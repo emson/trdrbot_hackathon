@@ -45,7 +45,21 @@ reference — matches charter.md's already-updated constraint). Verified: `uv sy
 clean (115 packages, no conflicts with existing deps), `elfmem` 0.20.0.dev0 imports,
 `MemorySystem` exposes the expected surface (`frame`, `dream`, `curate`, `from_config`, etc.)
 per the earlier elfmem exploration in notes/004 §10.1.
-**Open:** all three MCP/elfmem/elfsim verifications from notes/004 landed (MCP: local stdio confirmed; elfsim: spec-only →
+**Open:** all three MCP/elfmem/elfsim verifications from notes/004 landed
+
+Stage 3 built and verified live (not synthetic): wiki.py (OKF concept read/write + augmentation
+guard), positions.py updated with OKF fields (D-022 folded in as promised), elfmem_adapter.py,
+learn.py (F2/F3 credit assignment), housekeeping.py (F4, interim scoring INV-24). A real
+multi-leg order pending since stage 2 filled mid-session: reconciliation promoted it, on_fill
+remembered the thesis + created a mind prediction + marked it machine-confirmed, market closed
+so housekeeping ran and interim-scored it. Full chain confirmed via journal + position page
+inspection, not assumed.
+
+Two real findings recorded: D-024 (elfmem's mind_create duplicate detection is unreliable once
+other memory ops happen first — verified live; worked around with our own local
+underlying->mind_id mapping) and D-025 (OPEN, needs user input: dream()'s only embedding
+provider is OpenAI, current .env key is invalid/401 — writes work regardless, but frame()-based
+recall stays empty until a valid key exists). (MCP: local stdio confirmed; elfsim: spec-only →
 D-013 in-repo calibration module using elfmem's mind loop; elfmem: real, import as library,
 pin to self-frame-contract branch). notes/004 complete. Next: Specify mode for the six
 planned modules, then the day-0/1 walking skeleton.

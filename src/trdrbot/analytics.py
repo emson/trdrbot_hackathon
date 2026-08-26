@@ -71,6 +71,23 @@ class Snapshot:
         return "\n".join(lines)
 
 
+def position_pnl_pct(symbols: list[str], snap: "Snapshot") -> float | None:
+    """Position-level P&L fraction, summed across legs (INV-19).
+
+    Shared by C24 (exit rules) and housekeeping's interim scoring (INV-24) -
+    one implementation, so the two never quietly disagree on what "the P&L"
+    of a position means.
+    """
+    held = snap.by_symbol()
+    legs = [held[s] for s in symbols if s in held]
+    if not legs:
+        return None
+    cost = sum(abs(_f(l.get("cost_basis"))) for l in legs)
+    if cost == 0:
+        return None
+    return sum(_f(l.get("unrealized_pl")) for l in legs) / cost
+
+
 async def snapshot(tools: dict[str, Any]) -> Snapshot:
     """Gather deterministic state. A failing call degrades, never aborts."""
     snap = Snapshot(as_of=date.today().isoformat())

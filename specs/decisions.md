@@ -750,3 +750,57 @@ files and `bundle_tools.py`'s augmentation guard, read directly (not summarized)
 **Revisit if:** the augmentation guard proves too rigid in practice (e.g. a genuine correction
 that must legitimately shrink a section) — add an explicit `supersedes` escape hatch rather than
 removing the guard.
+
+## D-024: One mind per underlying, tracked in a local file — not elfmem's own duplicate detection
+**Date:** 2026-08-26
+**Status:** accepted
+**Context:** Resolves notes/006 gap #12 (mind_predict needs a mind subject; mapping
+unspecified) during stage 3 build. Verified live against the installed 0.20.0.dev0 library:
+`mind_create`'s duplicate detection is unreliable under realistic use. Two consecutive calls
+with an identical subject correctly dedupe in isolation (`duplicate_rejected`, same
+`block_id`) — but the identical two calls issued after other memory operations (a `remember()`,
+an earlier `predict()`) each returned `created` with a *different* `block_id`, silently minting
+a second mind for the same underlying. `mind_list()` cannot substitute as a pre-check either:
+a freshly created mind sits in elfmem's inbox and is invisible to `mind_list()` until a `dream()`
+consolidation runs, which under D-018 #6/INV-23 only happens at housekeeping — so a list-first
+check would report "not found" on every call within a tick regardless.
+**Choice:** `underlying -> mind_block_id` is tracked in a small local JSON file
+(`data/state/minds.json`), fully within our own control, checked before ever calling
+`mind_create`. elfmem's own dedup is not relied on at all.
+**Why not alternatives:**
+- Trust `mind_create`'s built-in duplicate detection: demonstrated unreliable above — would
+  fragment prediction tracking per underlying across an unpredictable number of duplicate minds.
+- Check `mind_list()` first: reports false negatives inside the dream-less window that is our
+  entire normal operating mode (every tick except housekeeping).
+**Evidence:** live verification against the installed library, not the docs — see git history
+for the exact reproduction sequence.
+**Revisit if:** a future elfmem release changes duplicate-detection semantics; our local mapping
+would then be redundant but harmless, not something that needs removing urgently.
+
+## D-025: elfmem's dream() requires a working embedding provider we do not yet have
+**Date:** 2026-08-26
+**Status:** open — needs the user's input, not a design decision this session can make alone
+**Context:** `dream()` (consolidation — the step that promotes freshly `remember()`'d content
+from elfmem's inbox into anything `frame()`/`recall()` can actually return) calls out to an
+embedding provider. elfmem ships only two embedding adapters: a real OpenAI adapter, and an
+explicit test-only mock — no Anthropic option exists, because Anthropic has no embeddings API.
+Live-tested: the `OPENAI_API_KEY` currently in `.env` returns 401 (invalid). `remember()`,
+`mind_predict()`, `mind_outcome()`, and `outcome()` are all confirmed pure-DB and unaffected —
+writes and credit-assignment work regardless. What's blocked is retrieval: `frame()`/`recall()`
+return nothing for anything not yet consolidated, and `dream()` itself cannot complete.
+**Current behaviour (not a fix, a safe degrade):** `housekeeping_dream()` catches the failure,
+logs it, and returns `False` rather than crashing housekeeping's other work (INV-8's
+advisory-input philosophy, extended to consolidation) — verified live. The rest of stage 3
+(remember/predict/outcome/mind_outcome, all writes) works correctly regardless of this gap.
+**What's actually degraded:** the `self`/`task`/`attention` frames injected into the decide
+prompt will stay empty until consolidation succeeds at least once — so the agent is currently
+deciding without elfmem's semantic recall contributing anything, even though every write is
+being correctly recorded and will retroactively become recallable once a valid key exists.
+**Choice needed from the user:** supply a valid `OPENAI_API_KEY` with embeddings access (only
+provider elfmem currently supports), or accept degraded recall until one exists. Not resolved
+in this session — flagging rather than guessing at a workaround (e.g. no local/offline
+embedding model was investigated; that would be a real alternative worth researching if a paid
+OpenAI key isn't wanted).
+**Evidence:** live 401 against the current `.env` key; `elfmem/adapters/` contains only
+`openai.py` and `mock.py`.
+**Revisit when:** a decision is made on the embedding provider question above.

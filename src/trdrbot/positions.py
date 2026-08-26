@@ -6,6 +6,15 @@
 Status is also the exactly-once guard (INV-17). Three different detectors can
 observe the same resolution - the reconciler, the collector, and the exit-rule
 evaluator - and only the first may act on it.
+
+Frontmatter follows OKF conventions (D-022): `type` is the only field OKF
+requires; `sources`/`generated`/`verified` are its provenance/trust fields.
+Position pages deliberately do NOT go through wiki.py's Concept/augmentation-
+guard machinery (D-023) - that guard targets open-ended LLM rewrites of
+knowledge prose (lessons.md, strategy.md); position pages are a structured,
+mostly code-driven write pattern (status transitions, exit-rule debounce
+state) with their own typed shape, and forcing them through a generic
+heading-diff guard would be the wrong tool for a different problem.
 """
 
 from __future__ import annotations
@@ -15,6 +24,8 @@ from pathlib import Path
 from typing import Any
 
 import yaml
+
+from . import ids
 
 TERMINAL = {"closed", "expired", "assigned", "abandoned"}
 ACTIVE = {"proposed", "opening", "open", "adjusting", "closing"}
@@ -35,14 +46,38 @@ class Position:
     thesis: str = ""
     decision_ref: str = ""
     provenance: str = "agent"
+    # OKF provenance/trust fields (D-022)
+    sources: list[dict[str, Any]] = field(default_factory=list)
+    generated_by: str = ""
+    verified: list[dict[str, Any]] = field(default_factory=list)
+    # elfmem bridge (D-011): captured PER FRAME at decide time (INV-22 fix -
+    # never rely on last_recall_block_ids, which reflects only the last call)
+    elfmem_blocks: dict[str, list[str]] = field(default_factory=dict)
+    mind_decision_block_id: str | None = None
     path: Path | None = None
 
     @property
     def symbols(self) -> list[str]:
         return [leg["symbol"] for leg in self.legs if leg.get("symbol")]
 
+    @property
+    def all_elfmem_block_ids(self) -> list[str]:
+        return [b for blocks in self.elfmem_blocks.values() for b in blocks]
+
+    def trust_tier(self) -> str:
+        """OKF trust tiers (D-022): unverified / machine-confirmed / human-reviewed."""
+        if not self.verified:
+            return "unverified"
+        if any(str(v.get("by", "")).startswith("human:") for v in self.verified):
+            return "human-reviewed"
+        return "machine-confirmed"
+
+    def mark_verified(self, by: str) -> None:
+        self.verified.append({"by": by, "at": ids.utc_now().isoformat()})
+
     def frontmatter(self) -> dict[str, Any]:
         return {
+            "type": "Position",  # OKF-required field (D-022)
             "position_id": self.position_id,
             "status": self.status,
             "strategy": self.strategy,
@@ -54,6 +89,11 @@ class Position:
             "exit_state": self.exit_state,
             "close_reason": self.close_reason,
             "decision_ref": self.decision_ref,
+            "sources": self.sources,
+            "generated": {"by": self.generated_by, "at": ids.utc_now().isoformat()},
+            "verified": self.verified,
+            "elfmem_blocks": self.elfmem_blocks,
+            "mind_decision_block_id": self.mind_decision_block_id,
             "provenance": self.provenance,
         }
 
@@ -99,6 +139,7 @@ class PositionStore:
         _, fm, body = text.split("---", 2)
         d = yaml.safe_load(fm) or {}
         thesis = body.split("## Thesis", 1)[-1].strip() if "## Thesis" in body else ""
+        generated = d.get("generated") or {}
         return Position(
             position_id=d["position_id"],
             status=d.get("status", "proposed"),
@@ -112,6 +153,11 @@ class PositionStore:
             close_reason=d.get("close_reason"),
             thesis=thesis,
             decision_ref=d.get("decision_ref", ""),
+            sources=d.get("sources") or [],
+            generated_by=generated.get("by", ""),
+            verified=d.get("verified") or [],
+            elfmem_blocks=d.get("elfmem_blocks") or {},
+            mind_decision_block_id=d.get("mind_decision_block_id"),
             provenance=d.get("provenance", "agent"),
             path=path,
         )

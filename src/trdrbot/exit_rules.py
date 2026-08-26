@@ -21,25 +21,16 @@ from __future__ import annotations
 from datetime import date
 from typing import Any
 
-from . import mcp_client
-from .analytics import Snapshot, _f
+from . import learn, mcp_client
+from .analytics import Snapshot, _f, position_pnl_pct
+from .elfmem_adapter import ElfmemAdapter
 from .journal import Journal
 from .positions import Position, PositionStore
+from .wiki import Wiki
 
 WINDOW = 3  # M
 NEEDED = 2  # N
 MAGNITUDE_OVERRIDE = 2.0
-
-
-def _pct(pos: Position, held: dict[str, dict[str, Any]]) -> float | None:
-    """Position-level P&L fraction, summed across legs (INV-19)."""
-    legs = [held[s] for s in pos.symbols if s in held]
-    if not legs:
-        return None
-    cost = sum(abs(_f(l.get("cost_basis"))) for l in legs)
-    if cost == 0:
-        return None
-    return sum(_f(l.get("unrealized_pl")) for l in legs) / cost
 
 
 def _days_to(expiry: str) -> int | None:
@@ -49,19 +40,24 @@ def _days_to(expiry: str) -> int | None:
         return None
 
 
-def evaluate(pos: Position, snap: Snapshot, deadline: str) -> tuple[str | None, str]:
-    """Return (close_reason, explanation). close_reason None means hold."""
+def evaluate(pos: Position, snap: Snapshot, deadline: str) -> tuple[str | None, str, float | None]:
+    """Return (close_reason, explanation, pnl_pct). close_reason None means hold.
+
+    pnl_pct is returned alongside the reason so the caller can feed it
+    straight to learn.on_resolution() without recomputing it - the position's
+    net mark is exactly the signal credit assignment needs (D-018 #9).
+    """
+    pnl = position_pnl_pct(pos.symbols, snap)
+
     # The deadline sweep is independent of any position's own expiry (INV-26).
     # A conventional-DTE position would otherwise never resolve inside the
     # competition, and the learning loop would produce nothing at all.
     try:
         if date.today() >= date.fromisoformat(deadline):
-            return "deadline", f"competition deadline {deadline} reached"
+            return "deadline", f"competition deadline {deadline} reached", pnl
     except (ValueError, TypeError):
         pass
 
-    held = snap.by_symbol()
-    pnl = _pct(pos, held)
     dte = _days_to(pos.expiry)
 
     for rule in pos.exit_rules:
@@ -71,7 +67,7 @@ def evaluate(pos: Position, snap: Snapshot, deadline: str) -> tuple[str | None, 
         if kind == "time_stop":
             n = int(rule.get("days_before_expiry", 0))
             if dte is not None and dte <= n:
-                return "time_stop", f"{dte}d to expiry <= {n}d"
+                return "time_stop", f"{dte}d to expiry <= {n}d", pnl
             continue
 
         if pnl is None:
@@ -95,11 +91,11 @@ def evaluate(pos: Position, snap: Snapshot, deadline: str) -> tuple[str | None, 
         pos.exit_state[key] = history
 
         if severe:
-            return kind, f"{pnl:+.1%} beyond {MAGNITUDE_OVERRIDE}x threshold {thr:+.0%} - immediate"
+            return kind, f"{pnl:+.1%} beyond {MAGNITUDE_OVERRIDE}x threshold {thr:+.0%} - immediate", pnl
         if sum(history) >= NEEDED:
-            return kind, f"{pnl:+.1%} vs threshold {thr:+.0%} ({sum(history)}/{len(history)} checks)"
+            return kind, f"{pnl:+.1%} vs threshold {thr:+.0%} ({sum(history)}/{len(history)} checks)", pnl
 
-    return None, ""
+    return None, "", pnl
 
 
 async def run(
@@ -108,6 +104,8 @@ async def run(
     tools: dict[str, Any],
     journal: Journal,
     deadline: str,
+    mem: ElfmemAdapter,
+    wiki: Wiki,
     *,
     verbose: bool = True,
 ) -> list[str]:
@@ -118,7 +116,7 @@ async def run(
         if pos.status != "open":
             continue  # only fully-open positions are candidates
 
-        reason, why = evaluate(pos, snap, deadline)
+        reason, why, pnl = evaluate(pos, snap, deadline)
         store.save(pos)  # persist debounce state either way
 
         if not reason:
@@ -148,6 +146,9 @@ async def run(
             legs=pos.symbols,
             submitted=closed_ok,
         )
+        if closed_ok:
+            store.transition(pos, "closed")  # INV-17: terminal, exactly once
+            await learn.on_resolution(pos, store, mem, wiki, journal, pnl_pct=pnl)  # F3
         triggered.append(pos.position_id)
 
     return triggered

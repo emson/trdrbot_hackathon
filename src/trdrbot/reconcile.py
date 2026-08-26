@@ -11,9 +11,12 @@ from __future__ import annotations
 
 from typing import Any
 
+from . import learn
 from .analytics import Snapshot
+from .elfmem_adapter import ElfmemAdapter
 from .journal import Journal
 from .positions import PositionStore
+from .wiki import Wiki
 
 
 def _working_symbols(orders: list[dict[str, Any]]) -> set[str]:
@@ -32,7 +35,9 @@ def _working_symbols(orders: list[dict[str, Any]]) -> set[str]:
     return out
 
 
-def reconcile(store: PositionStore, snap: Snapshot, journal: Journal) -> dict[str, list[str]]:
+async def reconcile(
+    store: PositionStore, snap: Snapshot, journal: Journal, mem: ElfmemAdapter, wiki: Wiki
+) -> dict[str, list[str]]:
     """Diff broker holdings against our open position pages."""
     held = snap.by_symbol()
     working = _working_symbols(snap.open_orders)
@@ -58,6 +63,7 @@ def reconcile(store: PositionStore, snap: Snapshot, journal: Journal) -> dict[st
                 store.save(pos)
                 journal.append("reconciliation", position_id=pos.position_id,
                                finding="fill_confirmed", legs=present)
+                await learn.on_fill(pos, store, mem, journal)  # F2
                 result["filled"].append(pos.position_id)
             elif pending:
                 pass  # still working - leave it alone
@@ -80,6 +86,10 @@ def reconcile(store: PositionStore, snap: Snapshot, journal: Journal) -> dict[st
                     finding="phantom",
                     detail="in our records, absent at broker",
                 )
+                # F3: no P&L available - the position already vanished from
+                # holdings by the time we noticed. D-018 #9 skips credit
+                # assignment here rather than guessing a sign.
+                await learn.on_resolution(pos, store, mem, wiki, journal, pnl_pct=None)
                 result["phantom"].append(pos.position_id)
         elif present and len(present) != len(syms) and not pending:
             journal.append(

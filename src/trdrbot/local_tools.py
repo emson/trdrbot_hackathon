@@ -19,7 +19,13 @@ from . import ids
 from .positions import Position, PositionStore
 
 
-def build_record_position(store: PositionStore, decision_ref: str) -> StructuredTool:
+def build_record_position(
+    store: PositionStore,
+    decision_ref: str,
+    *,
+    elfmem_blocks: dict[str, list[str]] | None = None,
+    generated_by: str = "",
+) -> StructuredTool:
     def record_position(
         underlying: str,
         strategy: str,
@@ -70,6 +76,10 @@ def build_record_position(store: PositionStore, decision_ref: str) -> Structured
             exit_rules=rules,
             thesis=thesis,
             decision_ref=decision_ref,
+            # elfmem blocks recalled for THIS decision (INV-22, per-frame) -
+            # the credit-assignment targets at resolution (D-011).
+            elfmem_blocks=dict(elfmem_blocks or {}),
+            generated_by=generated_by,
         )
         path = store.save(pos)
         return (
