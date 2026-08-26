@@ -100,3 +100,18 @@ Surfaced a latent bug in our own stage-4 code: `Sensor.policy` was declared but 
 and alpaca_news was mislabeled. Policy is now real (filter/change_only/raw), with
 change_only measuring against the last *emitted* value so slow drift still surfaces.
 Live: 8 macro markets ingested (Fed cut odds, US recession, CPI); second poll emitted 0.
+
+Built the thesis->experiment->execute->attribute loop (D-028) across 10 test/harden
+iterations. New: optmath.py (exact payoff maths vs modelled probability, labelled
+separately), experiments.py (Thesis/Experiment/simulate/rank/attribute),
+attribution.py (horizon-timed view-vs-structure verdict), simulate_experiments tool.
+
+The core idea: a thesis can be RIGHT while its expression is WRONG, and a thesis can be
+WRONG while the trade profits anyway. P&L-only learning cannot tell these apart and
+reinforces whichever story correlates with money - which is how an agent learns a
+superstition. The elfmem signal now follows the attribution, not the P&L.
+
+Two real bugs found by testing, not review: max_profit_loss reported a finite max profit
+for a long straddle whose upside is unbounded (put branch overwrote a correct None), and
+calendar spreads computed silently wrong because Leg had no expiry field. Both fixed and
+verified. Maths validated independently: E[S_T]=spot exactly, EV of a fair option = 0.0000.

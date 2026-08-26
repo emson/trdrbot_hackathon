@@ -7,6 +7,9 @@ Two jobs relevant to stage 3: interim scoring (INV-24 - the actual fix for
 
 from __future__ import annotations
 
+from typing import Any
+
+from . import attribution
 from .analytics import Snapshot, position_pnl_pct
 from .elfmem_adapter import ElfmemAdapter
 from .journal import Journal
@@ -16,7 +19,7 @@ from .wiki import Wiki
 
 async def run(
     store: PositionStore, snap: Snapshot, mem: ElfmemAdapter, wiki: Wiki, journal: Journal,
-    *, verbose: bool = True,
+    *, tools: dict[str, Any] | None = None, verbose: bool = True,
 ) -> dict[str, int]:
     interim_scored = 0
 
@@ -36,13 +39,20 @@ async def run(
         journal.append("interim_outcome", position_id=pos.position_id, pnl_pct=pnl, weight=0.1)
         interim_scored += 1
 
+    # Attribute any thesis whose horizon has now arrived (view vs structure).
+    attributed = 0
+    if tools:
+        attributed = (await attribution.run(store, tools, mem, wiki, journal,
+                                            verbose=verbose))["attributed"]
+
     dreamed = await mem.housekeeping_dream()
 
     wiki.append_log(
         f"housekeeping: {interim_scored} interim score(s), "
-        f"consolidation {'ok' if dreamed else 'skipped (see log)'}"
+        f"consolidation {'ok' if dreamed else 'skipped (see log)'}, "
+        f"{attributed} attribution(s)"
     )
     if verbose:
         print(f"[housekeeping] interim_scored={interim_scored} dream_ok={dreamed}")
 
-    return {"interim_scored": interim_scored, "dream_ok": dreamed}
+    return {"interim_scored": interim_scored, "dream_ok": dreamed, "attributed": attributed}

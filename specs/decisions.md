@@ -894,3 +894,58 @@ CPI prints; second poll correctly emitted zero); change-detection semantics veri
 six transitions.
 **Revisit if:** the competition window widens enough to justify xmcp's setup cost, or FRED's
 backward-looking series become useful alongside Polymarket's forward-looking probabilities.
+
+## D-028: Thesis -> experiments -> execute -> attribute loop, with view/structure separation
+**Date:** 2026-08-26
+**Status:** accepted
+**Context:** The agent could form a thesis and place one trade, but could not compare candidate
+expressions of that thesis before committing, and — more seriously — could not tell whether a
+loss meant its *view* was wrong or merely its *structure*. P&L-only learning conflates the two.
+**Choice:** A five-part loop.
+1. **`optmath.py`** — options maths split into two layers by how much they deserve to be
+   trusted. **EXACT** (payoff at expiry, entry cost, max profit/loss, breakevens) is arithmetic
+   on the contract with no model. **MODELLED** (probability of profit, EV) needs a terminal
+   distribution and uses lognormal-at-current-IV, which is standard and still an assumption.
+   The two are labelled separately everywhere they surface, because an agent that treats
+   "P(profit) 68%" with the same confidence as "max loss $300" will size wrongly.
+2. **`experiments.py`** — `Thesis` (falsifiable, with machine-checkable price bands),
+   `Experiment` (one structure expressing it), `simulate`, `rank`.
+3. **`simulate_experiments` tool** — takes ALL candidates in one call and refuses fewer than
+   two. A per-candidate tool would let the agent simulate one structure and stop, which is a
+   slower way of deciding first and justifying afterwards.
+4. **Ranking is by thesis edge, deliberately not EV.** EV under lognormal-at-current-IV is the
+   most model-dependent number available; ranking by it hands the decision to the model's tails.
+   "Thesis edge" (P(profit) under the agent's own drift, minus P(profit) under the market's
+   zero-drift assumption) is what the agent actually claims to know. A thesis that cannot move
+   that number is decorative, and the column shows it.
+5. **`attribution.py`** — the reason the loop is worth building. Four quadrants:
+   | thesis | outcome | verdict | signal |
+   |---|---|---|---|
+   | held | profit | both right | 0.90 |
+   | held | loss | **expression wrong, view keeps its credit** | 0.65 |
+   | failed | loss | view wrong, structure faithful | 0.10 |
+   | failed | profit | **lucky — reinforce nothing** | 0.50 |
+   The elfmem signal follows the *attribution*, never the money. P&L-based scoring would give
+   the lucky win 0.90 and the right-view-wrong-structure loss 0.10 — exactly backwards, and
+   exactly how an agent learns a superstition.
+**Timing is load-bearing:** attribution runs at housekeeping when the thesis **horizon** has
+passed, not at position close. A stop triggering on day 2 of a 10-day thesis says nothing about
+whether the view was right; scoring it at close would record "thesis wrong" for a view that had
+not yet been tested — the precise mis-attribution the module exists to prevent. Verified: a
+closed-but-pre-horizon position is correctly excluded from the attribution queue.
+**Bugs found and fixed while building (all by testing, not review):**
+- **`max_profit_loss` reported a finite max profit for a long straddle** (+$9,199) when its
+  upside is genuinely unbounded. The put-side branch overwrote a correctly-`None` result. A
+  confident wrong number about a position's own risk profile. Now verified across ten
+  structures including every unbounded case.
+- **Calendar/diagonal spreads computed silently wrong.** `Leg` had no expiry field, so legs at
+  different expiries were indistinguishable from a same-expiry pair and produced a confident
+  garbage payoff. Now `MultiExpiryError`, refused by name at the single chokepoint (`pnl_at`)
+  every other function routes through.
+**Validation:** grid weights sum to 1.000000; `E[S_T]` = spot exactly (martingale under r=0,
+confirming the −σ²T/2 correction); EV of a fairly-priced option = +0.0000, moving to ±100 for a
+∓1.00 mispricing; P(profit) monotone in strike; independently sanity-checked against σ-distance
+(a −1σ breakeven reporting 84% is right).
+**Revisit if:** calendars become worth supporting (needs a pricing model for the far leg at the
+near expiry — real work and real model risk, deliberately deferred), or the lognormal assumption
+proves materially wrong against realised outcomes, which the calibration record (D-013) will show.

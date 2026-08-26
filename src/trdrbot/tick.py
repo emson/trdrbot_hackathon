@@ -110,7 +110,7 @@ async def run_tick(config: Config, *, verbose: bool = True) -> dict[str, Any]:
 
         # ---------- market closed: housekeeping, not decide ----------
         if not snap.market_open:
-            hk = await housekeeping.run(store, snap, mem, wiki, journal, verbose=verbose)
+            hk = await housekeeping.run(store, snap, mem, wiki, journal, tools=tools, verbose=verbose)
             return {"status": "housekeeping", "tick": n, "exits": triggered, **hk}
 
         # ---------- slow path: every N ticks ----------
@@ -148,13 +148,16 @@ async def run_tick(config: Config, *, verbose: bool = True) -> dict[str, Any]:
             elfmem_blocks=ctx.blocks,
         )
 
+        shared: dict[str, Any] = {}
+        sim_tool = local_tools.build_simulate_experiments(shared)
         record_tool = local_tools.build_record_position(
             store, decision_id, elfmem_blocks=ctx.blocks, generated_by=config.model,
             calibration=calib,
             sources=[{"id": i.id, "resource": f"inbox/{i.id}", "author": i.source}
                      for i in items],
+            shared=shared,
         )
-        agent_tools = guarded + [record_tool]
+        agent_tools = guarded + [sim_tool, record_tool]
         agent = create_react_agent(build_model(config), agent_tools, prompt=SYSTEM_PROMPT)
 
         prompt_parts = [snap.render(), _render_positions(store)]

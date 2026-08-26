@@ -15,9 +15,93 @@ from typing import Any
 
 from langchain_core.tools import StructuredTool
 
-from . import ids
+from . import experiments, ids, optmath
 from .calibration import CalibrationStore
 from .positions import Position, PositionStore
+
+
+def build_simulate_experiments(shared: dict[str, Any]) -> StructuredTool:
+    """Tool: score several expressions of one thesis before risking anything.
+
+    Takes ALL candidates in a single call rather than one per call - that is
+    deliberate. A per-candidate tool lets the agent simulate one structure and
+    stop, which is just a slower way of deciding first and justifying after.
+    Requiring the list up front forces the comparison to actually happen.
+    """
+
+    def simulate_experiments(
+        thesis_claim: str,
+        underlying: str,
+        horizon: str,
+        drift_pct: float,
+        spot: float,
+        iv_pct: float,
+        days_to_expiry: int,
+        candidates: list[dict[str, Any]],
+        band_low: float | None = None,
+        band_high: float | None = None,
+    ) -> str:
+        """Simulate several candidate structures expressing ONE thesis, and rank them.
+
+        Call this BEFORE placing any order. Give at least two genuinely
+        different structures - if every candidate is the same shape with
+        different strikes, you are not exploring, you are decorating a choice
+        you already made.
+
+        Args:
+            thesis_claim: your falsifiable view in one sentence
+            underlying: e.g. "SPY"
+            horizon: YYYY-MM-DD by which the thesis is decided
+            drift_pct: expected TOTAL return over the horizon (2.0 = +2%).
+                This is your view. If it is 0 you are claiming no directional
+                edge, and the thesis edge column will show that honestly.
+            spot: current underlying price
+            iv_pct: implied vol as a percent (20.0 = 20%)
+            days_to_expiry: calendar days to the options' expiry
+            band_low: thesis holds only if price >= this at horizon
+            band_high: thesis holds only if price <= this at horizon.
+                Give at least one band - without one the thesis cannot be
+                scored later and you lose the ability to learn whether your
+                VIEW or your STRUCTURE was wrong.
+            candidates: list of {name, rationale, legs}, where legs is a list
+                of {right: "C"|"P", strike, side: "long"|"short", qty, price}
+        """
+        thesis = experiments.Thesis(
+            claim=thesis_claim, underlying=underlying, horizon=horizon,
+            drift=drift_pct / 100.0, band_low=band_low, band_high=band_high,
+        )
+        built: list[experiments.Experiment] = []
+        for c in candidates:
+            try:
+                legs = [optmath.Leg.parse(l) for l in (c.get("legs") or [])]
+            except ValueError as e:
+                return f"Invalid legs in candidate {c.get('name')!r}: {e}"
+            if not legs:
+                return f"Candidate {c.get('name')!r} has no legs."
+            built.append(experiments.Experiment(
+                name=str(c.get("name") or f"candidate {len(built)+1}"),
+                legs=legs, rationale=str(c.get("rationale") or ""),
+            ))
+        if len(built) < 2:
+            return (
+                "Give at least two genuinely different structures. One candidate is not "
+                "an experiment, it is a decision already made."
+            )
+
+        results = [
+            (e, experiments.simulate(e, thesis, spot, iv_pct / 100.0, days_to_expiry))
+            for e in built
+        ]
+        ranked = experiments.rank(results)
+        shared["thesis"] = thesis
+        shared["ranked"] = [(e.name, m) for e, m in ranked]
+        return experiments.render_comparison(thesis, ranked)
+
+    return StructuredTool.from_function(
+        func=simulate_experiments,
+        name="simulate_experiments",
+        description=simulate_experiments.__doc__,
+    )
 
 
 def build_record_position(
@@ -28,6 +112,7 @@ def build_record_position(
     generated_by: str = "",
     calibration: "CalibrationStore | None" = None,
     sources: list[dict[str, Any]] | None = None,
+    shared: dict[str, Any] | None = None,
 ) -> StructuredTool:
     def record_position(
         underlying: str,
@@ -95,6 +180,15 @@ def build_record_position(
             # so a resolved position can credit or discredit its inputs.
             sources=list(sources or []),
         )
+        # Carry the thesis onto the position so resolution can attribute the
+        # outcome to the VIEW or the STRUCTURE rather than just to P&L.
+        th = (shared or {}).get("thesis")
+        if th is not None:
+            pos.thesis_claim = th.claim
+            pos.thesis_horizon = th.horizon
+            pos.thesis_band_low = th.band_low
+            pos.thesis_band_high = th.band_high
+            pos.thesis_drift = th.drift
         path = store.save(pos)
         if calibration is not None:
             calibration.record(pos.position_id, confidence)

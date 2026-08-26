@@ -54,6 +54,14 @@ class Position:
     # never rely on last_recall_block_ids, which reflects only the last call)
     elfmem_blocks: dict[str, list[str]] = field(default_factory=dict)
     mind_decision_block_id: str | None = None
+    # Thesis carried from simulate_experiments, so resolution can attribute
+    # the outcome to the view or the structure (experiments.attribute).
+    thesis_claim: str = ""
+    thesis_horizon: str = ""
+    thesis_band_low: float | None = None
+    thesis_band_high: float | None = None
+    thesis_drift: float = 0.0
+    attribution: str = ""          # set once the horizon has passed
     path: Path | None = None
 
     @property
@@ -94,6 +102,12 @@ class Position:
             "verified": self.verified,
             "elfmem_blocks": self.elfmem_blocks,
             "mind_decision_block_id": self.mind_decision_block_id,
+            "thesis_claim": self.thesis_claim,
+            "thesis_horizon": self.thesis_horizon,
+            "thesis_band_low": self.thesis_band_low,
+            "thesis_band_high": self.thesis_band_high,
+            "thesis_drift": self.thesis_drift,
+            "attribution": self.attribution,
             "provenance": self.provenance,
         }
 
@@ -158,6 +172,12 @@ class PositionStore:
             verified=d.get("verified") or [],
             elfmem_blocks=d.get("elfmem_blocks") or {},
             mind_decision_block_id=d.get("mind_decision_block_id"),
+            thesis_claim=d.get("thesis_claim", ""),
+            thesis_horizon=d.get("thesis_horizon", ""),
+            thesis_band_low=d.get("thesis_band_low"),
+            thesis_band_high=d.get("thesis_band_high"),
+            thesis_drift=float(d.get("thesis_drift") or 0.0),
+            attribution=d.get("attribution", ""),
             provenance=d.get("provenance", "agent"),
             path=path,
         )

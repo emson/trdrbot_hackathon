@@ -1,0 +1,112 @@
+"""Attribute a closed position's outcome to its VIEW or its STRUCTURE.
+
+Runs at housekeeping, not at close, and that timing is the point. A stop
+triggering on day 2 of a 10-day thesis says nothing about whether the thesis
+was right - the horizon has not arrived. Scoring it at close would record
+"thesis wrong" for a view that had not yet been tested, which is precisely
+the mis-attribution this module exists to prevent.
+
+So: close records the P&L; attribution waits for the horizon; elfmem is fed a
+signal derived from the ATTRIBUTION rather than from the money.
+"""
+
+from __future__ import annotations
+
+from datetime import date
+from typing import Any
+
+from . import experiments, mcp_client
+from .elfmem_adapter import ElfmemAdapter
+from .journal import Journal
+from .positions import Position, PositionStore
+from .wiki import Wiki
+
+
+def _horizon_passed(pos: Position) -> bool:
+    try:
+        return date.today() >= date.fromisoformat(pos.thesis_horizon)
+    except (ValueError, TypeError):
+        return False
+
+
+def pending(store: PositionStore) -> list[Position]:
+    """Closed positions carrying an unattributed thesis whose horizon has arrived."""
+    return [
+        p
+        for p in store.all()
+        if p.thesis_claim
+        and not p.attribution
+        and p.status not in ("proposed", "opening", "open", "adjusting", "closing")
+        and _horizon_passed(p)
+    ]
+
+
+async def _spot(tools: dict[str, Any], underlying: str) -> float | None:
+    try:
+        snap = await mcp_client.call(tools, "get_stock_snapshot", symbol_or_symbols=underlying)
+        if isinstance(snap, dict):
+            for key in ("latestTrade", "latest_trade", "dailyBar", "daily_bar"):
+                node = snap.get(key) or (snap.get(underlying) or {}).get(key)
+                if isinstance(node, dict):
+                    px = node.get("p") or node.get("c") or node.get("price")
+                    if px is not None:
+                        return float(px)
+    except Exception as exc:  # noqa: BLE001
+        print(f"[attribution] spot lookup failed for {underlying}: {exc!r}")
+    return None
+
+
+async def run(
+    store: PositionStore,
+    tools: dict[str, Any],
+    mem: ElfmemAdapter,
+    wiki: Wiki,
+    journal: Journal,
+    *,
+    verbose: bool = True,
+) -> dict[str, int]:
+    """Attribute every position whose thesis horizon has now passed."""
+    done = 0
+    for pos in pending(store):
+        spot = await _spot(tools, pos.underlying)
+        if spot is None:
+            continue  # try again next housekeeping - never guess the price
+
+        held = experiments.Thesis(
+            claim=pos.thesis_claim, underlying=pos.underlying, horizon=pos.thesis_horizon,
+            drift=pos.thesis_drift, band_low=pos.thesis_band_low, band_high=pos.thesis_band_high,
+        ).holds_at(spot)
+
+        profited = (pos.close_reason or "") in ("target_hit", "thesis_resolved")
+        verdict, lesson = experiments.attribute(held, profited)
+        signal = experiments.ATTRIBUTION_SIGNAL[verdict]
+
+        pos.attribution = verdict
+        store.save(pos)
+
+        # The signal follows the attribution, NOT the P&L - so a lucky win on a
+        # wrong view stays neutral and a right view that lost keeps its credit.
+        if pos.all_elfmem_block_ids:
+            await mem.mem.outcome(
+                pos.all_elfmem_block_ids, signal, weight=1.0,
+                source=f"attribution:{pos.position_id}",
+            )
+
+        journal.append(
+            "attribution",
+            position_id=pos.position_id,
+            thesis=pos.thesis_claim,
+            horizon=pos.thesis_horizon,
+            price_at_horizon=spot,
+            thesis_held=held,
+            profited=profited,
+            verdict=verdict,
+            signal=signal,
+        )
+        wiki.append_log(f"attributed {pos.position_id}: {verdict} (price {spot:.2f})")
+        if verbose:
+            print(f"[attribution] {pos.position_id}: {verdict}")
+            print(f"              {lesson}")
+        done += 1
+
+    return {"attributed": done}

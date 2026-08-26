@@ -36,7 +36,7 @@ decision_ref: jrn_20260826T185819Z_dece972
 sources: []
 generated:
   by: ''
-  at: '2026-08-26T21:06:07.919923+00:00'
+  at: '2026-08-26T21:54:27.242817+00:00'
 verified:
 - by: trdrbot/reconcile
   at: '2026-08-26T20:05:59.099229+00:00'
@@ -44,6 +44,12 @@ elfmem_blocks:
   attention:
   - 5c42bcc0efd19526
 mind_decision_block_id: 8542b75a79eb0ef7
+thesis_claim: ''
+thesis_horizon: ''
+thesis_band_low: null
+thesis_band_high: null
+thesis_drift: 0.0
+attribution: ''
 provenance: agent
 ---
 
