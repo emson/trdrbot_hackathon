@@ -57,9 +57,12 @@ inspection, not assumed.
 
 Two real findings recorded: D-024 (elfmem's mind_create duplicate detection is unreliable once
 other memory ops happen first — verified live; worked around with our own local
-underlying->mind_id mapping) and D-025 (OPEN, needs user input: dream()'s only embedding
-provider is OpenAI, current .env key is invalid/401 — writes work regardless, but frame()-based
-recall stays empty until a valid key exists). (MCP: local stdio confirmed; elfsim: spec-only →
+underlying->mind_id mapping) and D-025, now RESOLVED — user supplied a valid OPENAI_API_KEY.
+Verified end to end by forcing dream() directly: remember() -> dream() -> recall() round-trip
+confirmed, assemble_context() now returns real text in all three frames. elfmem's semantic
+recall is fully functional. (First verification attempt hit the same shell-shadowing class of
+bug as the earlier Anthropic key issue, self-inflicted by an ad hoc test script that skipped
+config.load() — not a new bug, a reminder to always load secrets through it.) (MCP: local stdio confirmed; elfsim: spec-only →
 D-013 in-repo calibration module using elfmem's mind loop; elfmem: real, import as library,
 pin to self-frame-contract branch). notes/004 complete. Next: Specify mode for the six
 planned modules, then the day-0/1 walking skeleton.

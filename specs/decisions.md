@@ -779,7 +779,7 @@ would then be redundant but harmless, not something that needs removing urgently
 
 ## D-025: elfmem's dream() requires a working embedding provider we do not yet have
 **Date:** 2026-08-26
-**Status:** open — needs the user's input, not a design decision this session can make alone
+**Status:** resolved 2026-08-26 — user supplied a valid `OPENAI_API_KEY`
 **Context:** `dream()` (consolidation — the step that promotes freshly `remember()`'d content
 from elfmem's inbox into anything `frame()`/`recall()` can actually return) calls out to an
 embedding provider. elfmem ships only two embedding adapters: a real OpenAI adapter, and an
@@ -796,11 +796,14 @@ advisory-input philosophy, extended to consolidation) — verified live. The res
 prompt will stay empty until consolidation succeeds at least once — so the agent is currently
 deciding without elfmem's semantic recall contributing anything, even though every write is
 being correctly recorded and will retroactively become recallable once a valid key exists.
-**Choice needed from the user:** supply a valid `OPENAI_API_KEY` with embeddings access (only
-provider elfmem currently supports), or accept degraded recall until one exists. Not resolved
-in this session — flagging rather than guessing at a workaround (e.g. no local/offline
-embedding model was investigated; that would be a real alternative worth researching if a paid
-OpenAI key isn't wanted).
-**Evidence:** live 401 against the current `.env` key; `elfmem/adapters/` contains only
-`openai.py` and `mock.py`.
-**Revisit when:** a decision is made on the embedding provider question above.
+**Resolution:** user added a valid `OPENAI_API_KEY` to `.env`. Verified end to end, forcing
+`dream()` directly rather than waiting for the inbox threshold: a `remember()`'d block was
+consolidated ("1 promoted, 0 edges"), then correctly returned by `recall()`, and
+`assemble_context()` populated all three frames (`self`/`task`/`attention`) with real text.
+**One recurrence of the same class of bug as the Anthropic key earlier this session**: the first
+verification attempt still hit the old invalid key, because the ad hoc test script never called
+`config.load()` and so never applied our own `.env`-overrides-shell fix — it picked up a stale
+shell `OPENAI_API_KEY` instead. Not a new bug; a reminder that any script touching secrets must
+go through `config.load()`, not construct its own environment.
+**Evidence:** `elfmem/adapters/` contains only `openai.py` and `mock.py`; live dream()/recall()
+round-trip confirmed via `trdrbot.config.load()`.
