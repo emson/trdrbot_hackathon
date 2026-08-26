@@ -41,18 +41,55 @@ def pending(store: PositionStore) -> list[Position]:
     ]
 
 
+#: Our Alpaca subscription does not permit recent SIP (consolidated) data - the
+#: default feed 403s with "subscription does not permit querying recent SIP
+#: data". IEX is what the free tier serves. Found live: without this, every
+#: spot lookup failed, `_spot` always returned None, and attribution silently
+#: never ran - the self-improving loop's most important step dead while every
+#: log line still read healthy.
+FEED = "iex"
+
+
+def _extract_price(node: Any) -> float | None:
+    if not isinstance(node, dict):
+        return None
+    for k in ("p", "c", "price", "close"):
+        v = node.get(k)
+        if v is not None:
+            try:
+                return float(v)
+            except (TypeError, ValueError):
+                continue
+    return None
+
+
 async def _spot(tools: dict[str, Any], underlying: str) -> float | None:
+    """Last price for the underlying. None if genuinely unavailable - never guessed."""
+    # `symbols` (plural), not `symbol_or_symbols` - the latter is silently
+    # dropped from the parameter map and the request 400s.
     try:
-        snap = await mcp_client.call(tools, "get_stock_snapshot", symbol_or_symbols=underlying)
+        snap = await mcp_client.call(
+            tools, "get_stock_snapshot", symbols=underlying, feed=FEED
+        )
         if isinstance(snap, dict):
-            for key in ("latestTrade", "latest_trade", "dailyBar", "daily_bar"):
-                node = snap.get(key) or (snap.get(underlying) or {}).get(key)
-                if isinstance(node, dict):
-                    px = node.get("p") or node.get("c") or node.get("price")
-                    if px is not None:
-                        return float(px)
+            per_symbol = snap.get(underlying) if isinstance(snap.get(underlying), dict) else snap
+            for key in ("latestTrade", "latest_trade", "dailyBar", "daily_bar",
+                        "minuteBar", "prevDailyBar"):
+                px = _extract_price(per_symbol.get(key))
+                if px is not None:
+                    return px
     except Exception as exc:  # noqa: BLE001
-        print(f"[attribution] spot lookup failed for {underlying}: {exc!r}")
+        print(f"[attribution] snapshot failed for {underlying}: {exc!r}")
+
+    # Fallback: the single-trade endpoint, in case snapshot shape shifts.
+    try:
+        t = await mcp_client.call(
+            tools, "get_stock_latest_trade", symbols=underlying, feed=FEED
+        )
+        if isinstance(t, dict):
+            return _extract_price(t.get(underlying) or t)
+    except Exception as exc:  # noqa: BLE001
+        print(f"[attribution] latest_trade failed for {underlying}: {exc!r}")
     return None
 
 

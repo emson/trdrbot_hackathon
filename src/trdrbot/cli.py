@@ -77,11 +77,11 @@ def _inject(args: argparse.Namespace) -> int:
     return 0
 
 
-async def _tick() -> int:
+async def _tick(force: bool = False) -> int:
     cfg = config_mod.load()
     try:
         with tick_lock(cfg.paths.state / "tick.lock"):
-            await run_tick(cfg)
+            await run_tick(cfg, force_decide=force)
     except BlockingIOError as exc:
         print(f"[tick] {exc}")
         return 0
@@ -131,7 +131,9 @@ def main() -> None:
     inj.add_argument("--type", default="manual", help="item type")
     inj.add_argument("--payload", help="JSON payload")
 
-    sub.add_parser("tick", help="run one tick end to end")
+    tk = sub.add_parser("tick", help="run one tick end to end")
+    tk.add_argument("--force", action="store_true",
+                    help="run the decide path even when the market is closed")
 
     jrn = sub.add_parser("journal", help="show journal entries")
     jrn.add_argument("-n", type=int, default=20)
@@ -144,7 +146,7 @@ def main() -> None:
     elif args.cmd == "inject":
         sys.exit(_inject(args))
     elif args.cmd == "tick":
-        sys.exit(asyncio.run(_tick()))
+        sys.exit(asyncio.run(_tick(getattr(args, "force", False))))
     elif args.cmd == "journal":
         sys.exit(_journal(args))
     elif args.cmd == "calibration":

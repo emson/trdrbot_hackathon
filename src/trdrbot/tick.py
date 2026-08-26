@@ -59,6 +59,25 @@ def _tick_count(config: Config) -> int:
     return n
 
 
+def _text_of(message: Any) -> str:
+    """Readable text from a message whose content may be a block list.
+
+    Extended-thinking responses return a list of blocks - a `thinking` block
+    carrying an opaque signature blob, then the actual `text`. Stringifying
+    the whole list dumped that blob into the journal and the console, burying
+    the agent's reasoning in base64 and wasting the 2000-char summary budget.
+    """
+    content = getattr(message, "content", "")
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return "\n".join(
+            b.get("text", "") for b in content
+            if isinstance(b, dict) and b.get("type") == "text"
+        ).strip()
+    return str(content)
+
+
 def _render_positions(store: PositionStore) -> str:
     """Two-tier context (D-019): detail for what needs attention, one line for the rest."""
     positions = store.open_positions()
@@ -77,7 +96,9 @@ def _render_positions(store: PositionStore) -> str:
     return "\n".join(lines)
 
 
-async def run_tick(config: Config, *, verbose: bool = True) -> dict[str, Any]:
+async def run_tick(
+    config: Config, *, verbose: bool = True, force_decide: bool = False
+) -> dict[str, Any]:
     journal = Journal(config.paths.journal)
     inbox = Inbox(config.paths, max_retries=config.max_retries)
     store = PositionStore(config.paths.wiki)
@@ -109,7 +130,11 @@ async def run_tick(config: Config, *, verbose: bool = True) -> dict[str, Any]:
                 print(f"[tick {n}] exit rules closed: {triggered}")
 
         # ---------- market closed: housekeeping, not decide ----------
-        if not snap.market_open:
+        # force_decide exercises the full reasoning chain outside market hours.
+        # Orders queue rather than fill, so this tests the DECISION, not the
+        # execution - useful for development and for demoing the agent's
+        # reasoning without waiting for the bell.
+        if not snap.market_open and not force_decide:
             hk = await housekeeping.run(store, snap, mem, wiki, journal, tools=tools, verbose=verbose)
             return {"status": "housekeeping", "tick": n, "exits": triggered, **hk}
 
@@ -205,6 +230,7 @@ async def run_tick(config: Config, *, verbose: bool = True) -> dict[str, Any]:
 
         messages = result["messages"]
         final = messages[-1]
+        summary_text = _text_of(final)
         calls = [tc for m in messages for tc in (getattr(m, "tool_calls", None) or [])]
         orders = [tc for tc in calls if tc.get("name") in mcp_client.ORDER_TOOLS]
         recorded = [tc for tc in calls if tc.get("name") == "record_position"]
@@ -224,7 +250,7 @@ async def run_tick(config: Config, *, verbose: bool = True) -> dict[str, Any]:
                 for tc in orders
             ],
             positions_recorded=len(recorded),
-            summary=str(getattr(final, "content", ""))[:2000],
+            summary=summary_text[:2000],
         )
 
         inbox.archive(items)
@@ -238,7 +264,7 @@ async def run_tick(config: Config, *, verbose: bool = True) -> dict[str, Any]:
         if verbose:
             print(f"\n[tick {n}] tools: {[tc.get('name') for tc in calls] or 'none'}")
             print(f"[tick {n}] orders={len(orders)} positions_recorded={len(recorded)}")
-            print(f"\n--- agent ---\n{getattr(final, 'content', '')}\n")
+            print(f'\n--- agent ---\n{summary_text}\n')
 
         return {"status": "done", "tick": n, "batch": batch, "orders": len(orders),
                 "recorded": len(recorded), "exits": triggered}

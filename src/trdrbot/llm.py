@@ -13,8 +13,19 @@ from langchain.chat_models import init_chat_model
 from .config import Config
 
 
+#: Provider-side transients (429 rate limit, 529 overloaded, 5xx) are routine
+#: under load and WILL happen across an 8-day unattended run. Without retries a
+#: single 529 discards an entire decide cycle - the observations stay pending so
+#: nothing is lost permanently, but the tick produces no decision and the next
+#: one pays to reassemble the same context. Retrying inside the call is far
+#: cheaper than retrying the tick.
+LLM_MAX_RETRIES = 5
+
+
 def build_model(config: Config):
-    return init_chat_model(config.model, max_tokens=config.max_tokens)
+    return init_chat_model(
+        config.model, max_tokens=config.max_tokens, max_retries=LLM_MAX_RETRIES
+    )
 
 
 SYSTEM_PROMPT = """You are trdrbot, an autonomous options trading agent operating a \

@@ -1014,3 +1014,39 @@ estimate uncertainty, "ceiling not target"); differentiation verified across pay
 confidence levels.
 **Revisit if:** the sample grows past ~50 resolved forecasts, at which point the literature
 supports recalculating and possibly raising the fraction.
+
+## D-031: Findings from the first full open-market-logic run
+**Date:** 2026-08-26
+**Status:** accepted
+**Context:** First execution of the complete reasoning chain (thesis -> experiments -> sizing)
+against real market data, via a new `--force` flag that runs the decide path outside market
+hours. Orders queue rather than fill, so this tests the DECISION, not execution — and it is
+also how the agent's reasoning gets demonstrated without waiting for the bell.
+**What worked, unprompted:** the agent ran `simulate_experiments` with two genuinely different
+structures, read EV-after-costs, and **declined to trade** — "both negative after costs, so I
+stopped before `size_position`". It independently identified the credit-spread trap (collect $51
+to risk $449 needs ~90% accuracy), noticed call-side IV at 7.4% against put-side 16.5% and
+reasoned about selling the cheap wing of a skewed surface into an earnings print, and flagged
+that a second short-vol SPY position would double existing factor exposure rather than
+diversify. The transaction-cost work (D-030) directly changed the decision: "friction alone eats
+the edge."
+**Bugs found by running it, all silent-failure class:**
+1. **`attribution._spot` could never succeed.** Two faults at once: the parameter is `symbols`,
+   not `symbol_or_symbols` (the wrong name is dropped from the parameter map and the request
+   400s), and the default SIP feed 403s because our subscription does not permit recent
+   consolidated data. `_spot` therefore always returned `None` and attribution **silently never
+   ran** — the self-improving loop's most important step dead while every log line read healthy.
+   Now pinned to the `iex` feed with a `get_stock_latest_trade` fallback. Verified live: 766.42.
+2. **Thinking blocks polluted the journal.** Extended-thinking responses return a block list —
+   an opaque signature blob then the real text. Stringifying the list dumped base64 into the
+   journal and console and consumed the 2000-char summary budget. Now extracts `text` blocks only.
+3. **A 529 Overloaded discarded an entire decide cycle.** Provider transients are routine and
+   certain across an 8-day unattended run. `OverloadedError`/`ServiceUnavailable` are now named
+   explicitly in the transient set (previously correct only by fallback), and LLM calls retry
+   five times — retrying inside the call is far cheaper than losing the tick and re-assembling
+   the same context next cycle.
+4. **A printf format error crashed the comparison renderer** (`%+,.0f` — the comma flag is
+   f-string only). The agent had already called the tool successfully; the crash was in showing
+   it the answer. Render path now regression-tested across bounded, unbounded-loss,
+   unbounded-profit, calendar and zero-price candidates.
+**Evidence:** live runs, ticks 16-19.

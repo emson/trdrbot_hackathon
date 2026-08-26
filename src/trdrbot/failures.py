@@ -45,6 +45,8 @@ _TRANSIENT_MARKERS = (
     "InternalServerError",
     "ConnectionError",
     "TimeoutError",
+    "OverloadedError",   # Anthropic 529 - seen live, expected under load
+    "ServiceUnavailable",
 )
 
 

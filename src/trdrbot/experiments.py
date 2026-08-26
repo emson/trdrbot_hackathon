@@ -221,13 +221,14 @@ def render_comparison(
         edge = f"{m['thesis_edge']:+.1%}" if m["thesis_edge"] is not None else "n/a"
         pm = f"{m['pop_market']:.0%}" if m["pop_market"] is not None else "n/a"
         pt = f"{m['pop_thesis']:.0%}" if m["pop_thesis"] is not None else "n/a"
+        eac = f"${m['ev_after_costs']:+,.0f}" if m["ev_after_costs"] is not None else "n/a"
         lines.append(
             f"\n**{i}. {exp.name}** ({m['net']} ${abs(m['entry_cost']):,.0f})"
             f"\n   FACTS    max profit {mp} | max loss {ml} | R:R {rr}"
             f" | breakevens {m['breakevens']}"
             f"\n   MODELLED P(profit) market {pm} -> your view {pt} | thesis edge {edge}"
             f"\n   COSTS    est. round-trip friction ${m['est_friction']:,.0f}"
-            f" | EV after costs {('$%+,.0f' % m['ev_after_costs']) if m['ev_after_costs'] is not None else 'n/a'}"
+            f" | EV after costs {eac}"
             f"\n   {exp.rationale}"
         )
     lines.append(
