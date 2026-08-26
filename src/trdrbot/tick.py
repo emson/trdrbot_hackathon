@@ -23,7 +23,7 @@ from typing import Any
 
 from langgraph.prebuilt import create_react_agent
 
-from . import ids, mcp_client
+from . import failures, ids, mcp_client
 from .config import Config
 from .inbox import Inbox, Item
 from .journal import Journal
@@ -91,9 +91,20 @@ async def run_tick(config: Config, *, verbose: bool = True) -> dict[str, Any]:
     try:
         result = await agent.ainvoke({"messages": [("user", prompt)]})
     except Exception as exc:  # noqa: BLE001 - journal it, do not lose the batch
-        journal.append("error", batch=batch, decision_ref=decision_id, error=repr(exc))
+        cause = failures.classify(exc)
+        journal.append(
+            "error",
+            batch=batch,
+            decision_ref=decision_id,
+            cause=cause.value,
+            error=repr(exc),
+        )
         for it in items:
-            inbox.record_failure(it, reason=f"agent error: {exc!r}")
+            inbox.record_failure(it, reason=f"agent error: {exc!r}", cause=cause)
+        if verbose:
+            print(f"\n[tick] FAILED ({cause.value})")
+            print(f"  {type(exc).__name__}: {exc}")
+            print(f"\n  {failures.advice(cause, exc)}\n")
         raise
 
     messages = result["messages"]

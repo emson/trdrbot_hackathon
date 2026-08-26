@@ -45,7 +45,23 @@ async def _doctor() -> int:
     unknown = mcp_client.ORDER_TOOLS - set(names)
     if unknown:
         print(f"  NOTE: expected but absent: {sorted(unknown)}")
-    print(f"\n  all tools: {', '.join(names)}")
+
+    print(f"\n[doctor] checking LLM gateway ({cfg.model})...")
+    try:
+        from .llm import build_model
+
+        reply = await build_model(cfg).ainvoke("Reply with the single word: ok")
+        print(f"  reachable - replied {str(reply.content)[:40]!r}")
+    except Exception as exc:  # noqa: BLE001
+        from . import failures
+
+        cause = failures.classify(exc)
+        print(f"  FAILED ({cause.value}): {type(exc).__name__}: {exc}")
+        print(f"\n  {failures.advice(cause, exc)}")
+        return 1
+
+    print(f"\n  all Alpaca tools: {', '.join(names)}")
+    print("\n[doctor] all checks passed")
     return 0
 
 

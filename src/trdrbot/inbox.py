@@ -20,6 +20,7 @@ from typing import Any
 
 from . import ids
 from .config import Paths
+from .failures import Cause
 
 
 @dataclass
@@ -102,19 +103,26 @@ class Inbox:
                 # which matters for the watchdog-killed-mid-archive case.
                 shutil.move(str(it.path), str(dest / it.path.name))
 
-    def record_failure(self, item: Item, reason: str) -> None:
-        """Bump the retry counter, dead-lettering once it is exhausted.
+    def record_failure(self, item: Item, reason: str, cause: Cause = Cause.TRANSIENT) -> None:
+        """Apply the retry policy for this failure's cause (D-019 #6).
 
-        D-019 refines this: cause matters. A schema failure will never succeed
-        and should give up fast; a dependency outage may well succeed once the
-        dependency recovers. The skeleton keeps one counter and records the
-        reason so the distinction can be made when it earns its place.
+        CONFIG failures deliberately do not touch the retry counter: our setup
+        being broken is not the item's fault, and letting it dead-letter an
+        innocent observation loses a real signal for a reason unrelated to it.
         """
-        item.retry_count += 1
         if not item.path or not item.path.exists():
             return
+
+        if cause is Cause.CONFIG:
+            return  # blameless - leave it pending, untouched
+
+        if cause is Cause.PERMANENT:
+            self._dead_letter(item.path, reason=f"[permanent] {reason}")
+            return
+
+        item.retry_count += 1
         if item.retry_count >= self.max_retries:
-            self._dead_letter(item.path, reason=reason)
+            self._dead_letter(item.path, reason=f"[transient x{item.retry_count}] {reason}")
         else:
             item.path.write_text(json.dumps(item.to_dict(), indent=2))
 
