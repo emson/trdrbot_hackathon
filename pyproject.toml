@@ -1,0 +1,24 @@
+[project]
+name = "trdrbot"
+version = "0.1.0"
+description = "AI options trading agent for the Alpaca AI Trading Agents Hackathon"
+requires-python = ">=3.11"
+dependencies = [
+    "langgraph>=0.2",
+    "langchain>=0.3",
+    "langchain-anthropic>=0.3",
+    "langchain-mcp-adapters>=0.1",
+    "pydantic>=2",
+    "pyyaml>=6",
+    "python-dotenv>=1",
+]
+
+[project.scripts]
+trdrbot = "trdrbot.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/trdrbot"]

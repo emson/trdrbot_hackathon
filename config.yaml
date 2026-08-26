@@ -1,0 +1,33 @@
+# trdrbot configuration.
+# The model is a config value, not a code constant (D-008) - swapping providers
+# is an edit here, and every journalled decision records which model made it.
+
+llm:
+  # LangChain "provider:model" form. Model IDs are complete as-is; never append
+  # a date suffix.
+  model: "anthropic:claude-opus-5"
+  max_tokens: 8000
+
+alpaca:
+  # The MCP server runs as a local stdio subprocess (verified: Alpaca's hosted
+  # MCP endpoint is OAuth-interactive-only, unusable headless).
+  command: "uvx"
+  args: ["alpaca-mcp-server"]
+  paper: true
+
+trading:
+  watchlist: ["SPY"]
+  # Force-close everything on/after this date regardless of position expiry
+  # (D-019). Without it a conventional-DTE position never resolves inside the
+  # competition and the learning loop produces nothing.
+  deadline: "2026-09-04"
+
+tick:
+  # Cheap deterministic work every tick; the LLM decide path every N ticks
+  # (D-017). The skeleton runs decide every tick so it is easy to explore.
+  decide_every_n_ticks: 1
+  watchdog_seconds: 300
+
+inbox:
+  # Dead-letter after N attempts so one bad item cannot stall forever (D-018).
+  max_retries: 3

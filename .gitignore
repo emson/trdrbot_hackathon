@@ -1,0 +1,14 @@
+.env
+.venv/
+__pycache__/
+*.pyc
+.DS_Store
+dist/
+*.egg-info/
+
+# Runtime state. The inbox archive and journal are the raw layer and ground
+# truth (D-014); keep them out of git for now, revisit before submission if we
+# want the trade record in the repo as evidence.
+data/inbox/
+data/journal.jsonl
+data/state/
