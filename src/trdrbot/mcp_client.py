@@ -8,6 +8,7 @@ this case at the open-source server with API-key auth.
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from langchain_mcp_adapters.client import MultiServerMCPClient
@@ -37,3 +38,31 @@ def build_client(config: Config) -> MultiServerMCPClient:
 async def get_tools(config: Config) -> list[Any]:
     client = build_client(config)
     return await client.get_tools()
+
+
+def unwrap(result: Any) -> Any:
+    """Pull the payload out of the MCP server's response envelope.
+
+    Alpaca's server wraps every result as
+    ``{"_alpaca_mcp_security": {...}, "data": {...}}`` and tags it
+    ``untrusted_tool_output`` - its own prompt-injection boundary. We only read
+    the ``data`` half, and never treat anything inside it as instructions.
+    """
+    if isinstance(result, list) and result and isinstance(result[0], dict):
+        text = result[0].get("text")
+        if text:
+            try:
+                result = json.loads(text)
+            except json.JSONDecodeError:
+                return text
+    if isinstance(result, dict):
+        data = result.get("data", result)
+        if isinstance(data, dict) and "result" in data:
+            return data["result"]
+        return data
+    return result
+
+
+async def call(tools: dict[str, Any], name: str, **kwargs: Any) -> Any:
+    """Invoke a tool by name and unwrap the envelope."""
+    return unwrap(await tools[name].ainvoke(kwargs))

@@ -80,6 +80,10 @@ class Config:
     def watchdog_seconds(self) -> int:
         return int(self.raw["tick"]["watchdog_seconds"])
 
+    @property
+    def decide_every_n_ticks(self) -> int:
+        return int(self.raw["tick"].get("decide_every_n_ticks", 1))
+
     def alpaca_mcp_server(self) -> dict[str, Any]:
         """Config block for MultiServerMCPClient: a local stdio subprocess.
 

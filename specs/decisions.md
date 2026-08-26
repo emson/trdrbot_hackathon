@@ -629,3 +629,35 @@ control a value the model actually controls?
 `jrn_20260826T184458Z_exe47db` records the divergence.
 **Revisit if:** we add order tools beyond the three `place_*` variants, or move off MCP to direct
 SDK calls (in which case we author the arguments again and the wrapper becomes unnecessary).
+
+## D-021: Submitted is not filled - the `opening` state must be used, and reconciliation must consult open orders
+**Date:** 2026-08-26
+**Status:** accepted
+**Context:** Found by running stage 2. The agent placed a multi-leg limit order and recorded the
+position as `open`; the broker showed **0 positions and 1 working order**. On the next tick
+reconciliation would have seen "in our records, absent at broker", concluded phantom, and marked
+a perfectly healthy pending order as externally closed — destroying a live position's record
+while the order was still working. The `opening` state existed in the architecture's position
+lifecycle from the start; it was simply never wired, and nothing in either simulation pass caught
+that because both reasoned about positions as either open or gone.
+**Choice:** Two changes. (1) `record_position` writes `status: opening`, not `open` — an order is
+submitted, not filled, and claiming otherwise makes an unfilled limit look like real exposure
+that exit rules would then evaluate against a position which does not exist. (2) Reconciliation
+consults **open orders as well as holdings**, including the nested legs of a multi-leg order, and
+resolves `opening` three ways: broker shows the legs → promote to `open`; a live order exists →
+leave alone; neither → `abandoned` / `never_filled`, because it never became real exposure and
+must not be scored as a trade that closed.
+**Why it matters beyond the bug:** `abandoned` and `closed` are different outcomes for learning.
+An order that never filled says nothing about whether the thesis was right, and scoring it as a
+resolved trade would poison the calibration signal with non-events.
+**Evidence:** observed live — position page `pos_20260826_SPY_bull_put_spread_ebf0dcde` claiming
+`open` against a broker showing zero positions and one working `mleg` order. All four lifecycle
+paths (pending / filled / died / vanished) now unit-tested.
+**Generalised lesson (with D-020):** both findings come from the gap between what the design says
+happens and what the broker actually does. Simulation validated the *logic*; only execution
+validated the *interface*. Worth assuming every remaining broker-facing assumption is wrong until
+a live tick proves otherwise.
+**Revisit if:** partial fills on a multi-leg order need finer handling than the existing
+`intended_legs` vs `actual_legs` divergence flag (currently suppressed while an order is still
+working, which is correct but means a genuinely broken spread is not flagged until the order
+completes).

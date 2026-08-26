@@ -1,19 +1,17 @@
-"""One tick: drain the inbox, decide, act, journal, archive.
+"""One tick, split by cost (D-017).
 
-This is the walking skeleton's spine. It implements the ordering and
-idempotency rules the design simulations found load-bearing, and stubs
-everything else (sensors, memory, exit rules, calibration) so the end-to-end
-path can be explored before those land.
+    EVERY TICK (cheap, deterministic, no LLM)
+        C21 analytics  ->  C13 reconcile  ->  C24 exit rules
+                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        That order is the D-019 fix (INV-25): reconciling first means a
+        position the broker already resolved is terminal before exit rules
+        run, so it is excluded by construction rather than by a later check.
 
-What is real here:
-  - write-ahead journalling (INV-18)
-  - resume-rather-than-re-decide on retry (INV-27)
-  - batch-derived client_order_id (INV-18)
-  - at-least-once inbox with dead-letter (INV-20)
-  - single-flight stale-breakable lock (INV-7)
+    EVERY N TICKS (expensive)
+        resume-check -> assemble context -> decide -> act -> journal
 
-What is stubbed: the collector, elfmem, the wiki, exit rules, reconciliation,
-forecasting. Those are build stages 2-4.
+Fast monitoring with slow deciding shortens the exposure window while cutting
+LLM spend - the exit evaluator needs no model to notice a breached stop.
 """
 
 from __future__ import annotations
@@ -23,133 +21,160 @@ from typing import Any
 
 from langgraph.prebuilt import create_react_agent
 
-from . import failures, ids, mcp_client, tool_guard
+from . import analytics, exit_rules, failures, ids, local_tools, mcp_client, reconcile, tool_guard
 from .config import Config
 from .inbox import Inbox, Item
 from .journal import Journal
 from .llm import SYSTEM_PROMPT, build_model
+from .positions import PositionStore
 
 
-def _render_context(items: list[Item]) -> str:
-    lines = ["## Observations this cycle", ""]
-    for it in items:
-        lines.append(f"- [{it.type} | trust={it.trust} | {it.ts}] {json.dumps(it.payload)}")
+def _tick_count(config: Config) -> int:
+    p = config.paths.state / "tick_count"
+    n = int(p.read_text().strip() or 0) + 1 if p.exists() else 1
+    p.write_text(str(n))
+    return n
+
+
+def _render_positions(store: PositionStore) -> str:
+    """Two-tier context (D-019): detail for what needs attention, one line for the rest."""
+    positions = store.open_positions()
+    if not positions:
+        return "## Our positions\n\n(none)"
+
+    lines = ["## Our positions", ""]
+    for p in positions:
+        rules = ", ".join(
+            f"{r['type']}={r.get('threshold', r.get('days_before_expiry'))}" for r in p.exit_rules
+        ) or "NO EXIT RULES"
+        lines.append(f"- **{p.position_id}** [{p.status}] {p.strategy} on {p.underlying}")
+        lines.append(f"  legs: {', '.join(p.symbols) or '(none)'} | exits: {rules}")
+        lines.append(f"  thesis: {p.thesis[:200]}")
     return "\n".join(lines)
 
 
 async def run_tick(config: Config, *, verbose: bool = True) -> dict[str, Any]:
     journal = Journal(config.paths.journal)
     inbox = Inbox(config.paths, max_retries=config.max_retries)
+    store = PositionStore(config.paths.wiki)
+
+    n = _tick_count(config)
+    tools_list = await mcp_client.get_tools(config)
+    tools = {t.name: t for t in tools_list}
+
+    # ---------- fast path: every tick, no LLM ----------
+    snap = await analytics.snapshot(tools)
+    recon = reconcile.reconcile(store, snap, journal)
+    triggered = await exit_rules.run(
+        store, snap, tools, journal, config.deadline, verbose=verbose
+    )
+
+    if verbose:
+        print(f"[tick {n}] market_open={snap.market_open} equity=${snap.equity:,.0f} "
+              f"holdings={len(snap.broker_positions)}")
+        print(f"[tick {n}] reconcile: {reconcile.summarise(recon)}")
+        if triggered:
+            print(f"[tick {n}] exit rules closed: {triggered}")
+
+    # ---------- slow path: every N ticks ----------
+    if n % config.decide_every_n_ticks != 0:
+        if verbose:
+            print(f"[tick {n}] fast path only (decide runs every "
+                  f"{config.decide_every_n_ticks} ticks)")
+        return {"status": "fast_only", "tick": n, "exits": triggered}
 
     items = inbox.pending()
     if not items:
         if verbose:
-            print("[tick] inbox empty - nothing to do")
-        return {"status": "idle"}
+            print(f"[tick {n}] inbox empty - no decide cycle")
+        return {"status": "idle", "tick": n, "exits": triggered}
 
     batch = ids.batch_id([i.id for i in items])
-    if verbose:
-        print(f"[tick] batch {batch} with {len(items)} item(s)")
-
-    # INV-27: resume rather than re-decide. An LLM is nondeterministic, so
-    # re-deciding after a crash would orphan the write-ahead record and burn a
-    # call. The batch-derived order id makes a resubmission safely idempotent.
     prior = journal.unresolved_decision(batch)
-    if prior:
-        if verbose:
-            print(f"[tick] resuming unresolved decision {prior['id']} (not re-deciding)")
+    if prior and verbose:
+        print(f"[tick {n}] resuming unresolved decision {prior['id']} (not re-deciding)")
 
-    tools = await mcp_client.get_tools(config)
-    # The model authors every tool argument, so left alone it invents its own
+    # The model authors every tool argument, so without this it invents its own
     # client_order_id and INV-18's idempotency guarantee silently evaporates.
-    tools = tool_guard.enforce_order_ids(tools, batch)
-    if verbose:
-        print(f"[tick] {len(tools)} MCP tools available (order ids pinned to batch)")
+    guarded = tool_guard.enforce_order_ids(tools_list, batch)
 
-    model = build_model(config)
-    agent = create_react_agent(model, tools, prompt=SYSTEM_PROMPT)
-
-    prompt = _render_context(items)
-    if prior:
-        prompt += (
-            f"\n\n## Resuming\nA previous decision for this batch did not complete: "
-            f"{prior.get('thesis', '(no thesis recorded)')}\n"
-            f"Its intended action was: {json.dumps(prior.get('action', {}))}\n"
-            f"Re-attempt that same action if it still makes sense; the order id is "
-            f"idempotent so a duplicate will be rejected safely."
-        )
-
-    # Write-ahead (INV-18): the decision is journalled BEFORE any order goes out.
-    decision_id = journal.append(
+    decision_id = journal.append(  # write-ahead (INV-18)
         "decision",
         batch=batch,
         model=config.model,
+        tick=n,
         item_ids=[i.id for i in items],
         resumed_from=prior["id"] if prior else None,
-        context={"observations": [i.to_dict() for i in items]},
     )
-    if verbose:
-        print(f"[tick] write-ahead decision {decision_id}")
+
+    agent_tools = guarded + [local_tools.build_record_position(store, decision_id)]
+    agent = create_react_agent(build_model(config), agent_tools, prompt=SYSTEM_PROMPT)
+
+    prompt = "\n\n".join([
+        snap.render(),
+        _render_positions(store),
+        "## Observations this cycle\n\n"
+        + "\n".join(f"- [{i.type} | trust={i.trust}] {json.dumps(i.payload)}" for i in items),
+        f"## Constraints\n- Competition deadline: {config.deadline} "
+        f"(everything is force-closed then, so prefer expiries well inside it).\n"
+        f"- Watchlist: {', '.join(config.watchlist)}",
+    ])
+    if prior:
+        prompt += (
+            f"\n\n## Resuming\nA previous decision for this batch did not complete. "
+            f"Its order id is idempotent, so re-attempting the same action is safe - "
+            f"a duplicate will be rejected."
+        )
 
     try:
         result = await agent.ainvoke({"messages": [("user", prompt)]})
-    except Exception as exc:  # noqa: BLE001 - journal it, do not lose the batch
+    except Exception as exc:  # noqa: BLE001
         cause = failures.classify(exc)
-        journal.append(
-            "error",
-            batch=batch,
-            decision_ref=decision_id,
-            cause=cause.value,
-            error=repr(exc),
-        )
+        journal.append("error", batch=batch, decision_ref=decision_id,
+                       cause=cause.value, error=repr(exc))
         for it in items:
             inbox.record_failure(it, reason=f"agent error: {exc!r}", cause=cause)
         if verbose:
-            print(f"\n[tick] FAILED ({cause.value})")
-            print(f"  {type(exc).__name__}: {exc}")
+            print(f"\n[tick {n}] FAILED ({cause.value}): {type(exc).__name__}: {exc}")
             print(f"\n  {failures.advice(cause, exc)}\n")
         raise
 
     messages = result["messages"]
     final = messages[-1]
-    tool_calls = [
-        tc
-        for m in messages
-        for tc in (getattr(m, "tool_calls", None) or [])
-    ]
-    order_calls = [tc for tc in tool_calls if tc.get("name") in mcp_client.ORDER_TOOLS]
+    calls = [tc for m in messages for tc in (getattr(m, "tool_calls", None) or [])]
+    orders = [tc for tc in calls if tc.get("name") in mcp_client.ORDER_TOOLS]
+    recorded = [tc for tc in calls if tc.get("name") == "record_position"]
 
     journal.append(
-        "execution" if order_calls else "no_op",
+        "execution" if orders else "no_op",
         batch=batch,
         decision_ref=decision_id,
         model=config.model,
-        client_order_id=ids.client_order_id(batch) if order_calls else None,
-        tool_calls=[tc.get("name") for tc in tool_calls],
-        # Record the model's args verbatim AND what was actually enforced, so a
-        # divergence between the two is visible in the record rather than hidden.
+        tick=n,
+        client_order_id=ids.client_order_id(batch) if orders else None,
+        tool_calls=[tc.get("name") for tc in calls],
         order_calls=[
-            {
-                "name": tc.get("name"),
-                "args_as_model_supplied": tc.get("args"),
-                "client_order_id_enforced": ids.client_order_id(batch),
-            }
-            for tc in order_calls
+            {"name": tc.get("name"),
+             "args_as_model_supplied": tc.get("args"),
+             "client_order_id_enforced": ids.client_order_id(batch)}
+            for tc in orders
         ],
+        positions_recorded=len(recorded),
         summary=str(getattr(final, "content", ""))[:2000],
     )
 
     inbox.archive(items)
 
+    # An order placed without a recorded position has no exit rules and nothing
+    # can act on it - worth surfacing rather than discovering it days later.
+    if orders and not recorded:
+        print("\n[tick] WARNING: order placed but record_position was not called - "
+              "this position has no exit rules and the evaluator cannot see it.")
+
     if verbose:
-        print(f"\n[tick] tools called: {[tc.get('name') for tc in tool_calls] or 'none'}")
-        print(f"[tick] orders placed: {len(order_calls)}")
+        print(f"\n[tick {n}] tools: {[tc.get('name') for tc in calls] or 'none'}")
+        print(f"[tick {n}] orders={len(orders)} positions_recorded={len(recorded)}")
         print(f"\n--- agent ---\n{getattr(final, 'content', '')}\n")
 
-    return {
-        "status": "done",
-        "batch": batch,
-        "decision": decision_id,
-        "tool_calls": [tc.get("name") for tc in tool_calls],
-        "orders": len(order_calls),
-    }
+    return {"status": "done", "tick": n, "batch": batch, "orders": len(orders),
+            "recorded": len(recorded), "exits": triggered}
