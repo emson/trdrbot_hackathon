@@ -13,6 +13,7 @@ from typing import Any
 
 from . import learn
 from .analytics import Snapshot
+from .calibration import CalibrationStore
 from .elfmem_adapter import ElfmemAdapter
 from .journal import Journal
 from .positions import PositionStore
@@ -36,7 +37,8 @@ def _working_symbols(orders: list[dict[str, Any]]) -> set[str]:
 
 
 async def reconcile(
-    store: PositionStore, snap: Snapshot, journal: Journal, mem: ElfmemAdapter, wiki: Wiki
+    store: PositionStore, snap: Snapshot, journal: Journal, mem: ElfmemAdapter, wiki: Wiki,
+    calibration: CalibrationStore | None = None,
 ) -> dict[str, list[str]]:
     """Diff broker holdings against our open position pages."""
     held = snap.by_symbol()
@@ -89,7 +91,8 @@ async def reconcile(
                 # F3: no P&L available - the position already vanished from
                 # holdings by the time we noticed. D-018 #9 skips credit
                 # assignment here rather than guessing a sign.
-                await learn.on_resolution(pos, store, mem, wiki, journal, pnl_pct=None)
+                await learn.on_resolution(pos, store, mem, wiki, journal, pnl_pct=None,
+                                           calibration=calibration)
                 result["phantom"].append(pos.position_id)
         elif present and len(present) != len(syms) and not pending:
             journal.append(

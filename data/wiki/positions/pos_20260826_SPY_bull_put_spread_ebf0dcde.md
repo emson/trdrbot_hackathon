@@ -25,14 +25,18 @@ exit_rules:
 exit_state:
   stop_loss:
   - false
+  - false
+  - false
   profit_target:
+  - false
+  - false
   - false
 close_reason: null
 decision_ref: jrn_20260826T185819Z_dece972
 sources: []
 generated:
   by: ''
-  at: '2026-08-26T20:06:21.864867+00:00'
+  at: '2026-08-26T20:34:57.720876+00:00'
 verified:
 - by: trdrbot/reconcile
   at: '2026-08-26T20:05:59.099229+00:00'

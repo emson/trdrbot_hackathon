@@ -8,6 +8,8 @@ duplicated or skipped depending on which path happened to notice first.
 
 from __future__ import annotations
 
+from . import ids
+from .calibration import CalibrationStore
 from .elfmem_adapter import ElfmemAdapter
 from .journal import Journal
 from .positions import Position, PositionStore
@@ -42,6 +44,7 @@ async def on_resolution(
     journal: Journal,
     *,
     pnl_pct: float | None,
+    calibration: CalibrationStore | None = None,
 ) -> None:
     """F3: a position reached a terminal state, however it got there.
 
@@ -52,6 +55,15 @@ async def on_resolution(
     """
     self_resolved = pos.close_reason in SELF_RESOLVED
     scored = False
+
+    # Calibration (D-013) resolves on ANY close with a known P&L, including a
+    # non-self-resolved one. This is deliberately a wider gate than credit
+    # assignment: the forecast was "will this position close profitable", and
+    # a stop-triggered loss answers that question honestly even though it says
+    # nothing about whether the entry thesis was sound. Suppressing those would
+    # bias the calibration record toward trades that went well.
+    if calibration is not None and pnl_pct is not None:
+        calibration.resolve(pos.position_id, outcome=pnl_pct > 0, at=ids.utc_now().isoformat())
 
     if self_resolved and pnl_pct is not None:
         hit = pnl_pct > 0

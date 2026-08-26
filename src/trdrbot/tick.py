@@ -39,8 +39,10 @@ from . import (
     local_tools,
     mcp_client,
     reconcile,
+    sensors,
     tool_guard,
 )
+from .calibration import CalibrationStore
 from .config import Config
 from .elfmem_adapter import ElfmemAdapter
 from .inbox import Inbox, Item
@@ -80,6 +82,7 @@ async def run_tick(config: Config, *, verbose: bool = True) -> dict[str, Any]:
     inbox = Inbox(config.paths, max_retries=config.max_retries)
     store = PositionStore(config.paths.wiki)
     wiki = Wiki(config.paths.wiki)
+    calib = CalibrationStore(config.paths.state / "forecasts.jsonl")
 
     n = _tick_count(config)
     tools_list = await mcp_client.get_tools(config)
@@ -90,10 +93,12 @@ async def run_tick(config: Config, *, verbose: bool = True) -> dict[str, Any]:
 
     try:
         # ---------- fast path: every tick, no LLM ----------
+        sensed = await sensors.collect(tools, config, inbox, n, verbose=verbose)
         snap = await analytics.snapshot(tools)
-        recon = await reconcile.reconcile(store, snap, journal, mem, wiki)
+        recon = await reconcile.reconcile(store, snap, journal, mem, wiki, calib)
         triggered = await exit_rules.run(
-            store, snap, tools, journal, config.deadline, mem, wiki, verbose=verbose
+            store, snap, tools, journal, config.deadline, mem, wiki,
+            calibration=calib, verbose=verbose
         )
 
         if verbose:
@@ -144,7 +149,10 @@ async def run_tick(config: Config, *, verbose: bool = True) -> dict[str, Any]:
         )
 
         record_tool = local_tools.build_record_position(
-            store, decision_id, elfmem_blocks=ctx.blocks, generated_by=config.model
+            store, decision_id, elfmem_blocks=ctx.blocks, generated_by=config.model,
+            calibration=calib,
+            sources=[{"id": i.id, "resource": f"inbox/{i.id}", "author": i.source}
+                     for i in items],
         )
         agent_tools = guarded + [record_tool]
         agent = create_react_agent(build_model(config), agent_tools, prompt=SYSTEM_PROMPT)
@@ -156,6 +164,13 @@ async def run_tick(config: Config, *, verbose: bool = True) -> dict[str, Any]:
             "## Observations this cycle\n\n"
             + "\n".join(f"- [{i.type} | trust={i.trust}] {json.dumps(i.payload)}" for i in items)
         )
+        cal = calib.score()
+        if cal.n:
+            prompt_parts.append(
+                f"## Your calibration so far\n\n{cal.verdict()}\n\n"
+                f"Base rate: {cal.base_rate:.0%} of your closed positions were profitable. "
+                f"Use this to set `confidence` honestly - it is scored."
+            )
         prompt_parts.append(
             f"## Constraints\n- Competition deadline: {config.deadline} "
             f"(everything is force-closed then, so prefer expiries well inside it).\n"

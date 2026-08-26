@@ -62,7 +62,22 @@ Verified end to end by forcing dream() directly: remember() -> dream() -> recall
 confirmed, assemble_context() now returns real text in all three frames. elfmem's semantic
 recall is fully functional. (First verification attempt hit the same shell-shadowing class of
 bug as the earlier Anthropic key issue, self-inflicted by an ad hoc test script that skipped
-config.load() — not a new bug, a reminder to always load secrets through it.) (MCP: local stdio confirmed; elfsim: spec-only →
+config.load() — not a new bug, a reminder to always load secrets through it.)
+
+Stage 4 built: sensors.py (D-015 registry, alpaca_news live — verified get_news IS
+watchlist-scopeable via `symbols`, resolving an architecture.md §12 unknown) and
+calibration.py (D-013 Brier + Murphy decomposition, math verified against known cases:
+Murphy's identity rel-res+unc=Brier holds exactly; overconfidence correctly detected).
+record_position now takes a `confidence` the agent is told is scored; the decide prompt
+shows the agent its own calibration record. New `trdrbot calibration` CLI view.
+
+**D-026 — serious latent bug found by running it:** the news sensor reported "20 new of 20
+fetched" and left 2 files on disk. item_id/journal_id/position_id all derived their unique
+component from a second-resolution timestamp hash, so any batch written within one second
+collided into a single id. 18 of 20 real news articles were silently destroyed. Latent
+since the walking skeleton — unreachable until a batch-emitting producer existed. Fixed
+with uuid4; batch_id/client_order_id verified STILL deterministic since INV-18 depends on
+that. 20/20 items now persist. (MCP: local stdio confirmed; elfsim: spec-only →
 D-013 in-repo calibration module using elfmem's mind loop; elfmem: real, import as library,
 pin to self-frame-contract branch). notes/004 complete. Next: Specify mode for the six
 planned modules, then the day-0/1 walking skeleton.

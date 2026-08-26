@@ -100,6 +100,27 @@ def _journal(args: argparse.Namespace) -> int:
     return 0
 
 
+def _calibration() -> int:
+    from .calibration import CalibrationStore
+
+    cfg = config_mod.load()
+    store = CalibrationStore(cfg.paths.state / "forecasts.jsonl")
+    cal = store.score()
+    pending = store.pending()
+
+    print(f"\n{cal.verdict()}\n")
+    if cal.n:
+        print(f"  Brier score  : {cal.brier:.4f}   (0 = perfect, 0.25 = coin flip)")
+        print(f"  reliability  : {cal.reliability:.4f}   (lower is better - overconfidence signal)")
+        print(f"  resolution   : {cal.resolution:.4f}   (higher is better - discrimination)")
+        print(f"  uncertainty  : {cal.uncertainty:.4f}   (irreducible, given the base rate)")
+        print(f"  base rate    : {cal.base_rate:.0%} of closed positions profitable")
+    print(f"\n  resolved: {cal.n}   pending: {len(pending)}")
+    for f in pending:
+        print(f"    - {f.position_id}: forecast {f.probability:.0%}, not yet resolved")
+    return 0
+
+
 def main() -> None:
     p = argparse.ArgumentParser(prog="trdrbot")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -115,6 +136,8 @@ def main() -> None:
     jrn = sub.add_parser("journal", help="show journal entries")
     jrn.add_argument("-n", type=int, default=20)
 
+    sub.add_parser("calibration", help="show forecast calibration (Brier/Murphy)")
+
     args = p.parse_args()
     if args.cmd == "doctor":
         sys.exit(asyncio.run(_doctor()))
@@ -124,3 +147,5 @@ def main() -> None:
         sys.exit(asyncio.run(_tick()))
     elif args.cmd == "journal":
         sys.exit(_journal(args))
+    elif args.cmd == "calibration":
+        sys.exit(_calibration())

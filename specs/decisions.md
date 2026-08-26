@@ -807,3 +807,37 @@ shell `OPENAI_API_KEY` instead. Not a new bug; a reminder that any script touchi
 go through `config.load()`, not construct its own environment.
 **Evidence:** `elfmem/adapters/` contains only `openai.py` and `mock.py`; live dream()/recall()
 round-trip confirmed via `trdrbot.config.load()`.
+
+## D-026: Unique-per-call ids must not be derived from second-resolution timestamps
+**Date:** 2026-08-26
+**Status:** accepted
+**Context:** Found live during stage 4. The `alpaca_news` sensor reported "20 new of 20
+fetched" and left **2 files on disk**. Root cause: `item_id` hashed `(kind, source,
+utc_stamp)` — all three identical for items written in the same second — so every item in a
+sensor batch got an identical filename and silently overwrote the previous one. 18 of 20 real
+news articles were destroyed with no error, no warning, and a log line that said everything
+worked. Auditing the rest of `ids.py` found the same flaw in `journal_id` (less destructive —
+the journal is append-only so nothing is overwritten, but duplicate ids break traceability and
+`decision_ref` lookups could resolve to the wrong entry) and in `position_id` (**most severe** —
+two positions on the same underlying/strategy opened in the same second would silently share
+one wiki page, the second's thesis and exit rules destroying the first's).
+**Why it stayed hidden until now:** nothing before sensors ever wrote more than one item per
+second. Stages 1-3 wrote at most one position and a handful of journal entries per tick, each
+comfortably separated. The bug was latent from the walking skeleton onward and only became
+reachable when a batch-emitting producer existed.
+**Choice:** `item_id`, `journal_id` and `position_id` now use `uuid4` for their unique
+component instead of a timestamp hash — removing the collision entirely rather than narrowing
+the window with finer-grained timestamps, which would only make it rarer and harder to
+reproduce. Verified 100/100 unique for each.
+**Critically unchanged:** `batch_id` and `client_order_id` remain fully deterministic — they
+*must* be, because INV-18's crash-retry idempotency depends on the same batch producing the
+same order id. Verified explicitly after the change (order-stable, repeatable) rather than
+assumed.
+**Generalised lesson (with D-020, D-021):** the third find this project that only surfaced by
+running the system rather than reasoning about it — and the first that was latent in code
+written three stages earlier. A design-level review would not have caught it: the id function
+looked correct in isolation and only failed under a call pattern that did not yet exist.
+**Evidence:** live sensor run (20 fetched → 2 persisted → 20 persisted after fix); uniqueness
+and determinism both re-verified at 100 samples.
+**Revisit if:** any id needs to become deterministic later — it would then need an explicit
+content-derived key, not a timestamp.

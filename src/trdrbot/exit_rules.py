@@ -23,6 +23,7 @@ from typing import Any
 
 from . import learn, mcp_client
 from .analytics import Snapshot, _f, position_pnl_pct
+from .calibration import CalibrationStore
 from .elfmem_adapter import ElfmemAdapter
 from .journal import Journal
 from .positions import Position, PositionStore
@@ -107,6 +108,7 @@ async def run(
     mem: ElfmemAdapter,
     wiki: Wiki,
     *,
+    calibration: CalibrationStore | None = None,
     verbose: bool = True,
 ) -> list[str]:
     """Evaluate every still-open position and close those that trigger."""
@@ -148,7 +150,8 @@ async def run(
         )
         if closed_ok:
             store.transition(pos, "closed")  # INV-17: terminal, exactly once
-            await learn.on_resolution(pos, store, mem, wiki, journal, pnl_pct=pnl)  # F3
+            await learn.on_resolution(pos, store, mem, wiki, journal, pnl_pct=pnl,
+                                       calibration=calibration)  # F3
         triggered.append(pos.position_id)
 
     return triggered
