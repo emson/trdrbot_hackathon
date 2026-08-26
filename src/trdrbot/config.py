@@ -107,9 +107,34 @@ class Config:
         }
 
 
-def load(root: Path | None = None) -> Config:
+#: Secrets whose shell value silently shadowing .env is a confusing failure.
+_SHADOWABLE = ("ANTHROPIC_API_KEY", "ALPACA_API_KEY", "ALPACA_SECRET_KEY", "OPENAI_API_KEY")
+
+
+def load(root: Path | None = None, *, quiet: bool = False) -> Config:
+    """Load config, with the project's .env authoritative over the shell.
+
+    `load_dotenv` defaults to override=False, so an exported shell variable
+    silently wins over the .env file. That cost a debugging session: a stale
+    exported ANTHROPIC_API_KEY shadowed a freshly-rotated valid key in .env,
+    and every edit to .env appeared to do nothing.
+
+    The project's .env is the project's configuration, so it wins - and when it
+    overrides a *different* shell value we say so, because a silent override is
+    the same class of confusion in the opposite direction.
+    """
     root = root or ROOT
-    load_dotenv(root / ".env")
+    env_path = root / ".env"
+
+    before = {k: os.environ.get(k) for k in _SHADOWABLE}
+    load_dotenv(env_path, override=True)
+
+    if not quiet:
+        for k, old in before.items():
+            new = os.environ.get(k)
+            if old and new and old != new:
+                print(f"[config] .env overrode a different shell value for {k}")
+
     with (root / "config.yaml").open() as f:
         raw = yaml.safe_load(f)
     paths = Paths.build(root)
