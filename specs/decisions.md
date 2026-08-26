@@ -599,3 +599,33 @@ growth) remains low-priority and deferred.
 **Revisit if:** a future simulation pass finds the reordering (#1 above) has itself introduced a
 new race, or the deadline sweep interacts badly with an in-flight multi-leg order at the exact
 cutoff (worth a dedicated scenario next time a simulation runs).
+
+## D-020: Order arguments authored by the model must be normalised before dispatch
+**Date:** 2026-08-26
+**Status:** accepted
+**Context:** Found by running the walking skeleton, not by simulation. Both simulation passes
+reasoned about `client_order_id` as something *we* set (INV-18). In the real system the LLM
+calls the Alpaca MCP tools directly, so it authors **every** argument — and it duly invented its
+own id (`trdrbot-skeleton-20260826-spy260918c765`) while the journal recorded the batch-derived
+one we assumed had been sent. Two failures at once: INV-18's idempotency guarantee was void (a
+crash-retry would invent a *different* id and open a second, different position — exactly the
+failure D-018 #3 was written to prevent), and the journal was recording something that never
+happened.
+**Choice:** Wrap the order-*placing* MCP tools (`place_stock_order`, `place_option_order`,
+`place_crypto_order`) and overwrite `client_order_id` with the batch-derived value before the
+call leaves the process, logging any replacement. Cancel/close tools are addressed by order or
+position id and take no `client_order_id`, so they are left untouched. The journal now records
+the model's arguments verbatim *alongside* the enforced id, so a divergence is visible in the
+record rather than hidden by it.
+**This is not a guardrail (D-009).** It blocks nothing, rejects nothing, and vetoes no decision —
+it normalises one argument so an existing invariant actually holds. Same category as
+reconciliation: correctness plumbing, not policy.
+**Generalised lesson:** any invariant that depends on the value of a tool argument is
+unenforceable if the model authors that argument. Simulation could not have caught this, because
+the design documents describe what the system *should* send without modelling *who* composes the
+call. Worth re-checking the other invariants against this question: which of them assume we
+control a value the model actually controls?
+**Evidence:** observed directly in the first successful end-to-end tick; journal entry
+`jrn_20260826T184458Z_exe47db` records the divergence.
+**Revisit if:** we add order tools beyond the three `place_*` variants, or move off MCP to direct
+SDK calls (in which case we author the arguments again and the wrapper becomes unnecessary).

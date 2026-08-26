@@ -23,7 +23,7 @@ from typing import Any
 
 from langgraph.prebuilt import create_react_agent
 
-from . import failures, ids, mcp_client
+from . import failures, ids, mcp_client, tool_guard
 from .config import Config
 from .inbox import Inbox, Item
 from .journal import Journal
@@ -60,8 +60,11 @@ async def run_tick(config: Config, *, verbose: bool = True) -> dict[str, Any]:
             print(f"[tick] resuming unresolved decision {prior['id']} (not re-deciding)")
 
     tools = await mcp_client.get_tools(config)
+    # The model authors every tool argument, so left alone it invents its own
+    # client_order_id and INV-18's idempotency guarantee silently evaporates.
+    tools = tool_guard.enforce_order_ids(tools, batch)
     if verbose:
-        print(f"[tick] {len(tools)} MCP tools available")
+        print(f"[tick] {len(tools)} MCP tools available (order ids pinned to batch)")
 
     model = build_model(config)
     agent = create_react_agent(model, tools, prompt=SYSTEM_PROMPT)
@@ -123,7 +126,16 @@ async def run_tick(config: Config, *, verbose: bool = True) -> dict[str, Any]:
         model=config.model,
         client_order_id=ids.client_order_id(batch) if order_calls else None,
         tool_calls=[tc.get("name") for tc in tool_calls],
-        order_calls=[{"name": tc.get("name"), "args": tc.get("args")} for tc in order_calls],
+        # Record the model's args verbatim AND what was actually enforced, so a
+        # divergence between the two is visible in the record rather than hidden.
+        order_calls=[
+            {
+                "name": tc.get("name"),
+                "args_as_model_supplied": tc.get("args"),
+                "client_order_id_enforced": ids.client_order_id(batch),
+            }
+            for tc in order_calls
+        ],
         summary=str(getattr(final, "content", ""))[:2000],
     )
 

@@ -452,7 +452,7 @@ healthy ──failure──▶ degraded(n) ──n≥N──▶ parked (rest of 
 | **INV-15** | Context assembly stays within budget; anything dropped is recorded in the journal | Silent truncation |
 | **INV-16** | A single sensor failure never aborts a tick | Fragile to third-party outage |
 | **INV-17** | A position enters a terminal state **at most once**, whatever detects it | Double credit assignment *(gap #4)* |
-| **INV-18** | `client_order_id` derives from the inbox **batch**, and the decision is journalled **before** submission | Retry opens a second, different position *(gap #3)* |
+| **INV-18** | `client_order_id` derives from the inbox **batch**, is **enforced on the tool call** (the model authors tool args, so it will otherwise invent its own - D-020), and the decision is journalled **before** submission | Retry opens a second, different position *(gap #3)* |
 | **INV-19** | An exit rule closes **all legs** of a position, never a single leg | Naked short with unbounded risk *(D-017)* |
 | **INV-20** | An item failing N times moves to `inbox/failed/`; the batch proceeds | One poison item stalls forever *(gap #2)* |
 | **INV-21** | Every closed position records a `close_reason` | Entry theses penalised for exit decisions *(gap #9)* |
