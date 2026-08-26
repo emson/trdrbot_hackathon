@@ -841,3 +841,56 @@ looked correct in isolation and only failed under a call pattern that did not ye
 and determinism both re-verified at 100 samples.
 **Revisit if:** any id needs to become deterministic later — it would then need an explicit
 content-derived key, not a timestamp.
+
+## D-027: Adopt Polymarket from the prior trdrbot project; reject xmcp and the rest
+**Date:** 2026-08-26
+**Status:** accepted
+**Context:** Reviewed the tools and MCPs in a prior incarnation of this project
+(`~/Dropbox/devel/projects/ai/trdrbot`) for anything worth bringing across. It carries three
+MCPs (`xmcp`, `elfmem`, `elfsim`) and eight "organs" (polymarket, fred, rss-news, yfinance,
+alpaca, market-analysis, paper-ledger, ask), plus a knowledge vault of live-verified
+data-source quirks.
+**Choice — adopt Polymarket only.** Evaluated against operational friction and our own
+signal-per-token order (D-015):
+
+| Candidate | Auth | Cost | Process | D-015 rank | Verdict |
+|---|---|---|---|---|---|
+| polymarket | none | $0 | none (plain HTTP) | #2, next up | **adopt** |
+| xmcp (X/news) | 4 OAuth secrets | credits, 402 seen live | separate server, ~9s startup | #4, last | reject |
+| fred | API key | $0 | none | not in order | defer |
+| elfmem MCP | — | — | subprocess | — | reject: we use the library (D-011), which the research found strictly better |
+| elfsim MCP | — | — | subprocess | — | reject: spec-only, no implementation (D-013) |
+| rss-news, yfinance, alpaca, market-analysis, paper-ledger, ask | — | — | — | — | reject: duplicate what we already built |
+
+**Why Polymarket wins decisively:** it is the only candidate with *zero* operational friction —
+no credentials, no cost, no separate process — and it is literally the next sensor in our own
+planned order. It also resolves architecture.md §12's open assumption ("Polymarket exposes
+queryable market odds suitable for automated polling") with a **yes**, and feeds the calibration
+synergy D-015 §3.4 identified: a market-implied probability is a free external benchmark against
+our own stated confidence (D-013).
+**Why xmcp is rejected despite being genuinely useful:** four OAuth secrets, real per-call
+credit cost (the prior project's own journal logs an `HTTP 402, credits depleted` mid-run), and
+a separate long-running local server with ~9s startup that would have to survive an 8-day
+unattended window. It is also the *lowest* trust tier (`social`), which our own simulation
+flagged as the false-viral risk (FM-18). High friction, lowest signal, last in priority — a bad
+trade for a 9-day build. The capability is documented here should the window ever widen.
+**What actually transferred:** not just code — the load-bearing value is nine **live-verified
+API quirks** (now `docs/sources/polymarket_gamma_api.md`), several of which are silent-corruption
+bugs rather than errors. Quirk 1 is the sharpest: `outcomes`/`outcomePrices` arrive as
+JSON-encoded *strings*, so `prices[0]` returns the character `'['` rather than a price.
+Re-verified live on adoption. Our `src/trdrbot/polymarket.py` implements the same defences
+(double-decode, skip closed/inactive/degenerate markets nested inside open events, prefer
+`volumeNum` over string `volume`, never fabricate `0.0`, no `sort=volume` on text search, and
+`.get("events") or []` because a zero-result search omits the key entirely).
+**A latent bug this surfaced in our own code:** `Sensor.policy` was declared but never read —
+`collect()` applied identity-dedup to everything regardless, and `alpaca_news` was mislabeled
+`change_only` when it is really dedup-by-article-id. Polymarket needs `change_only` to mean
+something, so policy is now real: `filter` (identity dedup), `change_only` (numeric threshold),
+`raw` (pass through). Change detection compares against the **last emitted** value, not the
+previous poll, so a slow drift still surfaces instead of creeping past one sub-threshold step at
+a time — verified explicitly.
+**Evidence:** live end-to-end run (8 markets ingested: Fed cut odds by meeting, US recession,
+CPI prints; second poll correctly emitted zero); change-detection semantics verified across
+six transitions.
+**Revisit if:** the competition window widens enough to justify xmcp's setup cost, or FRED's
+backward-looking series become useful alongside Polymarket's forward-looking probabilities.

@@ -81,6 +81,10 @@ class Config:
         return int(self.raw["tick"]["watchdog_seconds"])
 
     @property
+    def polymarket_queries(self) -> list[str]:
+        return list((self.raw.get("polymarket") or {}).get("queries") or [])
+
+    @property
     def decide_every_n_ticks(self) -> int:
         return int(self.raw["tick"].get("decide_every_n_ticks", 1))
 

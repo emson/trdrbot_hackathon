@@ -81,3 +81,22 @@ that. 20/20 items now persist. (MCP: local stdio confirmed; elfsim: spec-only �
 D-013 in-repo calibration module using elfmem's mind loop; elfmem: real, import as library,
 pin to self-frame-contract branch). notes/004 complete. Next: Specify mode for the six
 planned modules, then the day-0/1 walking skeleton.
+
+
+Reviewed the prior trdrbot project's tools/MCPs (D-027). Adopted **Polymarket** — the
+only candidate with zero operational friction (no auth, no cost, no separate process) and
+literally #2 in our own D-015 sensor order. Rejected **xmcp** despite genuine usefulness:
+4 OAuth secrets, real credit cost (their journal logs an HTTP 402 depletion mid-run), a
+separate ~9s-startup server to keep alive for 8 unattended days, and the lowest trust tier
+our own FM-18 flagged. Rejected elfmem/elfsim MCPs (we use the library / it has no impl)
+and six organs that duplicate what we built.
+
+The real transfer was knowledge, not code: nine live-verified Gamma API quirks now in
+docs/sources/polymarket_gamma_api.md. Quirk 1 re-verified live here — `outcomePrices` is a
+JSON-encoded *string*, so naive `prices[0]` yields the character `'['`. Silent corruption,
+not an error.
+
+Surfaced a latent bug in our own stage-4 code: `Sensor.policy` was declared but never read,
+and alpaca_news was mislabeled. Policy is now real (filter/change_only/raw), with
+change_only measuring against the last *emitted* value so slow drift still surfaces.
+Live: 8 macro markets ingested (Fed cut odds, US recession, CPI); second poll emitted 0.

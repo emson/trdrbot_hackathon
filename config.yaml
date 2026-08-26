@@ -15,6 +15,15 @@ alpaca:
   args: ["alpaca-mcp-server"]
   paper: true
 
+polymarket:
+  # Macro questions whose odds move SPY. Read-only, no auth, no cost.
+  # Free-text relevance search - Gamma's default ranking, deliberately
+  # unsorted (sort=volume destroys relevance, verified live).
+  queries:
+    - "fed rate cut"
+    - "us recession"
+    - "cpi inflation"
+
 trading:
   watchlist: ["SPY"]
   # Force-close everything on/after this date regardless of position expiry

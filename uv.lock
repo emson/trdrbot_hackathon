@@ -550,7 +550,7 @@ wheels = [
 [[package]]
 name = "elfmem"
 version = "0.20.0.dev0"
-source = { git = "https://github.com/emson/elfmem.git?branch=elfmem_index#60daa758be7ad3cc7c995a97561ac6ff41532d5f" }
+source = { git = "https://github.com/emson/elfmem.git?branch=elfmem_index#e1bcbf410eb6f2a4ac133065e6f6d1914478c98f" }
 dependencies = [
     { name = "aiosqlite" },
     { name = "alembic" },
