@@ -661,3 +661,92 @@ a live tick proves otherwise.
 `intended_legs` vs `actual_legs` divergence flag (currently suppressed while an order is still
 working, which is correct but means a genuinely broken spread is not flagged until the order
 completes).
+
+## D-022: Adopt Google's Open Knowledge Format (OKF) frontmatter conventions for the wiki
+**Date:** 2026-08-26
+**Status:** accepted
+**Context:** User directive to research OKF as a basis for the wiki. Verified via decision-mode
+research (53 agents, primary-source fetch of `SPEC.md`/`README.md` directly, not secondhand
+summary — see [notes/008](notes/008_open_knowledge_format_research.md)): OKF is a real, current
+specification from Google Cloud's Data Cloud team (announced 2026-06-12, now v0.2, canonical
+repo `GoogleCloudPlatform/open-knowledge-format`), confirmed distinct from schema.org, the
+Knowledge Graph API, `llms.txt`/`AGENTS.md`, and the unrelated UK Open Knowledge Foundation
+(same acronym). D-011's existing Karpathy-pattern wiki (`index.md`, `log.md`, `positions/`,
+`lessons.md`, `strategy.md`, `context/`) already matches OKF's reserved-filename and
+directory-of-markdown convention — this is formalization, not a redesign.
+**Choice — normative OKF fields adopted, cited to `SPEC.md` directly:**
+- `type:` on every concept file (`Position`, `Lesson`, `MarketContext`, `Metric`) — the only
+  field OKF requires.
+- `sources[]` replaces the flat `wiki_refs` sha-hash list from D-014: each entry carries
+  `resource`, optional `id`, and credibility *signals* `author`/`usage_count`/`last_modified` —
+  deliberately no stored score, since "a score is subjective, unportable, and goes stale."
+  Per-claim attribution uses footnotes **keyed by `sources[].id`, not position**, because our
+  learn path rewrites `lessons.md`/`strategy.md` over time and a positional citation would
+  silently misattribute the moment the list reorders.
+- `generated: {by, at}` / `verified: [{by, at}]` → three trust tiers (unverified /
+  machine-confirmed / human-reviewed). `generated.by` formalizes the model-attribution tracking
+  D-008 already required; `verified` is new capacity — when the reconciler independently
+  confirms something the decide path wrote (a fill, a close), that becomes a legitimate
+  machine-confirmed event distinct from the original unverified write.
+- `status: draft|stable|deprecated` + `stale_after` (an absolute ISO instant, not a relative
+  TTL) on `wiki/context/{regime,macro,calendar}.md` — exactly the "slow-changing, needs a
+  freshness marker" case the field was designed for.
+- Link convention: **relative paths**, not the spec's recommended absolute bundle-relative
+  (`/`-rooted) form. Deliberate deviation — `positions/*.md` are a submission artifact judges
+  may read on GitHub, and a leading `/` breaks GitHub's markdown rendering (the spec's own
+  reference agent forbids the form it recommends, for the same reason).
+**Why not alternatives:**
+- Invent our own frontmatter schema from scratch: OKF already solved the provenance/trust/
+  freshness questions we would otherwise have designed ad hoc, with reasoning (e.g. "no stored
+  credibility score") directly applicable to our situation.
+- Adopt OKF wholesale including its deferred `Attested Computation` runtime: the runtime
+  protocol (receipt/verdict format, attester ABI, sandboxing) is explicitly unfinished in v0.2 —
+  not safe to depend on. Noted as a directional fit for D-013's calibration scores, not adopted.
+**Evidence:** [notes/008](notes/008_open_knowledge_format_research.md), `SPEC.md` §2-§7, §12-§13
+**Revisit if:** OKF v0.3/v1.0 renames any field we've adopted (v0.2 already broke two v0.1
+fields — `timestamp`→`generated.at`, `# Citations`→`sources` — so this has already happened
+once in the format's short life), or if maintaining OKF-shaped frontmatter under a 9-day
+deadline costs more than the retrieval/attribution benefit it buys.
+
+## D-023: Wiki house rules borrowed from OKF's reference implementation — not the spec itself
+**Date:** 2026-08-26
+**Status:** accepted
+**Context:** OKF's spec deliberately leaves note atomicity, when-to-split, deduplication, and
+anti-degradation policy unspecified (explicit non-goals). The format's own reference-agent
+implementation — labeled a proof of concept, not normative — has concrete, battle-tested answers
+to exactly these questions. Adopting them as our own house rules, distinctly *not* citing them
+as "the OKF spec," per [notes/008](notes/008_open_knowledge_format_research.md)'s own
+normative-vs-illustrative distinction.
+**Choice:**
+1. **Four-gate mint test** before creating any new `lessons.md`/reference entry: (a)
+   referenceable by name, not narrative; (b) not bundle-level meta (not an overview/changelog in
+   disguise); (c) passes a "See the [X] for..." citation-sentence test; (d) would be cited by
+   ≥2 existing concepts, or is load-bearing background for one. A speculative or one-off
+   observation that fails gate (d) should not be minted as a standing lesson.
+2. **Monotonic augmentation, enforced in code** — this is our concrete answer to "how do we
+   reduce degradation," and the wiki's write path (`wiki.py`, not yet built) must implement it:
+   writes are full-replacement, not patches; a guard refuses any write that shrinks an existing
+   `sources[]`/`tags[]` list or drops a heading present in the prior version; `generated` is the
+   only frontmatter key allowed to shrink to nothing (it gets refreshed on write). A rejected
+   write means retry with a proper superset, not silent data loss.
+3. **Anti-orphan rule** — a minted reference note with nothing linking to it is a bug; the
+   learn/housekeeping path should verify new notes are cited from at least one primary page
+   before considering a write cycle complete.
+4. **Write workflow**: read the existing note first and refine rather than rewrite from
+   scratch; write exactly one concept per call rather than one sprawling document covering
+   several facts.
+**Why this shape:** these rules exist specifically because an LLM is the primary and only
+writer of this wiki, with no human review step (D-009's no-guardrails philosophy extends here —
+the wiki has no gate on what gets written, only a discipline for how). Monotonic augmentation is
+the load-bearing one: without a code-level guard, a "helpful" rewrite that drops detail is
+indistinguishable from a good edit until the knowledge has already quietly degraded across many
+autonomous cycles.
+**Why not alternatives:**
+- Trust prompt instructions alone to prevent degradation: the same category of gap D-018/D-019
+  already found elsewhere (constitution says X, nothing enforces it) — a code-level guard is
+  required, not optional, given the pattern's track record in this project specifically.
+**Evidence:** [notes/008](notes/008_open_knowledge_format_research.md); reference-agent prompt
+files and `bundle_tools.py`'s augmentation guard, read directly (not summarized).
+**Revisit if:** the augmentation guard proves too rigid in practice (e.g. a genuine correction
+that must legitimately shrink a section) — add an explicit `supersedes` escape hatch rather than
+removing the guard.

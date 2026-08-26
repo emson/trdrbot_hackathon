@@ -128,9 +128,12 @@ predictions. Position state lives in files so it survives an elfmem reset.
 ### Entity: Position (`wiki/positions/<position_id>.md`)
 
 Frontmatter is the machine-readable spine; the prose below it is what the model actually reads.
+Frontmatter follows OKF conventions *(D-022)*: `type` is the only field OKF itself requires;
+`sources`/`generated`/`verified` are OKF's provenance/trust fields, adopted directly.
 
 ```markdown
 ---
+type: Position                       # OKF-required field (D-022)
 position_id: pos_20260828_SPY_bps_a3f2
 status: proposed|opening|open|adjusting|closing|closed|expired|assigned|orphaned
 strategy: bull_put_spread
@@ -155,14 +158,15 @@ elfmem_blocks:                       # ← credit-assignment targets, captured P
   self: [f90171e2...]
   task: [b12c9d04...]
   attention: [a3b81c04...]
-wiki_refs:                                   # ← what informed the decision, versioned
-  - {path: lessons.md, sha: 9f2b1a}
-  - {path: strategy.md, sha: 4e8c22}
-model: <gateway model id>
+sources:                             # OKF provenance (D-022) — replaces the old wiki_refs shape
+  - {id: lessons-1, resource: lessons.md, author: "trdrbot/decide", last_modified: 2026-08-28T14:30:00Z}
+  - {id: strategy-1, resource: strategy.md, author: "trdrbot/decide", last_modified: 2026-08-27T09:00:00Z}
+generated: {by: "anthropic:claude-opus-5", at: 2026-08-28T14:35:00Z}   # OKF (D-022)
+verified: []                         # populated by reconciliation on fill confirmation (D-022)
 ---
 
 ## Thesis
-One paragraph: why this trade, what must be true, what invalidates it.
+One paragraph: why this trade, what must be true, what invalidates it.[^lessons-1][^strategy-1]
 
 ## Timeline
 - 2026-08-28 opened for 1.35 credit
@@ -170,12 +174,25 @@ One paragraph: why this trade, what must be true, what invalidates it.
 
 ## Outcome
 Written at close: realised P&L, did the thesis hold, Brier resolution, lesson extracted.
+
+[^lessons-1]: current lessons.md guidance active at decision time
+[^strategy-1]: current strategy.md playbook active at decision time
 ```
 
-`wiki_refs` carries a content hash because **the learn path actively rewrites the wiki** — by
-review time the page that informed a decision may read differently. The wiki directory is in
-git, so `git show <sha>` recovers the exact text the model saw. Two lines of code to keep
-post-hoc review honest.
+**`sources[]` replaces the old flat `wiki_refs` list** *(D-022)*: each entry is `resource`
+(what was read) plus credibility signals `author`, `usage_count`, `last_modified` — no stored
+score, since a score would itself go stale. Per-claim footnotes are **keyed by `sources[].id`,
+not position**, because **the learn path actively rewrites the wiki** — by review time the page
+that informed a decision may read differently, and a positional citation (`sources[0]`) would
+silently misattribute the moment the list reorders. The wiki directory is in git, so
+`git log -p -- lessons.md` around `last_modified` recovers what the model actually saw.
+
+**`generated`/`verified` are OKF's trust-tier fields** *(D-022)*: `generated.by` is the model
+that made the decision (formalizes D-008's existing model-attribution requirement).
+`verified: []` starts empty (**unverified** tier) and gains an entry — `{by: "trdrbot/reconcile",
+at: ...}` — when reconciliation independently confirms the fill, promoting the position to
+**machine-confirmed**. A `human:<id>` entry would be **human-reviewed**, not expected in normal
+autonomous operation but the field exists if a team member ever intervenes.
 
 `intended_legs` vs `actual_legs` exists because with no guardrails *(D-009)* a partial multi-leg
 fill can leave a broken spread whose risk profile is nothing like the intent. We do not prevent

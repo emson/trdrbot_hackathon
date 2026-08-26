@@ -71,6 +71,7 @@ documentation). There is no external end user in v1 — this is a self-operated 
 - Anthropic's Consumer Terms restrict relying on Claude to buy/sell securities/derivatives;
   applies when Claude is the gateway-selected model (D-008). Known, accepted risk, not
   resolved — see D-007.
-- Reuses elfmem (`elf0_mem_sim`, branch `self-frame-contract`, v0.19.3 — real, mature package)
+- Reuses elfmem (`elf0_mem_sim`, branch `elfmem_index`, v0.20.0.dev0 — real, mature package,
+  pushed to GitHub; supersedes the earlier `self-frame-contract` local-path reference)
   per D-011. elfsim is spec-only with no implementation; trdrbot implements its calibration
   slice in-repo instead (D-013).

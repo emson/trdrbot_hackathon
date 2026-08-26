@@ -11,6 +11,7 @@ dependencies = [
     "pydantic>=2",
     "pyyaml>=6",
     "python-dotenv>=1",
+    "elfmem[tools]",
 ]
 
 [project.scripts]
@@ -22,3 +23,6 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/trdrbot"]
+
+[tool.uv.sources]
+elfmem = { git = "https://github.com/emson/elfmem.git", branch = "elfmem_index" }

@@ -28,7 +28,24 @@ recovery, reworded INV-6 to resolve its conflict with INV-24, capped the needs-a
 against systemic regime shifts, and refined dead-lettering + exit-rule debounce. D-018's note
 points to D-019 for the completed items. architecture.md, spec.md, charter.md all updated
 (architecture.md now includes INV-25..30, FM-32..37).
-**Open:** all three verifications landed (MCP: local stdio confirmed; elfsim: spec-only →
+Researched Google's Open Knowledge Format (real, verified against primary SPEC.md — decision-
+mode fan-out, 53 agents): adopted as D-022 (normative frontmatter: type/sources/generated/
+verified/status/stale_after, replacing wiki_refs) and D-023 (house rules borrowed from OKF's
+non-normative reference agent: four-gate mint test, monotonic-augmentation write guard — the
+actual mechanism against wiki degradation). spec.md's Position entity and architecture.md's
+wiki section updated. Portable cross-project reference saved to
+docs/sources/open_knowledge_format.md.
+**CODE GAP, folded into stage 3:** src/trdrbot/positions.py predates D-022/D-023 — no
+`type`/`sources`/`generated`/`verified` fields, no augmentation guard. Fixed as part of building
+the wiki write path in stage 3 (memory), not separately.
+
+pyproject.toml updated: elfmem now a real git dependency
+(`github.com/emson/elfmem.git@elfmem_index`, superseding the earlier local-path/branch
+reference — matches charter.md's already-updated constraint). Verified: `uv sync` resolves
+clean (115 packages, no conflicts with existing deps), `elfmem` 0.20.0.dev0 imports,
+`MemorySystem` exposes the expected surface (`frame`, `dream`, `curate`, `from_config`, etc.)
+per the earlier elfmem exploration in notes/004 §10.1.
+**Open:** all three MCP/elfmem/elfsim verifications from notes/004 landed (MCP: local stdio confirmed; elfsim: spec-only →
 D-013 in-repo calibration module using elfmem's mind loop; elfmem: real, import as library,
 pin to self-frame-contract branch). notes/004 complete. Next: Specify mode for the six
 planned modules, then the day-0/1 walking skeleton.

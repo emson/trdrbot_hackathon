@@ -2,7 +2,7 @@
 
 **One-pager for humans; simulation input for LLMs.**
 Companion to [charter.md](charter.md) (why), [spec.md](spec.md) (normative detail, data model),
-[decisions.md](decisions.md) (D-003, D-007..D-019). This document is the conceptual layer: what
+[decisions.md](decisions.md) (D-003, D-007..D-023). This document is the conceptual layer: what
 the components are, how they interact, what must always be true, and where it can break.
 Hardened twice by simulation: [notes/006](notes/006_simulation_stress_run.md) (initial stress
 run) and [notes/007](notes/007_simulation_regression_run.md) (regression + new adversarial
@@ -205,6 +205,19 @@ decide cycle — the current regime assessment, the macro picture, and a forward
 events (FOMC, CPI, earnings). It is what a human trader keeps in their head, and `calendar.md`
 pairs naturally with options expiry selection and with the forecasting module *(D-013)*.
 
+**Frontmatter conventions follow the Open Knowledge Format (OKF)** *(D-022)* — Google Cloud's
+markdown-bundle spec, verified real and current
+([notes/008](notes/008_open_knowledge_format_research.md)). Every wiki page gets `type:` (the
+only field OKF requires); `sources[]` with footnote-keyed attribution replaces ad hoc citation;
+`generated`/`verified` give a three-tier trust signal (unverified / machine-confirmed /
+human-reviewed); `status`/`stale_after` (an absolute instant, not a TTL) mark freshness on
+`wiki/context/*.md` specifically. `index.md` and `log.md` are OKF-reserved filenames — which our
+design already used before this research, a happy convergence rather than a rename. Two
+authoring disciplines are borrowed from OKF's reference implementation as house rules, not spec
+*(D-023)*: a four-gate test before minting any new `lessons.md` entry, and — the actual answer to
+"how do we stop an LLM-maintained wiki from degrading" — a write guard that refuses any edit
+shrinking an existing `sources[]`/`tags[]` list or dropping a heading that was already there.
+
 **Synergy worth exploiting:** Polymarket publishes calibrated crowd probabilities for macro
 events; our calibration module produces our own probabilities. Systematic disagreement that we
 lose on is a first-class calibration lesson, and Polymarket odds are a free forecast input.
@@ -266,8 +279,8 @@ Each entry: what it does, what triggers it, how it fails. IDs (C1…) are stable
 | ID | Component | Responsibility | Mutability | Fails by |
 |---|---|---|---|---|
 | **C17** | Journal | `journal.jsonl` — every event, append-only; rebuild path | Never edited | Write fails mid-batch |
-| **C18** | Wiki | `positions/`, **`context/`**, `lessons.md`, `strategy.md`, `portfolio.md`, `index.md`, `AGENTS.md` | Edited by C14/C16 | Frontmatter corruption; growth |
-| **C19** | elfmem Adapter | `MemorySystem` (library, `self-frame-contract`); frames in, `remember`/`outcome` out | Evolves, can forget | Unavailable; slow; cue omitted |
+| **C18** | Wiki | `positions/`, **`context/`**, `lessons.md`, `strategy.md`, `portfolio.md`, `index.md`, `AGENTS.md`; OKF frontmatter + monotonic-augmentation write guard *(D-022, D-023)* | Edited by C14/C16 | Frontmatter corruption; growth; a shrinking write silently degrading a note (guarded against by design, not yet implemented) |
+| **C19** | elfmem Adapter | `MemorySystem` (library, `elfmem_index` branch on GitHub); frames in, `remember`/`outcome` out | Evolves, can forget | Unavailable; slow; cue omitted |
 
 ---
 
