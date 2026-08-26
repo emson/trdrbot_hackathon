@@ -949,3 +949,68 @@ confirming the −σ²T/2 correction); EV of a fairly-priced option = +0.0000, m
 **Revisit if:** calendars become worth supporting (needs a pricing model for the far leg at the
 near expiry — real work and real model risk, deliberately deferred), or the lognormal assumption
 proves materially wrong against realised outcomes, which the calibration record (D-013) will show.
+
+## D-029: Optimise expected profit via calibrated decisions, not this week's P&L
+**Date:** 2026-08-26
+**Status:** accepted
+**Context:** The stated project goal is "generate as much profit as possible". Before tuning
+the system toward that, two things were checked rather than assumed.
+
+**First, what actually wins.** Our own `docs/submission_and_judging.md` listed a "Results &
+Performance" criterion including raw returns — but it was explicitly marked *(Inferred)* and had
+never been verified. Researched: **lablab.ai scores across four dimensions — Application of
+Technology, Presentation, Business Value, Originality.** Raw P&L is not among them. A comparable
+AI-trading hackathon states rankings use "risk-adjusted profitability, drawdown control, and
+validation quality, not just raw PnL". The docs are corrected in place.
+
+**Second, whether a week of P&L means anything.** Simulated: a genuinely skilled 60%-edge agent
+out-scores a coin flip only **69% of the time over 20 trades**; a zero-skill agent risking 1% per
+trade lands between **-7.8% and +8.2%** (90% interval). Over an 8-day window with our cadence,
+raw P&L cannot distinguish skill from luck in either direction.
+
+**Choice:** keep the goal — profit — but change the objective function from "maximise this week's
+P&L" to "maximise expected profit per unit of risk, with the decision process demonstrably
+improving". These are not in tension about *what to build*; they are in tension about *what to
+optimise*. Swinging for a big week maximises variance, and a blow-up would cost marks on all four
+real dimensions while proving nothing about skill.
+
+**Why this is the profit-maximising choice and not a hedge:** the machinery that wins the rubric
+(calibration, view-vs-structure attribution, provenance, earned sizing) is the *same* machinery
+that produces profit over any horizon long enough to be meaningful. Optimising the one-week
+number is the only variant that trades the two off against each other.
+**Evidence:** lablab.ai's published four-dimension rubric; statistical power simulation above.
+**Revisit if:** the organisers publish trading-performance-based criteria for this specific event.
+
+## D-030: Position size is derived from edge and EARNED by calibration
+**Date:** 2026-08-26
+**Status:** accepted
+**Context:** Sizing was the model's free choice, unconnected to edge, bankroll, or track record —
+which made every other piece of machinery decorative, since a well-reasoned trade at a reckless
+size is a reckless trade. Sizing is the single largest lever on long-run profit.
+**Choice:** `sizing.py` — Kelly, scaled fractionally, gated on measured calibration.
+- Full Kelly is unusable (acutely fragile to estimation error, per the literature); the
+  practitioner consensus is fractional Kelly used as a **ceiling, not a target** (Thorp:
+  half-Kelly captures ~75% of growth for ~25% of the variance).
+- **The fraction is earned.** Stated confidence is shrunk toward the base rate in proportion to
+  how well the agent's probabilities have actually held up (D-013). No record → 5% Kelly and a
+  halved claimed edge. Established calibration over a real sample → 25% Kelly.
+- Hard ceiling of 5% of equity per position regardless, because every Kelly input is an estimate
+  and estimates fail together in exactly the conditions that matter.
+- Concentration divisor: several options positions on one underlying are one bet wearing hats.
+- Unbounded max loss → **refused**, not sized: Kelly divides by a worst case that does not exist.
+**Why this is the self-improving loop, concretely:** better calibration is not a dashboard
+metric, it is *permission to bet more*. Experience → demonstrated reliability → larger size →
+more profit, with no step that rewards confidence unbacked by evidence. Verified: the same stated
+70% confidence yields **0 contracts with no track record and 16 with a proven 30-sample record**.
+**A useful thing it catches:** Kelly refuses high-probability-*looking* credit spreads with poor
+payoff ratios — collecting $75 against $425 of risk needs ~85% accuracy just to break even, and
+the module returns zero contracts below that. "Probably wins" is not "worth trading".
+**Also added:** round-trip friction in the simulation. Options spreads are wide, and simulating
+at mid systematically overstates every edge — most for the cheap far-OTM options that look best
+on a payoff diagram. Measured on a real candidate: EV +25.4 before costs, **+8.9 after** — a 65%
+reduction, with friction comparable in magnitude to the edge itself.
+**Evidence:** Kelly/fractional-Kelly research (Thorp half-Kelly result, quarter-Kelly under
+estimate uncertainty, "ceiling not target"); differentiation verified across payoff ratios and
+confidence levels.
+**Revisit if:** the sample grows past ~50 resolved forecasts, at which point the literature
+supports recalculating and possibly raising the fraction.

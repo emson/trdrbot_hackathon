@@ -71,7 +71,18 @@ class Experiment:
     metrics: dict[str, Any] = field(default_factory=dict)
 
 
-def simulate(exp: Experiment, thesis: Thesis, spot: float, iv: float, days: float) -> dict[str, Any]:
+#: Round-trip cost per contract as a fraction of the premium, when the agent
+#: supplies mid prices. Options spreads are wide - you buy at the ask and sell
+#: at the bid, twice (entry and exit). Simulating at mid and ignoring this
+#: systematically overstates every edge, and does so most for the cheap
+#: far-OTM options that look most attractive on a payoff diagram.
+DEFAULT_ROUND_TRIP_COST = 0.10
+
+
+def simulate(
+    exp: Experiment, thesis: Thesis, spot: float, iv: float, days: float,
+    *, round_trip_cost: float = DEFAULT_ROUND_TRIP_COST,
+) -> dict[str, Any]:
     """Score one candidate. Exact facts and modelled estimates kept distinct."""
     legs = exp.legs
     try:
@@ -80,6 +91,10 @@ def simulate(exp: Experiment, thesis: Thesis, spot: float, iv: float, days: floa
         bes = optmath.breakevens(legs)
     except optmath.MultiExpiryError as e:
         return {"error": str(e), "usable": False}
+
+    # Frictions, charged against the gross premium traded across all legs.
+    gross_premium = sum(l.price * l.qty * optmath.CONTRACT_MULTIPLIER for l in legs)
+    friction = gross_premium * round_trip_cost
 
     pop_market = optmath.prob_profit(legs, spot, iv, days)
     pop_thesis = optmath.pop_given_view(legs, spot, iv, days, drift=thesis.drift)
@@ -113,6 +128,8 @@ def simulate(exp: Experiment, thesis: Thesis, spot: float, iv: float, days: floa
         "pop_market": pop_market,
         "pop_thesis": pop_thesis,
         "ev_market": ev_market,
+        "ev_after_costs": (ev_market - friction) if ev_market is not None else None,
+        "est_friction": friction,
         "thesis_edge": edge,
     }
 
@@ -209,6 +226,8 @@ def render_comparison(
             f"\n   FACTS    max profit {mp} | max loss {ml} | R:R {rr}"
             f" | breakevens {m['breakevens']}"
             f"\n   MODELLED P(profit) market {pm} -> your view {pt} | thesis edge {edge}"
+            f"\n   COSTS    est. round-trip friction ${m['est_friction']:,.0f}"
+            f" | EV after costs {('$%+,.0f' % m['ev_after_costs']) if m['ev_after_costs'] is not None else 'n/a'}"
             f"\n   {exp.rationale}"
         )
     lines.append(

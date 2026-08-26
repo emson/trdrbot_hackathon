@@ -15,7 +15,7 @@ from typing import Any
 
 from langchain_core.tools import StructuredTool
 
-from . import experiments, ids, optmath
+from . import experiments, ids, optmath, sizing
 from .calibration import CalibrationStore
 from .positions import Position, PositionStore
 
@@ -202,4 +202,46 @@ def build_record_position(
         func=record_position,
         name="record_position",
         description=record_position.__doc__,
+    )
+
+
+def build_size_position(calibration: "CalibrationStore", equity: float, open_count: int) -> StructuredTool:
+    """Tool: how many contracts, given edge, bankroll, and earned trust.
+
+    Sizing used to be the model's free choice, which made every other piece of
+    machinery decorative - a perfectly reasoned trade at a reckless size is a
+    reckless trade. This puts size on Kelly, scaled by how well the agent's
+    stated probabilities have actually held up.
+    """
+
+    def size_position(
+        stated_confidence: float,
+        max_profit: float,
+        max_loss: float,
+    ) -> str:
+        """Compute the defensible position size. Call this BEFORE placing an order.
+
+        Size is derived from your edge and your TRACK RECORD, not chosen. Your
+        stated confidence is shrunk toward the base rate according to how well
+        calibrated you have actually been - so overconfidence costs you size,
+        and a demonstrated record earns it back. A result of 0 contracts means
+        there is no defensible position here; that is a real answer.
+
+        Args:
+            stated_confidence: your honest probability (0-1) this closes profitable
+            max_profit: from simulate_experiments (use a positive number)
+            max_loss: from simulate_experiments (use a NEGATIVE number)
+        """
+        d = sizing.size_position(
+            equity=equity,
+            stated_confidence=stated_confidence,
+            max_profit=max_profit,
+            max_loss=max_loss,
+            calibration=calibration.score(),
+            open_position_count=open_count,
+        )
+        return d.explain()
+
+    return StructuredTool.from_function(
+        func=size_position, name="size_position", description=size_position.__doc__
     )

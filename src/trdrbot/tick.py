@@ -150,6 +150,9 @@ async def run_tick(config: Config, *, verbose: bool = True) -> dict[str, Any]:
 
         shared: dict[str, Any] = {}
         sim_tool = local_tools.build_simulate_experiments(shared)
+        size_tool = local_tools.build_size_position(
+            calib, snap.equity or 100000.0, len(store.open_positions())
+        )
         record_tool = local_tools.build_record_position(
             store, decision_id, elfmem_blocks=ctx.blocks, generated_by=config.model,
             calibration=calib,
@@ -157,7 +160,7 @@ async def run_tick(config: Config, *, verbose: bool = True) -> dict[str, Any]:
                      for i in items],
             shared=shared,
         )
-        agent_tools = guarded + [sim_tool, record_tool]
+        agent_tools = guarded + [sim_tool, size_tool, record_tool]
         agent = create_react_agent(build_model(config), agent_tools, prompt=SYSTEM_PROMPT)
 
         prompt_parts = [snap.render(), _render_positions(store)]

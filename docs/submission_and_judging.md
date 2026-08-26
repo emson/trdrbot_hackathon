@@ -61,7 +61,27 @@
 - Winners are selected based on evaluation criteria
 - All winners highlighted across lablab.ai channels
 
-### Judging Criteria (Inferred)
+### Judging Criteria
+
+> **CORRECTED 2026-08-26.** The criteria below were originally written as *inferred* from
+> typical hackathon evaluation and were never verified. Researched against lablab.ai's
+> published material: **lablab.ai scores across four dimensions — Application of
+> Technology, Presentation, Business Value, Originality.** Raw P&L is *not* one of them.
+> A comparable AI-trading hackathon states rankings use "risk-adjusted profitability,
+> drawdown control, and validation quality, not just raw PnL".
+>
+> This matters for how the agent is tuned — see D-029. Optimising this week's P&L
+> optimises variance: over ~20 trades a zero-skill agent lands between -8% and +8%, so a
+> good week proves nothing and a blow-up costs marks on all four real dimensions.
+
+#### lablab.ai's four dimensions (verified)
+
+1. **Application of Technology** — effective, innovative use of the core technology
+2. **Presentation** — how clearly the solution is explained and demonstrated
+3. **Business Value** — commercial viability and market potential
+4. **Originality** — novelty versus existing approaches
+
+#### Originally inferred (unverified — retained for contrast)
 
 Based on typical hackathon evaluation, judges likely assess:
 
