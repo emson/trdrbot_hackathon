@@ -1930,3 +1930,30 @@ was missing when it was set.
 **Verified:** 5 new tests incl. a 2x tracker recovering beta 2.0 at R2>0.9, pure noise shrinking
 back to the market, negative beta preserved, thin history refused, and the hedge demonstration.
 93 tests pass.
+
+## D-056: Attribution scored a label, not a profit
+**Date:** 2026-08-27
+**Status:** accepted
+**Context:** The NVDA spread closed while the loop was running - and it closed *well*. The agent
+noticed its own profit-target limit had gone stale ("3.40 sat ~5% above mid while the position
+bleeds -$84/day. A stale profit-target price is not an exit; it's a hope"), repriced it to 3.18,
+and it filled. Total P&L **+$1,290** on the day.
+**The bug that exposed:** because the agent closed it with its own order rather than through our
+exit-rule evaluator, reconciliation marked it `close_reason='external'` - and attribution read
+`profited = close_reason in ("target_hit", "thesis_resolved")`. So a **+52% trade would have
+been attributed as a loss**, teaching the learning loop the exact opposite of what happened, on
+the only position with a scoreable thesis. It was about to fire on the 2026-09-03 horizon.
+**Fix:** profit is MEASURED. `Position.last_pnl_pct` is written every tick while the position is
+visible at the broker, because a position closing outside our rules leaves the broker taking its
+final P&L with it - the last observation is the honest one. Attribution scores that, falling
+back to the label only when no observation exists. The live position was backfilled from measured
+equity (100,181.18 -> 101,290.18 with nothing else open, +$1,109 on $2,100 risk = +52.8%);
+attribution now yields `thesis_right_expression_right` if NVDA lands in [220, 245] and
+`thesis_wrong_profited_anyway` (signal 0.5, teaches nothing) if it does not - which is the
+correct pair of answers.
+**Second fix - a warning that cried wolf.** "order placed but record_position was not called"
+fired on `replace_order_by_id` when the agent repriced its own EXIT, demanding a position record
+for something it was closing. Only orders that OPEN a position now qualify. A warning that fires
+on correct behaviour trains everyone to ignore warnings - the same class as the
+`underlying_stop=None` rendering bug (D-055), a signal that lies.
+**Verified:** 3 new tests; 97 pass.

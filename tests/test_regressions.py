@@ -1154,3 +1154,49 @@ def test_beta_weighting_reveals_a_hedge_that_raw_delta_hides():
     assert two["delta_dollars"] > one["delta_dollars"], "raw delta grows"
     assert abs(two["beta_weighted_delta"]) < abs(one["beta_weighted_delta"]) / 5, "true exposure falls"
     assert two["betas"]["INV"] < 0
+
+
+# ------------------- D-056 measured profit, and a warning that cried wolf
+
+def test_attribution_scores_measured_profit_not_the_close_label():
+    """close_reason was standing in for profit, so anything closed outside our
+    own exit rules - 'external' - scored as a LOSS however much it made. Caught
+    live: an NVDA spread the agent closed itself by repricing its profit target
+    made +$1,290 and would have taught the loop the opposite of what happened."""
+    import inspect
+    from trdrbot import attribution, experiments
+    src = inspect.getsource(attribution.run)
+    assert "last_pnl_pct" in src, "profit must be measured, not inferred from a label"
+
+    # the two verdicts must differ on a profitable trade whose thesis failed
+    right, _ = experiments.attribute(True, True)
+    lucky, _ = experiments.attribute(False, True)
+    assert experiments.ATTRIBUTION_SIGNAL[right] > experiments.ATTRIBUTION_SIGNAL[lucky]
+
+
+def test_last_pnl_survives_a_position_leaving_the_broker():
+    import tempfile
+    from pathlib import Path
+    from trdrbot.positions import PositionStore, Position
+    st = PositionStore(Path(tempfile.mkdtemp()))
+    st.save(Position(position_id="pos_x", status="open", last_pnl_pct=0.53))
+    assert [p for p in st.all() if p.position_id == "pos_x"][0].last_pnl_pct == 0.53
+    st.save(Position(position_id="pos_y", status="open"))
+    assert [p for p in st.all() if p.position_id == "pos_y"][0].last_pnl_pct is None
+
+
+def test_only_opening_orders_demand_a_recorded_position():
+    """The warning fired on replace_order_by_id when the agent repriced its own
+    EXIT, demanding a record_position for a position it was closing. A warning
+    that cries wolf teaches everyone to ignore warnings."""
+    def demands(o):
+        return (str(o.get("name", "")).startswith("place_")
+                and "close" not in str(o.get("args_as_model_supplied", {})
+                                       .get("position_intent", "")).lower())
+
+    assert not demands({"name": "replace_order_by_id", "args_as_model_supplied": {}})
+    assert not demands({"name": "cancel_order_by_id", "args_as_model_supplied": {}})
+    assert not demands({"name": "place_option_order",
+                        "args_as_model_supplied": {"position_intent": "sell_to_close"}})
+    assert demands({"name": "place_option_order",
+                    "args_as_model_supplied": {"order_class": "mleg", "qty": "10"}})

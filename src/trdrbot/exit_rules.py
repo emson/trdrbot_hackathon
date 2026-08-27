@@ -154,6 +154,10 @@ def evaluate(pos: Position, snap: Snapshot, deadline: str) -> tuple[str | None, 
     exactly the signal credit assignment needs (D-018 #9).
     """
     pnl = position_pnl_pct(pos.symbols, snap)
+    # Remember the last time we could see it. A position that closes outside
+    # our rules leaves the broker, taking its final P&L with it (D-056).
+    if pnl is not None:
+        pos.last_pnl_pct = pnl
     fired: list[tuple[int, str, str]] = []
 
     # Self-healing: drop debounce state written by the pre-registry engine,

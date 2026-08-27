@@ -474,9 +474,19 @@ async def run_tick(
 
         inbox.archive(items)
 
-        # An order placed without a recorded position has no exit rules and
-        # nothing can act on it - worth surfacing rather than discovering it days later.
-        if orders and not recorded:
+        # An order that OPENS a position without a recorded position has no
+        # exit rules and nothing can act on it. Only opening orders qualify:
+        # this fired on `replace_order_by_id` when the agent repriced its own
+        # exit, demanding a record_position for a position it was closing. A
+        # warning that cries wolf teaches everyone to ignore warnings - the
+        # same class as the underlying_stop=None rendering bug (D-056).
+        opening_orders = [
+            o for o in orders
+            if str(o.get("name", "")).startswith("place_")
+            and "close" not in str(o.get("args_as_model_supplied", {})
+                                   .get("position_intent", "")).lower()
+        ]
+        if opening_orders and not recorded:
             print("\n[tick] WARNING: order placed but record_position was not called - "
                   "this position has no exit rules and the evaluator cannot see it.")
 

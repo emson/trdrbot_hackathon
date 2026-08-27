@@ -1,9 +1,10 @@
 ---
 type: Position
 position_id: pos_20260827_NVDA_bull_call_spread_01a75fab
-status: open
+status: closed
 interim_band: 0
 max_loss_usd: 2100.0
+last_pnl_pct: 0.5280952380952381
 greeks_at_entry:
   delta_shares: 242.96
   delta_dollars: 54859.81
@@ -56,7 +57,7 @@ exit_state:
   - false
   - false
   - false
-close_reason: null
+close_reason: external
 decision_ref: jrn_20260827T152254Z_dec775fcc
 sources:
 - id: opp_20260827T152232Z_discovery_36d5c9a3
@@ -67,7 +68,7 @@ sources:
   author: discovery
 generated:
   by: anthropic:claude-opus-5
-  at: '2026-08-27T16:52:41.877512+00:00'
+  at: '2026-08-27T17:01:05.010319+00:00'
 verified:
 - by: trdrbot/reconcile
   at: '2026-08-27T15:27:06.400573+00:00'

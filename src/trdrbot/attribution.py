@@ -121,7 +121,17 @@ async def run(
             drift=pos.thesis_drift, band_low=pos.thesis_band_low, band_high=pos.thesis_band_high,
         ).holds_at(spot)
 
-        profited = (pos.close_reason or "") in ("target_hit", "thesis_resolved")
+        # Profit is measured, not inferred from a label. `close_reason` was
+        # standing in for it, so anything closed outside our own exit rules -
+        # `external` - scored as a LOSS however much money it made. Caught
+        # live: an NVDA spread the agent closed itself by repricing its profit
+        # target made +$1,290 and would have been attributed as a losing
+        # thesis, teaching the loop the exact opposite of what happened
+        # (D-056).
+        if pos.last_pnl_pct is not None:
+            profited = pos.last_pnl_pct > 0
+        else:
+            profited = (pos.close_reason or "") in ("target_hit", "thesis_resolved")
         verdict, lesson = experiments.attribute(held, profited)
         signal = experiments.ATTRIBUTION_SIGNAL[verdict]
 
