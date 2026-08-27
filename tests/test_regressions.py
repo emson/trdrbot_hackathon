@@ -861,3 +861,52 @@ def test_reliability_is_never_negative():
     for s in range(20):
         c = score(_synthetic("perfect", 12, seed=s))
         assert c.reliability >= 0.0 and c.resolution >= 0.0
+
+
+# --------------------------- D-051 vol clock and gamma breakeven
+
+def test_weekend_time_is_not_full_volatility_time():
+    """Friday->Monday is 2.25 calendar days but ~1.25 vol days. At 30 DTE that
+    is a rounding error; at 2-10 DTE it corrupts every greek and the expected
+    move the thesis band is checked against."""
+    import datetime
+    from trdrbot.optmath import vol_days
+    friday = datetime.date(2026, 8, 28)
+    monday = datetime.date(2026, 8, 31)
+    assert vol_days(3, friday) < vol_days(3, monday)
+    assert abs(vol_days(3, monday) - 3.0) < 1e-9, "a midweek run is all trading days"
+    assert vol_days(3, friday) == 2.0, "Fri 1.0 + Sat 0.5 + Sun 0.5"
+    assert vol_days(0, friday) == 0.0
+
+
+def test_vol_clock_degrades_honestly_without_a_start_date():
+    from trdrbot.optmath import vol_days
+    assert 0 < vol_days(7) < 7, "must discount weekends even when we cannot date them"
+
+
+def test_expected_move_shrinks_across_a_weekend():
+    """The number the agent compares its thesis band against."""
+    import datetime
+    from trdrbot.optmath import expected_move
+    fri = expected_move(770, 0.13, 3, datetime.date(2026, 8, 28))
+    mon = expected_move(770, 0.13, 3, datetime.date(2026, 8, 31))
+    assert fri < mon and fri / mon < 0.9
+
+
+def test_gamma_breakeven_is_the_implied_daily_move_not_a_structure_score():
+    """Sources claim it discriminates structures. It does not: theta/gamma is
+    the same BS identity for every position at one spot and one vol. What it
+    returns is the daily move implied by IV - useful against REALISED range."""
+    from trdrbot.optmath import Leg, net_greeks, gamma_breakeven
+
+    def L(r, k, side, q=1):
+        return Leg.parse({"right": r, "strike": k, "side": side, "qty": q, "price": 1.0})
+
+    spread = net_greeks([L("P", 755, "short", 5), L("P", 750, "long", 5)], 766.0, 0.13, 6)
+    straddle = net_greeks([L("C", 766, "long"), L("P", 766, "long")], 766.0, 0.13, 6)
+    assert abs(gamma_breakeven(spread) - gamma_breakeven(straddle)) < 0.01
+
+    low = gamma_breakeven(net_greeks([L("C", 766, "long")], 766.0, 0.08, 6))
+    high = gamma_breakeven(net_greeks([L("C", 766, "long")], 766.0, 0.35, 6))
+    assert high > 2 * low, "it must scale with IV - that is its actual content"
+    assert gamma_breakeven(None) is None

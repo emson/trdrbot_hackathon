@@ -240,11 +240,13 @@ def _greeks_line(g: dict[str, Any] | None, days: float) -> str:
     # risk - delta can flip on a $1 move. Surface, never gate (D-009).
     if g["gamma_shares"] < 0 and days <= 2:
         warn = "  <- short gamma near expiry: delta unstable, pin risk"
+    be = optmath.gamma_breakeven(g)
+    be_txt = f" | implied daily move ${be:,.2f}" if be else ""
     return (
         f"\n   GREEKS   delta ${g['delta_dollars']:+,.0f}"
         f" ({g['delta_shares']:+.0f} sh) | theta ${g['theta_dollars']:+,.0f}/day"
         f" | vega ${g['vega_dollars']:+,.0f}/IVpt"
-        f" | gamma {g['gamma_shares']:+.1f} sh/$" + warn
+        f" | gamma {g['gamma_shares']:+.1f} sh/$" + be_txt + warn
     )
 
 

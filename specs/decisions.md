@@ -1776,3 +1776,31 @@ size.**
 **Verified:** 4 new tests - a perfect forecaster is not penalised at n=20; a genuinely
 overconfident one still scores 3x higher at n=60; the gate exists only where it discriminates;
 reliability is never negative. 76 tests pass.
+
+## D-051: Volatility clock and implied daily move
+**Date:** 2026-08-27
+**Status:** accepted
+**Context:** Two items from the technique research ([docs/sources/trading_techniques_review.md](../docs/sources/trading_techniques_review.md)).
+**1. The volatility clock.** Black-Scholes counted calendar days; volatility does not accrue when
+the market is shut. Weighting a weekend/holiday day at 0.5 gives a ~308-day year. **At 30 DTE
+this is a rounding error; at our 2-10 DTE it dominates.** Measured: 3 calendar days from a Friday
+is **2.00 vol days, a 50% overstatement**, which moved the expected move the thesis band is
+checked against from $9.88 to $8.07 and theta by 22%. An unadjusted clock also manufactures a
+spurious IV jump every Monday. Corroborated independently: removing Friday->Monday positions from
+a 1DTE SPX put-write study (Mar 2018 - Sep 2025) cut cumulative return from 28.07% to 8.94% -
+about two thirds of all profit came from weekend-spanning trades, which is what over-counting
+weekend time looks like from the other side. Theta is still quoted per CALENDAR day, because that
+is what a holder actually experiences.
+**2. Implied daily move (gamma breakeven), and a correction to the source.** `sqrt(2|theta|/|gamma|)`
+was recommended as a structure-selection guard. **It is not one, and the sources claiming it is
+are wrong.** Measured: at a flat 13% IV a short put spread, a long straddle and an iron condor all
+return $5.21, because theta/gamma is the same Black-Scholes identity for every position at one
+spot and one vol. What it actually returns is **the daily move implied by IV in dollars** ($3.21
+at 8% IV, $14.03 at 35%), varying between structures only through skew. That makes it useful for
+exactly one thing, which is the important thing: **compare it against the underlying's realised
+daily range.** Above realised, short premium is being paid for; below, it is being donated. It is
+the implied-vs-realised edge test denominated in dollars a day - the same test as an
+IV/forecast-RV ratio, in units the agent can check against the tape directly. Rendered on every
+candidate with that instruction in the prompt.
+**Verified:** 4 new tests, incl. one asserting the breakeven does NOT discriminate structures, so
+nobody re-adds that belief later. 80 tests pass.
