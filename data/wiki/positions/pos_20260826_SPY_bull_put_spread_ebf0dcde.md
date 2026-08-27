@@ -2,6 +2,7 @@
 type: Position
 position_id: pos_20260826_SPY_bull_put_spread_ebf0dcde
 status: open
+interim_band: 0
 strategy: bull_put_spread
 underlying: SPY
 opened: '2026-08-26T18:59:03.685962+00:00'
@@ -36,7 +37,7 @@ decision_ref: jrn_20260826T185819Z_dece972
 sources: []
 generated:
   by: ''
-  at: '2026-08-27T06:27:02.276342+00:00'
+  at: '2026-08-27T10:00:55.471821+00:00'
 verified:
 - by: trdrbot/reconcile
   at: '2026-08-26T20:05:59.099229+00:00'

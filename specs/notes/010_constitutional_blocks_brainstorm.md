@@ -171,3 +171,72 @@ metaphor mechanically: consolidation during sleep, in both directions.
 4. Decide the ingestion-module trigger condition (third writer? agent write-tool?) and park it.
 5. First incident-mapping pass over the existing journal (there are already ~10 scoreable
    incidents: two premise-breaks, several rejections, one tail-gap case).
+
+---
+
+## Addendum — should elfmem understand its own internals? (2026-08-27)
+
+Asked: should the agent hold blocks describing how elfmem works — hybrid retrieval, Beta
+posteriors, decay curves, frame budgets — so it can use its memory better?
+
+**Verdict: no for mechanism, yes for one piece of metacognition.** The human-memory framing that
+motivates this whole design is what settles it: humans have no access to their own memory
+mechanism and it does not hold them back. What good rememberers have is metacognition — knowing
+recall is unreliable, knowing when to check a source rather than trust a reconstruction. Someone
+who studies consolidation does not remember better; someone with calibrated metacognitive
+judgment does. **Metacognition is constitutional; mechanism is reference.**
+
+### Why mechanism blocks fail the slot test
+
+1. **The operational consequence is already there, cheaper.** Block 5 ("no cue, no memory") *is*
+   the actionable consequence of hybrid retrieval. The agent does not need to know BM25 exists;
+   it needs to write cues. The principle encodes the mechanism's implication at a fraction of
+   the tokens. Every mechanism block I drafted collapsed this way — into a principle already
+   held, or into nothing actionable.
+2. **Pinned mechanism goes stale and cannot decay.** A block stating "recall is BM25 + vector"
+   becomes a lie the moment elfmem's retrieval changes — and being pinned identity, it never
+   decays out. Confidently-wrong identity is strictly worse than no identity. Ordinary blocks
+   fade when they stop being validated; constitutional ones do not, which is precisely why only
+   slow-changing things belong there.
+3. **It invites gaming its own memory.** An agent that knows how retrieval *scores* can write
+   memories optimised for the scorer rather than for truth — keyword-stuffing its own past.
+   Goodhart applied to self-memory, and the damage would be invisible: retrieval metrics would
+   improve while the memories got worse. Precision-beats-volume (block 7) is the value; knowing
+   the scoring function is a route around it.
+
+Mechanism belongs in the wiki as `reference/elfmem-mechanics` — retrievable when genuinely
+needed (debugging a recall failure), versioned, and free to go stale gracefully. That is exactly
+block 8 (route by nature) applied to the memory's knowledge of itself.
+
+### The one block that survives — and it is a real gap
+
+**10. My recall is cue-driven and incomplete.**
+*Not finding something is not evidence it did not happen. When a judgment depends on absence —
+"this has never failed", "no prior case" — I check the journal, which is the record; my memory
+is only a reconstruction of it.*
+
+This is metacognitive, not mechanical: it names a *failure mode of the substrate* without
+describing the substrate. It closes a genuine gap — nothing in blocks 1-9 stops the agent
+reasoning "I recall no instance of this pattern failing, therefore it is reliable," which is an
+error that follows directly from cue-driven retrieval and would be invisible when it happened.
+It also gives the journal/memory split (block 8, about *writing*) its reading-side counterpart:
+memory reconstructs, the journal records, and precision questions go to the record.
+
+Traces to: elfmem's hybrid-retrieval design (a cueless or oddly-phrased memory is unreachable —
+verified mechanic); the human analogue is the availability heuristic.
+
+### Cut, with reasons
+
+| Proposed self-knowledge block | Rejected because |
+|---|---|
+| How hybrid retrieval scores blocks | Consequence already in block 5; invites optimising for the scorer |
+| How Beta posteriors update | Consequence already in block 4; the number is shown at recall anyway |
+| Decay curves / half-lives | Consequence already in blocks 1 and 7; parameters are the most upgrade-fragile thing in the system |
+| Frame budgets and slot counts | Not the agent's decision — `assemble_context` enforces it. Knowing the budget cannot change behaviour |
+| Available operations (remember/recall/outcome) | Affordances belong in tool descriptions, which the agent already reads every cycle. Duplicating them as identity spends a slot on something never absent |
+
+The pattern repeats notes/010's main cut list: **a mechanism worth knowing has already been
+compiled into a principle worth holding.** If it hasn't, that is a sign the mechanism has no
+behavioural consequence — and it should not be in the SELF frame either way.
+
+**Net effect on the seed set: ten blocks, ~310 tokens.** Agenda item 1 gains one draft to review.

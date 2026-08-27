@@ -1142,3 +1142,33 @@ or an agent wiki-write tool exists; when built, it also owns promotion/demotion 
 (elfmem pattern that survives a regime change → promoted to wiki; wiki page past stale_after
 unverified → deprecated), completing the consolidation arc D-011 designed but never assigned an
 owner. notes/010 ends with the joint-session agenda.
+
+## D-034: Interim scoring fires on materiality bands, not on every cycle
+**Date:** 2026-08-27
+**Status:** accepted
+**Supersedes:** the cadence half of D-018 #1 / INV-24 (the low weight stands; the per-cycle
+trigger does not)
+**Context:** Scaffold pass over the journal after a full tick. INV-24 gave interim scores a
+deliberately low weight (0.1) so an unrealised mark could not rival a true resolution (1.0). The
+weight was right; **repetition was the hole nobody priced.** One unresolved position had
+accumulated **eight** interim scores - 0.8 of cumulative evidence, approaching a real resolution -
+and every one scored `hit=False` from a -$45 mark that was bid/ask noise on a freshly opened
+spread whose thesis was intact, with the underlying sitting 1.5% clear of the short strike. The
+learning loop was busy teaching itself that a good position was bad, from spread noise, eight
+times over. Exactly the failure the iteration-2 simulation asked about ("does repeated interim
+scoring over-weight the signal relative to a single true resolution?") - answered live: yes.
+**Choice:** score only on **first entry into a materiality band** (|P&L| >= 25%, then >= 50%),
+tracked per position in a monotonic `interim_band` field. Consequences: a position contributes at
+most two interim signals (cumulative weight 0.2, comfortably under a resolution's 1.0); each is
+earned by a move too large to be spread noise; and because bands are one-way, a mark oscillating
+across a threshold cannot re-fire - the same debounce reasoning as INV-19's exit rules, applied
+to learning rather than execution.
+**Verified:** eight noise marks around -3% now fire 0 scores (was 8); a genuine deterioration to
+-58% fires 2, at -27% and -55%; the field round-trips through disk and legacy position files
+without it default to 0; live unforced housekeeping logged `interim_scored=0` where the old code
+would have written a ninth false negative.
+**Also found:** `tick --force` skips housekeeping entirely, so forced runs exercise only the
+decide half - research, attribution and interim scoring never run. Correct behaviour for a flag
+whose job is to force the decide path, but worth knowing when reading forced-run output as
+evidence: it is half the system. Noted rather than changed.
+**Evidence:** journal entries (8 x interim_outcome on one unresolved position); live tick 23.

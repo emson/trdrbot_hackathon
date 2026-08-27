@@ -62,6 +62,10 @@ class Position:
     thesis_band_high: float | None = None
     thesis_drift: float = 0.0
     attribution: str = ""          # set once the horizon has passed
+    #: Highest materiality band already interim-scored (INV-24). Monotonic:
+    #: caps how much cumulative evidence one unresolved position can
+    #: contribute, and stops a mark flapping across a threshold re-firing.
+    interim_band: int = 0
     path: Path | None = None
 
     @property
@@ -88,6 +92,7 @@ class Position:
             "type": "Position",  # OKF-required field (D-022)
             "position_id": self.position_id,
             "status": self.status,
+            "interim_band": self.interim_band,
             "strategy": self.strategy,
             "underlying": self.underlying,
             "opened": self.opened,
@@ -157,6 +162,7 @@ class PositionStore:
         return Position(
             position_id=d["position_id"],
             status=d.get("status", "proposed"),
+            interim_band=int(d.get("interim_band", 0) or 0),
             strategy=d.get("strategy", ""),
             underlying=d.get("underlying", ""),
             opened=d.get("opened", ""),
