@@ -66,6 +66,10 @@ class Position:
     #: caps how much cumulative evidence one unresolved position can
     #: contribute, and stops a mark flapping across a threshold re-firing.
     interim_band: int = 0
+    #: Defined worst case in dollars at entry (from simulate_experiments).
+    #: Feeds the portfolio-level at-risk cap (D-036). None on legacy
+    #: positions - counted as zero risk by the cap, leniently.
+    max_loss_usd: float | None = None
     path: Path | None = None
 
     @property
@@ -93,6 +97,7 @@ class Position:
             "position_id": self.position_id,
             "status": self.status,
             "interim_band": self.interim_band,
+            "max_loss_usd": self.max_loss_usd,
             "strategy": self.strategy,
             "underlying": self.underlying,
             "opened": self.opened,
@@ -163,6 +168,7 @@ class PositionStore:
             position_id=d["position_id"],
             status=d.get("status", "proposed"),
             interim_band=int(d.get("interim_band", 0) or 0),
+            max_loss_usd=(float(d["max_loss_usd"]) if d.get("max_loss_usd") is not None else None),
             strategy=d.get("strategy", ""),
             underlying=d.get("underlying", ""),
             opened=d.get("opened", ""),

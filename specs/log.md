@@ -147,3 +147,11 @@ options-liquidity gate) -> synthesis -> opportunities through the existing seams
 run nominated CRM/CRWD/META/MRVL/BBY. Inspection caught the LLM emitting percentage-move
 bands instead of prices (would have made every discovery thesis score as failed);
 fixed with prompt wording + a code gate anchored to computed spot. Second run clean.
+
+Trader review (notes/011, D-036): edge process already sound; risk side had the gaps.
+Implemented same-day: underlying_stop exit rules (the agent's stated invalidation and its
+coded exits disagreed - now stops watch the underlying, not the noisy mark), portfolio
+at-risk cap at 15% of equity (per-position caps allowed a correlated 25% book), real
+spread-based friction from live quotes, rule-derived event calendar (payrolls = deadline
+day), limit-order execution discipline in the prompt. Parked with reasons: contest-variance
+sizing (revisit Sept 1), order-rate breaker (D-009), IV-rank store.

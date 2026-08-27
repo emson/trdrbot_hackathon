@@ -66,16 +66,37 @@ def build_simulate_experiments(shared: dict[str, Any], state_dir: "Path | None" 
                 scored later and you lose the ability to learn whether your
                 VIEW or your STRUCTURE was wrong.
             candidates: list of {name, rationale, legs}, where legs is a list
-                of {right: "C"|"P", strike, side: "long"|"short", qty, price}
+                of {right: "C"|"P", strike, side: "long"|"short", qty, price,
+                bid?, ask?}. Include bid and ask when you have real quotes:
+                friction is then computed from the ACTUAL spreads instead of
+                a flat 10% of premium, and price should be the mid.
         """
         thesis = experiments.Thesis(
             claim=thesis_claim, underlying=underlying, horizon=horizon,
             drift=drift_pct / 100.0, band_low=band_low, band_high=band_high,
         )
         built: list[experiments.Experiment] = []
+        frictions: list[float | None] = []
         for c in candidates:
+            raw_legs = list(c.get("legs") or [])
+            # Real friction from real quotes: a round trip crosses ~one full
+            # bid/ask spread per leg. Only used when EVERY leg has a sane
+            # quote pair - a partial set silently mixes models.
+            friction: float | None = None
+            quoted = [
+                (float(l["ask"]) - float(l["bid"]), float(l.get("qty", 1)))
+                for l in raw_legs
+                if l.get("bid") is not None and l.get("ask") is not None
+                and float(l["ask"]) >= float(l["bid"]) >= 0
+            ]
+            if len(quoted) == len(raw_legs) and quoted:
+                friction = sum(sp * q * optmath.CONTRACT_MULTIPLIER for sp, q in quoted)
+            frictions.append(friction)
             try:
-                legs = [optmath.Leg.parse(l) for l in (c.get("legs") or [])]
+                legs = [
+                    optmath.Leg.parse({k: v for k, v in l.items() if k not in ("bid", "ask")})
+                    for l in raw_legs
+                ]
             except ValueError as e:
                 return f"Invalid legs in candidate {c.get('name')!r}: {e}"
             if not legs:
@@ -103,8 +124,8 @@ def build_simulate_experiments(shared: dict[str, Any], state_dir: "Path | None" 
                 ) or None
         results = [
             (e, experiments.simulate(e, thesis, spot, iv_pct / 100.0, days_to_expiry,
-                                     terminal_factors=factors))
-            for e in built
+                                     terminal_factors=factors, friction_usd=fr))
+            for e, fr in zip(built, frictions)
         ]
         ranked = experiments.rank(results)
         shared["thesis"] = thesis
@@ -138,6 +159,9 @@ def build_record_position(
         stop_loss_pct: float | None = None,
         profit_target_pct: float | None = None,
         time_stop_days_before_expiry: int | None = None,
+        underlying_stop_below: float | None = None,
+        underlying_stop_above: float | None = None,
+        max_loss_usd: float | None = None,
     ) -> str:
         """Record a position you have just opened, with its exit conditions.
 
@@ -161,6 +185,14 @@ def build_record_position(
             stop_loss_pct: close at this loss, as a negative percent (-50 = -50%)
             profit_target_pct: close at this gain, as a percent (50 = +50%)
             time_stop_days_before_expiry: close this many days before expiry
+            underlying_stop_below: close if the UNDERLYING trades below this
+                price - your thesis-invalidation level. Prefer this to
+                stop_loss_pct for spreads: the underlying prints cleanly,
+                the option mark is bid/ask noise.
+            underlying_stop_above: same, for bearish theses.
+            max_loss_usd: the position's TOTAL defined max loss in dollars
+                (contracts x per-contract max loss, from simulate/size).
+                Feeds the portfolio risk cap.
         """
         rules: list[dict[str, Any]] = []
         if stop_loss_pct is not None:
@@ -169,6 +201,10 @@ def build_record_position(
             rules.append({"type": "profit_target", "basis": "position_mark", "threshold": f"{profit_target_pct}%"})
         if time_stop_days_before_expiry is not None:
             rules.append({"type": "time_stop", "days_before_expiry": time_stop_days_before_expiry})
+        if underlying_stop_below is not None:
+            rules.append({"type": "underlying_stop", "direction": "below", "level": underlying_stop_below})
+        if underlying_stop_above is not None:
+            rules.append({"type": "underlying_stop", "direction": "above", "level": underlying_stop_above})
 
         pos = Position(
             position_id=ids.position_id(underlying, strategy),
@@ -190,6 +226,7 @@ def build_record_position(
             # the credit-assignment targets at resolution (D-011).
             elfmem_blocks=dict(elfmem_blocks or {}),
             generated_by=generated_by,
+            max_loss_usd=max_loss_usd,
             # OKF sources (D-022): what the agent actually read this cycle,
             # so a resolved position can credit or discredit its inputs.
             sources=list(sources or []),
@@ -219,7 +256,8 @@ def build_record_position(
     )
 
 
-def build_size_position(calibration: "CalibrationStore", equity: float, open_count: int) -> StructuredTool:
+def build_size_position(calibration: "CalibrationStore", equity: float, open_count: int,
+                        open_risk_usd: float = 0.0) -> StructuredTool:
     """Tool: how many contracts, given edge, bankroll, and earned trust.
 
     Sizing used to be the model's free choice, which made every other piece of
@@ -248,6 +286,7 @@ def build_size_position(calibration: "CalibrationStore", equity: float, open_cou
         """
         d = sizing.size_position(
             equity=equity,
+            open_risk_usd=open_risk_usd,
             stated_confidence=stated_confidence,
             max_profit=max_profit,
             max_loss=max_loss,

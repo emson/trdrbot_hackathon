@@ -1206,3 +1206,33 @@ seams (wiki + inbox) so the decide cycle validates against live quotes before an
 **Revisit if:** yfinance breaks (unofficial API - the fundamentals block already degrades to
 `unavailable` without sinking the run), or nomination quality drifts toward megacap defaults
 (the "not the biggest names, the most interesting ones" instruction stops working).
+
+## D-036: Trader-review hardening - thesis stops, portfolio cap, real friction, event calendar
+**Date:** 2026-08-27
+**Status:** accepted
+**Context:** Full-logic review through a professional trader's lens ([notes/011](notes/011_trader_review.md)).
+The edge process (simulate, rank by thesis edge, refuse unbounded loss, decline freely) was
+already sound; the gaps were all on the RISK side.
+**Implemented, all verified:**
+1. **`underlying_stop` exit rules (F1).** The agent's stated invalidation ("break below
+   ~757-758") and its coded exits (mark-based only) disagreed - and the mark is the noisiest
+   signal an options position produces. New rule type evaluates the UNDERLYING against the
+   thesis level (same N-of-M debounce, immediate at 1% beyond); the snapshot fetches a live
+   underlying mark per open position; `record_position` exposes it and the prompt directs the
+   agent to set it at the level it would state out loud.
+2. **Portfolio at-risk cap (F2).** `PORTFOLIO_MAX_AT_RISK = 0.15` of equity over the sum of
+   open defined max-losses plus the candidate; `Position.max_loss_usd` recorded at entry;
+   sizing shrinks to the remaining budget and refuses when the book is full. Per-position caps
+   alone allowed a 25% correlated book in 5% clothing.
+3. **Real spread friction (F3).** `simulate_experiments` accepts bid/ask per leg; when every
+   leg carries a quote pair, friction = one full spread per leg instead of flat 10% of premium.
+4. **Event calendar (F4).** `events:` config (rule-derived/user-verified dates only), rendered
+   into decide context within 14 days. Seeded with the landmine: payrolls = first Friday =
+   2026-09-04 = the deadline day.
+5. **Execution discipline (F5).** Prompt: always limit orders at mid or better on options.
+**Evaluated, parked with reasons (notes/011 F6-F9):** contest-variance sizing (revisit ~Sept 1
+as a recorded decision if flat with proven calibration), order-rate breaker (D-009 stands),
+IV-rank store (post-hackathon), mark-vs-liquidation honesty (F1+F3 cover the sharp edges).
+**Evidence:** live verification of each: debounced underlying stop fires 2-of-3 at 756.8 vs
+757.5 and immediately at 748; portfolio cap 3 contracts empty-book, refused at $14.5k open
+risk; real friction $6 vs flat $9 flowing into EV-after-costs; tick 24 clean end-to-end.

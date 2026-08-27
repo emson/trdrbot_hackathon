@@ -83,6 +83,7 @@ def simulate(
     exp: Experiment, thesis: Thesis, spot: float, iv: float, days: float,
     *, round_trip_cost: float = DEFAULT_ROUND_TRIP_COST,
     terminal_factors: list[float] | None = None,
+    friction_usd: float | None = None,
 ) -> dict[str, Any]:
     """Score one candidate. Exact facts and modelled estimates kept distinct."""
     legs = exp.legs
@@ -95,7 +96,12 @@ def simulate(
 
     # Frictions, charged against the gross premium traded across all legs.
     gross_premium = sum(l.price * l.qty * optmath.CONTRACT_MULTIPLIER for l in legs)
-    friction = gross_premium * round_trip_cost
+    # Real spreads beat the flat model whenever the agent has quotes: a
+    # round trip crosses roughly one full bid/ask spread per leg, and
+    # spreads are wildly non-uniform (7% on a liquid SPY call, 30%+ on a
+    # single-name weekly). The flat 10%-of-premium default remains the
+    # fallback when no quotes were supplied.
+    friction = friction_usd if friction_usd is not None else gross_premium * round_trip_cost
 
     pop_market = optmath.prob_profit(legs, spot, iv, days)
     pop_thesis = optmath.pop_given_view(legs, spot, iv, days, drift=thesis.drift)

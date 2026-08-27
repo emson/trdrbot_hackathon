@@ -81,6 +81,10 @@ class Config:
         return int(self.raw["tick"]["watchdog_seconds"])
 
     @property
+    def events(self) -> list[dict]:
+        return list(self.raw.get("events") or [])
+
+    @property
     def research_universe(self) -> list[str]:
         return list((self.raw.get("research") or {}).get("universe") or self.watchlist)
 

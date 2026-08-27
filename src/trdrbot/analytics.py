@@ -30,6 +30,10 @@ class Snapshot:
     account: dict[str, Any] = field(default_factory=dict)
     broker_positions: list[dict[str, Any]] = field(default_factory=list)
     open_orders: list[dict[str, Any]] = field(default_factory=list)
+    #: Latest trade per underlying of every open position. What the
+    #: underlying-based exit rules (thesis stops) evaluate against - the
+    #: underlying prints far more reliably than a wide option mark.
+    underlying_prices: dict[str, float] = field(default_factory=dict)
     as_of: str = ""
 
     @property
@@ -54,6 +58,11 @@ class Snapshot:
             f"- equity: ${self.equity:,.2f}   buying power: ${self.buying_power:,.2f}",
             f"- open positions: {len(self.broker_positions)}   open orders: {len(self.open_orders)}",
             f"- total unrealised P&L: ${self.total_unrealized:,.2f}",
+        ]
+        if self.underlying_prices:
+            lines += [
+            "- underlying marks: " + ", ".join(
+                f"{k} {v:.2f}" for k, v in sorted(self.underlying_prices.items())),
         ]
         if self.broker_positions:
             lines.append("\n## Holdings (from broker)")
@@ -88,7 +97,7 @@ def position_pnl_pct(symbols: list[str], snap: "Snapshot") -> float | None:
     return sum(_f(l.get("unrealized_pl")) for l in legs) / cost
 
 
-async def snapshot(tools: dict[str, Any]) -> Snapshot:
+async def snapshot(tools: dict[str, Any], underlyings: list[str] | None = None) -> Snapshot:
     """Gather deterministic state. A failing call degrades, never aborts."""
     snap = Snapshot(as_of=date.today().isoformat())
 
@@ -111,6 +120,16 @@ async def snapshot(tools: dict[str, Any]) -> Snapshot:
             snap.broker_positions = pos
     except Exception as exc:  # noqa: BLE001
         print(f"[analytics] positions unavailable: {exc!r}")
+
+    for u in underlyings or []:
+        try:
+            t = await mcp_client.call(tools, "get_stock_latest_trade", symbols=u, feed="iex")
+            node = t.get(u) if isinstance(t, dict) else None
+            px = _f((node or {}).get("p") or (node or {}).get("price"), 0.0)
+            if px > 0:
+                snap.underlying_prices[u] = px
+        except Exception as exc:  # noqa: BLE001
+            print(f"[analytics] underlying {u} price unavailable: {exc!r}")
 
     try:
         orders = await mcp_client.call(tools, "get_orders", status="open")

@@ -65,6 +65,39 @@ def evaluate(pos: Position, snap: Snapshot, deadline: str) -> tuple[str | None, 
         kind = rule.get("type")
         key = str(kind)
 
+        if kind == "underlying_stop":
+            # The thesis stop a professional actually uses: spreads are exited
+            # when the UNDERLYING breaks the thesis level, not when a wide
+            # option mark wobbles across a P&L line. The mark is the noisiest
+            # signal available on an options position; the underlying prints
+            # continuously and tightly. Found live: the agent NARRATED
+            # "invalidated on a decisive break below ~757-758" while its coded
+            # rules only watched the mark - stated plan and executed plan
+            # disagreed. Same N-of-M debounce; magnitude override at 1% beyond
+            # the level.
+            u_px = snap.underlying_prices.get(pos.underlying)
+            level = _f(str(rule.get("level")), 0.0)
+            if u_px is None or level <= 0:
+                continue
+            direction = rule.get("direction", "below")
+            breached = u_px < level if direction == "below" else u_px > level
+            severe = (
+                u_px < level * 0.99 if direction == "below" else u_px > level * 1.01
+            )
+            history = list(pos.exit_state.get(key, []))[-(WINDOW - 1):] + [breached]
+            pos.exit_state[key] = history
+            if severe:
+                return kind, (
+                    f"underlying {u_px:.2f} decisively {direction} thesis level "
+                    f"{level:.2f} - immediate"
+                ), pnl
+            if sum(history) >= NEEDED:
+                return kind, (
+                    f"underlying {u_px:.2f} {direction} {level:.2f} "
+                    f"({sum(history)}/{len(history)} checks)"
+                ), pnl
+            continue
+
         if kind == "time_stop":
             n = int(rule.get("days_before_expiry", 0))
             if dte is not None and dte <= n:

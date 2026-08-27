@@ -32,6 +32,10 @@ from .calibration import Calibration
 #: A hard ceiling, because every input to Kelly is an estimate and estimates
 #: fail together in exactly the conditions that matter.
 MAX_FRACTION = 0.05
+#: Aggregate cap: total defined max-loss across ALL open positions plus the
+#: candidate. Per-position caps alone let a book of five 5% positions become
+#: one 25% correlated bet wearing five hats - trader review finding, D-036.
+PORTFOLIO_MAX_AT_RISK = 0.15
 
 #: Kelly multiplier once calibration is genuinely established. Quarter-Kelly
 #: is the conservative end of the practitioner range, chosen because an
@@ -104,6 +108,7 @@ def size_position(
     max_loss: float | None,
     calibration: Calibration,
     open_position_count: int = 0,
+    open_risk_usd: float = 0.0,
 ) -> SizingDecision:
     """How many contracts to trade. Returns 0 when there is no defensible size."""
     adj = shrink_probability(stated_confidence, calibration)
@@ -146,6 +151,20 @@ def size_position(
             f"NO POSITION: risk budget ${risk_budget:,.0f} is below one contract's "
             f"max loss ${per_contract_risk:,.0f}. Position too large for the account.",
         )
+
+    # Portfolio cap: shrink to fit the aggregate at-risk budget, refuse when
+    # the book is already full. Unknown-risk open positions count as zero
+    # here, which is lenient - the honest direction would be to refuse, but
+    # legacy positions predate the field and would deadlock the book.
+    budget_left = PORTFOLIO_MAX_AT_RISK * equity - open_risk_usd
+    if budget_left < per_contract_risk:
+        return SizingDecision(
+            0, 0.0, full, frac, adj,
+            f"REFUSED: portfolio already carries ${open_risk_usd:,.0f} of defined "
+            f"max-loss vs a {PORTFOLIO_MAX_AT_RISK:.0%} cap (${PORTFOLIO_MAX_AT_RISK * equity:,.0f}). "
+            f"Adding more risk means the book, not this trade, is the bet.",
+        )
+    contracts = min(contracts, int(budget_left // per_contract_risk))
 
     actual = (contracts * per_contract_risk) / equity
     track = (

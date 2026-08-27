@@ -28,6 +28,13 @@ research:
   # The company universe the daily research cycle covers. Liquid, optionable.
   universe: ["SPY", "QQQ", "NVDA"]
 
+events:
+  # Known macro events. Dates here are RULE-DERIVED or user-verified, never
+  # model memory (D-032's date discipline). Payrolls = first Friday of the
+  # month - arithmetic, not recall. Note the collision: payrolls lands ON
+  # the competition deadline day.
+  - { date: "2026-09-04", name: "US nonfarm payrolls (first Friday - rule-derived); also the competition deadline" }
+
 trading:
   watchlist: ["SPY"]
   # Force-close everything on/after this date regardless of position expiry

@@ -115,7 +115,9 @@ async def run_tick(
     try:
         # ---------- fast path: every tick, no LLM ----------
         sensed = await sensors.collect(tools, config, inbox, n, verbose=verbose)
-        snap = await analytics.snapshot(tools)
+        snap = await analytics.snapshot(
+        tools, underlyings=sorted({p.underlying for p in store.open_positions() if p.underlying})
+    )
         recon = await reconcile.reconcile(store, snap, journal, mem, wiki, calib)
         triggered = await exit_rules.run(
             store, snap, tools, journal, config.deadline, mem, wiki,
@@ -175,8 +177,10 @@ async def run_tick(
 
         shared: dict[str, Any] = {}
         sim_tool = local_tools.build_simulate_experiments(shared, config.paths.state)
+        open_pos = store.open_positions()
+        open_risk = sum(p.max_loss_usd or 0.0 for p in open_pos)
         size_tool = local_tools.build_size_position(
-            calib, snap.equity or 100000.0, len(store.open_positions())
+            calib, snap.equity or 100000.0, len(open_pos), open_risk_usd=open_risk
         )
         record_tool = local_tools.build_record_position(
             store, decision_id, elfmem_blocks=ctx.blocks, generated_by=config.model,
@@ -189,6 +193,21 @@ async def run_tick(
         agent = create_react_agent(build_model(config), agent_tools, prompt=SYSTEM_PROMPT)
 
         prompt_parts = [snap.render(), _render_positions(store)]
+        if config.events:
+            from datetime import date as _date
+            ev_lines = []
+            for ev in config.events:
+                try:
+                    days = (_date.fromisoformat(str(ev["date"])) - _date.today()).days
+                except (KeyError, ValueError):
+                    continue
+                if 0 <= days <= 14:
+                    ev_lines.append(f"- {ev['date']} ({days}d away): {ev.get('name','')}")
+            if ev_lines:
+                prompt_parts.append(
+                    "## Known macro events (binary risk - check every holding window)\n"
+                    + "\n".join(ev_lines)
+                )
         regime = wiki.read("context/regime")
         if regime and regime.body.strip():
             prompt_parts.append(
