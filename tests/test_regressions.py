@@ -1033,3 +1033,124 @@ def test_a_reworded_lesson_replaces_rather_than_duplicates():
     src = inspect.getsource(lessons.seed)
     assert "lesson/" in src, "must key on a per-lesson tag"
     assert "forget" in src, "must drop the superseded block"
+
+
+# ----------------------------- D-055 beta-weighted book delta
+
+def test_beta_is_returned_with_its_fit_quality():
+    """A beta without R-squared is a number pretending to be knowledge.
+    Measured on real data: MU came out at -0.45 and NVDA at +1.85 over the
+    same 120 sessions - both semiconductors. That is one estimate dominated by
+    name-specific moves, not two market sensitivities."""
+    import math, random
+    from trdrbot.market_stats import beta, shrunk_beta
+    rng = random.Random(5)
+    bench = [100.0]
+    for _ in range(150):
+        bench.append(bench[-1] * math.exp(rng.gauss(0, 0.01)))
+    br = [math.log(b / a) for a, b in zip(bench, bench[1:])]
+
+    # a true 2x tracker: high beta, high R2, taken at face value
+    tracker = [100.0]
+    for r in br:
+        tracker.append(tracker[-1] * math.exp(2 * r))
+    raw, r2 = beta(tracker, bench)
+    assert abs(raw - 2.0) < 0.1 and r2 > 0.9
+    assert abs(shrunk_beta(raw, r2) - raw) < 0.05, "a well-fitted beta is not shrunk"
+
+    # pure noise: whatever beta falls out must be shrunk back toward the market
+    noise = [100.0]
+    for _ in range(150):
+        noise.append(noise[-1] * math.exp(rng.gauss(0, 0.02)))
+    raw_n, r2_n = beta(noise, bench)
+    assert r2_n < 0.2
+    assert abs(shrunk_beta(raw_n, r2_n) - 1.0) < abs(raw_n - 1.0), "noise must shrink to market"
+
+
+def test_beta_refuses_rather_than_guessing_on_thin_history():
+    import math, random
+    from trdrbot.market_stats import beta
+    rng = random.Random(3)
+    short = [100.0 * math.exp(rng.gauss(0, 0.01)) for _ in range(30)]
+    assert beta(short, short) is None
+
+
+def test_negative_beta_is_preserved_not_clamped():
+    """An offsetting position is the whole point of measuring this."""
+    import math, random
+    from trdrbot.market_stats import beta
+    rng = random.Random(9)
+    bench = [100.0]
+    for _ in range(150):
+        bench.append(bench[-1] * math.exp(rng.gauss(0, 0.01)))
+    inverse = [100.0]
+    for a, b in zip(bench, bench[1:]):
+        inverse.append(inverse[-1] * math.exp(-math.log(b / a)))
+    raw, r2 = beta(inverse, bench)
+    assert raw < -0.9 and r2 > 0.9
+
+
+def test_book_delta_is_beta_weighted_and_can_offset():
+    """Raw delta treats $10k of a 1.85-beta name as $10k of the market. On our
+    own live book that understated market exposure by 85%."""
+    import tempfile
+    from pathlib import Path
+    from trdrbot.analytics import book_greeks, Snapshot
+    from trdrbot import market_stats
+
+    d = Path(tempfile.mkdtemp())
+    import math, random
+    rng = random.Random(4)
+    spy = [100.0]
+    for _ in range(200):
+        spy.append(spy[-1] * math.exp(rng.gauss(0, 0.01)))
+    hi = [100.0]
+    for a, b in zip(spy, spy[1:]):
+        hi.append(hi[-1] * math.exp(2 * math.log(b / a)))
+    market_stats.save_closes(d, "SPY", spy)
+    market_stats.save_closes(d, "HI", hi)
+
+    betas, assumed = market_stats.betas_for(d, ["SPY", "HI"])
+    assert betas["SPY"] == 1.0
+    assert betas["HI"] > 1.7, "a 2x tracker must weight roughly double"
+    assert "HI" not in assumed
+
+
+def test_beta_weighting_reveals_a_hedge_that_raw_delta_hides():
+    """The demonstration that justifies the whole feature: adding an
+    inverse-beta position RAISED raw book delta from $90k to $253k while
+    beta-weighted delta FELL from $181k to $18k. Raw delta said "more
+    exposed"; the truth was "almost flat"."""
+    import math, random, tempfile
+    from pathlib import Path
+    from trdrbot import market_stats
+    from trdrbot.analytics import book_greeks
+
+    d = Path(tempfile.mkdtemp())
+    rng = random.Random(4)
+    spy = [100.0]
+    for _ in range(200):
+        spy.append(spy[-1] * math.exp(rng.gauss(0, 0.01)))
+
+    def track(m):
+        o = [100.0]
+        for a, b in zip(spy, spy[1:]):
+            o.append(o[-1] * math.exp(m * math.log(b / a)))
+        return o
+
+    market_stats.save_closes(d, "SPY", spy)
+    market_stats.save_closes(d, "HIB", track(2.0))
+    market_stats.save_closes(d, "INV", track(-1.0))
+
+    def pos(u, qty):
+        return Position(position_id=f"p_{u}", status="open", underlying=u, entry_iv=0.30,
+                        legs=[{"symbol": f"{u}990904C00095000", "side": "buy", "qty": qty}])
+
+    prices = {"HIB": 100.0, "INV": 100.0}
+    one = book_greeks([pos("HIB", 10)], prices, state_dir=d, equity=100_000)
+    two = book_greeks([pos("HIB", 10), pos("INV", 18)], prices, state_dir=d, equity=100_000)
+
+    assert two["positions_priced"] == 2, "OCC roots are max 6 chars - both must price"
+    assert two["delta_dollars"] > one["delta_dollars"], "raw delta grows"
+    assert abs(two["beta_weighted_delta"]) < abs(one["beta_weighted_delta"]) / 5, "true exposure falls"
+    assert two["betas"]["INV"] < 0

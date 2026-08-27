@@ -1894,3 +1894,39 @@ supply `host_analyses`, in batches capped at the per-run limit.
 **Verified by retrieval, not by storage:** `trdrbot lessons verify` recalls each lesson by its own
 cue - 6/6, ranks 2-7. And on the real decide-cycle query *"should I open a second position
 alongside the NVDA spread I already hold"*, `[correlated-names-are-one-bet]` surfaces first.
+
+## D-055: Beta-weighted book delta - names are not exposures
+**Date:** 2026-08-27
+**Status:** accepted
+**Context:** Closes the gap D-054's `[correlated-names-are-one-bet]` lesson names but could not
+enforce: the per-underlying risk cap counts NAMES, so three correlated positions pass every
+check and lose together. Until now the lesson told the agent to check by hand what the code
+should check for it.
+**Choice:** every position's delta is converted to SPY-equivalent by its measured beta and
+summed, giving one number for the whole book. Betas come from the closes the research cycle
+already persists, so this costs **no network calls**.
+**Beta is returned with its R-squared, and shrunk toward 1.0 when the fit is poor.** This
+mattered immediately: on our own stored data MU estimated at **-0.45 while NVDA estimated at
++1.85** over the same 120 sessions - both semiconductors. That is not two market sensitivities,
+it is one estimate dominated by name-specific news. A beta without its explanatory power is a
+number pretending to be knowledge. After shrinkage (same logic sizing already applies to stated
+probabilities): MU -0.45 at R2=0.00 becomes 0.98, MRNA -1.52 at R2=0.02 becomes 0.86, while
+QQQ (R2=0.84) and NVDA (R2=0.47) keep their genuine betas. Negative beta is never clamped - an
+offsetting position is the entire point.
+**Reported as P&L per 1% market move, not raw delta dollars.** Raw delta is notional and looks
+alarming on any spread - our live NVDA position carries $63,987 of delta against $2,100 of max
+loss. The interpretable form is "+1.17% of equity per 1% SPY move".
+**What it revealed on the live book immediately:** one NVDA position, raw delta $63,987,
+**beta-weighted $118,261** - raw delta understated market exposure by 85%, because NVDA runs a
+beta of 1.85. A book that looks small is a levered directional bet.
+**Demonstration that justifies the feature:** adding an inverse-beta position RAISED raw book
+delta from $90k to $253k while beta-weighted delta FELL from $181k to $18k, and the
+concentration flag cleared. Raw delta said "more exposed"; the truth was "almost flat".
+**Reported, never gated (D-009):** flagged above 1.5% of equity per 1% market move. It bounds
+variance, not ruin, and defined-risk legs already bound the worst case.
+**Also fixed:** the positions block rendered `underlying_stop=None` because it read only
+`threshold`, while underlying stops carry `level` - telling the agent its most important guard
+was missing when it was set.
+**Verified:** 5 new tests incl. a 2x tracker recovering beta 2.0 at R2>0.9, pure noise shrinking
+back to the market, negative beta preserved, thin history refused, and the hedge demonstration.
+93 tests pass.

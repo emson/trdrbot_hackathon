@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import date
+from pathlib import Path
 from typing import Any
 
 from . import mcp_client
@@ -151,7 +152,8 @@ async def snapshot(tools: dict[str, Any], underlyings: list[str] | None = None) 
     return snap
 
 
-def book_greeks(positions: list[Any], underlying_prices: dict[str, float]) -> dict[str, Any] | None:
+def book_greeks(positions: list[Any], underlying_prices: dict[str, float],
+                state_dir: "Path | None" = None, equity: float = 0.0) -> dict[str, Any] | None:
     """Approximate net greeks of the whole book, re-priced now (D-040).
 
     Legs are re-derived from their OCC symbols and priced at the CURRENT spot
@@ -169,6 +171,7 @@ def book_greeks(positions: list[Any], underlying_prices: dict[str, float]) -> di
 
     total = {"delta_dollars": 0.0, "theta_dollars": 0.0, "vega_dollars": 0.0, "gamma_shares": 0.0}
     priced, skipped = 0, 0
+    per_underlying_delta: dict[str, float] = {}
     for pos in positions:
         spot = underlying_prices.get(getattr(pos, "underlying", ""))
         iv = getattr(pos, "entry_iv", None)
@@ -201,8 +204,32 @@ def book_greeks(positions: list[Any], underlying_prices: dict[str, float]) -> di
         priced += 1
         for k in total:
             total[k] += g[k]
+        u = getattr(pos, "underlying", "").upper()
+        per_underlying_delta[u] = per_underlying_delta.get(u, 0.0) + g["delta_dollars"]
     if priced == 0:
         return None
     total["positions_priced"] = priced
     total["positions_skipped"] = skipped
+
+    # Beta-weighted delta (D-055). Summing raw delta across names treats $10k
+    # of XLE exposure as identical to $10k of NVDA, which it is not: over the
+    # last 120 sessions NVDA ran a beta of 1.85 to SPY. Beta-weighting converts
+    # the whole book into ONE number - how it moves when the market moves - and
+    # that is the exposure the per-underlying risk cap cannot see, because that
+    # cap counts names rather than factor loadings.
+    if state_dir is not None and per_underlying_delta:
+        from . import market_stats
+
+        betas, assumed = market_stats.betas_for(state_dir, list(per_underlying_delta))
+        bw = sum(d * betas.get(u, market_stats.ASSUMED_BETA)
+                 for u, d in per_underlying_delta.items())
+        total["beta_weighted_delta"] = bw
+        total["betas"] = {u: round(betas.get(u, 1.0), 2) for u in per_underlying_delta}
+        total["betas_assumed"] = assumed
+        # The interpretable form: P&L per 1% market move, against equity. Raw
+        # delta dollars are notional and look alarming on any spread (our NVDA
+        # position carries $54,860 of delta against $2,100 of max loss); this
+        # says what a 1% SPY move actually costs.
+        if equity > 0:
+            total["pct_equity_per_1pct_spy"] = (bw * 0.01) / equity * 100.0
     return total
