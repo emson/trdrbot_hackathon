@@ -1624,3 +1624,52 @@ as `tool_guard`'s existing client_order_id enforcement: correctness plumbing, no
 **Evidence:** journal execution 14:46:24 (`close_all_positions` then a separate leg sell);
 broker flat at $100,181.18 with zero open orders; regression test covering both the multi-
 position refusal and the single-position pass-through.
+
+## D-047: Phased risk posture - breaking the sizing deadlock
+**Date:** 2026-08-27
+**Status:** accepted
+**Supersedes:** the F6 deferral in [notes/011](notes/011_trader_review.md) ("revisit ~Sept 1").
+The evidence arrived early and is stronger than expected.
+**The deadlock, measured not guessed:**
+```
+resolved trades   n=0  n=3  n=5  n=7  n=8  n=12
+contracts sized     0    0    0    0    0     1
+```
+With no track record the probability shrinkage pulls a stated 70% back to the base rate, Kelly
+on a typical 0.67:1 payoff lands at exactly 0.000, and the system **can never place the trade
+that would build the record it needs in order to be allowed to trade.** Eight days of 0% is not
+risk discipline; it is a formula returning zero with nobody checking. Live calibration is n=0 -
+our one closed trade carried no thesis (D-039) - so this was the actual trajectory.
+**The insight that resolves it: size and learning rate are independent here.** Learning comes
+from the NUMBER of resolved theses, not their size, and survival is guaranteed structurally by
+defined-risk legs plus a book cap - not by sizing small. So a tiny size buys no extra safety and
+no extra learning; it only shrinks the result. A desk does not hand a new trader zero, it hands
+them a bounded exploration allocation and expects to pay for the information.
+**Three phases, two independent gates that must BOTH permit** (tightest binds, exactly as the
+three risk caps already compose):
+- **VALIDATE** (>5 days left, or n<8): fixed 2.2%-of-equity exploration allocation, deliberately
+  NOT Kelly - we do not trust the edge MAGNITUDE yet. The go/no-go gate uses the agent's STATED
+  confidence rather than the shrunk one, because shrinking to base rate and then demanding
+  Kelly>0 is precisely what made a first trade impossible.
+- **DEPLOY** (2-5 days AND n>=8): Kelly with a continuous evidence ramp, 20% book cap.
+- **HARVEST** (<2 days): no NEW risk - a position opened now cannot resolve, and an unresolved
+  position at the deadline is closed at whatever the book offers.
+**Continuous ramp replaces the n>=8 cliff:** `mult = unproven + (established-unproven)*n/(n+6)`,
+the same shrinkage shape already used for probabilities. Under the old gate the 8th resolved
+trade was a bigger step than every trade before it combined.
+**Indivisible contracts.** Kelly on a mediocre payoff routinely lands below one contract (0.9%
+of equity on a 0.67:1 at 62%), and rounding that to zero made an EARNED record size *smaller*
+than the unproven exploration allocation - the ladder inverted. A desk takes one contract or
+none. One is now the floor when the edge is positive; the book caps still bound above, and the
+per-position ceiling still refuses anything genuinely too large for the account.
+**Drawdown throttle:** below a 3% drawdown from the equity high-water mark the book cap scales
+down toward a 25% floor. A losing streak is evidence the current regime is not the one the
+record was earned in.
+**Regime deliberately NOT a separate term:** the agent's stated confidence already reflects the
+regime it can see, and sizing already shrinks that confidence by measured calibration. A second
+regime multiplier would double-count the same information.
+**Verified:** 9 new tests - first trade now possible at n=0; ladder monotonic in evidence;
+HARVEST refuses; both gates required for DEPLOY; ramp continuous with no step >3%; drawdown
+throttles the cap; book cap still binds at $19.5k; a genuine 3:1 edge scales to 4 contracts; an
+oversized position still refused. 71 tests pass. Posture is journalled every decide cycle and
+rendered into the prompt.

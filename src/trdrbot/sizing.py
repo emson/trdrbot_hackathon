@@ -26,6 +26,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from typing import Any
+
 from .calibration import Calibration
 
 #: Never exceed this share of equity on one position, whatever Kelly says.
@@ -112,6 +114,7 @@ def size_position(
     max_profit: float | None,
     max_loss: float | None,
     calibration: Calibration,
+    posture: "Any" = None,
     underlying: str = "",
     open_risk_usd: float = 0.0,
     open_risk_by_underlying: dict[str, float] | None = None,
@@ -129,35 +132,71 @@ def size_position(
         )
 
     full = kelly_fraction(adj, max_profit, max_loss)
-    if full is None or full <= 0:
+    exploring = posture is not None and not posture.uses_kelly
+
+    # Which edge estimate gates the trade depends on what we are claiming to
+    # know. In VALIDATE we do NOT trust the magnitude (hence a fixed size),
+    # but the agent must still claim a positive edge at the real payoff - so
+    # the gate uses its stated confidence, not the shrunk one. Shrinking to
+    # the base rate and THEN demanding Kelly>0 is what produced the deadlock:
+    # a stated 70% on a 0.67 payoff shrinks to exactly break-even, so nothing
+    # could ever be the first trade.
+    gate = kelly_fraction(stated_confidence, max_profit, max_loss) if exploring else full
+    if gate is None or gate <= 0:
+        which = "your stated" if exploring else "calibration-adjusted"
+        pval = stated_confidence if exploring else adj
         return SizingDecision(
             0, 0.0, full, 0.0, adj,
-            f"NO POSITION: calibration-adjusted probability {adj:.0%} implies no edge "
-            f"at this payoff (Kelly {full if full is not None else float('nan'):+.3f}). "
+            f"NO POSITION: {which} probability {pval:.0%} implies no edge "
+            f"at this payoff (Kelly {gate if gate is not None else float('nan'):+.3f}). "
             f"Not trading is the correct action.",
         )
 
-    established = calibration.n >= MIN_SAMPLE and (calibration.reliability or 1.0) < 0.05
-    mult = ESTABLISHED_KELLY if established else UNPROVEN_KELLY
-
-    frac = min(full * mult, MAX_FRACTION)
+    # Phase posture (D-047) supplies the multiplier and the ceiling. Without
+    # one, fall back to the original cliff so callers that predate phases keep
+    # working.
+    if exploring:
+        # VALIDATE: a fixed exploration allocation, deliberately NOT Kelly.
+        # With no record the shrinkage kills the edge estimate and Kelly
+        # returns ~0 - which deadlocked the system into never trading at all.
+        # Exploration is a bounded cost paid for information.
+        frac = posture.seed_fraction * posture.drawdown_throttle
+    else:
+        if posture is not None:
+            mult = posture.kelly_multiplier
+        else:
+            established = calibration.n >= MIN_SAMPLE and (calibration.reliability or 1.0) < 0.05
+            mult = ESTABLISHED_KELLY if established else UNPROVEN_KELLY
+        frac = min(full * mult, MAX_FRACTION)
     risk_budget = equity * frac
     per_contract_risk = abs(max_loss)
     contracts = int(risk_budget // per_contract_risk) if per_contract_risk > 0 else 0
 
+    # Contracts are indivisible: a desk takes one or none, never 0.7. Kelly on
+    # a mediocre payoff routinely lands below a single contract (a 0.67:1
+    # payoff at 62% confidence is ~0.9% of equity), and rounding that to zero
+    # made an EARNED record size SMALLER than the unproven exploration
+    # allocation - the ladder inverted. If the edge is positive, one contract
+    # is the floor; the book caps below still bound it, and the per-position
+    # ceiling still refuses anything genuinely too large for the account.
     if contracts < 1:
-        return SizingDecision(
-            0, 0.0, full, frac, adj,
-            f"NO POSITION: risk budget ${risk_budget:,.0f} is below one contract's "
-            f"max loss ${per_contract_risk:,.0f}. Position too large for the account.",
-        )
+        if per_contract_risk <= MAX_FRACTION * equity:
+            contracts = 1
+        else:
+            return SizingDecision(
+                0, 0.0, full, frac, adj,
+                f"NO POSITION: one contract risks ${per_contract_risk:,.0f}, above the "
+                f"{MAX_FRACTION:.0%} per-position ceiling (${MAX_FRACTION * equity:,.0f}). "
+                f"Position too large for the account.",
+            )
 
     # Book caps, tightest-binding wins. Both measured in dollars of defined
     # max loss so the number means the same thing everywhere.
     same_name = (open_risk_by_underlying or {}).get(underlying.upper(), 0.0)
+    portfolio_cap = posture.portfolio_cap if posture is not None else PORTFOLIO_MAX_AT_RISK
     caps = [
-        ("portfolio", PORTFOLIO_MAX_AT_RISK * equity - open_risk_usd,
-         PORTFOLIO_MAX_AT_RISK, open_risk_usd, "the book"),
+        ("portfolio", portfolio_cap * equity - open_risk_usd,
+         portfolio_cap, open_risk_usd, "the book"),
         (f"{underlying.upper() or 'underlying'} concentration",
          PER_UNDERLYING_MAX_AT_RISK * equity - same_name,
          PER_UNDERLYING_MAX_AT_RISK, same_name, f"{underlying.upper() or 'one name'}"),
@@ -173,12 +212,19 @@ def size_position(
         contracts = min(contracts, int(budget_left // per_contract_risk))
 
     actual = (contracts * per_contract_risk) / equity
-    track = (
-        f"calibration established (n={calibration.n}, reliability "
-        f"{calibration.reliability:.3f}) so {ESTABLISHED_KELLY:.0%} Kelly"
-        if established
-        else f"calibration unproven (n={calibration.n}) so {UNPROVEN_KELLY:.0%} Kelly"
-    )
+    if exploring:
+        track = (f"{posture.phase.upper()} phase, n={calibration.n} - fixed "
+                 f"{posture.seed_fraction:.1%} exploration allocation, not Kelly")
+    elif posture is not None:
+        track = (f"{posture.phase.upper()} phase, n={calibration.n} - "
+                 f"Kelly x{posture.kelly_multiplier:.2f} (evidence ramp)")
+    else:
+        established = calibration.n >= MIN_SAMPLE and (calibration.reliability or 1.0) < 0.05
+        track = (
+            f"calibration established (n={calibration.n}) so {ESTABLISHED_KELLY:.0%} Kelly"
+            if established
+            else f"calibration unproven (n={calibration.n}) so {UNPROVEN_KELLY:.0%} Kelly"
+        )
     return SizingDecision(
         contracts, actual, full, frac, adj,
         f"stated {stated_confidence:.0%} -> calibration-adjusted {adj:.0%}; "

@@ -334,6 +334,7 @@ def build_size_position(
     open_risk_usd: float = 0.0,
     open_risk_by_underlying: dict[str, float] | None = None,
     shared: dict[str, Any] | None = None,
+    posture: Any = None,
 ) -> StructuredTool:
     """Tool: how many contracts, given edge, bankroll, and earned trust.
 
@@ -372,6 +373,7 @@ def build_size_position(
             max_profit=max_profit,
             max_loss=max_loss,
             calibration=calibration.score(),
+            posture=posture,
         )
         # The system now KNOWS this position's true worst case. Stashing it
         # here means record_position can fill max_loss_usd itself instead of

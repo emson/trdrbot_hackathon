@@ -686,3 +686,94 @@ def test_close_all_positions_is_refused_while_several_are_open():
     tools2 = tool_guard.redirect_whole_book_close([t2], lambda: 1)
     out2 = asyncio.run(tools2[0].coroutine(cancel_orders=True))
     assert out2 == "liquidated" and t2.called, "one position: equivalent to a normal close"
+
+
+# ---------------------------------------- D-047 phased risk posture
+
+def _posture(days, n, equity=100_000, hw=100_000):
+    import datetime
+    from datetime import date
+    from trdrbot import phase, sizing
+    dl = (date.today() + datetime.timedelta(days=days)).isoformat()
+    return phase.posture(deadline=dl, calibration_n=n, equity=equity, high_water=hw,
+                         unproven_kelly=sizing.UNPROVEN_KELLY,
+                         established_kelly=sizing.ESTABLISHED_KELLY)
+
+
+def _sized(days, n, equity=100_000, hw=100_000, risk=0.0, mp=800.0, ml=-1200.0):
+    from trdrbot import sizing
+    from trdrbot.sizing import Calibration
+    p = _posture(days, n, equity, hw)
+    cal = (Calibration(n=n, brier=0.18, reliability=0.02, resolution=0.05,
+                       uncertainty=0.24, base_rate=0.5) if n else
+           Calibration(n=0, brier=None, reliability=None, resolution=None,
+                       uncertainty=None, base_rate=None))
+    return sizing.size_position(equity=equity, underlying="SPY", stated_confidence=0.70,
+                                max_profit=mp, max_loss=ml, calibration=cal,
+                                posture=p, open_risk_usd=risk)
+
+
+def test_unproven_agent_can_actually_place_its_first_trade():
+    """The measured deadlock: n=0..8 all sized 0 contracts, so the record that
+    unlocks size could never be built. Exploration is a bounded cost paid for
+    information, not an accident of a formula returning zero."""
+    assert _sized(8, 0).contracts >= 1
+
+
+def test_earning_a_record_never_reduces_size():
+    """DEPLOY once sized SMALLER than VALIDATE, because Kelly on a mediocre
+    payoff lands below one contract and rounded to zero. The ladder must be
+    monotonic in evidence."""
+    validate = _sized(8, 0).contracts
+    deploy = _sized(3, 10).contracts
+    assert deploy >= validate >= 1
+
+
+def test_harvest_refuses_new_risk_that_cannot_resolve():
+    from trdrbot import phase
+    p = _posture(1, 10)
+    assert p.phase == phase.HARVEST and p.portfolio_cap == 0.0
+    assert _sized(1, 10).contracts == 0
+
+
+def test_deploy_requires_both_the_calendar_and_the_record():
+    """Both gates must permit; the tighter binds."""
+    from trdrbot import phase
+    assert _posture(3, 10).phase == phase.DEPLOY      # time + evidence
+    assert _posture(3, 2).phase == phase.VALIDATE     # time but no evidence
+    assert _posture(8, 10).phase == phase.VALIDATE    # evidence but too early
+
+
+def test_kelly_ramp_is_continuous_not_a_cliff():
+    """A hard n>=8 gate made the 8th resolved trade a bigger step than every
+    trade before it combined."""
+    from trdrbot.phase import kelly_ramp
+    vals = [kelly_ramp(n, 0.05, 0.25) for n in range(0, 30)]
+    assert vals == sorted(vals), "must be monotonic in evidence"
+    assert vals[0] == 0.05 and vals[-1] < 0.25
+    steps = [b - a for a, b in zip(vals, vals[1:])]
+    assert max(steps) < 0.03, "no single trade may be a step change"
+
+
+def test_drawdown_throttles_the_book_cap():
+    from trdrbot.phase import drawdown_throttle, DRAWDOWN_FLOOR
+    assert drawdown_throttle(100_000, 100_000) == 1.0
+    assert drawdown_throttle(98_000, 100_000) == 1.0        # inside the trigger
+    assert drawdown_throttle(95_000, 100_000) < 1.0
+    assert drawdown_throttle(80_000, 100_000) == DRAWDOWN_FLOOR
+    assert _posture(3, 10, equity=91_000).portfolio_cap < _posture(3, 10).portfolio_cap
+
+
+def test_book_cap_still_binds_within_a_phase():
+    assert _sized(3, 10, risk=19_500).contracts == 0
+    assert _sized(3, 10, risk=0).contracts >= 1
+
+
+def test_a_genuinely_strong_edge_scales_up():
+    weak = _sized(3, 20, mp=800.0, ml=-1200.0).contracts
+    strong = _sized(3, 20, mp=3600.0, ml=-1200.0).contracts
+    assert strong > weak
+
+
+def test_position_too_large_for_the_account_is_still_refused():
+    assert _sized(8, 10, ml=-9000.0).contracts == 0
