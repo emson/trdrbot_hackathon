@@ -47,12 +47,16 @@ exit_state:
   - false
   - false
   - false
+  underlying:below:757.5:
+  - false
+  - false
+  - false
 close_reason: null
 decision_ref: jrn_20260826T185819Z_dece972
 sources: []
 generated:
   by: ''
-  at: '2026-08-27T12:37:42.782634+00:00'
+  at: '2026-08-27T13:50:08.467090+00:00'
 verified:
 - by: trdrbot/reconcile
   at: '2026-08-26T20:05:59.099229+00:00'

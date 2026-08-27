@@ -111,6 +111,50 @@ def _render_positions(store: PositionStore, snap: "analytics.Snapshot | None" = 
     return "\n".join(lines)
 
 
+#: A move of this fraction in an underlying we hold is worth a fresh look,
+#: even with nothing in the news. Roughly a third of a typical daily range on
+#: an index - big enough not to fire on noise, small enough to precede a stop.
+PULSE_MOVE = 0.004
+#: And look at least this often while the market is open, regardless.
+PULSE_MAX_SILENCE_MIN = 90
+
+
+def _market_pulse(store, snap, journal, config) -> dict | None:
+    """Should the agent look, absent any external event? Deterministic, no LLM."""
+    positions = [p for p in store.open_positions() if p.status == "open"]
+    if not positions:
+        return None  # nothing at risk; silence is correct
+
+    last = journal.last_decision_at()
+    silent_min = None
+    if last is not None:
+        from datetime import datetime, timezone
+        silent_min = (datetime.now(timezone.utc) - last).total_seconds() / 60.0
+
+    moves = []
+    for p in positions:
+        px = snap.underlying_prices.get(p.underlying)
+        if px and p.entry_spot:
+            moves.append((p.underlying, (px / p.entry_spot) - 1.0))
+
+    big = [(u, m) for u, m in moves if abs(m) >= PULSE_MOVE]
+    if big:
+        return {
+            "reason": "material move since entry: "
+                      + ", ".join(f"{u} {m:+.2%}" for u, m in big),
+            "moves": dict(moves),
+            "positions": [p.position_id for p in positions],
+        }
+    if silent_min is None or silent_min >= PULSE_MAX_SILENCE_MIN:
+        return {
+            "reason": f"no decide cycle for {silent_min:.0f}min" if silent_min
+                      else "no decide cycle yet today",
+            "moves": dict(moves),
+            "positions": [p.position_id for p in positions],
+        }
+    return None
+
+
 async def run_tick(
     config: Config, *, verbose: bool = True, force_decide: bool = False
 ) -> dict[str, Any]:
@@ -153,20 +197,35 @@ async def run_tick(
         # reasoning without waiting for the bell.
         if not snap.market_open and not force_decide:
             hk = await housekeeping.run(store, snap, mem, wiki, journal, tools=tools, verbose=verbose)
-            return {"status": "housekeeping", "tick": n, "exits": triggered, **hk}
+            return {"status": "housekeeping", "tick": n, "market_open": snap.market_open, "exits": triggered, **hk}
 
         # ---------- slow path: every N ticks ----------
         if n % config.decide_every_n_ticks != 0:
             if verbose:
                 print(f"[tick {n}] fast path only (decide runs every "
                       f"{config.decide_every_n_ticks} ticks)")
-            return {"status": "fast_only", "tick": n, "exits": triggered}
+            return {"status": "fast_only", "tick": n, "market_open": snap.market_open, "exits": triggered}
 
         items = inbox.pending()
+        if not items and snap.market_open:
+            # MARKET PULSE (D-042). The system was purely reactive: with an
+            # empty inbox it never reasoned, even with the market open, a live
+            # position, and the underlying moving. Found live at the 09:30
+            # open - equity had moved and the agent did nothing because no
+            # headline had arrived. No trader waits for news to check their
+            # book. A material move in an underlying we hold, or too long
+            # since the last look, is itself an observation.
+            pulse = _market_pulse(store, snap, journal, config)
+            if pulse:
+                inbox.write("market_pulse", pulse, source="pulse", trust="primary")
+                items = inbox.pending()
+                if verbose:
+                    print(f"[tick {n}] pulse: {pulse['reason']}")
+
         if not items:
             if verbose:
                 print(f"[tick {n}] inbox empty - no decide cycle")
-            return {"status": "idle", "tick": n, "exits": triggered}
+            return {"status": "idle", "tick": n, "market_open": snap.market_open, "exits": triggered}
 
         batch = ids.batch_id([i.id for i in items])
         prior = journal.unresolved_decision(batch)
@@ -313,7 +372,7 @@ async def run_tick(
             print(f"[tick {n}] orders={len(orders)} positions_recorded={len(recorded)}")
             print(f'\n--- agent ---\n{summary_text}\n')
 
-        return {"status": "done", "tick": n, "batch": batch, "orders": len(orders),
+        return {"status": "done", "tick": n, "market_open": snap.market_open, "batch": batch, "orders": len(orders),
                 "recorded": len(recorded), "exits": triggered}
     finally:
         await mem.end()  # no dream() here - see module docstring

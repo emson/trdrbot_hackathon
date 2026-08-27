@@ -467,3 +467,60 @@ def test_constitution_keys_are_unique():
     from trdrbot import constitution
     keys = [p.key for p in constitution.PRINCIPLES]
     assert len(keys) == len(set(keys))
+
+
+# ------------------------------------- D-042 the loop that must actually turn
+
+def test_latest_trade_response_is_parsed_from_its_real_shape():
+    """The live response nests under `trades`, not the symbol. The original
+    parser looked one level too shallow, left underlying_prices EMPTY without
+    raising, and so made every underlying_stop rule inert in production - while
+    passing every unit test, because the tests supplied the price map directly.
+    A parser test must use a REAL captured response."""
+    from trdrbot.analytics import _f
+    real = {"trades": {"SPY": {"c": [" "], "i": 52983527340113, "p": 767.46,
+                               "s": 40, "t": "2026-08-27T13:35:35Z", "x": "V", "z": "B"}}}
+    node = (real.get("trades") or {}).get("SPY") or real.get("SPY")
+    assert _f((node or {}).get("p"), 0.0) == 767.46
+
+
+def test_credit_assignment_excludes_the_constitution():
+    """A losing trade must not degrade identity. Principles carry PERMANENT
+    decay, so P&L-driven damage to them would never recover, and D-033 puts
+    them under human-ratified incident review instead."""
+    p = Position(position_id="x", elfmem_blocks={
+        "self": ["c1", "c2"], "task": ["t1"], "attention": ["a1", "a2"]})
+    assert set(p.all_elfmem_block_ids) == {"t1", "a1", "a2"}
+    assert set(p.recalled_block_ids()) == {"c1", "c2", "t1", "a1", "a2"}
+
+
+def test_market_pulse_wakes_the_agent_on_a_material_move():
+    """The system was purely reactive: an empty inbox meant no reasoning, even
+    with the market open and a live position moving. No trader waits for a
+    headline to check their book."""
+    from trdrbot.tick import _market_pulse, PULSE_MOVE
+    from trdrbot.journal import Journal
+
+    class Store:
+        def __init__(self, ps): self._p = ps
+        def open_positions(self): return self._p
+
+    class J:
+        def last_decision_at(self):
+            from datetime import datetime, timezone
+            return datetime.now(timezone.utc)  # just decided: silence is fine
+
+    pos = Position(position_id="p", status="open", underlying="SPY", entry_spot=766.5)
+    snap = Snapshot(); snap.market_open = True
+
+    snap.underlying_prices = {"SPY": 766.6}
+    assert _market_pulse(Store([pos]), snap, J(), None) is None, "must not fire on noise"
+
+    snap.underlying_prices = {"SPY": 766.5 * (1 + PULSE_MOVE * 1.5)}
+    assert _market_pulse(Store([pos]), snap, J(), None) is not None
+
+    snap.underlying_prices = {"SPY": 766.5 * (1 - PULSE_MOVE * 1.5)}
+    assert _market_pulse(Store([pos]), snap, J(), None) is not None
+
+    # Nothing at risk -> silence is the correct output, not a missed check.
+    assert _market_pulse(Store([]), snap, J(), None) is None

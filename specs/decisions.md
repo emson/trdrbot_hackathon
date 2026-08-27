@@ -1446,3 +1446,48 @@ reasoning is most at risk of violating - what makes the constitution operative r
 decorative (notes/009 §2).
 **Evidence:** live `constitution verify` renders 10/10 at 501 tokens; `assemble_context` in the
 real decide path contains 10/10; 45 regression tests pass.
+
+## D-042: Scaffold run at the open - three dead paths found, plus the scheduler
+**Date:** 2026-08-27
+**Status:** accepted
+**Context:** Full-system scaffold simulation at the 09:30 ET open, with the specific brief of
+checking that the system records what it learns and recalls and acts on it. Three of the
+findings were dead code paths that every unit test passed.
+**1. `underlying_stop` exit rules were INERT in production.** The live-trade response nests
+under `trades` (`{"trades": {"SPY": {"p": 767.46}}}`), not under the symbol. The parser looked
+one level too shallow, found nothing, and left `underlying_prices` EMPTY **without raising** -
+so the thesis-invalidation stop built in D-036 and unified in D-037 could never fire. Every
+unit test passed because the tests supplied the price map directly. The most important risk
+control in the system was decorative for a day. Fixed; verified live: SPY 767.61 against a
+757.5 stop, ARMED. Regression test now uses a REAL captured response, not a hand-built dict.
+**2. Trade outcomes were credited to the constitution.** `all_elfmem_block_ids` flattened ALL
+frames including `self`, so `resolve()` would push trade P&L signal onto all ten constitutional
+principles - and since they carry PERMANENT decay, damage would never wash out. Split into
+`all_elfmem_block_ids` (task + attention, credited) and `recalled_block_ids` (all frames,
+provenance only). Principles are scored by human-ratified incident review (D-033), never by P&L.
+**3. The constitution had crowded out learned knowledge.** Constitutional blocks are
+semantically close to almost any reasoning query AND never decay, so they dominated ATTENTION:
+10 of 12 hits were principles (0.77-0.96), and after de-duplicating against SELF the frame
+returned NOTHING - the agent's own market knowledge entirely displaced by its own identity, one
+day after seeding it. ATTENTION now builds from `recall()` with over-fetch and cross-frame
+dedupe. Verified: the agent's stored MU note and its own prediction now reach the decide cycle.
+**4. The system was purely reactive** - an empty inbox meant no reasoning, even with the market
+open and a live position moving. Found at the open: equity had moved and the agent did nothing
+because no headline had arrived. Added the **market pulse**: a material move (0.4%) in a held
+underlying, or 90 minutes of silence while holding risk, is itself an observation and wakes the
+decide cycle. Deliberately silent when nothing is at risk.
+**5. Principles were cited by unstable number.** The SELF frame orders by how load-bearing each
+has proven, so numbering shifts between cycles - the agent cited "Principle 10" for what is
+principle 3. Prompt now requires citing by opening words.
+**Scheduler:** `trdrbot run --interval 300 --closed-interval 1800`. Two cadences because the
+work differs: open runs decide/pulse/exit-rules (stops checked hourly are worthless), closed
+runs housekeeping/research/attribution/consolidation (daily by nature, and they cost LLM calls).
+A failing tick never stops the loop (INV-8) - over eight unattended days provider transients are
+certain, and a crash that halts trading is worse than a journalled skipped tick.
+**Evidence the loop is closed, from the live open-market decide cycle:** the agent recalled its
+own stored note ("my stored note is bullish on DRAM/HBM ASP repricing"), applied a principle by
+name ("I'm marking the tension rather than resolving it in my own favour" - the contradictions
+principle), read its book greeks ("a book already carrying +$29.9k delta"), enforced its own
+pre-registered rule ("skip entirely if the ATM straddle prices materially above 9-10%" - it
+priced at 12.5%, so it skipped), and killed a thesis on a stale premise (its note said MRNA
+142.57; the tape said 145.48). 48 regression tests pass.

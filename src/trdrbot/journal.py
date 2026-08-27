@@ -38,6 +38,28 @@ class Journal:
                 if line:
                     yield json.loads(line)
 
+    def last_decision_at(self):
+        """When the agent last actually reasoned. None if never.
+
+        Used by the market pulse (D-042) to notice it has gone quiet while
+        holding risk - the failure mode is silence that looks like calm.
+        """
+        from datetime import datetime
+        latest = None
+        for row in self.read():
+            if row.get("kind") not in ("decision",):
+                continue
+            ts = row.get("ts")
+            if not ts:
+                continue
+            try:
+                dt = datetime.fromisoformat(ts)
+            except ValueError:
+                continue
+            if latest is None or dt > latest:
+                latest = dt
+        return latest
+
     def unresolved_decision(self, batch: str) -> dict[str, Any] | None:
         """INV-27: a decision for this batch with no terminal entry after it.
 

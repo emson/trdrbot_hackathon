@@ -24,6 +24,9 @@ from elfmem import MemorySystem
 
 from .positions import Position
 
+#: How many learned blocks ATTENTION contributes to a decide cycle.
+ATTENTION_KEEP = 5
+
 
 @dataclass
 class ContextResult:
@@ -68,11 +71,32 @@ class ElfmemAdapter:
         # constitution and never know (D-041).
         from .constitution import PRINCIPLES
         self_k = len(PRINCIPLES) + 4  # principles + identity + learned self
-        for name, q in (("self", None), ("task", None), ("attention", query)):
-            fr = await self.mem.frame(name, q, top_k=self_k if name == "self" else None)
-            blocks[name] = [b.id for b in fr.blocks]
+        seen: set[str] = set()
+        for name in ("self", "task"):
+            fr = await self.mem.frame(name, None, top_k=self_k if name == "self" else None)
+            ids = [b.id for b in fr.blocks if b.id not in seen]
+            seen.update(ids)
+            blocks[name] = ids
             if fr.text:
                 parts.append(fr.text)
+
+        # ATTENTION is built from recall() rather than frame(), because
+        # constitutional blocks are semantically close to almost any reasoning
+        # query AND carry PERMANENT decay - so once seeded they dominate it.
+        # Measured live: 10 of 12 attention hits were principles (0.77-0.96),
+        # and after de-duplicating against SELF the frame returned NOTHING.
+        # The agent's own learned market knowledge had been entirely displaced
+        # by its own identity. Over-fetch, drop anything already in SELF/TASK,
+        # keep what was actually learned.
+        want = ATTENTION_KEEP
+        candidates = await self.mem.recall(query, frame="attention", top_k=want + self_k)
+        kept = [b for b in candidates if b.id not in seen][:want]
+        blocks["attention"] = [b.id for b in kept]
+        if kept:
+            parts.append(
+                "## Relevant memory\n\n"
+                + "\n".join(f"- {b.content.strip()}" for b in kept)
+            )
         return ContextResult(text="\n\n".join(parts), blocks=blocks)
 
     # -- fill-event learning (F2) --

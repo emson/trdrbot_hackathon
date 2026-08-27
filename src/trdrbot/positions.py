@@ -81,8 +81,27 @@ class Position:
     def symbols(self) -> list[str]:
         return [leg["symbol"] for leg in self.legs if leg.get("symbol")]
 
+    #: Frames whose blocks are CREDITED at resolution. Deliberately excludes
+    #: "self": constitutional principles are identity, not a bet on this trade.
+    #: Crediting them would let a losing week silently degrade the constitution
+    #: - and since principles carry PERMANENT decay they would never recover.
+    #: Principles are scored by incident review with human ratification
+    #: (D-033/D-041), never automatically by P&L.
+    CREDITED_FRAMES = ("task", "attention")
+
     @property
     def all_elfmem_block_ids(self) -> list[str]:
+        """Blocks that informed this decision AND may be credited by its outcome."""
+        return [
+            b
+            for frame, blocks in self.elfmem_blocks.items()
+            if frame in self.CREDITED_FRAMES
+            for b in blocks
+        ]
+
+    def recalled_block_ids(self) -> list[str]:
+        """Every block that informed the decision, including identity. For
+        provenance and audit - never for credit assignment."""
         return [b for blocks in self.elfmem_blocks.values() for b in blocks]
 
     def trust_tier(self) -> str:

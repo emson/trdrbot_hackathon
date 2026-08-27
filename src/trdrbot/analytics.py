@@ -124,10 +124,20 @@ async def snapshot(tools: dict[str, Any], underlyings: list[str] | None = None) 
     for u in underlyings or []:
         try:
             t = await mcp_client.call(tools, "get_stock_latest_trade", symbols=u, feed="iex")
-            node = t.get(u) if isinstance(t, dict) else None
+            # Shape is {"trades": {"SPY": {"p": 767.46, ...}}} - nested under
+            # `trades`, not under the symbol directly. The original parser
+            # looked one level too shallow, found nothing, and left the price
+            # map EMPTY without raising: the underlying_stop exit rules that
+            # read it were therefore inert in production while passing every
+            # unit test, because the tests supplied the map directly (D-042).
+            node = None
+            if isinstance(t, dict):
+                node = (t.get("trades") or {}).get(u) or t.get(u)
             px = _f((node or {}).get("p") or (node or {}).get("price"), 0.0)
             if px > 0:
                 snap.underlying_prices[u] = px
+            else:
+                print(f"[analytics] underlying {u}: no usable price in response")
         except Exception as exc:  # noqa: BLE001
             print(f"[analytics] underlying {u} price unavailable: {exc!r}")
 

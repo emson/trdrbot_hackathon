@@ -147,6 +147,39 @@ async def _discover() -> int:
     return 0
 
 
+async def _run_loop(interval: int, closed_interval: int) -> int:
+    """Tick until the deadline. Two cadences, because the work differs.
+
+    Open: the decide path, the market pulse and exit-rule evaluation, on a
+    short interval - exits and stops are worthless if checked hourly.
+    Closed: housekeeping, research, attribution, consolidation - all of which
+    are daily-ish by nature and cost LLM calls, so a long interval.
+
+    A failing tick NEVER stops the loop: an eight-day unattended run will meet
+    provider transients, and a crash that halts trading is worse than a tick
+    that is skipped and journalled (INV-8).
+    """
+    from datetime import date
+
+    from .tick import run_tick
+
+    cfg = config_mod.load()
+    deadline = date.fromisoformat(cfg.deadline)
+    n = 0
+    print(f"[run] looping until {deadline}; open={interval}s closed={closed_interval}s", flush=True)
+    while date.today() <= deadline:
+        n += 1
+        open_now = False
+        try:
+            r = await run_tick(cfg, verbose=True)
+            open_now = bool(r.get("market_open", r.get("status") != "housekeeping"))
+        except Exception as exc:  # noqa: BLE001 - a bad tick must not end the run
+            print(f"[run] tick {n} failed, continuing: {exc!r}", flush=True)
+        await asyncio.sleep(interval if open_now else closed_interval)
+    print(f"[run] deadline {deadline} reached after {n} ticks", flush=True)
+    return 0
+
+
 def _health() -> int:
     from . import health
     from .positions import PositionStore
@@ -249,6 +282,11 @@ def main() -> None:
     sub.add_parser("research", help="run the daily research cycle now")
     sub.add_parser("discover", help="news-driven company discovery + thesis building")
     sub.add_parser("health", help="detect subsystems that run but never produce")
+    run = sub.add_parser("run", help="loop ticks continuously until the deadline")
+    run.add_argument("--interval", type=int, default=300,
+                     help="seconds between ticks while the market is open (default 300)")
+    run.add_argument("--closed-interval", type=int, default=1800,
+                     help="seconds between ticks while closed (default 1800)")
     con = sub.add_parser("constitution", help="the epistemic constitution in elfmem's SELF frame")
     con.add_argument("action", choices=["show", "seed", "verify", "review", "reseed"], default="show",
                      nargs="?", help="show text | seed into elfmem | verify it renders | "
@@ -271,5 +309,7 @@ def main() -> None:
         sys.exit(asyncio.run(_discover()))
     elif args.cmd == "health":
         sys.exit(_health())
+    elif args.cmd == "run":
+        sys.exit(asyncio.run(_run_loop(args.interval, args.closed_interval)))
     elif args.cmd == "constitution":
         sys.exit(asyncio.run(_constitution(args.action)))
