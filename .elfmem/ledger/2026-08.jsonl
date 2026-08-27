@@ -272,3 +272,36 @@
 {"t":"2026-08-27T16:46:55.020909+00:00","s":2,"ah":1.141603,"k":"promote","id":"23343d703dfb464f","conf":0.75,"sig":0.75,"lam":0.01,"sum":"[correlated-names-are-one-bet] A second position only diversifies if the underlyings are actually uncorrelated, and ours mostly are not. Measured over 120 sessions: SPY/QQQ correlate at 0.92, SPY/NVDA at 0.66, and my original research universe averaged 0.75 pairwise - three names, one factor. The per-underlying risk cap cannot see this because it counts NAMES, not exposures: three 'diversified' tech positions pass every check and lose together. Before adding a position, ask whether it offsets the book's existing delta and vega or grows them. XLE runs -0.42 against SPY, XLP -0.04, XLV +0.16 - those genuinely diversify."}
 {"t":"2026-08-27T16:52:41.931129+00:00","s":18,"ah":1.162543,"k":"asm","ids":["78ec8cb80ae8e249","cf4026ebe4e5f325","78b0c92502a8cab5","95209bc148c6a7b9","df86248db03497d9","1af203536546c2ef","9d43b52dbc4fff0e","64452a897a4cf9c3","1ce8ed99b7938d82","fdf58a3178eae813","5c42bcc0efd19526"],"frame":"self","sid":"e9555dc9af9f4018"}
 {"t":"2026-08-27T16:52:41.945075+00:00","s":19,"ah":1.162547,"k":"asm","ids":["78ec8cb80ae8e249","cf4026ebe4e5f325","78b0c92502a8cab5","95209bc148c6a7b9","df86248db03497d9"],"frame":"task","sid":"e9555dc9af9f4018"}
+{"t":"2026-08-27T17:04:06.031266+00:00","s":20,"ah":1.184759,"k":"asm","ids":["78ec8cb80ae8e249","cf4026ebe4e5f325","78b0c92502a8cab5","95209bc148c6a7b9","df86248db03497d9","1af203536546c2ef","9d43b52dbc4fff0e","64452a897a4cf9c3","1ce8ed99b7938d82","fdf58a3178eae813","5c42bcc0efd19526"],"frame":"self","sid":"6ded826f1d1941a0"}
+{"t":"2026-08-27T17:04:06.045690+00:00","s":21,"ah":1.184763,"k":"asm","ids":["78ec8cb80ae8e249","cf4026ebe4e5f325","78b0c92502a8cab5","95209bc148c6a7b9","df86248db03497d9"],"frame":"task","sid":"6ded826f1d1941a0"}
+{"t":"2026-08-27T17:09:04.027467+00:00","s":0,"ah":2e-06,"k":"birth","id":"961020edb1384cd5"}
+{"t":"2026-08-27T17:09:04.091893+00:00","s":1,"ah":2e-05,"k":"out","id":"961020edb1384cd5","sig":0.5,"w":1.0,"src":"attribution:pos_sim_lucky"}
+{"t":"2026-08-27T17:09:04.103435+00:00","s":2,"ah":2.3e-05,"k":"out","id":"961020edb1384cd5","sig":0.9,"w":1.0,"src":"attribution:pos_sim_right_right"}
+{"t":"2026-08-27T17:09:04.110654+00:00","s":3,"ah":2.5e-05,"k":"out","id":"961020edb1384cd5","sig":0.65,"w":1.0,"src":"attribution:pos_sim_right_wrong"}
+{"t":"2026-08-27T17:09:04.117961+00:00","s":4,"ah":2.7e-05,"k":"out","id":"961020edb1384cd5","sig":0.1,"w":1.0,"src":"attribution:pos_sim_wrong_faithful"}
+{"t":"2026-08-27T17:09:31.797716+00:00","s":0,"ah":1e-06,"k":"birth","id":"8d852f8e614f5863"}
+{"t":"2026-08-27T17:09:31.802831+00:00","s":1,"ah":3e-06,"k":"out","id":"8d852f8e614f5863","sig":0.9,"w":1.0,"src":"trade-1"}
+{"t":"2026-08-27T17:09:55.971439+00:00","s":0,"ah":2e-06,"k":"birth","id":"8d852f8e614f5863"}
+{"t":"2026-08-27T17:09:55.976340+00:00","s":1,"ah":3e-06,"k":"out","id":"8d852f8e614f5863","sig":0.9,"w":1.0,"src":"trade-1"}
+{"t":"2026-08-27T17:09:58.827410+00:00","s":2,"ah":3e-06,"k":"promote","id":"8d852f8e614f5863","conf":0.1,"sig":0.1,"lam":0.01,"sum":"The block contains fragmented text \"[t] gaps hold on raised guidance\" which appears to be corrupted, incomplete, or nonsensical data with no clear semantic meaning."}
+{"t":"2026-08-27T17:09:58.862112+00:00","s":3,"ah":0.000805,"k":"out","id":"8d852f8e614f5863","sig":0.9,"w":1.0,"src":"trade-2"}
+{"t":"2026-08-27T17:10:38.146799+00:00","s":0,"ah":1.229812,"k":"out","id":"622adbc1707582cd","sig":0.9,"w":1.0,"src":"pos_20260827_NVDA_bull_call_spread_01a75fab"}
+{"t":"2026-08-27T17:10:38.147947+00:00","s":1,"ah":1.229812,"k":"out","id":"8542b75a79eb0ef7","sig":0.9,"w":1.0,"src":"pos_20260827_NVDA_bull_call_spread_01a75fab"}
+{"t":"2026-08-27T17:10:38.148072+00:00","s":2,"ah":1.229812,"k":"out","id":"7b36fdbb80f4cc35","sig":0.9,"w":1.0,"src":"pos_20260827_NVDA_bull_call_spread_01a75fab"}
+{"t":"2026-08-27T17:10:48.185203+00:00","s":0,"ah":3e-06,"k":"birth","id":"961020edb1384cd5"}
+{"t":"2026-08-27T17:10:48.222609+00:00","s":1,"ah":1.4e-05,"k":"out","id":"961020edb1384cd5","sig":0.5,"w":1.0,"src":"attribution:pos_sim_lucky"}
+{"t":"2026-08-27T17:10:48.228055+00:00","s":2,"ah":1.5e-05,"k":"out","id":"961020edb1384cd5","sig":0.9,"w":1.0,"src":"attribution:pos_sim_right_right"}
+{"t":"2026-08-27T17:10:48.232596+00:00","s":3,"ah":1.6e-05,"k":"out","id":"961020edb1384cd5","sig":0.65,"w":1.0,"src":"attribution:pos_sim_right_wrong"}
+{"t":"2026-08-27T17:10:48.237574+00:00","s":4,"ah":1.8e-05,"k":"out","id":"961020edb1384cd5","sig":0.1,"w":1.0,"src":"attribution:pos_sim_wrong_faithful"}
+{"t":"2026-08-27T17:11:07.104256+00:00","s":0,"ah":1e-06,"k":"birth","id":"a5a14b33590e2461"}
+{"t":"2026-08-27T17:11:42.735638+00:00","s":0,"ah":2e-06,"k":"birth","id":"961020edb1384cd5"}
+{"t":"2026-08-27T17:11:42.746813+00:00","s":1,"ah":5e-06,"k":"out","id":"961020edb1384cd5","sig":0.9,"w":1.0,"src":"pos_sim_right_right"}
+{"t":"2026-08-27T17:11:45.245087+00:00","s":2,"ah":5e-06,"k":"promote","id":"961020edb1384cd5","conf":0.3,"sig":0.3,"lam":0.01,"sum":"NVDA tends to hold post-earnings gaps when guidance is raised, indicating a pattern in the stock's price behavior following earnings announcements with positive guidance."}
+{"t":"2026-08-27T17:11:45.272180+00:00","s":3,"ah":0.000706,"k":"out","id":"961020edb1384cd5","sig":0.9,"w":1.0,"src":"pos_sim_right_right"}
+{"t":"2026-08-27T17:11:45.282947+00:00","s":4,"ah":0.000709,"k":"out","id":"961020edb1384cd5","sig":0.1,"w":1.0,"src":"pos_sim_right_wrong"}
+{"t":"2026-08-27T17:11:45.293301+00:00","s":5,"ah":0.000712,"k":"out","id":"961020edb1384cd5","sig":0.1,"w":1.0,"src":"pos_sim_wrong_faithful"}
+{"t":"2026-08-27T17:11:45.306260+00:00","s":6,"ah":0.000716,"k":"out","id":"961020edb1384cd5","sig":0.9,"w":1.0,"src":"pos_sim_lucky"}
+{"t":"2026-08-27T17:11:45.329397+00:00","s":7,"ah":0.000722,"k":"out","id":"961020edb1384cd5","sig":0.5,"w":1.0,"src":"attribution:pos_sim_lucky"}
+{"t":"2026-08-27T17:11:45.343263+00:00","s":8,"ah":0.000726,"k":"out","id":"961020edb1384cd5","sig":0.9,"w":1.0,"src":"attribution:pos_sim_right_right"}
+{"t":"2026-08-27T17:11:45.350653+00:00","s":9,"ah":0.000728,"k":"out","id":"961020edb1384cd5","sig":0.65,"w":1.0,"src":"attribution:pos_sim_right_wrong"}
+{"t":"2026-08-27T17:11:45.362576+00:00","s":10,"ah":0.000731,"k":"out","id":"961020edb1384cd5","sig":0.1,"w":1.0,"src":"attribution:pos_sim_wrong_faithful"}

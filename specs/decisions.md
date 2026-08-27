@@ -1957,3 +1957,33 @@ for something it was closing. Only orders that OPEN a position now qualify. A wa
 on correct behaviour trains everyone to ignore warnings - the same class as the
 `underlying_stop=None` rendering bug (D-055), a signal that lies.
 **Verified:** 3 new tests; 97 pass.
+
+## D-057: The learning-loop simulation - two credit-loss bugs found and fixed
+**Date:** 2026-08-27
+**Status:** accepted
+**Context:** Ran the learning loop end to end with KNOWN inputs (scratchpad sim): synthetic
+agents with known calibration through the real scorer/ladder/sizer, then four known positions -
+one per attribution quadrant - through the real resolution -> attribution -> memory path.
+**What passed first time:** the career arcs. A perfectly calibrated agent promotes
+EXPLORE->ESTABLISH->SCALE->MATURE over 8 weeks with size 1->4 contracts, monotonic. An
+overconfident agent (says 85%, right 55%) with lucky wins is held at ESTABLISH by the
+attribution gate and sized at half. Drawdown demotes to EXPLORE at -11% and recovery restores.
+All four attribution quadrants produce the correct verdict, and the attributable rate excludes
+exactly the lucky win.
+**Bug 1: credit assignment silently skipped on every external close.** `learn.on_resolution`
+gated `mem.resolve()` on `close_reason in SELF_RESOLVED` - and BOTH real closes so far have been
+'external', because the agent manages its own exits through the broker (repricing its own
+profit-target limit) rather than through our evaluator. The gate predates D-056's measured P&L;
+with P&L now measured, an external close is honest evidence. Credit now gates on a KNOWN P&L,
+skipping only when P&L is unknown (a guess would be worse than silence).
+**Bug 2: `outcome()` on an unconsolidated block is a silent zero.** Measured directly:
+updated=0 before consolidation, updated=1 after, no error either way. Theses are remembered at
+FILL and consolidation runs at market-closed housekeeping - so any same-day resolution loses its
+memory credit invisibly. Our first profitable NVDA trade did exactly this. `resolve()` now
+detects a short count, consolidates, and retries once; the live NVDA credit was repaired
+manually (3 blocks, updated=3). Reported upstream (report addendum 2) with the suggested
+`OutcomeResult.pending_inbox` field - same silent-reducer pattern as everything else in that
+report.
+**Also:** the sim initially hit an OpenAI 401 because the script skipped `config.load()` and the
+stale shell key shadowed .env - our own D-shadowing lesson, re-learned in miniature.
+**Verified:** the full simulation passes end to end; 99 regression tests.

@@ -1200,3 +1200,31 @@ def test_only_opening_orders_demand_a_recorded_position():
                         "args_as_model_supplied": {"position_intent": "sell_to_close"}})
     assert demands({"name": "place_option_order",
                     "args_as_model_supplied": {"order_class": "mleg", "qty": "10"}})
+
+
+# ---------------- D-057 credit lost on external closes and inbox blocks
+
+def test_credit_gates_on_measured_pnl_not_the_close_label():
+    """close_reason in SELF_RESOLVED silently skipped credit assignment for
+    every 'external' close - and both real closes so far have been external,
+    because the agent manages its own exits through the broker. Found by the
+    learning-loop simulation: the credited block ended with reinforcement=None."""
+    import inspect
+    from trdrbot import learn
+    src = inspect.getsource(learn.on_resolution)
+    assert "if pnl_pct is not None:\n        hit = pnl_pct > 0" in src
+    # the None-P&L guess path must still be skipped
+    assert "skipped rather than guessed" in src
+
+
+def test_resolve_self_heals_when_outcomes_hit_unconsolidated_blocks():
+    """outcome() on a block still in elfmem's inbox returns updated=0
+    SILENTLY. Theses are remembered at FILL and consolidation runs only at
+    market-closed housekeeping, so any same-day resolution - like our first
+    profitable NVDA trade - lost its memory credit invisibly. Measured:
+    updated=0 before consolidation, updated=1 after."""
+    import inspect
+    from trdrbot.elfmem_adapter import ElfmemAdapter
+    src = inspect.getsource(ElfmemAdapter.resolve)
+    assert "blocks_updated" in src and "consolidate" in src, \
+        "resolve must detect a short-count and consolidate-then-retry"
