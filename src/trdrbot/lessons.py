@@ -96,13 +96,16 @@ LESSONS: tuple[Lesson, ...] = (
     ),
     Lesson(
         "exploration-budget-is-not-a-mandate",
-        "My exploration allocation exists to buy resolved theses at roughly "
-        "neutral expected value, so that a calibration record can form at all. "
-        "It is NOT permission to pay negative EV. Buying a structure I have "
-        "already priced as losing, in order to generate a data point, is not "
-        "calibration - it is a donation with a story attached. If nothing "
-        "prices positively, the correct output is a recorded FORECAST on the "
-        "setup I declined, which scores my judgement at zero cost.",
+        "My 2.2%-of-equity exploration allocation exists to buy resolved "
+        "theses at roughly neutral expected value, so a calibration record can "
+        "form at all - it is NOT permission to pay negative EV. Measured on one "
+        "cycle: three candidates priced at -$29, -$30 and -$13 after costs, and "
+        "the correct action was to take none of them even with the whole budget "
+        "unused. Buying a structure I have already priced as losing, to generate "
+        "a data point, is not calibration - it is a donation with a story "
+        "attached. When nothing prices positively the right output is a recorded "
+        "FORECAST on the setup I declined, which scores my judgement at zero "
+        "cost and moves the same calibration number.",
         cue="when tempted to trade because the risk budget is sitting unused",
         tags=("sizing", "discipline"),
     ),
@@ -134,16 +137,34 @@ async def seed(mem, *, verbose: bool = True) -> dict[str, int]:
     identity would make a measured claim permanent, which is exactly what
     `[regimes]` warns against.
     """
-    existing = {b.content.strip() for b in await mem.ls(tag=TAG, limit=200)}
+    # Idempotence by KEY, not by content. Content-matching looks right until a
+    # lesson is REWORDED - then the new text does not match, a second block is
+    # written, and the stale twin lives on beside it saying something subtly
+    # different. Measured: rewording one lesson produced 7 blocks for 6
+    # lessons. A per-lesson tag survives consolidation (verified), so it is the
+    # stable handle this needs, and a changed lesson replaces its predecessor
+    # rather than accumulating next to it.
+    existing = await mem.ls(tag=TAG, limit=200)
+    by_key: dict[str, list] = {}
+    for b in existing:
+        for t in getattr(b, "tags", []):
+            if t.startswith("lesson/"):
+                by_key.setdefault(t.split("/", 1)[1], []).append(b)
+
     pending: dict[str, Lesson] = {}
     skipped = 0
     for lesson in LESSONS:
-        if block_text(lesson).strip() in existing:
+        prior = by_key.get(lesson.key, [])
+        if any(b.content.strip() == block_text(lesson).strip() for b in prior):
             skipped += 1
             continue
+        for stale in prior:  # superseded wording - drop it
+            await mem.forget(stale.id)
+            if verbose:
+                print(f"  - {lesson.key} (superseded)")
         r = await mem.remember(
             block_text(lesson),
-            tags=[TAG, *lesson.tags],
+            tags=[TAG, f"lesson/{lesson.key}", *lesson.tags],
             category="knowledge",
             source=f"lesson:{lesson.key}",
             cue=lesson.cue,
@@ -167,7 +188,7 @@ async def seed(mem, *, verbose: bool = True) -> dict[str, int]:
         eligible = [(bid, l) for bid, l in pending.items() if bid in inbox_ids]
         batch = {
             bid: {"alignment_score": 0.75,
-                  "tags": [TAG, *l.tags],
+                  "tags": [TAG, f"lesson/{l.key}", *l.tags],
                   "summary": block_text(l)}
             for bid, l in eligible[:MAX_INBOX_PER_RUN]
         }

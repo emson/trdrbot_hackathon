@@ -1021,3 +1021,15 @@ def test_lessons_are_not_constitutional():
     assert lessons.TAG != constitution.TAG
     for l in lessons.LESSONS:
         assert constitution.TAG not in l.tags
+
+
+def test_a_reworded_lesson_replaces_rather_than_duplicates():
+    """Content-based idempotence looks right until a lesson is REWORDED: the
+    new text does not match, a second block is written, and the stale twin
+    lives on saying something subtly different. Measured: rewording one lesson
+    produced 7 blocks for 6 lessons. Keys must be the handle, not content."""
+    import inspect
+    from trdrbot import lessons
+    src = inspect.getsource(lessons.seed)
+    assert "lesson/" in src, "must key on a per-lesson tag"
+    assert "forget" in src, "must drop the superseded block"

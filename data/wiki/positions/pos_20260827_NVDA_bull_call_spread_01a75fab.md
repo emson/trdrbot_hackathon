@@ -67,7 +67,7 @@ sources:
   author: discovery
 generated:
   by: anthropic:claude-opus-5
-  at: '2026-08-27T16:40:19.380843+00:00'
+  at: '2026-08-27T16:46:38.248962+00:00'
 verified:
 - by: trdrbot/reconcile
   at: '2026-08-27T15:27:06.400573+00:00'
