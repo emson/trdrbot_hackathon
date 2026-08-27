@@ -132,7 +132,14 @@ def size_position(
         )
 
     full = kelly_fraction(adj, max_profit, max_loss)
-    exploring = posture is not None and not posture.uses_kelly
+    # Below MIN_SAMPLE the shrinkage is a blunt 'halve the claimed edge'
+    # heuristic, not a measurement - so it must not VETO a trade, only size
+    # it down. Letting it veto inverted the ladder a second time: promotion
+    # from EXPLORE to ESTABLISH at n=5 took sizing from 1 contract to 0,
+    # because the fabricated shrink drove Kelly to exactly zero (found by
+    # the monotonicity check in the D-048 scaffold, not by inspection).
+    unmeasured = calibration.n < MIN_SAMPLE
+    exploring = unmeasured or (posture is not None and not posture.uses_kelly)
 
     # Which edge estimate gates the trade depends on what we are claiming to
     # know. In VALIDATE we do NOT trust the magnitude (hence a fixed size),
@@ -155,12 +162,12 @@ def size_position(
     # Phase posture (D-047) supplies the multiplier and the ceiling. Without
     # one, fall back to the original cliff so callers that predate phases keep
     # working.
-    if exploring:
-        # VALIDATE: a fixed exploration allocation, deliberately NOT Kelly.
+    if posture is not None and not posture.uses_kelly:
+        # A fixed exploration allocation, deliberately NOT Kelly.
         # With no record the shrinkage kills the edge estimate and Kelly
         # returns ~0 - which deadlocked the system into never trading at all.
         # Exploration is a bounded cost paid for information.
-        frac = posture.seed_fraction * posture.drawdown_throttle
+        frac = posture.seed_fraction
     else:
         if posture is not None:
             mult = posture.kelly_multiplier
@@ -193,7 +200,7 @@ def size_position(
     # Book caps, tightest-binding wins. Both measured in dollars of defined
     # max loss so the number means the same thing everywhere.
     same_name = (open_risk_by_underlying or {}).get(underlying.upper(), 0.0)
-    portfolio_cap = posture.portfolio_cap if posture is not None else PORTFOLIO_MAX_AT_RISK
+    portfolio_cap = posture.book_cap if posture is not None else PORTFOLIO_MAX_AT_RISK
     caps = [
         ("portfolio", portfolio_cap * equity - open_risk_usd,
          portfolio_cap, open_risk_usd, "the book"),
@@ -212,11 +219,11 @@ def size_position(
         contracts = min(contracts, int(budget_left // per_contract_risk))
 
     actual = (contracts * per_contract_risk) / equity
-    if exploring:
-        track = (f"{posture.phase.upper()} phase, n={calibration.n} - fixed "
+    if posture is not None and not posture.uses_kelly:
+        track = (f"{posture.tier.upper()} tier, n={calibration.n} - fixed "
                  f"{posture.seed_fraction:.1%} exploration allocation, not Kelly")
     elif posture is not None:
-        track = (f"{posture.phase.upper()} phase, n={calibration.n} - "
+        track = (f"{posture.tier.upper()} tier, n={calibration.n} - "
                  f"Kelly x{posture.kelly_multiplier:.2f} (evidence ramp)")
     else:
         established = calibration.n >= MIN_SAMPLE and (calibration.reliability or 1.0) < 0.05

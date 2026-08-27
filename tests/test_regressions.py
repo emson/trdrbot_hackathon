@@ -234,12 +234,27 @@ def test_unbounded_loss_is_refused_not_estimated():
     assert d.contracts == 0 and "unbounded" in d.reason.lower()
 
 
-def test_no_track_record_means_no_size():
-    """Same stated confidence buys nothing until calibration is earned."""
+def test_no_record_sizes_minimally_rather_than_refusing():
+    """Deliberate behaviour change (D-048). This once asserted 0 contracts,
+    which encoded the deadlock: shrinking an unmeasured confidence to the base
+    rate and then letting Kelly VETO meant a first trade was impossible, so the
+    record that unlocks size could never be built. Below MIN_SAMPLE the
+    shrinkage is a blunt heuristic and must size down, never veto. A proven
+    record still buys strictly more."""
     empty = Calibration(n=0, brier=None, reliability=None, resolution=None,
                         uncertainty=None, base_rate=None)
-    assert _size(calibration=empty).contracts == 0
-    assert _size(calibration=ESTABLISHED).contracts > 0
+    unproven = _size(calibration=empty, max_profit=3600.0, max_loss=-1200.0).contracts
+    proven = _size(calibration=ESTABLISHED, max_profit=3600.0, max_loss=-1200.0).contracts
+    assert unproven >= 1, "must be able to place a first trade"
+    assert proven > unproven, "a proven record must still buy more"
+
+
+def test_a_none_posture_never_raises():
+    """A None posture once dereferenced posture.tier and raised - the
+    competence ladder must not break callers that predate it."""
+    empty = Calibration(n=0, brier=None, reliability=None, resolution=None,
+                        uncertainty=None, base_rate=None)
+    assert _size(calibration=empty).reason
 
 
 # ------------------------------------------------- D-035 LLM unit confusion
@@ -688,92 +703,107 @@ def test_close_all_positions_is_refused_while_several_are_open():
     assert out2 == "liquidated" and t2.called, "one position: equivalent to a normal close"
 
 
-# ---------------------------------------- D-047 phased risk posture
+# ------------------------------- D-048 competence ladder (replaces D-047 phases)
 
-def _posture(days, n, equity=100_000, hw=100_000):
-    import datetime
-    from datetime import date
-    from trdrbot import phase, sizing
-    dl = (date.today() + datetime.timedelta(days=days)).isoformat()
-    return phase.posture(deadline=dl, calibration_n=n, equity=equity, high_water=hw,
-                         unproven_kelly=sizing.UNPROVEN_KELLY,
-                         established_kelly=sizing.ESTABLISHED_KELLY)
+GOOD_V = "thesis_right_expression_right"
+LUCK_V = "thesis_wrong_profited_anyway"
+NOSCORE_V = "unscoreable"
 
 
-def _sized(days, n, equity=100_000, hw=100_000, risk=0.0, mp=800.0, ml=-1200.0):
+def _hist(n, verdict=GOOD_V):
+    return [Position(position_id=f"h{i}", attribution=verdict) for i in range(n)]
+
+
+def _comp(resolved, rel=0.02, verdicts=None, equity=100_000, hw=100_000):
+    from trdrbot import competence
+    pos = verdicts if verdicts is not None else _hist(max(1, resolved))
+    return competence.assess(resolved=resolved, reliability=rel, positions=pos,
+                             equity=equity, high_water=hw)
+
+
+def _size_tier(comp, resolved, mp=800.0, ml=-1200.0, risk=0.0, by=None):
     from trdrbot import sizing
     from trdrbot.sizing import Calibration
-    p = _posture(days, n, equity, hw)
-    cal = (Calibration(n=n, brier=0.18, reliability=0.02, resolution=0.05,
-                       uncertainty=0.24, base_rate=0.5) if n else
-           Calibration(n=0, brier=None, reliability=None, resolution=None,
-                       uncertainty=None, base_rate=None))
-    return sizing.size_position(equity=equity, underlying="SPY", stated_confidence=0.70,
+    cal = Calibration(n=resolved, brier=0.2, reliability=comp.reliability,
+                      resolution=0.05, uncertainty=0.24, base_rate=0.5)
+    return sizing.size_position(equity=100_000, underlying="SPY", stated_confidence=0.70,
                                 max_profit=mp, max_loss=ml, calibration=cal,
-                                posture=p, open_risk_usd=risk)
+                                posture=comp, open_risk_usd=risk,
+                                open_risk_by_underlying=by)
 
 
-def test_unproven_agent_can_actually_place_its_first_trade():
-    """The measured deadlock: n=0..8 all sized 0 contracts, so the record that
-    unlocks size could never be built. Exploration is a bounded cost paid for
-    information, not an accident of a formula returning zero."""
-    assert _sized(8, 0).contracts >= 1
+def test_size_is_monotonic_in_evidence():
+    """Two separate ladder inversions have shipped and been caught here: an
+    earned record sizing smaller than an unproven one, and promotion from
+    EXPLORE to ESTABLISH taking sizing from 1 contract to 0."""
+    prev = -1
+    for n in [0, 2, 5, 8, 12, 15, 20, 30, 40, 60, 100]:
+        c = _comp(n)
+        got = _size_tier(c, n).contracts
+        assert got >= prev, f"n={n} sized {got}, below the previous {prev}"
+        prev = got
 
 
-def test_earning_a_record_never_reduces_size():
-    """DEPLOY once sized SMALLER than VALIDATE, because Kelly on a mediocre
-    payoff lands below one contract and rounded to zero. The ladder must be
-    monotonic in evidence."""
-    validate = _sized(8, 0).contracts
-    deploy = _sized(3, 10).contracts
-    assert deploy >= validate >= 1
+def test_luck_does_not_buy_size():
+    """A profit on a wrong view teaches nothing. Promotion past ESTABLISH
+    requires theses we could actually explain."""
+    from trdrbot import competence
+    lucky = _comp(15, verdicts=_hist(10, LUCK_V) + _hist(5, GOOD_V))
+    earned = _comp(15, verdicts=_hist(11, GOOD_V) + _hist(4, LUCK_V))
+    assert lucky.tier == competence.ESTABLISH
+    assert earned.tier == competence.SCALE
 
 
-def test_harvest_refuses_new_risk_that_cannot_resolve():
-    from trdrbot import phase
-    p = _posture(1, 10)
-    assert p.phase == phase.HARVEST and p.portfolio_cap == 0.0
-    assert _sized(1, 10).contracts == 0
+def test_unscoreable_theses_do_not_buy_size():
+    from trdrbot import competence
+    c = _comp(15, verdicts=_hist(10, NOSCORE_V) + _hist(5, GOOD_V))
+    assert c.tier == competence.ESTABLISH
 
 
-def test_deploy_requires_both_the_calendar_and_the_record():
-    """Both gates must permit; the tighter binds."""
-    from trdrbot import phase
-    assert _posture(3, 10).phase == phase.DEPLOY      # time + evidence
-    assert _posture(3, 2).phase == phase.VALIDATE     # time but no evidence
-    assert _posture(8, 10).phase == phase.VALIDATE    # evidence but too early
+def test_poor_calibration_blocks_promotion_despite_volume():
+    from trdrbot import competence
+    assert _comp(40, rel=0.09).tier == competence.ESTABLISH
+    assert _comp(40, rel=0.02).tier == competence.MATURE
 
 
-def test_kelly_ramp_is_continuous_not_a_cliff():
-    """A hard n>=8 gate made the 8th resolved trade a bigger step than every
-    trade before it combined."""
-    from trdrbot.phase import kelly_ramp
-    vals = [kelly_ramp(n, 0.05, 0.25) for n in range(0, 30)]
-    assert vals == sorted(vals), "must be monotonic in evidence"
-    assert vals[0] == 0.05 and vals[-1] < 0.25
-    steps = [b - a for a, b in zip(vals, vals[1:])]
-    assert max(steps) < 0.03, "no single trade may be a step change"
+def test_drawdown_demotes_immediately_and_recovers():
+    from trdrbot import competence
+    assert _comp(40).tier == competence.MATURE
+    assert _comp(40, equity=94_000).tier == competence.SCALE
+    assert _comp(40, equity=88_000).tier == competence.EXPLORE
+    assert _comp(40, equity=100_000).tier == competence.MATURE
 
 
-def test_drawdown_throttles_the_book_cap():
-    from trdrbot.phase import drawdown_throttle, DRAWDOWN_FLOOR
-    assert drawdown_throttle(100_000, 100_000) == 1.0
-    assert drawdown_throttle(98_000, 100_000) == 1.0        # inside the trigger
-    assert drawdown_throttle(95_000, 100_000) < 1.0
-    assert drawdown_throttle(80_000, 100_000) == DRAWDOWN_FLOOR
-    assert _posture(3, 10, equity=91_000).portfolio_cap < _posture(3, 10).portfolio_cap
+def test_the_ladder_has_no_calendar_in_it():
+    """The previous design keyed on days-to-deadline and would have entered a
+    no-new-risk phase permanently once the date passed."""
+    import inspect
+    from trdrbot import competence
+    src = inspect.getsource(competence.assess)
+    assert "date" not in src and "deadline" not in src
 
 
-def test_book_cap_still_binds_within_a_phase():
-    assert _sized(3, 10, risk=19_500).contracts == 0
-    assert _sized(3, 10, risk=0).contracts >= 1
+def test_hard_stop_is_a_position_check_not_a_sizing_regime():
+    import datetime
+    from datetime import date
+    from trdrbot import competence
+    soon = (date.today() + datetime.timedelta(days=1)).isoformat()
+    far = (date.today() + datetime.timedelta(days=30)).isoformat()
+    assert competence.can_open(soon, None)[0] is False
+    assert competence.can_open(far, None)[0] is True
+    assert competence.can_open(None, None)[0] is True, "no deadline: always open"
+    past = (date.today() + datetime.timedelta(days=45)).isoformat()
+    assert competence.can_open(far, past)[0] is False
 
 
-def test_a_genuinely_strong_edge_scales_up():
-    weak = _sized(3, 20, mp=800.0, ml=-1200.0).contracts
-    strong = _sized(3, 20, mp=3600.0, ml=-1200.0).contracts
-    assert strong > weak
+def test_book_supports_several_symbols_and_refuses_concentration():
+    c = _comp(20)
+    d1 = _size_tier(c, 20, ml=-1500.0, risk=6_000, by={"SPY": 6_000})
+    d2 = _size_tier(c, 20, ml=-1500.0, risk=6_000, by={"NVDA": 6_000})
+    assert d2.contracts >= d1.contracts, "a different name must not be punished as concentration"
 
 
-def test_position_too_large_for_the_account_is_still_refused():
-    assert _sized(8, 10, ml=-9000.0).contracts == 0
+def test_next_tier_is_visible_to_the_agent():
+    c = _comp(7, rel=0.06, verdicts=_hist(5, GOOD_V) + _hist(2, LUCK_V))
+    needs = c.next_tier_needs()
+    assert "SCALE" in needs and "15" in needs

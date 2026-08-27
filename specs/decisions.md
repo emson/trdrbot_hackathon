@@ -1673,3 +1673,49 @@ HARVEST refuses; both gates required for DEPLOY; ramp continuous with no step >3
 throttles the cap; book cap still binds at $19.5k; a genuine 3:1 edge scales to 4 contracts; an
 oversized position still refused. 71 tests pass. Posture is journalled every decide cycle and
 rendered into the prompt.
+
+## D-048: Size earned by competence, not by the calendar
+**Date:** 2026-08-27
+**Status:** accepted
+**Supersedes:** D-047's deadline-phased posture (the deadlock diagnosis stands; the phasing does not)
+**Context:** D-047 keyed the risk budget on days-to-deadline. The bot will keep running after
+this competition, and that design had a bug waiting for the day after: once `days_left` went
+negative it entered its no-new-risk phase **permanently and would never trade again**. Worse, it
+was conceptually wrong - a desk does not scale a trader by the date.
+**Choice: a competence ladder climbed by demonstrated skill, with the calendar removed entirely
+from sizing** (there is a test asserting `assess()` contains no date logic at all):
+
+| tier | requires | book cap |
+|---|---|---|
+| EXPLORE | nothing - the starting allocation | 10% |
+| ESTABLISH | >=5 resolved theses | 15% |
+| SCALE | >=15, reliability <0.05, >=60% attributable | 20% |
+| MATURE | >=40, reliability <0.03, >=70% attributable | 25% |
+
+**Attribution is a promotion criterion, not just a metric** - the distinctive part. A profit on a
+wrong thesis is luck, and a book of luck is not competence however good the P&L. Promotion past
+ESTABLISH requires that most resolved theses were ATTRIBUTABLE - that the agent knows *why* it
+was right. Verified: 15 resolved that are mostly lucky wins, or mostly unscoreable, both stay at
+ESTABLISH; 15 understood reach SCALE. This is "level of understanding" made measurable, and it
+is the honest thing for a size ladder to key on.
+**Asymmetric by design:** promotion needs a sustained record; demotion is immediate - one tier
+down at 5% drawdown, all the way to EXPLORE at 10%, recovering when equity does. A losing streak
+is evidence the regime has moved out from under the record, which is the "regimes" principle
+applied to the agent's own competence.
+**The deadline did not disappear** - it became a POSITION-level horizon check (`can_open`):
+can this specific trade resolve before a hard stop? That fires for a competition deadline or a
+planned shutdown and is inert in normal operation, which is where it belongs.
+**The scaffold found a second ladder inversion.** Promotion from EXPLORE to ESTABLISH at n=5
+took sizing from 1 contract to **0**: competence promotes at 5, but `shrink_probability` applies
+a blunt "halve the claimed edge" heuristic below MIN_SAMPLE=8, driving Kelly to exactly zero.
+Fixed at the root: **below MIN_SAMPLE the shrinkage sizes down, it never vetoes** - it is a
+heuristic, not a measurement. A monotonicity test now runs the whole ladder and asserts more
+evidence never means less size; two separate inversions have now been caught by it.
+**Multi-symbol confirmed working end to end:** at SCALE with a $20k book cap, sizing filled
+SPY/NVDA/CRM/META to $19.1k and then refused; exit rules fire per position (CRM breaking its
+thesis level closed CRM alone, SPY and NVDA untouched); one price fetch covers every held
+underlying; book greeks aggregate across all of them. The per-underlying cap actively rewards
+diversification and refuses concentration.
+**Verified:** 72 tests, incl. monotonicity across n=0..100, luck/unscoreable blocking promotion,
+poor calibration blocking promotion despite volume, drawdown demotion and recovery, the
+no-calendar assertion, hard-stop position checks, and multi-symbol book behaviour.

@@ -31,8 +31,8 @@ from typing import Any
 from langgraph.prebuilt import create_react_agent
 
 from . import (
+    competence,
     idle,
-    phase,
     prompts,
     sizing,
     analytics,
@@ -306,20 +306,20 @@ async def run_tick(
                     by_underlying.get(op.underlying.upper(), 0.0) + (op.max_loss_usd or 0.0)
                 )
         equity_now = snap.equity or 100000.0
-        hw = phase.update_high_water(config.paths.state, equity_now)
-        posture = phase.posture(
-            deadline=config.deadline, calibration_n=calib.score().n,
-            equity=equity_now, high_water=hw,
-            unproven_kelly=sizing.UNPROVEN_KELLY,
-            established_kelly=sizing.ESTABLISHED_KELLY,
+        hw = competence.update_high_water(config.paths.state, equity_now)
+        cal_now = calib.score()
+        posture = competence.assess(
+            resolved=cal_now.n, reliability=cal_now.reliability,
+            positions=store.all(), equity=equity_now, high_water=hw,
         )
         if verbose:
-            print(f"[tick {n}] risk posture: {posture.phase} - {posture.reason}")
-        journal.append("posture", phase=posture.phase, days_left=posture.days_left,
-                       portfolio_cap=posture.portfolio_cap,
+            print(f"[tick {n}] competence: {posture.reason}")
+        journal.append("competence", tier=posture.tier, resolved=posture.resolved,
+                       reliability=posture.reliability,
+                       attributable_rate=posture.attributable_rate,
+                       drawdown=posture.drawdown, book_cap=posture.book_cap,
                        kelly_multiplier=posture.kelly_multiplier,
                        seed_fraction=posture.seed_fraction,
-                       drawdown_throttle=posture.drawdown_throttle,
                        equity=equity_now, high_water=hw)
         size_tool = local_tools.build_size_position(
             calib, equity_now, len(open_pos),
@@ -340,10 +340,14 @@ async def run_tick(
         agent = create_react_agent(build_model(config), agent_tools, prompt=SYSTEM_PROMPT)
 
         prompt_parts = [snap.render(), _render_positions(store, snap)]
+        _ok, _why = competence.can_open(config.deadline, None)
         prompt_parts.append(
-            f"## Risk posture: {posture.phase.upper()} ({posture.days_left}d to deadline)\n"
-            f"{posture.reason}. Book cap {posture.portfolio_cap:.0%} of equity in defined "
-            f"max-loss. size_position enforces this - do not argue with the number it returns."
+            f"## Competence tier: {posture.tier.upper()}\n"
+            f"{posture.reason}. Book cap {posture.book_cap:.0%} of equity in defined "
+            f"max-loss; size_position enforces it - do not argue with the number it returns.\n"
+            f"To earn more size: {posture.next_tier_needs()}. Size is earned by resolved, "
+            f"ATTRIBUTABLE theses - a profit on a wrong view is luck and counts for nothing."
+            + (f"\nHARD STOP: {_why}" if not _ok else "")
         )
         if config.events:
             from datetime import date as _date
