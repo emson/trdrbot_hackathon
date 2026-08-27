@@ -1260,3 +1260,36 @@ def test_remember_thesis_pins_tags_to_avoid_a_self_leak():
     assert "host_analyses" in src, "must pin its own tags, not trust free consolidation"
     assert 'tags = [pos.underlying.lower(), pos.strategy]' in src
     assert "self/" not in src.split("host_analyses={")[0].split("tags = [")[1][:80]
+
+
+# ----------------------------------- D-060 the muse
+
+def test_muse_unwraps_an_object_wrapped_candidate_array():
+    """The model sometimes returns {"candidates": [...]} and _parse_json_block
+    salvages {} before [] - so raw arrived as a dict, the list-guard silently
+    skipped everything, and the run reported '0 candidates' with no evidence.
+    Third unlogged null path found in one module."""
+    raw = {"candidates": [{"underlying": "X"}], "note": "y"}
+    if isinstance(raw, dict):
+        raw = next((v for v in raw.values() if isinstance(v, list)), [])
+    assert raw == [{"underlying": "X"}]
+
+
+def test_muse_sampler_is_stratified_toward_market_content():
+    """An unstratified draw produced three technique/ rules, which collide into
+    process talk, not market theses."""
+    import inspect
+    from trdrbot import muse
+    src = inspect.getsource(muse._sample_concepts)
+    assert "technique/" in src and "k - 1" in src
+
+
+def test_muse_keeps_a_breakout_call_against_a_calm_base():
+    """A stated 27% against a 99% base is not vacuous - the disagreement IS the
+    claim. The naive ceiling gate rejected exactly the most interesting
+    candidate on the first live run."""
+    import inspect
+    from trdrbot import muse
+    src = inspect.getsource(muse.run)
+    assert "disagrees" in src
+    assert "not disagrees" in src, "ceiling must only reject when the model AGREES"

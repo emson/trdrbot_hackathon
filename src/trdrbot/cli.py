@@ -391,6 +391,21 @@ async def _constitution(action: str) -> int:
     return 0
 
 
+async def _muse() -> int:
+    from . import ledger as ledger_mod, muse
+    from .journal import Journal
+    from .wiki import Wiki
+
+    cfg = config_mod.load()
+    tools = {t.name: t for t in await mcp_client.get_tools(cfg)}
+    inbox = Inbox(cfg.paths, max_retries=cfg.max_retries)
+    book = ledger_mod.Ledger(cfg.paths.state / "ledger.jsonl")
+    r = await muse.run(tools, cfg, inbox, Wiki(cfg.paths.wiki),
+                       Journal(cfg.paths.journal), book)
+    print(f"muse complete: {r['candidates']} candidates, {r['emitted']} emitted")
+    return 0
+
+
 def main() -> None:
     p = argparse.ArgumentParser(prog="trdrbot")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -411,6 +426,7 @@ def main() -> None:
     sub.add_parser("calibration", help="show forecast calibration (Brier/Murphy)")
     sub.add_parser("research", help="run the daily research cycle now")
     sub.add_parser("discover", help="news-driven company discovery + thesis building")
+    sub.add_parser("muse", help="creative theses by random concept collision")
     sub.add_parser("health", help="detect subsystems that run but never produce")
     sub.add_parser("prompts", help="inventory every prompt the models read")
     sub.add_parser("ledger", help="every thesis ever formed, traded or declined")
@@ -446,6 +462,8 @@ def main() -> None:
         sys.exit(asyncio.run(_research()))
     elif args.cmd == "discover":
         sys.exit(asyncio.run(_discover()))
+    elif args.cmd == "muse":
+        sys.exit(asyncio.run(_muse()))
     elif args.cmd == "health":
         sys.exit(_health())
     elif args.cmd == "prompts":

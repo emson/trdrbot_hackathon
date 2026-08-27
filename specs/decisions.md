@@ -2067,3 +2067,44 @@ recallable by its cue.
 history block recalls on cue; mind confidence 0.43->0.45; 101 regression tests (removed one
 placeholder test that asserted nothing - padding a test suite with `assert True` is the same
 dishonesty as anything else in this note).
+
+## D-060: The muse, the bug ledger, the weekend gate, and a name
+**Date:** 2026-08-27
+**Status:** accepted
+**1. Closed-market tick cost - measured, not assumed.** Overnight journal: closed ticks emit
+`research` (once daily, the ONLY recurring LLM cost), `attribution_run`, and free bookkeeping;
+sensors and snapshots are API calls costing nothing. The 30-minute cadence is therefore already
+near-free, and halving it to 1 hour would save pennies while doubling reaction lag to overnight
+news accumulation. Kept at 1800s. The real saving found: **Saturday research burned an LLM call
+on Friday-stale data** that would be stale twice over by Monday's open. Research now skips
+Saturday and keeps Sunday (its regime read feeds Monday). Weekends otherwise: the loop ticks
+harmlessly at the closed cadence throughout.
+**2. `specs/issues.md` - the living bug ledger.** Rule: a bug is recorded the moment it is
+found and removed only by the commit that fixes it. Seeded with 7 open items, the deliberate
+limitations (so nobody "fixes" them), and the last 6 resolved for pattern-reading. Health
+detects; the ledger remembers.
+**3. The muse (`trdrbot muse`) - creative theses by forced collision.** Random wiki concepts x
+news x odds -> LLM narrates domino chains -> EVERY candidate pre-registered in the ledger ->
+deterministic adversarial evaluation (drift-free bootstrap base probability, band plausibility,
+options gate) -> top 2 by |claimed edge| graduate to the inbox. Building it surfaced three
+unlogged null paths IN ONE MODULE, each found by running rather than reading: the model wrapping
+its array in an object (parsed as dict, silently skipped), horizons dated 2025 (the prompt never
+said what today was), and a parse failure leaving no evidence. All three now logged or fixed -
+D-038's own rule, nearly violated by the module written the same day.
+**4. The information gate, corrected by its first live run.** The naive "base probability >90%
+is vacuous" ceiling rejected a candidate stating 27% against a 99% base - which is not vacuous
+but a BREAKOUT call, the disagreement being the claim. The ceiling now rejects only when the
+model AGREES with the extreme base; the floor stays hard (a band the bootstrap can never reach
+needs a jump no history evidences). First live run: 5 candidates, 3 correctly rejected as
+wide/vacuous, 1 emitted - SentinelOne, a name no funnel was pointing at, with an explicit
+software-guidance-regime chain.
+**5. The agent has a name: Theo** - for theta, the greek a short-dated book lives on. Short,
+easy to spell, not elf. Seeded as an identity block (renders in SELF under "Learned about
+yourself"); system prompt aligned. Upstream nit filed (I-7): elfmem's template header still
+hardcodes "You are elf".
+**On "research the latest science": deliberately NOT re-run** - two comprehensive sweeps
+completed hours ago (docs/sources/trading_techniques_review.md) remain current; re-running would
+duplicate spend. The unimplemented top items from it (event variance extraction, chain arbitrage
+validator) stay next in the build queue.
+**Verified:** 104 tests; muse live run end to end; Theo rendering in the real SELF frame;
+weekend gate unit-checked via weekday logic.

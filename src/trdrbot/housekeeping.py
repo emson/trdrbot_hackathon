@@ -90,7 +90,16 @@ async def run(
         from .config import Config as _C  # narrow import to avoid a cycle
         marker = store.dir.parent.parent / "state" / "last_research"
         today = _ids.utc_now().date().isoformat()
-        if not marker.exists() or marker.read_text().strip() != today:
+        # Research is the ONLY recurring LLM cost of the closed-market loop
+        # (measured from the journal: overnight ticks emit research 1x/day and
+        # otherwise only free bookkeeping). Gate it to days where the output
+        # can still be acted on: Saturday research reads Friday's close and is
+        # stale twice over by Monday's open, so it is skipped; Sunday runs,
+        # because its regime read feeds Monday. Weekday check is UTC - close
+        # enough for a Sat/Sun distinction (D-060).
+        weekday = _ids.utc_now().weekday()  # Mon=0 .. Sat=5, Sun=6
+        research_worthwhile = weekday != 5
+        if research_worthwhile and (not marker.exists() or marker.read_text().strip() != today):
             try:
                 cfg = _load_config()
                 from .inbox import Inbox as _Inbox
