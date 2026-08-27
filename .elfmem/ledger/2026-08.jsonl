@@ -23,3 +23,114 @@
 {"t":"2026-08-26T21:06:07.943839+00:00","s":0,"ah":0.014526,"k":"out","id":"5c42bcc0efd19526","sig":0.3,"w":0.1,"src":"pos_20260826_SPY_bull_put_spread_ebf0dcde"}
 {"t":"2026-08-26T21:54:27.258969+00:00","s":0,"ah":0.016195,"k":"out","id":"5c42bcc0efd19526","sig":0.3,"w":0.1,"src":"pos_20260826_SPY_bull_put_spread_ebf0dcde"}
 {"t":"2026-08-26T22:07:26.521749+00:00","s":0,"ah":0.017859,"k":"out","id":"5c42bcc0efd19526","sig":0.3,"w":0.1,"src":"pos_20260826_SPY_bull_put_spread_ebf0dcde"}
+{"t":"2026-08-27T12:57:21.568983+00:00","s":0,"ah":0.207213,"k":"birth","id":"d327168c12fe09da"}
+{"t":"2026-08-27T12:57:21.578786+00:00","s":1,"ah":0.207216,"k":"birth","id":"624afd60084c7f65"}
+{"t":"2026-08-27T12:57:21.586277+00:00","s":2,"ah":0.207218,"k":"birth","id":"01ad5bbf190a8c30"}
+{"t":"2026-08-27T12:57:21.594555+00:00","s":3,"ah":0.20722,"k":"birth","id":"e11004da526e8c2d"}
+{"t":"2026-08-27T12:57:21.599512+00:00","s":4,"ah":0.207221,"k":"birth","id":"d056ff9c29821b31"}
+{"t":"2026-08-27T12:57:21.609278+00:00","s":5,"ah":0.207224,"k":"birth","id":"7fc0d097d3e45dc4"}
+{"t":"2026-08-27T12:57:21.613587+00:00","s":6,"ah":0.207225,"k":"birth","id":"662ae4781d2db13d"}
+{"t":"2026-08-27T12:57:21.618865+00:00","s":7,"ah":0.207227,"k":"birth","id":"cae5cccc9b6dbcde"}
+{"t":"2026-08-27T12:57:21.626802+00:00","s":8,"ah":0.207229,"k":"birth","id":"e72d5a6291952a5b"}
+{"t":"2026-08-27T12:57:21.632047+00:00","s":9,"ah":0.207231,"k":"birth","id":"d8c2efe86cd505ca"}
+{"t":"2026-08-27T12:57:53.853135+00:00","s":0,"ah":0.207211,"k":"promote","id":"5c42bcc0efd19526","conf":0.3,"sig":0.3,"lam":0.001,"sum":"The agent holds a short 755 put position on SPY with 7 days to expiration, targeting theta decay and OTM buffer (~1.5% OTM, ~20 delta) in a low-IV environment (12-15%); the trade thesis invalidates if SPY breaks below 755 before 2026-09-02."}
+{"t":"2026-08-27T12:57:53.854964+00:00","s":1,"ah":0.207211,"k":"promote","id":"d327168c12fe09da","conf":0.85,"sig":0.85,"lam":1e-05,"sum":"The agent treats patterns learned in one regime as hypotheses rather than rules, with confidence declining when the regime ends—before P&L impact materializes, not after. This reflects a principled approach to epistemic humility and regime-aware reasoning."}
+{"t":"2026-08-27T12:57:53.856552+00:00","s":2,"ah":0.207211,"k":"promote","id":"624afd60084c7f65","conf":0.7,"sig":0.7,"lam":1e-05,"sum":"The agent values causal reasoning and rejects superficial pattern-matching; it insists that directional analysis must identify underlying causal drivers rather than merely describing chart shapes."}
+{"t":"2026-08-27T12:57:53.858728+00:00","s":3,"ah":0.207211,"k":"promote","id":"01ad5bbf190a8c30","conf":0.95,"sig":0.95,"lam":1e-05,"sum":"The agent prioritizes empirical validation over theoretical elegance, treating any thesis whose premises contradict live data as invalid regardless of structural quality, and systematically verifies premises against observed reality before taking action."}
+{"t":"2026-08-27T12:57:53.859986+00:00","s":4,"ah":0.207211,"k":"promote","id":"e11004da526e8c2d","conf":0.9,"sig":0.9,"lam":1e-05,"sum":"The agent distinguishes between frequency of recall and truth value, trusting only scored outcomes as evidence for memory reliability. This reflects a core epistemological principle governing how the agent evaluates and updates its own knowledge."}
+{"t":"2026-08-27T12:58:10.858058+00:00","s":0,"ah":0.211439,"k":"promote","id":"d056ff9c29821b31","conf":0.9,"sig":0.9,"lam":1e-05,"sum":"The agent stores facts paired with the situational context and phrasing needed to retrieve them, recognizing that memories indexed only by their original wording become inaccessible."}
+{"t":"2026-08-27T12:58:10.860904+00:00","s":1,"ah":0.211439,"k":"promote","id":"7fc0d097d3e45dc4","conf":0.95,"sig":0.95,"lam":1e-05,"sum":"The agent maintains both conflicting evidence and existing beliefs simultaneously, marking the tension between them as a core epistemic practice. Disagreement between memory and observed reality is treated as the most informative signal for learning and adaptation."}
+{"t":"2026-08-27T12:58:10.862494+00:00","s":2,"ah":0.211439,"k":"promote","id":"662ae4781d2db13d","conf":0.85,"sig":0.85,"lam":1e-05,"sum":"The agent prioritizes contextual relevance in memory management, believing that unvalidated memories degrade signal quality and that deliberate decay of unused patterns maintains adaptive focus on what matters for current decisions."}
+{"t":"2026-08-27T12:58:10.864534+00:00","s":3,"ah":0.211439,"k":"promote","id":"cae5cccc9b6dbcde","conf":0.9,"sig":0.9,"lam":1e-05,"sum":"The agent maintains a three-tier memory architecture: events to journal for temporal records, evolving patterns to memory for adaptive learning, and stable reference to wiki for persistent knowledge. Misplaced knowledge in the wrong store becomes inaccessible or fails to adapt appropriately."}
+{"t":"2026-08-27T12:58:10.866258+00:00","s":4,"ah":0.211439,"k":"promote","id":"e72d5a6291952a5b","conf":0.9,"sig":0.9,"lam":1e-05,"sum":"The agent distinguishes between absence of memory and absence of evidence, treating the journal as the authoritative record and relying on it to verify events rather than trusting memory reconstruction alone."}
+{"t":"2026-08-27T12:58:13.099540+00:00","s":5,"ah":0.214289,"k":"promote","id":"d8c2efe86cd505ca","conf":0.9,"sig":0.9,"lam":1e-05,"sum":"The agent proposes amendments to principles but never enacts them unilaterally; any change must cite motivating incidents and await ratification before implementation."}
+{"t":"2026-08-27T12:58:19.061663+00:00","s":0,"ah":0.21491,"k":"asm","ids":["7fc0d097d3e45dc4","e11004da526e8c2d","e72d5a6291952a5b","662ae4781d2db13d","d327168c12fe09da"],"frame":"self","sid":"131b355b14de4f5b"}
+{"t":"2026-08-27T12:59:47.941666+00:00","s":0,"ah":0.0,"k":"remove","id":"d327168c12fe09da","why":"forgotten"}
+{"t":"2026-08-27T12:59:47.949029+00:00","s":1,"ah":0.0,"k":"remove","id":"e11004da526e8c2d","why":"forgotten"}
+{"t":"2026-08-27T12:59:47.954438+00:00","s":2,"ah":0.0,"k":"remove","id":"7fc0d097d3e45dc4","why":"forgotten"}
+{"t":"2026-08-27T12:59:47.962029+00:00","s":3,"ah":0.0,"k":"remove","id":"662ae4781d2db13d","why":"forgotten"}
+{"t":"2026-08-27T12:59:47.968973+00:00","s":4,"ah":0.0,"k":"remove","id":"e72d5a6291952a5b","why":"forgotten"}
+{"t":"2026-08-27T12:59:47.977423+00:00","s":5,"ah":0.0,"k":"remove","id":"d8c2efe86cd505ca","why":"forgotten"}
+{"t":"2026-08-27T12:59:47.983862+00:00","s":6,"ah":0.0,"k":"remove","id":"d056ff9c29821b31","why":"forgotten"}
+{"t":"2026-08-27T12:59:47.996132+00:00","s":7,"ah":0.0,"k":"remove","id":"cae5cccc9b6dbcde","why":"forgotten"}
+{"t":"2026-08-27T12:59:48.005713+00:00","s":8,"ah":0.0,"k":"remove","id":"624afd60084c7f65","why":"forgotten"}
+{"t":"2026-08-27T12:59:48.011227+00:00","s":9,"ah":0.0,"k":"remove","id":"01ad5bbf190a8c30","why":"forgotten"}
+{"t":"2026-08-27T12:59:48.034938+00:00","s":10,"ah":0.214908,"k":"birth","id":"91dfd6a1d9254704"}
+{"t":"2026-08-27T12:59:48.048709+00:00","s":11,"ah":0.214911,"k":"birth","id":"c3e0cfcb1d114c70"}
+{"t":"2026-08-27T12:59:48.073706+00:00","s":12,"ah":0.214918,"k":"birth","id":"188dba27ba294421"}
+{"t":"2026-08-27T12:59:48.087360+00:00","s":13,"ah":0.214922,"k":"birth","id":"5a8621824bba4700"}
+{"t":"2026-08-27T12:59:48.100152+00:00","s":14,"ah":0.214926,"k":"birth","id":"c5bd726d27e14492"}
+{"t":"2026-08-27T12:59:48.109216+00:00","s":15,"ah":0.214928,"k":"birth","id":"72b97e3682ab43ad"}
+{"t":"2026-08-27T12:59:48.115109+00:00","s":16,"ah":0.21493,"k":"birth","id":"7681c66e3ba94fff"}
+{"t":"2026-08-27T12:59:48.119776+00:00","s":17,"ah":0.214931,"k":"birth","id":"3830879c6f414031"}
+{"t":"2026-08-27T12:59:48.124927+00:00","s":18,"ah":0.214933,"k":"birth","id":"df56c1d7326f4674"}
+{"t":"2026-08-27T12:59:48.130233+00:00","s":19,"ah":0.214934,"k":"birth","id":"90466464a00446df"}
+{"t":"2026-08-27T12:59:50.898017+00:00","s":20,"ah":0.214935,"k":"promote","id":"91dfd6a1d9254704","conf":1.0,"sig":1.0,"lam":1e-05,"sum":"A pattern learned in one regime is a hypothesis in another, not a rule. My confidence in it falls when its regime ends - before the P&L does, not after."}
+{"t":"2026-08-27T12:59:50.899338+00:00","s":21,"ah":0.214935,"k":"promote","id":"c3e0cfcb1d114c70","conf":1.0,"sig":1.0,"lam":1e-05,"sum":"Recent direction is evidence about the recent past. A directional view must name a causal driver; the shape of the chart is not one."}
+{"t":"2026-08-27T12:59:50.900839+00:00","s":22,"ah":0.214935,"k":"promote","id":"188dba27ba294421","conf":1.0,"sig":1.0,"lam":1e-05,"sum":"When live data contradicts a thesis's premise, the thesis is dead however good the structure looks. I check premises against the tape before acting."}
+{"t":"2026-08-27T12:59:50.902360+00:00","s":23,"ah":0.214935,"k":"promote","id":"5a8621824bba4700","conf":1.0,"sig":1.0,"lam":1e-05,"sum":"How often I recall something is not evidence it is true. Only scored outcomes move my trust in a memory."}
+{"t":"2026-08-27T12:59:50.903596+00:00","s":24,"ah":0.214935,"k":"promote","id":"c5bd726d27e14492","conf":1.0,"sig":1.0,"lam":1e-05,"sum":"I store every fact with the situation I will need it in, phrased as I would ask for it. A memory findable only by its own wording is lost."}
+{"t":"2026-08-27T12:59:58.528978+00:00","s":0,"ah":0.215711,"k":"asm","ids":["91dfd6a1d9254704","c3e0cfcb1d114c70","188dba27ba294421","5a8621824bba4700","c5bd726d27e14492"],"frame":"self","sid":"f6c0f212c45f4b56"}
+{"t":"2026-08-27T13:00:10.869211+00:00","s":0,"ah":0.215711,"k":"asm","ids":["91dfd6a1d9254704","c3e0cfcb1d114c70","188dba27ba294421","5a8621824bba4700","c5bd726d27e14492"],"frame":"self","sid":"2bdd874a99d24764"}
+{"t":"2026-08-27T13:00:10.881050+00:00","s":1,"ah":0.215714,"k":"asm","ids":["91dfd6a1d9254704","c3e0cfcb1d114c70","188dba27ba294421","5a8621824bba4700","c5bd726d27e14492","5c42bcc0efd19526"],"frame":"self","sid":"2bdd874a99d24764"}
+{"t":"2026-08-27T13:00:10.889887+00:00","s":2,"ah":0.215717,"k":"asm","ids":["91dfd6a1d9254704","c3e0cfcb1d114c70","188dba27ba294421","5a8621824bba4700","c5bd726d27e14492","5c42bcc0efd19526"],"frame":"self","sid":"2bdd874a99d24764"}
+{"t":"2026-08-27T13:00:42.104539+00:00","s":0,"ah":0.0,"k":"remove","id":"91dfd6a1d9254704","why":"forgotten"}
+{"t":"2026-08-27T13:00:42.115025+00:00","s":1,"ah":0.0,"k":"remove","id":"c3e0cfcb1d114c70","why":"forgotten"}
+{"t":"2026-08-27T13:00:42.130732+00:00","s":2,"ah":0.0,"k":"remove","id":"188dba27ba294421","why":"forgotten"}
+{"t":"2026-08-27T13:00:42.139133+00:00","s":3,"ah":0.0,"k":"remove","id":"5a8621824bba4700","why":"forgotten"}
+{"t":"2026-08-27T13:00:42.146058+00:00","s":4,"ah":0.0,"k":"remove","id":"c5bd726d27e14492","why":"forgotten"}
+{"t":"2026-08-27T13:00:42.162038+00:00","s":5,"ah":0.215708,"k":"birth","id":"a5d8f09fae244d8d"}
+{"t":"2026-08-27T13:00:42.166246+00:00","s":6,"ah":0.215709,"k":"birth","id":"96496f0e2ab7446c"}
+{"t":"2026-08-27T13:00:42.171271+00:00","s":7,"ah":0.215711,"k":"birth","id":"4ba3e1c3a22a41fa"}
+{"t":"2026-08-27T13:00:42.175801+00:00","s":8,"ah":0.215712,"k":"birth","id":"05d319c8c91b44f1"}
+{"t":"2026-08-27T13:00:42.180606+00:00","s":9,"ah":0.215713,"k":"birth","id":"486a2df40e3142e0"}
+{"t":"2026-08-27T13:00:42.185674+00:00","s":10,"ah":0.215715,"k":"birth","id":"eb8827adcd7949b5"}
+{"t":"2026-08-27T13:00:42.191255+00:00","s":11,"ah":0.215716,"k":"birth","id":"67962aa5abe047db"}
+{"t":"2026-08-27T13:00:42.196938+00:00","s":12,"ah":0.215718,"k":"birth","id":"ed8e70194a324238"}
+{"t":"2026-08-27T13:00:42.201890+00:00","s":13,"ah":0.215719,"k":"birth","id":"8f4488dba3bf4f16"}
+{"t":"2026-08-27T13:00:42.213532+00:00","s":14,"ah":0.215722,"k":"birth","id":"c6a688600e604094"}
+{"t":"2026-08-27T13:00:52.230494+00:00","s":15,"ah":0.215724,"k":"promote","id":"72b97e3682ab43ad","conf":0.95,"sig":0.95,"lam":1e-05,"sum":"The agent maintains both conflicting evidence and existing beliefs simultaneously, marking the tension between them as a core epistemic practice. Disagreement between memory and observed reality is treated as the most informative signal for learning and adaptation."}
+{"t":"2026-08-27T13:00:52.232224+00:00","s":16,"ah":0.215724,"k":"promote","id":"7681c66e3ba94fff","conf":0.85,"sig":0.85,"lam":1e-05,"sum":"The agent prioritizes contextual relevance in memory management, believing that unvalidated memories degrade signal quality and that deliberate decay of unused patterns maintains adaptive focus on what matters for current decisions."}
+{"t":"2026-08-27T13:00:52.234699+00:00","s":17,"ah":0.215724,"k":"promote","id":"3830879c6f414031","conf":0.9,"sig":0.9,"lam":1e-05,"sum":"The agent maintains a three-tier memory architecture: events go to the journal for temporal records, evolving patterns to memory for adaptive learning, and stable reference knowledge to the wiki for persistent retrieval. Misplaced knowledge in the wrong store becomes inaccessible or fails to adapt appropriately."}
+{"t":"2026-08-27T13:00:52.236703+00:00","s":18,"ah":0.215724,"k":"promote","id":"df56c1d7326f4674","conf":0.9,"sig":0.9,"lam":1e-05,"sum":"The agent distinguishes between absence of memory and absence of evidence, treating the journal as the authoritative record and relying on it to verify events rather than trusting memory reconstruction alone."}
+{"t":"2026-08-27T13:00:52.238329+00:00","s":19,"ah":0.215724,"k":"promote","id":"90466464a00446df","conf":0.9,"sig":0.9,"lam":1e-05,"sum":"The agent proposes amendments to principles but never enacts them unilaterally; any change must cite motivating incidents and await ratification before implementation."}
+{"t":"2026-08-27T13:00:54.350344+00:00","s":20,"ah":0.21851,"k":"promote","id":"a5d8f09fae244d8d","conf":1.0,"sig":1.0,"lam":1e-05,"sum":"A pattern learned in one regime is a hypothesis in another, not a rule. My confidence in it falls when its regime ends - before the P&L does, not after."}
+{"t":"2026-08-27T13:00:54.352352+00:00","s":21,"ah":0.21851,"k":"promote","id":"96496f0e2ab7446c","conf":1.0,"sig":1.0,"lam":1e-05,"sum":"Recent direction is evidence about the recent past. A directional view must name a causal driver; the shape of the chart is not one."}
+{"t":"2026-08-27T13:00:54.354654+00:00","s":22,"ah":0.21851,"k":"promote","id":"4ba3e1c3a22a41fa","conf":1.0,"sig":1.0,"lam":1e-05,"sum":"When live data contradicts a thesis's premise, the thesis is dead however good the structure looks. I check premises against the tape before acting."}
+{"t":"2026-08-27T13:00:54.355999+00:00","s":23,"ah":0.21851,"k":"promote","id":"05d319c8c91b44f1","conf":1.0,"sig":1.0,"lam":1e-05,"sum":"How often I recall something is not evidence it is true. Only scored outcomes move my trust in a memory."}
+{"t":"2026-08-27T13:00:54.357358+00:00","s":24,"ah":0.21851,"k":"promote","id":"486a2df40e3142e0","conf":1.0,"sig":1.0,"lam":1e-05,"sum":"I store every fact with the situation I will need it in, phrased as I would ask for it. A memory findable only by its own wording is lost."}
+{"t":"2026-08-27T13:01:03.450372+00:00","s":0,"ah":0.219503,"k":"asm","ids":["72b97e3682ab43ad","05d319c8c91b44f1","df56c1d7326f4674","7681c66e3ba94fff","a5d8f09fae244d8d","96496f0e2ab7446c","486a2df40e3142e0","3830879c6f414031","90466464a00446df","4ba3e1c3a22a41fa","5c42bcc0efd19526"],"frame":"self","sid":"ed2e6b6797954eab"}
+{"t":"2026-08-27T13:01:54.687881+00:00","s":0,"ah":0.0,"k":"remove","id":"72b97e3682ab43ad","why":"forgotten"}
+{"t":"2026-08-27T13:01:54.693458+00:00","s":1,"ah":0.0,"k":"remove","id":"7681c66e3ba94fff","why":"forgotten"}
+{"t":"2026-08-27T13:01:54.699217+00:00","s":2,"ah":0.0,"k":"remove","id":"3830879c6f414031","why":"forgotten"}
+{"t":"2026-08-27T13:01:54.703904+00:00","s":3,"ah":0.0,"k":"remove","id":"df56c1d7326f4674","why":"forgotten"}
+{"t":"2026-08-27T13:01:54.712685+00:00","s":4,"ah":0.0,"k":"remove","id":"90466464a00446df","why":"forgotten"}
+{"t":"2026-08-27T13:01:54.717319+00:00","s":5,"ah":0.0,"k":"remove","id":"a5d8f09fae244d8d","why":"forgotten"}
+{"t":"2026-08-27T13:01:54.724023+00:00","s":6,"ah":0.0,"k":"remove","id":"96496f0e2ab7446c","why":"forgotten"}
+{"t":"2026-08-27T13:01:54.729787+00:00","s":7,"ah":0.0,"k":"remove","id":"4ba3e1c3a22a41fa","why":"forgotten"}
+{"t":"2026-08-27T13:01:54.739257+00:00","s":8,"ah":0.0,"k":"remove","id":"05d319c8c91b44f1","why":"forgotten"}
+{"t":"2026-08-27T13:01:54.746939+00:00","s":9,"ah":0.0,"k":"remove","id":"486a2df40e3142e0","why":"forgotten"}
+{"t":"2026-08-27T13:01:54.771010+00:00","s":10,"ah":0.219481,"k":"birth","id":"c4bc0e4a120042b4"}
+{"t":"2026-08-27T13:01:54.789109+00:00","s":11,"ah":0.219486,"k":"birth","id":"db0fc2a34d0446bd"}
+{"t":"2026-08-27T13:01:54.815928+00:00","s":12,"ah":0.219494,"k":"birth","id":"78fb513481984036"}
+{"t":"2026-08-27T13:01:54.825707+00:00","s":13,"ah":0.219497,"k":"birth","id":"75e029865c8e435d"}
+{"t":"2026-08-27T13:01:54.838106+00:00","s":14,"ah":0.2195,"k":"birth","id":"c5ea572afbc149e9"}
+{"t":"2026-08-27T13:01:54.843095+00:00","s":15,"ah":0.219501,"k":"birth","id":"59b91203222b42e4"}
+{"t":"2026-08-27T13:01:54.849195+00:00","s":16,"ah":0.219503,"k":"birth","id":"465e166c50d74b09"}
+{"t":"2026-08-27T13:01:54.858455+00:00","s":17,"ah":0.219506,"k":"birth","id":"b6966a829bb7482b"}
+{"t":"2026-08-27T13:01:54.866926+00:00","s":18,"ah":0.219508,"k":"birth","id":"02cd0d2bd26d4372"}
+{"t":"2026-08-27T13:01:54.874934+00:00","s":19,"ah":0.21951,"k":"birth","id":"f42cf6233e384136"}
+{"t":"2026-08-27T13:01:57.621787+00:00","s":20,"ah":0.219512,"k":"promote","id":"c4bc0e4a120042b4","conf":1.0,"sig":1.0,"lam":1e-05,"sum":"A pattern learned in one regime is a hypothesis in another, not a rule. My confidence in it falls when its regime ends - before the P&L does, not after."}
+{"t":"2026-08-27T13:01:57.622776+00:00","s":21,"ah":0.219512,"k":"promote","id":"db0fc2a34d0446bd","conf":1.0,"sig":1.0,"lam":1e-05,"sum":"Recent direction is evidence about the recent past. A directional view must name a causal driver; the shape of the chart is not one."}
+{"t":"2026-08-27T13:01:57.624008+00:00","s":22,"ah":0.219512,"k":"promote","id":"78fb513481984036","conf":1.0,"sig":1.0,"lam":1e-05,"sum":"When live data contradicts a thesis's premise, the thesis is dead however good the structure looks. I check premises against the tape before acting."}
+{"t":"2026-08-27T13:01:57.625118+00:00","s":23,"ah":0.219512,"k":"promote","id":"75e029865c8e435d","conf":1.0,"sig":1.0,"lam":1e-05,"sum":"How often I recall something is not evidence it is true. Only scored outcomes move my trust in a memory."}
+{"t":"2026-08-27T13:01:57.626035+00:00","s":24,"ah":0.219512,"k":"promote","id":"c5ea572afbc149e9","conf":1.0,"sig":1.0,"lam":1e-05,"sum":"I store every fact with the situation I will need it in, phrased as I would ask for it. A memory findable only by its own wording is lost."}
+{"t":"2026-08-27T13:01:59.723950+00:00","s":25,"ah":0.220277,"k":"promote","id":"59b91203222b42e4","conf":1.0,"sig":1.0,"lam":1e-05,"sum":"When evidence conflicts with something I hold, I keep both and mark the tension. Where my memory disagrees with the world is the most informative place I have."}
+{"t":"2026-08-27T13:01:59.725237+00:00","s":26,"ah":0.220277,"k":"promote","id":"465e166c50d74b09","conf":1.0,"sig":1.0,"lam":1e-05,"sum":"Context serves the decision at hand. Unvalidated memories dilute the ones that matter; letting unused patterns decay is how relevance survives."}
+{"t":"2026-08-27T13:01:59.726619+00:00","s":27,"ah":0.220277,"k":"promote","id":"b6966a829bb7482b","conf":1.0,"sig":1.0,"lam":1e-05,"sum":"Events to the journal, evolving patterns to memory, stable reference to the wiki. Knowledge in the wrong store will not be found, or will not adapt."}
+{"t":"2026-08-27T13:01:59.728156+00:00","s":28,"ah":0.220277,"k":"promote","id":"02cd0d2bd26d4372","conf":1.0,"sig":1.0,"lam":1e-05,"sum":"Not finding a memory is not evidence it did not happen. When a judgment rests on absence I check the journal: it is the record, my memory only reconstructs it."}
+{"t":"2026-08-27T13:01:59.729918+00:00","s":29,"ah":0.220277,"k":"promote","id":"f42cf6233e384136","conf":1.0,"sig":1.0,"lam":1e-05,"sum":"I propose amendments to these principles; I never enact them. A change cites the incidents that motivate it and waits for ratification."}
+{"t":"2026-08-27T13:02:02.764407+00:00","s":0,"ah":0.220872,"k":"asm","ids":["59b91203222b42e4","02cd0d2bd26d4372","75e029865c8e435d","465e166c50d74b09","b6966a829bb7482b","c5ea572afbc149e9","f42cf6233e384136","c4bc0e4a120042b4","db0fc2a34d0446bd","78fb513481984036","5c42bcc0efd19526"],"frame":"self","sid":"9dc32e9609d946d8"}
+{"t":"2026-08-27T13:02:17.334241+00:00","s":0,"ah":0.220869,"k":"asm","ids":["59b91203222b42e4","02cd0d2bd26d4372","75e029865c8e435d","465e166c50d74b09","b6966a829bb7482b","c5ea572afbc149e9","c4bc0e4a120042b4","db0fc2a34d0446bd","f42cf6233e384136","78fb513481984036","5c42bcc0efd19526"],"frame":"self","sid":"a8c72d99329e451c"}
+{"t":"2026-08-27T13:02:17.347977+00:00","s":1,"ah":0.220873,"k":"asm","ids":["59b91203222b42e4","02cd0d2bd26d4372","75e029865c8e435d","465e166c50d74b09","b6966a829bb7482b"],"frame":"task","sid":"a8c72d99329e451c"}
+{"t":"2026-08-27T13:02:17.941332+00:00","s":2,"ah":0.221038,"k":"asm","ids":["59b91203222b42e4","db0fc2a34d0446bd","5c42bcc0efd19526","f42cf6233e384136","c4bc0e4a120042b4"],"frame":"attention","sid":"a8c72d99329e451c"}

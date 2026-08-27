@@ -62,8 +62,14 @@ class ElfmemAdapter:
         """self + task + attention frames, captured per-frame (INV-22)."""
         blocks: dict[str, list[str]] = {}
         parts: list[str] = []
+        # SELF needs top_k >= the constitution size. elfmem defaults top_k to 5
+        # (memory.top_k), so the default call renders FIVE of ten principles and
+        # says nothing about the other five - the agent would hold half a
+        # constitution and never know (D-041).
+        from .constitution import PRINCIPLES
+        self_k = len(PRINCIPLES) + 4  # principles + identity + learned self
         for name, q in (("self", None), ("task", None), ("attention", query)):
-            fr = await self.mem.frame(name, q)
+            fr = await self.mem.frame(name, q, top_k=self_k if name == "self" else None)
             blocks[name] = [b.id for b in fr.blocks]
             if fr.text:
                 parts.append(fr.text)

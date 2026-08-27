@@ -1395,3 +1395,54 @@ round-trip; book aggregation with legacy positions skipped-and-counted. 42 regre
 pass. Live forced tick 27 ran clean; the agent declined on stale pre-open quotes - correctly.
 **Parked:** beta-weighted book delta (over-engineering for a 3-5 name book); IV-rank store
 (F8 stands); intraday P&L attribution by greek (post-hackathon).
+
+## D-041: The epistemic constitution, seeded into elfmem's SELF frame
+**Date:** 2026-08-27
+**Status:** accepted
+**Context:** Implements [notes/009](notes/009_epistemic_constitution_plan.md) (mechanism) and
+[notes/010](notes/010_constitutional_blocks_brainstorm.md) (the ten ratified principles).
+elfmem updated to `elfmem_index` HEAD (8a38bba3) first; every load-bearing fact re-verified on
+the new build.
+**What elfmem actually provides, verified not assumed:** `determine_decay_tier` grants PERMANENT
+decay (~34yr half-life) to any block tagged `self/constitutional`; `SELF_FRAME` guarantees those
+blocks slots, is queryless, and has `token_budget=600`; `review_constitutional` PROPOSES and
+`accept_amendment` applies, deliberately separate, with ADR 0003 cited in its own docstring as
+the reason. The plan drafted before reading the library matched the library.
+**Deliberately NOT used: `setup(seed=True)`.** It seeds ten domain-neutral personality blocks
+("I am elf - a curious, adaptive cognitive agent"), which is exactly the platitude class
+notes/010 cut. Our ten are incident-traced and displace nothing we would rather have.
+**Four silent gates between "seeded" and "visible", each found by checking rather than trusting
+the success message:**
+1. **Inbox.** `remember()` reported ten successes while `frame("self")` rendered NOTHING - SELF
+   blocks queue until consolidation. Stored is not visible.
+2. **Consolidation rewrites content.** The LLM turned terse imperatives into third-person
+   description - faithful, but ~2x the tokens, which pushed five principles past the budget
+   where the greedy renderer drops them in silence. Fixed with `host_analyses`: we supply the
+   summary, so principles land in the words they were ratified in, at the measured token cost,
+   and at zero LLM cost.
+3. **Batch cap.** `consolidate()` processes at most 5 per call (ADR 0007). Submitting ten in one
+   `host_analyses` dict does not queue the surplus - it gets LLM-analysed on a later pass,
+   silently reinstating the rewriting. Detectable only by inspecting tags: LLM-analysed blocks
+   carry inferred `self/value` tags we never supplied. Batches are now capped and progress is
+   measured by what LEAVES the inbox, never by what was submitted.
+4. **`top_k` defaults to 5.** The decide cycle would have rendered FIVE of ten principles and
+   said nothing about the rest - the agent holding half a constitution without knowing.
+   `assemble_context` now requests `len(PRINCIPLES) + 4` for the SELF frame.
+**Token discipline:** principles were measured at 499 tokens before trimming, against a 600
+budget the template also draws on. Trimmed to imperative cores (rationale lives in `traces_to`,
+for humans) at 351 tokens; the frame now renders all ten at 501 with headroom.
+`CONSTITUTION_TOKEN_CEILING` and a regression test keep it there.
+**`trdrbot constitution show|seed|reseed|verify|review`.** `verify` is the important one: it
+asserts the frame ACTUALLY RENDERS every principle, because counting stored blocks proves
+nothing - three of the four gates above passed a naive count. `review` proposes and never
+accepts; ratification is a human act (principle 10).
+**Honest limitation for the competition:** `review_constitutional` cannot fire inside the
+8-day window - its defaults require blocks >= 30 days old and >= 20 recently-reinforced blocks.
+The amendment path is real, wired and demonstrable, but it will report `insufficient_history`
+until well after the deadline. That is correct behaviour, not a gap: churning principles on
+eight days of data is the overfitting notes/009 warned about.
+**Self-test wired:** the decide prompt now asks the agent to name the ONE principle its current
+reasoning is most at risk of violating - what makes the constitution operative rather than
+decorative (notes/009 §2).
+**Evidence:** live `constitution verify` renders 10/10 at 501 tokens; `assemble_context` in the
+real decide path contains 10/10; 45 regression tests pass.

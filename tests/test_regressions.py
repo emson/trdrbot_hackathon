@@ -439,3 +439,31 @@ def test_book_greeks_sums_and_reports_unpriced_positions():
     assert bg["positions_priced"] == 1 and bg["positions_skipped"] == 1
     assert bg["delta_dollars"] > 0  # the priced bull put spread is bullish
     assert book_greeks([legacy], {"QQQ": 723.0}) is None
+
+
+# ------------------------------------------------ D-041 constitution
+
+def test_constitution_fits_the_self_frame_budget():
+    """The SELF frame renders greedily and BREAKS at the first block that
+    overflows - principles past the budget vanish with no error. Measured at
+    499 tokens before trimming, against a 600 budget that template overhead
+    eats into."""
+    from trdrbot import constitution
+    assert constitution.estimate_tokens() <= constitution.CONSTITUTION_TOKEN_CEILING
+    assert constitution.CONSTITUTION_TOKEN_CEILING < constitution.SELF_FRAME_TOKEN_BUDGET
+
+
+def test_every_principle_is_traceable_and_cued():
+    """notes/009's standing test: a principle you cannot trace is a platitude.
+    And block 5 applied to itself - a cueless block is lexically inert."""
+    from trdrbot import constitution
+    for p in constitution.PRINCIPLES:
+        assert p.traces_to.strip(), f"{p.key} cites no incident"
+        assert p.cue.strip() and not p.cue.lower().startswith("when relevant")
+        assert len(p.text) // 4 <= 45, f"{p.key} is too long for a scarce frame"
+
+
+def test_constitution_keys_are_unique():
+    from trdrbot import constitution
+    keys = [p.key for p in constitution.PRINCIPLES]
+    assert len(keys) == len(set(keys))

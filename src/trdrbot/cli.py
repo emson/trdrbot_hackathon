@@ -158,6 +158,76 @@ def _health() -> int:
     return 1 if any(f[0] == health.BAD for f in findings) else 0
 
 
+async def _constitution(action: str) -> int:
+    from . import constitution
+    from .elfmem_adapter import ElfmemAdapter
+
+    if action == "show":
+        print(constitution.render())
+        print(f"Budget: {constitution.estimate_tokens()} tokens of "
+              f"{constitution.SELF_FRAME_TOKEN_BUDGET} in the SELF frame "
+              f"(ceiling {constitution.CONSTITUTION_TOKEN_CEILING}).")
+        return 0
+
+    cfg = config_mod.load()
+    mem = await ElfmemAdapter.build(cfg.paths.state / "elfmem.db")
+    try:
+        if action == "reseed":
+            await constitution.purge(mem.mem)
+            r = await constitution.seed(mem.mem)
+            print(f"reseeded={r['created']}")
+            return 0
+
+        if action == "seed":
+            r = await constitution.seed(mem.mem)
+            print(f"seeded={r['created']} already_present={r['skipped']} total={r['total']}")
+            print("SELF blocks queue in the inbox until consolidation; "
+                  "run `trdrbot constitution verify` after the next housekeeping tick.")
+            return 0
+
+        if action == "verify":
+            # The check that matters: does the frame ACTUALLY render all ten?
+            # Greedy budget rendering drops overflow silently, so counting
+            # stored blocks proves nothing about what the agent will see.
+            fr = await mem.mem.frame("self", top_k=len(constitution.PRINCIPLES) + 4)
+            text = fr.text or ""
+            missing = [p.key for p in constitution.PRINCIPLES
+                       if p.text.split(".")[0][:40] not in text]
+            print(f"SELF frame renders {len(fr.blocks)} block(s), "
+                  f"~{len(text)//4} tokens.\n")
+            print(text[:1500])
+            print()
+            if missing:
+                print(f"MISSING from the rendered frame: {missing}")
+                print("These principles are stored but the agent never sees them.")
+                return 1
+            print(f"All {len(constitution.PRINCIPLES)} principles render. ")
+            return 0
+
+        if action == "review":
+            r = await mem.mem.review_constitutional()
+            if getattr(r, "insufficient_history", False):
+                print("insufficient_history: not enough operational record to judge drift.")
+                print("Expected here - review needs ~20 recently-reinforced blocks and "
+                      "blocks at least 30 days old (elfmem ReviewConfig defaults).")
+                return 0
+            props = getattr(r, "proposals", []) or []
+            if not props:
+                print("No drift proposals. The constitution matches operational behaviour.")
+                return 0
+            print(f"{len(props)} PROPOSED amendment(s) - none applied. "
+                  f"Ratify explicitly if you agree:\n")
+            for pr in props:
+                print(f"- block {getattr(pr,'block_id','?')} "
+                      f"(drift {getattr(pr,'drift_score',0):.2f})")
+                print(f"  proposed: {getattr(pr,'proposed_content','')[:300]}")
+                print(f"  rationale: {getattr(pr,'rationale','')[:300]}\n")
+            return 0
+    finally:
+        await mem.close()
+    return 0
+
+
 def main() -> None:
     p = argparse.ArgumentParser(prog="trdrbot")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -179,6 +249,10 @@ def main() -> None:
     sub.add_parser("research", help="run the daily research cycle now")
     sub.add_parser("discover", help="news-driven company discovery + thesis building")
     sub.add_parser("health", help="detect subsystems that run but never produce")
+    con = sub.add_parser("constitution", help="the epistemic constitution in elfmem's SELF frame")
+    con.add_argument("action", choices=["show", "seed", "verify", "review", "reseed"], default="show",
+                     nargs="?", help="show text | seed into elfmem | verify it renders | "
+                                     "review for drift (PROPOSES only, never accepts)")
 
     args = p.parse_args()
     if args.cmd == "doctor":
@@ -197,3 +271,5 @@ def main() -> None:
         sys.exit(asyncio.run(_discover()))
     elif args.cmd == "health":
         sys.exit(_health())
+    elif args.cmd == "constitution":
+        sys.exit(asyncio.run(_constitution(args.action)))
