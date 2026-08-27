@@ -1532,3 +1532,35 @@ prediction is right or wrong once, at its horizon.
 **Verified:** 8 ladder scenarios (sleep/review-on-move/review-on-silence/hunt/cap-full/cooldown/
 near-close/market-closed), 57 regression tests, and live at 09:59 ET - "idle -> sleep: positions
 healthy, tape quiet, looked recently".
+
+## D-044: A stray smoke-test loop hammered the API for half an hour
+**Date:** 2026-08-27
+**Status:** accepted
+**Context:** Starting the production run loop found a leftover `trdrbot run --interval 5` still
+alive from an earlier smoke test - polling the broker every 5 seconds and burning LLM calls,
+unnoticed, for roughly half an hour.
+**Root cause was six compounding failures, none of them bad luck:**
+1. `kill %1` targeted the backgrounded PIPELINE job, not the `uv run` -> python child, which was
+   orphaned and reparented rather than killed.
+2. No process-group kill (`pkill -P` / `kill -- -PGID`), so the tree survived its parent.
+3. No PID file, so later cleanup was guesswork against `pgrep` output.
+4. Death was never verified - "smoke test done" was printed without checking.
+5. Piping into `head -8` should SIGPIPE upstream, but a buffered `uv run` need not die from it.
+6. **`timeout` does not exist on macOS.** `timeout 200 uv run ...` returned exit 127 (command
+   not found) and the safety net I believed I had silently did not exist.
+**Choice - make the class structurally impossible rather than remembered:**
+- **Singleton lock.** `trdrbot run` writes `logs/run.pid` and refuses to start when that pid is
+  alive. A stale lock (recorded process gone) is taken over rather than treated as fatal - a
+  crashed loop must not require manual cleanup before trading can resume. A corrupt pid file is
+  also taken over. Deliberately reuses the pid file already written by the live loop, so the
+  currently-running process is protected retroactively.
+- **Interval floor.** `MIN_INTERVAL_SECONDS = 30`, overridable only with `--allow-fast`. No
+  legitimate reason exists to poll a live broker faster, and the floor bounds the blast radius
+  of the mistake even when process cleanup fails. This alone would have prevented the damage.
+- **`--max-ticks N`.** Smoke tests terminate themselves rather than depending on an external
+  kill that may target the wrong process. The original failure was in the *cleanup*, so removing
+  the need for cleanup is the more reliable fix.
+**Operational hygiene alongside the code:** the production loop now writes a PID file, logs to
+`logs/current.log`, and its liveness was verified after start rather than assumed.
+**Verified:** second loop refused against a live pid; stale and corrupt locks taken over;
+`--interval 5` refused with a clear message; `--max-ticks 1` self-terminated. 61 tests pass.

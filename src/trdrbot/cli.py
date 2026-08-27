@@ -147,7 +147,46 @@ async def _discover() -> int:
     return 0
 
 
-async def _run_loop(interval: int, closed_interval: int) -> int:
+#: No legitimate reason to poll a live broker faster than this. A stray
+#: 5-second smoke-test loop once hammered the API and burned LLM calls for
+#: half an hour before it was noticed - the floor bounds the blast radius of
+#: that mistake even when process cleanup fails (D-044).
+MIN_INTERVAL_SECONDS = 30
+
+
+def _acquire_run_lock(pid_path: "Path") -> bool:
+    """One run loop per machine. Returns False if another is already alive.
+
+    A stale lock (the recorded process is gone) is taken over rather than
+    treated as fatal: a crashed loop must not require manual cleanup before
+    trading can resume.
+    """
+    import os
+
+    if pid_path.exists():
+        try:
+            other = int(pid_path.read_text().strip())
+        except (ValueError, OSError):
+            other = None
+        if other and other != os.getpid():
+            try:
+                os.kill(other, 0)  # signal 0 = liveness probe, no effect
+            except ProcessLookupError:
+                print(f"[run] stale lock from pid {other}, taking over")
+            except PermissionError:
+                print(f"[run] pid {other} is alive and not ours - refusing to start")
+                return False
+            else:
+                print(f"[run] another run loop is already alive (pid {other}). "
+                      f"Stop it first, or delete {pid_path} if you know it is dead.")
+                return False
+    pid_path.parent.mkdir(parents=True, exist_ok=True)
+    pid_path.write_text(str(os.getpid()))
+    return True
+
+
+async def _run_loop(interval: int, closed_interval: int, *,
+                    max_ticks: int = 0, allow_fast: bool = False) -> int:
     """Tick until the deadline. Two cadences, because the work differs.
 
     Open: the decide path, the market pulse and exit-rule evaluation, on a
@@ -163,11 +202,28 @@ async def _run_loop(interval: int, closed_interval: int) -> int:
 
     from .tick import run_tick
 
+    from pathlib import Path
+
     cfg = config_mod.load()
+    if interval < MIN_INTERVAL_SECONDS and not allow_fast:
+        print(f"[run] refusing interval {interval}s - floor is {MIN_INTERVAL_SECONDS}s "
+              f"(pass --allow-fast to override). Polling a live broker faster than "
+              f"this is never legitimate.", flush=True)
+        return 2
+
+    pid_path = Path("logs/run.pid")
+    if not _acquire_run_lock(pid_path):
+        return 3
+
     deadline = date.fromisoformat(cfg.deadline)
     n = 0
-    print(f"[run] looping until {deadline}; open={interval}s closed={closed_interval}s", flush=True)
+    print(f"[run] pid {__import__('os').getpid()} looping until {deadline}; "
+          f"open={interval}s closed={closed_interval}s"
+          + (f"; stopping after {max_ticks} ticks" if max_ticks else ""), flush=True)
     while date.today() <= deadline:
+        if max_ticks and n >= max_ticks:
+            print(f"[run] reached --max-ticks {max_ticks}, stopping", flush=True)
+            break
         n += 1
         open_now = False
         try:
@@ -287,6 +343,11 @@ def main() -> None:
                      help="seconds between ticks while the market is open (default 300)")
     run.add_argument("--closed-interval", type=int, default=1800,
                      help="seconds between ticks while closed (default 1800)")
+    run.add_argument("--max-ticks", type=int, default=0,
+                     help="stop after N ticks (0 = run to the deadline). Use for smoke "
+                          "tests so they terminate themselves instead of needing a kill")
+    run.add_argument("--allow-fast", action="store_true",
+                     help="permit an interval below the safety floor")
     con = sub.add_parser("constitution", help="the epistemic constitution in elfmem's SELF frame")
     con.add_argument("action", choices=["show", "seed", "verify", "review", "reseed"], default="show",
                      nargs="?", help="show text | seed into elfmem | verify it renders | "
@@ -310,6 +371,8 @@ def main() -> None:
     elif args.cmd == "health":
         sys.exit(_health())
     elif args.cmd == "run":
-        sys.exit(asyncio.run(_run_loop(args.interval, args.closed_interval)))
+        sys.exit(asyncio.run(_run_loop(args.interval, args.closed_interval,
+                                       max_ticks=args.max_ticks,
+                                       allow_fast=args.allow_fast)))
     elif args.cmd == "constitution":
         sys.exit(asyncio.run(_constitution(args.action)))

@@ -610,3 +610,51 @@ def test_interim_marks_do_not_score_the_mind_prediction():
     from trdrbot.elfmem_adapter import ElfmemAdapter
     src = inspect.getsource(ElfmemAdapter.resolve)
     assert "not interim" in src, "mind_outcome must be gated on a true resolution"
+
+
+# ------------------------------------- D-044 stray background processes
+
+def test_run_lock_refuses_a_second_live_loop():
+    """A stray 5s smoke-test loop once hammered the broker API and burned LLM
+    calls for half an hour. `kill %1` had killed the pipeline job, not the
+    orphaned `uv run` child."""
+    import os, tempfile
+    from pathlib import Path
+    from trdrbot.cli import _acquire_run_lock
+
+    pid_file = Path(tempfile.mkdtemp()) / "run.pid"
+    pid_file.write_text(str(os.getpid()))  # a definitely-alive process
+    # Our own pid is treated as ours (re-entrant), so use a live *other* pid:
+    import subprocess
+    proc = subprocess.Popen(["sleep", "30"])
+    try:
+        pid_file.write_text(str(proc.pid))
+        assert _acquire_run_lock(pid_file) is False
+    finally:
+        proc.terminate()
+
+
+def test_run_lock_takes_over_a_stale_lock():
+    """A crashed loop must not require manual cleanup before trading resumes."""
+    import tempfile
+    from pathlib import Path
+    from trdrbot.cli import _acquire_run_lock
+
+    pid_file = Path(tempfile.mkdtemp()) / "run.pid"
+    pid_file.write_text("999999")  # not a live pid
+    assert _acquire_run_lock(pid_file) is True
+
+
+def test_run_lock_survives_a_corrupt_pid_file():
+    import tempfile
+    from pathlib import Path
+    from trdrbot.cli import _acquire_run_lock
+
+    pid_file = Path(tempfile.mkdtemp()) / "run.pid"
+    pid_file.write_text("not-a-pid")
+    assert _acquire_run_lock(pid_file) is True
+
+
+def test_interval_floor_is_above_any_legitimate_polling_rate():
+    from trdrbot.cli import MIN_INTERVAL_SECONDS
+    assert MIN_INTERVAL_SECONDS >= 30
