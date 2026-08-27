@@ -147,6 +147,17 @@ async def _discover() -> int:
     return 0
 
 
+def _health() -> int:
+    from . import health
+    from .positions import PositionStore
+
+    cfg = config_mod.load(quiet=True)
+    store = PositionStore(cfg.paths.wiki)
+    findings = health.check(cfg.paths.journal, store.all())
+    print(health.render(findings))
+    return 1 if any(f[0] == health.BAD for f in findings) else 0
+
+
 def main() -> None:
     p = argparse.ArgumentParser(prog="trdrbot")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -167,6 +178,7 @@ def main() -> None:
     sub.add_parser("calibration", help="show forecast calibration (Brier/Murphy)")
     sub.add_parser("research", help="run the daily research cycle now")
     sub.add_parser("discover", help="news-driven company discovery + thesis building")
+    sub.add_parser("health", help="detect subsystems that run but never produce")
 
     args = p.parse_args()
     if args.cmd == "doctor":
@@ -183,3 +195,5 @@ def main() -> None:
         sys.exit(asyncio.run(_research()))
     elif args.cmd == "discover":
         sys.exit(asyncio.run(_discover()))
+    elif args.cmd == "health":
+        sys.exit(_health())

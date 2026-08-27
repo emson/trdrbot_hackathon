@@ -83,6 +83,29 @@ HOLDS at the horizon), never percentage moves. At least one must be non-null.
 """
 
 
+def _plausible_band(o: dict[str, Any], spot: float) -> bool:
+    """Are this opportunity's bands actually PRICES, given the computed spot?
+
+    Found live (D-035): the LLM emitted percentage moves ([-6.0, 8.0] on an
+    $87 stock). `holds_at()` would then be always-False and attribution would
+    score every thesis as failed - silent false negatives straight into the
+    learning loop. Anchored to a number the system computed itself, because
+    an LLM-supplied value cannot validate an LLM-supplied value.
+    """
+    if spot <= 0:
+        return True  # no anchor to judge against; do not invent one
+    for b in (o.get("band_low"), o.get("band_high")):
+        if b is None:
+            continue
+        try:
+            v = float(b)
+        except (TypeError, ValueError):
+            return False
+        if not (0.3 * spot <= v <= 3.0 * spot):
+            return False
+    return True
+
+
 async def _fundamentals(ticker: str) -> dict[str, Any]:
     """Yahoo snapshot. Advisory: empty dict on any failure, never a crash."""
     try:
@@ -260,15 +283,10 @@ async def run(
         # failed - silently corrupting the learning loop. Anchor plausibility
         # to the computed close: a real band lives within [0.3x, 3x] of it.
         spot = last_close.get(o["underlying"].upper())
-        if spot:
-            bad = any(
-                b is not None and not (0.3 * spot <= float(b) <= 3.0 * spot)
-                for b in (o.get("band_low"), o.get("band_high"))
-            )
-            if bad:
-                journal.append("research_rejected", reason="band_not_a_price",
-                               raw=str(o)[:300], spot=spot)
-                continue
+        if spot and not _plausible_band(o, spot):
+            journal.append("research_rejected", reason="band_not_a_price",
+                           raw=str(o)[:300], spot=spot)
+            continue
         inbox.write("opportunity", o, source="discovery", trust="primary")
         emitted += 1
 

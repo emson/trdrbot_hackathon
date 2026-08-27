@@ -104,10 +104,17 @@ async def run(
 ) -> dict[str, int]:
     """Attribute every position whose thesis horizon has now passed."""
     done = 0
-    for pos in pending(store):
+    waiting = list(pending(store))
+    no_price = 0
+    for pos in waiting:
         spot = await _spot(tools, pos.underlying)
         if spot is None:
-            continue  # try again next housekeeping - never guess the price
+            # Never guess the price - but never fail silently either. This
+            # `continue` is exactly how attribution ran dead for days while
+            # every log line read healthy: no journal entry meant "never ran"
+            # and "ran, found nothing" were indistinguishable (D-038).
+            no_price += 1
+            continue
 
         held = experiments.Thesis(
             claim=pos.thesis_claim, underlying=pos.underlying, horizon=pos.thesis_horizon,
@@ -146,4 +153,13 @@ async def run(
             print(f"              {lesson}")
         done += 1
 
-    return {"attributed": done}
+    # Heartbeat: always record that the subsystem ran and what it concluded,
+    # including when it concluded nothing. The null path is the one that goes
+    # wrong quietly, so it is the one that must leave evidence.
+    journal.append(
+        "attribution_run",
+        pending=len(waiting),
+        attributed=done,
+        skipped_no_price=no_price,
+    )
+    return {"attributed": done, "pending": len(waiting), "skipped_no_price": no_price}

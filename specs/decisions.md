@@ -1284,3 +1284,39 @@ incl. the model omitting `max_loss_usd` entirely ($3,600 derived correctly). Tic
 had narrated "invalidated on a decisive break below ~757-758" while its rules watched only the
 mark. Added `underlying_stop below 757.5`, encoding what it had already said. Backup at
 scratchpad/pos_backup.md.
+
+## D-038: Detect silent failures systematically - health probe, null-path evidence, regression tests
+**Date:** 2026-08-27
+**Status:** accepted
+**Context:** The same *shape* of bug had appeared six times: the system kept running, the logs
+kept reading healthy, and something was quietly doing nothing. `attribution._spot` dead for
+days; `Sensor.policy` declared and never read; the `opening` status never wired; bars six weeks
+stale; 8 interim scores accumulating; `max_loss_usd` absent counting as zero risk. Each was
+found by accident. Taxonomy of the six classes with detection questions in
+[notes/012](notes/012_failure_classes.md).
+**Three mechanisms, in order of what they catch:**
+1. **`trdrbot health`** - a data-driven probe table asking of every subsystem *ran >= threshold
+   and produced nothing?* `doctor` answers "can this system start"; health answers "is it doing
+   anything". It found a real problem on its first run: the live position had no `max_loss_usd`
+   and so counted as ZERO risk against the book caps, silently loosening them (backfilled to
+   $2,210). It also checks positions for mark-only exit rules and unscoreable theses. Reports,
+   never gates (D-009).
+2. **Instrument the null path.** `attribution.run()` had a bare `continue` on a failed price
+   lookup - no journal entry, so "never ran" and "ran, found nothing" were indistinguishable,
+   which is exactly how it stayed dead. It now always emits `attribution_run` with
+   pending/attributed/skipped_no_price. **Rule: any early exit meaning "nothing happened" must
+   leave evidence saying why.**
+3. **`tests/test_regressions.py`** - 31 tests, one per bug that actually reached running code,
+   each named by its decision record, all pure and offline. **A bug is not fixed until the test
+   that would have caught it exists.** This session had been verifying fixes in throwaway shell
+   snippets, which protects nothing against the next edit; those checks are now permanent.
+   `_plausible_band` was extracted from `discovery.run` so the D-035 unit-confusion check is
+   testable rather than buried inline.
+**The mechanism that has caught the most, unplanned:** two independent paths computing the same
+quantity with the disagreement surfaced. The stale-bars bug died because the decide cycle
+checked research's numbers against live quotes and said so out loud; the bootstrap-drift bug
+died because a convergence test compared two estimators that should have agreed. Where a second
+opinion is cheap, compute it and journal the delta.
+**Evidence:** `trdrbot health` output before and after the backfill; 31 passing tests incl.
+three that test the detector itself (flags zero-risk position, flags run-but-never-produced,
+stays quiet while a subsystem is merely young).

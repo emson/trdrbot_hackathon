@@ -27,3 +27,8 @@ packages = ["src/trdrbot"]
 
 [tool.uv.sources]
 elfmem = { git = "https://github.com/emson/elfmem.git", branch = "elfmem_index" }
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+]
