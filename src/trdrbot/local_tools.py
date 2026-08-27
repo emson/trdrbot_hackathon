@@ -67,9 +67,12 @@ def build_simulate_experiments(shared: dict[str, Any], state_dir: "Path | None" 
                 VIEW or your STRUCTURE was wrong.
             candidates: list of {name, rationale, legs}, where legs is a list
                 of {right: "C"|"P", strike, side: "long"|"short", qty, price,
-                bid?, ask?}. Include bid and ask when you have real quotes:
-                friction is then computed from the ACTUAL spreads instead of
-                a flat 10% of premium, and price should be the mid.
+                bid?, ask?, iv_pct?}. Include bid and ask when you have real
+                quotes: friction is then computed from the ACTUAL spreads
+                instead of a flat 10% of premium, and price should be the
+                mid. Include iv_pct per leg when the surface is skewed - net
+                vega/greeks then honour the skew you observed instead of a
+                flat surface.
         """
         thesis = experiments.Thesis(
             claim=thesis_claim, underlying=underlying, horizon=horizon,
@@ -129,6 +132,9 @@ def build_simulate_experiments(shared: dict[str, Any], state_dir: "Path | None" 
         ]
         ranked = experiments.rank(results)
         shared["thesis"] = thesis
+        # Market params of this simulation - record_position derives the
+        # entry greeks from these, same derive-not-declare pattern as sizing.
+        shared["market"] = {"spot": spot, "iv": iv_pct / 100.0, "days": days_to_expiry}
         shared["ranked"] = [(e.name, m) for e, m in ranked]
         return experiments.render_comparison(thesis, ranked)
 
@@ -242,6 +248,29 @@ def build_record_position(
         elif max_loss_usd is not None:
             pos.max_loss_usd = float(max_loss_usd)
 
+        # Entry greeks, derived not declared (D-040): parse the executed OCC
+        # legs, price them with the market params simulate_experiments stashed.
+        # The judged story ("net delta X, theta Y - chosen because...") comes
+        # from here, and so does the book-greeks context on later ticks.
+        mkt = (shared or {}).get("market") or {}
+        if mkt:
+            occ_legs = []
+            for l in legs:
+                o = optmath.parse_occ(str(l.get("symbol", "")))
+                if o is None:
+                    occ_legs = []
+                    break
+                occ_legs.append(optmath.Leg(
+                    right=o["right"], strike=o["strike"],
+                    side="long" if str(l.get("side", "")).lower() in ("long", "buy") else "short",
+                    qty=int(l.get("qty", 1) or 1), price=0.0,
+                ))
+            g = optmath.net_greeks(occ_legs, mkt["spot"], mkt["iv"], mkt["days"]) if occ_legs else None
+            if g:
+                pos.greeks_at_entry = {k: round(v, 2) for k, v in g.items()}
+                pos.entry_iv = mkt["iv"]
+                pos.entry_spot = mkt["spot"]
+
         # Carry the thesis onto the position so resolution can attribute the
         # outcome to the VIEW or the STRUCTURE rather than just to P&L. Found
         # live: the very first position ever opened went straight from
@@ -282,6 +311,10 @@ def build_record_position(
                 "stated one."
             )
         risk = f" risk ${pos.max_loss_usd:,.0f}" if pos.max_loss_usd else ""
+        if pos.greeks_at_entry:
+            ge = pos.greeks_at_entry
+            risk += (f"; entry greeks delta ${ge['delta_dollars']:+,.0f}, "
+                     f"theta ${ge['theta_dollars']:+,.0f}/day, vega ${ge['vega_dollars']:+,.0f}/IVpt")
         return (
             f"Recorded {pos.position_id} with {len(rules)} exit rule(s) at {path.name}, "
             f"confidence {confidence:.0%} (scored for calibration at close),{risk}. "

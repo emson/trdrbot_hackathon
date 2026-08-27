@@ -4,6 +4,9 @@ position_id: pos_20260826_SPY_bull_put_spread_ebf0dcde
 status: open
 interim_band: 0
 max_loss_usd: 2210.0
+greeks_at_entry: null
+entry_iv: 0.165
+entry_spot: 766.5
 strategy: bull_put_spread
 underlying: SPY
 opened: '2026-08-26T18:59:03.685962+00:00'
@@ -28,28 +31,28 @@ exit_rules:
   direction: below
   level: 757.5
 exit_state:
-  stop_loss:
-  - false
-  - false
-  - false
-  profit_target:
-  - false
-  - false
-  - false
   days_to_deadline:below:0:
+  - false
+  - false
   - false
   position_mark:below:-1:
   - false
+  - false
+  - false
   position_mark:above:0.5:
   - false
+  - false
+  - false
   days_to_expiry:below:1:
+  - false
+  - false
   - false
 close_reason: null
 decision_ref: jrn_20260826T185819Z_dece972
 sources: []
 generated:
   by: ''
-  at: '2026-08-27T12:12:13.502253+00:00'
+  at: '2026-08-27T12:37:42.782634+00:00'
 verified:
 - by: trdrbot/reconcile
   at: '2026-08-26T20:05:59.099229+00:00'

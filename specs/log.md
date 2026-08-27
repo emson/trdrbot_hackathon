@@ -155,3 +155,9 @@ at-risk cap at 15% of equity (per-position caps allowed a correlated 25% book), 
 spread-based friction from live quotes, rule-derived event calendar (payrolls = deadline
 day), limit-order execution discipline in the prompt. Parked with reasons: contest-variance
 sizing (revisit Sept 1), order-rate breaker (D-009), IV-rank store.
+
+Built the greeks layer (D-040): BS closed-form in optmath (compute-don't-fetch, refusal
+on 0DTE/0IV), GREEKS row + expected-move-vs-band header in simulate_experiments, per-leg
+IV for skew, entry greeks derived onto positions, book greeks re-priced into every decide
+context, prompt playbook (shape-to-thesis matching, book check, pin-risk discipline).
+Dual-window realized vol (21d/5d) after the agent caught a window mismatch live. 42 tests.

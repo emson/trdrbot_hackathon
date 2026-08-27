@@ -103,6 +103,7 @@ def simulate(
     # fallback when no quotes were supplied.
     friction = friction_usd if friction_usd is not None else gross_premium * round_trip_cost
 
+    greeks = optmath.net_greeks(legs, spot, iv, days)
     pop_market = optmath.prob_profit(legs, spot, iv, days)
     pop_thesis = optmath.pop_given_view(legs, spot, iv, days, drift=thesis.drift)
     ev_market = optmath.expected_value(legs, spot, iv, days)
@@ -152,6 +153,10 @@ def simulate(
         "thesis_edge": edge,
         "pop_bootstrap": pop_bootstrap,
         "tail_gap": tail_gap,
+        "greeks": greeks,
+        "days": days,
+        "expected_move": optmath.expected_move(spot, iv, days),
+        "spot": spot,
     }
 
 
@@ -227,11 +232,42 @@ ATTRIBUTION_SIGNAL = {
 }
 
 
+def _greeks_line(g: dict[str, Any] | None, days: float) -> str:
+    if not g:
+        return ""
+    warn = ""
+    # Near-expiry warning, quantified: short gamma into the final days is pin
+    # risk - delta can flip on a $1 move. Surface, never gate (D-009).
+    if g["gamma_shares"] < 0 and days <= 2:
+        warn = "  <- short gamma near expiry: delta unstable, pin risk"
+    return (
+        f"\n   GREEKS   delta ${g['delta_dollars']:+,.0f}"
+        f" ({g['delta_shares']:+.0f} sh) | theta ${g['theta_dollars']:+,.0f}/day"
+        f" | vega ${g['vega_dollars']:+,.0f}/IVpt"
+        f" | gamma {g['gamma_shares']:+.1f} sh/$" + warn
+    )
+
+
 def render_comparison(
     thesis: Thesis, ranked: list[tuple[Experiment, dict[str, Any]]]
 ) -> str:
     """Comparison table for the decide prompt - facts and estimates separated."""
-    lines = [f"### Thesis\n{thesis.summary()}\n", "### Candidate expressions (ranked)"]
+    lines = [f"### Thesis\n{thesis.summary()}"]
+    # The market's own 1-sigma forecast, next to the thesis's claim. A band
+    # inside the expected move is agreeing with the market and paying for the
+    # privilege; a band claiming much more needs a reason the market lacks.
+    for _, m0 in ranked:
+        em, sp = m0.get("expected_move"), m0.get("spot")
+        if em and sp:
+            lo = f"{thesis.band_low:g}" if thesis.band_low is not None else "-inf"
+            hi = f"{thesis.band_high:g}" if thesis.band_high is not None else "+inf"
+            lines.append(
+                f"Market 1-sigma expected move by horizon: +/-${em:,.2f}"
+                f" (i.e. {sp - em:,.2f} to {sp + em:,.2f}; spot {sp:,.2f})."
+                f" Thesis band [{lo}, {hi}]."
+            )
+            break
+    lines.append("\n### Candidate expressions (ranked)")
     for i, (exp, m) in enumerate(ranked, 1):
         if not m.get("usable"):
             lines.append(f"\n**{i}. {exp.name}** - UNUSABLE: {m.get('error')}")
@@ -254,6 +290,7 @@ def render_comparison(
             f"\n   FACTS    max profit {mp} | max loss {ml} | R:R {rr}"
             f" | breakevens {m['breakevens']}"
             f"\n   MODELLED P(profit) market {pm} -> your view {pt} | thesis edge {edge}"
+            f"{_greeks_line(m.get('greeks'), m.get('days') or 0)}"
             f"{boot}"
             f"\n   COSTS    est. round-trip friction ${m['est_friction']:,.0f}"
             f" | EV after costs {eac}"

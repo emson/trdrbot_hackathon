@@ -20,6 +20,7 @@ too much weight on the second.
 from __future__ import annotations
 
 import math
+import re
 from dataclasses import dataclass
 from typing import Any, Iterable
 
@@ -45,6 +46,11 @@ class Leg:
     qty: int
     price: float  # per-share premium at entry
     expiry: str = ""  # YYYY-MM-DD; blank means "unspecified, assume shared"
+    #: Optional per-leg implied vol as a FRACTION (0.165 = 16.5%). Real
+    #: surfaces are skewed - the agent has measured 16.5%-vs-7.4% put/call
+    #: splits live - and a single flat IV erases exactly that observation.
+    #: None falls back to the shared IV at the call site.
+    iv: float | None = None
 
     @property
     def sign(self) -> int:
@@ -66,9 +72,11 @@ class Leg:
             raise ValueError(f"leg strike must be positive, got {strike}")
         if price < 0:
             raise ValueError(f"leg price cannot be negative, got {price}")
+        iv = d.get("iv_pct")
         return cls(
             right=right, strike=strike, side=side, qty=qty, price=price,
             expiry=str(d.get("expiry", "") or ""),
+            iv=(float(iv) / 100.0) if iv is not None else None,
         )
 
 
@@ -250,3 +258,103 @@ def pop_given_view(
         for z, d in zip(zs, dens)
         if pnl_at(legs, spot * math.exp(mu + sig * z)) > 0
     )
+
+
+# ------------------------------------------------------------- greeks (MODELLED)
+#
+# Black-Scholes closed form with r=0. Rho is deliberately absent: at <= 7 DTE
+# with rates ~4% its effect is cents per contract, and pretending otherwise
+# would be precision theatre. Everything here inherits the same caveat as the
+# lognormal grid - these are model numbers, advisory, assumption-carrying.
+
+def _norm_cdf(x: float) -> float:
+    return 0.5 * (1.0 + math.erf(x / math.sqrt(2.0)))
+
+
+def _norm_pdf(x: float) -> float:
+    return math.exp(-0.5 * x * x) / math.sqrt(2.0 * math.pi)
+
+
+def bs_greeks(right: str, strike: float, spot: float, iv: float, days: float) -> dict[str, float] | None:
+    """Per-share greeks for one contract. None when the model is undefined.
+
+    At days <= 0 or iv <= 0 the formulas divide by zero - and the honest
+    answer is that an expiring option has no smooth sensitivities, it has a
+    cliff. None, never an extrapolation (same refusal discipline as
+    MultiExpiryError and unbounded-loss sizing).
+    """
+    if days <= 0 or iv <= 0 or spot <= 0 or strike <= 0:
+        return None
+    t = days / 365.0
+    st = iv * math.sqrt(t)
+    d1 = (math.log(spot / strike) + 0.5 * iv * iv * t) / st
+    delta = _norm_cdf(d1) if right == "C" else _norm_cdf(d1) - 1.0
+    gamma = _norm_pdf(d1) / (spot * st)
+    # theta per DAY, r=0 (call and put theta coincide at r=0)
+    theta = -(spot * _norm_pdf(d1) * iv) / (2.0 * math.sqrt(t)) / 365.0
+    # vega per 1 IV POINT (0.01), the unit traders quote
+    vega = spot * _norm_pdf(d1) * math.sqrt(t) / 100.0
+    return {"delta": delta, "gamma": gamma, "theta": theta, "vega": vega}
+
+
+def net_greeks(legs: list[Leg], spot: float, iv: float, days: float) -> dict[str, float] | None:
+    """Whole-position greeks in trader units, or None if any leg is undefined.
+
+    delta_shares  equivalent stock shares (signed)
+    delta_dollars delta_shares x spot - directional exposure in money
+    gamma_shares  shares of delta gained per $1 move in the underlying
+    theta_dollars P&L per calendar day from time passing (+ = decay is income)
+    vega_dollars  P&L per 1-point move in IV (+ = long vol)
+
+    Per-leg IV is honoured when the leg carries one (skew); otherwise the
+    shared IV applies. All-or-nothing: one unpriceable leg makes the position
+    shape unknown, and a partial sum would be silently wrong (the same
+    reasoning as INV-19's all-legs closes).
+    """
+    d_sh = g_sh = th = ve = 0.0
+    for leg in legs:
+        g = bs_greeks(leg.right, leg.strike, spot, leg.iv if leg.iv is not None else iv, days)
+        if g is None:
+            return None
+        k = leg.sign * leg.qty * CONTRACT_MULTIPLIER
+        d_sh += k * g["delta"]
+        g_sh += k * g["gamma"]
+        th += k * g["theta"]
+        ve += k * g["vega"]
+    return {
+        "delta_shares": d_sh,
+        "delta_dollars": d_sh * spot,
+        "gamma_shares": g_sh,
+        "theta_dollars": th,
+        "vega_dollars": ve,
+    }
+
+
+def expected_move(spot: float, iv: float, days: float) -> float | None:
+    """The market's own 1-sigma move by the horizon, in dollars.
+
+    The first professional sanity check on any thesis: a band INSIDE the
+    expected move is agreeing with the market and paying theta for the
+    privilege; a band claiming much more than the expected move needs a
+    reason the whole market lacks."""
+    if spot <= 0 or iv <= 0 or days <= 0:
+        return None
+    return spot * iv * math.sqrt(days / 365.0)
+
+
+# OCC symbol: ROOT + YYMMDD + C/P + strike*1000 zero-padded to 8.
+_OCC = re.compile(r"^([A-Z]{1,6})(\d{6})([CP])(\d{8})$")
+
+
+def parse_occ(symbol: str) -> dict[str, Any] | None:
+    """SPY260902P00755000 -> {underlying, expiry, right, strike}. None if not OCC."""
+    m = _OCC.match(str(symbol).strip().upper())
+    if not m:
+        return None
+    root, ymd, right, strike = m.groups()
+    return {
+        "underlying": root,
+        "expiry": f"20{ymd[:2]}-{ymd[2:4]}-{ymd[4:6]}",
+        "right": right,
+        "strike": int(strike) / 1000.0,
+    }

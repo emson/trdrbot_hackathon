@@ -1349,3 +1349,49 @@ attribution machinery exists to prevent. It remains a known, visible, permanent 
 learning record: one trade this loop cannot learn from.
 **Evidence:** journal `jrn_20260826T185911Z_exe9276`, tool_calls confirms simulate_experiments
 absent from the sequence; live `trdrbot health` before/after; 2 new regression tests.
+
+## D-040: The greeks layer - risk shape as a first-class input
+**Date:** 2026-08-27
+**Status:** accepted
+**Context:** The system simulated only TERMINAL outcomes (payoff at expiry, P(profit), EV) -
+zero intra-life sensitivity anywhere. The agent reasoned about risk shape qualitatively
+("doubling the same factor exposure", "short-strike delta 0.239") with numbers it gleaned from
+chain quotes. Judging explicitly scores options-strategy sophistication, and risk shaping IS
+the substance of multi-leg trading (docs/sources/multi_leg_and_greeks_explained.md).
+**Choice - compute, don't fetch:** Black-Scholes closed form in optmath (r=0; rho deliberately
+absent - at <=7 DTE its effect is cents and pretending otherwise is precision theatre). Chosen
+over reading Alpaca chain greeks: zero new inputs, works offline and in tests, and the
+exact/modelled split stays honest - we know which assumptions produced every number. Greeks are
+MODELLED-layer citizens with the same refusal discipline as the rest of optmath: 0 DTE or 0 IV
+returns None (an expiring option has a cliff, not smooth sensitivities), and one unpriceable leg
+makes the whole POSITION's shape None (a partial sum is silently wrong - INV-19's reasoning).
+**What was added, each verified:**
+1. **`net_greeks` in trader units** - delta$ (direction in money), theta$/day (time income or
+   cost), vega$/IVpt (vol exposure), gamma sh/$ (delta instability). Per-leg `iv_pct` honoured:
+   the agent has measured 16.5%-vs-7.4% put/call skew live, and a flat surface erases exactly
+   that observation - selling the rich side IS the trade, so measure it.
+2. **GREEKS row in `simulate_experiments`** - shape sits between MODELLED and HISTORY for every
+   candidate; short gamma with <=2 DTE renders a pin-risk warning (surfaced, never gated).
+3. **Expected move vs thesis band** in the comparison header - the first professional sanity
+   check: a band inside the market's 1-sigma move is agreeing with the market and paying for
+   the privilege. Rendered from inputs already present.
+4. **Entry greeks stored on the position** - derived (OCC-parsed executed legs priced with the
+   market params simulate stashed in `shared`), not declared, same pattern as D-037's risk.
+5. **Book greeks in every decide context** - open positions re-priced at current spot and DTE
+   with entry IV (the one labelled staleness). Partial books sum with a skipped count: a
+   partially-priced BOOK is informative where a partially-priced position is not. This is what
+   turns "three bullish put spreads on three tickers are one +delta/-vega/+theta position" from
+   a sentence into a number the agent sees before adding a fourth.
+6. **Prompt playbook** - match shape to thesis (range view = theta income; breakout = own
+   gamma; vol view = vega trade), check the book first, expected-move comparison, final-two-days
+   gamma discipline, per-leg IV for skew.
+7. **Dual-window realized vol** (21d + 5d) after the live decide cycle caught the desk citing
+   21d vol against a market pricing the last few days - both were right, the WINDOW was the
+   disagreement; now both render and the guess is removed.
+**Verified:** put-call delta parity at r=0; bull put spread = +delta/+theta/-vega; long straddle
+= flat delta/+gamma/-theta/+vega; ATM gamma 2.6x from 7 DTE to 1 DTE (the pin-risk warning
+rests on a real effect); skew-aware vega diverges from flat; refusal on 0 DTE/0 IV; OCC parse
+round-trip; book aggregation with legacy positions skipped-and-counted. 42 regression tests
+pass. Live forced tick 27 ran clean; the agent declined on stale pre-open quotes - correctly.
+**Parked:** beta-weighted book delta (over-engineering for a 3-5 name book); IV-rank store
+(F8 stands); intraday P&L attribution by greek (post-hackathon).

@@ -360,3 +360,82 @@ def test_record_position_warns_when_simulate_was_skipped():
     assert "no thesis on file" in msg
     pos = store.all()[0]
     assert pos.thesis_claim == ""  # the free-text `thesis` arg is NOT thesis_claim
+
+
+# ---------------------------------------------------- D-040 greeks layer
+
+def test_bull_put_spread_shape_is_bullish_theta_income_short_vol():
+    legs = [Leg.parse({"right": "P", "strike": 755, "side": "short", "qty": 5, "price": 0.6}),
+            Leg.parse({"right": "P", "strike": 750, "side": "long", "qty": 5, "price": 0.3})]
+    g = optmath.net_greeks(legs, 766.0, 0.13, 6)
+    assert g["delta_dollars"] > 0 and g["theta_dollars"] > 0 and g["vega_dollars"] < 0
+
+
+def test_long_straddle_shape_is_flat_delta_long_gamma_pays_theta():
+    legs = [Leg.parse({"right": "C", "strike": 766, "side": "long", "qty": 1, "price": 4}),
+            Leg.parse({"right": "P", "strike": 766, "side": "long", "qty": 1, "price": 4})]
+    g = optmath.net_greeks(legs, 766.0, 0.13, 6)
+    assert abs(g["delta_shares"]) < 12 and g["gamma_shares"] > 0
+    assert g["theta_dollars"] < 0 and g["vega_dollars"] > 0
+
+
+def test_greeks_refuse_expiring_and_zero_vol_rather_than_extrapolate():
+    assert optmath.bs_greeks("C", 100, 100, 0.2, 0) is None
+    assert optmath.bs_greeks("C", 100, 100, 0.0, 5) is None
+    legs = [Leg.parse({"right": "C", "strike": 766, "side": "long", "qty": 1, "price": 4})]
+    assert optmath.net_greeks(legs, 766.0, 0.0, 6) is None
+
+
+def test_put_call_delta_parity_at_zero_rates():
+    c = optmath.bs_greeks("C", 100, 100, 0.2, 7)
+    p = optmath.bs_greeks("P", 100, 100, 0.2, 7)
+    assert abs(c["delta"] - p["delta"] - 1.0) < 1e-9
+
+
+def test_gamma_explodes_toward_expiry():
+    g7 = optmath.bs_greeks("C", 766, 766, 0.13, 7)["gamma"]
+    g1 = optmath.bs_greeks("C", 766, 766, 0.13, 1)["gamma"]
+    assert g1 / g7 > 2, "the near-expiry warning must rest on a real effect"
+
+
+def test_per_leg_iv_changes_net_vega_skew_is_measurable():
+    flat = optmath.net_greeks(
+        [Leg.parse({"right": "P", "strike": 755, "side": "short", "qty": 1, "price": 1}),
+         Leg.parse({"right": "C", "strike": 777, "side": "short", "qty": 1, "price": 1})],
+        766.0, 0.12, 6)
+    skew = optmath.net_greeks(
+        [Leg.parse({"right": "P", "strike": 755, "side": "short", "qty": 1, "price": 1, "iv_pct": 16.5}),
+         Leg.parse({"right": "C", "strike": 777, "side": "short", "qty": 1, "price": 1, "iv_pct": 7.4}),],
+        766.0, 0.12, 6)
+    assert abs(skew["vega_dollars"] - flat["vega_dollars"]) > 0.5
+
+
+def test_occ_symbols_parse_and_reject():
+    o = optmath.parse_occ("SPY260902P00755000")
+    assert o == {"underlying": "SPY", "expiry": "2026-09-02", "right": "P", "strike": 755.0}
+    assert optmath.parse_occ("SPY") is None
+    assert optmath.parse_occ("") is None
+
+
+def test_expected_move_is_rendered_next_to_the_thesis_band():
+    th = experiments.Thesis(claim="range", underlying="SPY", horizon="2026-09-02",
+                            band_low=755.0, band_high=785.0)
+    e = experiments.Experiment("s", [
+        Leg.parse({"right": "P", "strike": 755, "side": "short", "qty": 1, "price": 0.6}),
+        Leg.parse({"right": "P", "strike": 750, "side": "long", "qty": 1, "price": 0.3})])
+    out = experiments.render_comparison(th, [(e, experiments.simulate(e, th, 766.42, 0.105, 6))])
+    assert "expected move" in out and "GREEKS" in out
+
+
+def test_book_greeks_sums_and_reports_unpriced_positions():
+    from trdrbot.analytics import book_greeks
+    good = Position(position_id="a", status="open", underlying="SPY", entry_iv=0.13,
+                    legs=[{"symbol": "SPY990902P00755000", "side": "sell", "qty": 5},
+                          {"symbol": "SPY990902P00750000", "side": "buy", "qty": 5}])
+    legacy = Position(position_id="b", status="open", underlying="QQQ",
+                      legs=[{"symbol": "QQQ990902P00700000", "side": "sell", "qty": 1}])
+    bg = book_greeks([good, legacy], {"SPY": 766.0, "QQQ": 723.0})
+    assert bg is not None
+    assert bg["positions_priced"] == 1 and bg["positions_skipped"] == 1
+    assert bg["delta_dollars"] > 0  # the priced bull put spread is bullish
+    assert book_greeks([legacy], {"QQQ": 723.0}) is None

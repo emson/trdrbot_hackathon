@@ -37,6 +37,10 @@ class Stats:
     ret_21d: float | None
     ret_63d: float | None
     realized_vol: float | None  # annualized, last 21 days
+    #: Same measure over the last 5 days. The decide cycle caught the desk
+    #: citing 21d vol against a market pricing the last few days - both were
+    #: right, the window was the disagreement. Report both, remove the guess.
+    realized_vol_5d: float | None
     vol_percentile: float | None  # today's 21d vol vs its own 1y history
     sma20_state: str  # above | below
     sma50_state: str
@@ -49,8 +53,8 @@ class Stats:
             f"{self.symbol}: close {self.last_close:.2f} | "
             f"5d {f(self.ret_5d, '%+.1f%%')} 21d {f(self.ret_21d, '%+.1f%%')} "
             f"63d {f(self.ret_63d, '%+.1f%%')} | "
-            f"realized vol {f(self.realized_vol, '%.1f%%')} "
-            f"(pctile {f(self.vol_percentile, '%.0f')}) | "
+            f"realized vol 21d {f(self.realized_vol, '%.1f%%')} / 5d {f(self.realized_vol_5d, '%.1f%%')} "
+            f"(21d pctile {f(self.vol_percentile, '%.0f')}) | "
             f"px {self.sma20_state} SMA20, {self.sma50_state} SMA50 | "
             f"RSI14 {f(self.rsi14, '%.0f')} | "
             f"max DD 1y {f(self.max_drawdown_1y, '%.1f%%')}"
@@ -112,6 +116,8 @@ def compute_stats(symbol: str, closes: list[float]) -> Stats:
 
     vols = _rolling_vol(rets)
     realized = vols[-1] * 100 if vols else None
+    v5 = _rolling_vol(rets, window=5)
+    realized5 = v5[-1] * 100 if v5 else None
     pctile = None
     if len(vols) >= 30:
         below = sum(1 for v in vols if v <= vols[-1])
@@ -135,6 +141,7 @@ def compute_stats(symbol: str, closes: list[float]) -> Stats:
         ret_21d=total_ret(21),
         ret_63d=total_ret(63),
         realized_vol=realized,
+        realized_vol_5d=realized5,
         vol_percentile=pctile,
         rsi14=_rsi(closes),
         sma20_state="above" if (sma20 and last > sma20) else "below",

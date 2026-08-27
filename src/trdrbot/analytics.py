@@ -139,3 +139,60 @@ async def snapshot(tools: dict[str, Any], underlyings: list[str] | None = None) 
         print(f"[analytics] orders unavailable: {exc!r}")
 
     return snap
+
+
+def book_greeks(positions: list[Any], underlying_prices: dict[str, float]) -> dict[str, Any] | None:
+    """Approximate net greeks of the whole book, re-priced now (D-040).
+
+    Legs are re-derived from their OCC symbols and priced at the CURRENT spot
+    and CURRENT days-to-expiry, with each position's entry IV (the one honest
+    staleness in the estimate, and it is labelled). This is what makes "a
+    second short-vol position doubles the factor bet" a number instead of a
+    sentence. None when nothing is priceable; partial books are summed and
+    the skipped count reported - a partially-priced book is still far more
+    informative than none, unlike a partially-priced POSITION (which is why
+    net_greeks is all-or-nothing but this is not).
+    """
+    from datetime import date as _date
+
+    from . import optmath
+
+    total = {"delta_dollars": 0.0, "theta_dollars": 0.0, "vega_dollars": 0.0, "gamma_shares": 0.0}
+    priced, skipped = 0, 0
+    for pos in positions:
+        spot = underlying_prices.get(getattr(pos, "underlying", ""))
+        iv = getattr(pos, "entry_iv", None)
+        if not spot or not iv:
+            skipped += 1
+            continue
+        legs = []
+        for l in getattr(pos, "legs", []):
+            o = optmath.parse_occ(str(l.get("symbol", "")))
+            if o is None:
+                legs = []
+                break
+            legs.append(optmath.Leg(
+                right=o["right"], strike=o["strike"],
+                side="long" if str(l.get("side", "")).lower() in ("long", "buy") else "short",
+                qty=int(l.get("qty", 1) or 1), price=0.0, expiry=o["expiry"],
+            ))
+        if not legs:
+            skipped += 1
+            continue
+        days = None
+        try:
+            days = ( _date.fromisoformat(legs[0].expiry) - _date.today()).days
+        except ValueError:
+            pass
+        g = optmath.net_greeks(legs, spot, iv, days) if days and days > 0 else None
+        if g is None:
+            skipped += 1
+            continue
+        priced += 1
+        for k in total:
+            total[k] += g[k]
+    if priced == 0:
+        return None
+    total["positions_priced"] = priced
+    total["positions_skipped"] = skipped
+    return total

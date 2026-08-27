@@ -78,13 +78,28 @@ def _text_of(message: Any) -> str:
     return str(content)
 
 
-def _render_positions(store: PositionStore) -> str:
+def _render_positions(store: PositionStore, snap: "analytics.Snapshot | None" = None) -> str:
     """Two-tier context (D-019): detail for what needs attention, one line for the rest."""
     positions = store.open_positions()
     if not positions:
         return "## Our positions\n\n(none)"
 
     lines = ["## Our positions", ""]
+    # Book shape first: correlated exposure in its native units. Three
+    # bullish put spreads on three tickers LOOK diversified and ARE one
+    # +delta/-vega/+theta position - this line is where that becomes
+    # visible before a fourth one gets added (D-040).
+    if snap is not None:
+        bg = analytics.book_greeks(positions, snap.underlying_prices)
+        if bg:
+            skip = f" ({bg['positions_skipped']} unpriced)" if bg["positions_skipped"] else ""
+            lines.append(
+                f"Book greeks (est., entry IV): delta ${bg['delta_dollars']:+,.0f}"
+                f" | theta ${bg['theta_dollars']:+,.0f}/day"
+                f" | vega ${bg['vega_dollars']:+,.0f}/IVpt{skip}. Before adding a"
+                f" position, check whether it grows or offsets these."
+            )
+            lines.append("")
     for p in positions:
         rules = ", ".join(
             f"{r['type']}={r.get('threshold', r.get('days_before_expiry'))}" for r in p.exit_rules
@@ -199,7 +214,7 @@ async def run_tick(
         agent_tools = guarded + [sim_tool, size_tool, record_tool]
         agent = create_react_agent(build_model(config), agent_tools, prompt=SYSTEM_PROMPT)
 
-        prompt_parts = [snap.render(), _render_positions(store)]
+        prompt_parts = [snap.render(), _render_positions(store, snap)]
         if config.events:
             from datetime import date as _date
             ev_lines = []
