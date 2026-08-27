@@ -997,3 +997,27 @@ def test_traded_and_declined_are_distinguishable():
     b.mark_traded("NVDA", "2099-01-01", "pos_1")
     s = b.summary()
     assert s["traded"] == 1 and s["declined"] == 1 and s["trials"] == 2
+
+
+# ------------------------------------------- D-054 measured lessons
+
+def test_every_lesson_is_cued_named_and_specific():
+    """A lesson findable only by its own wording is lost ([cues] applied to
+    itself), and one without numbers is a platitude."""
+    from trdrbot import lessons
+    keys = [l.key for l in lessons.LESSONS]
+    assert len(keys) == len(set(keys))
+    for l in lessons.LESSONS:
+        assert l.cue.strip().startswith("when"), f"{l.key}: cue must name a situation"
+        assert lessons.block_text(l).startswith(f"[{l.key}]"), "name-first for stable citation"
+        assert any(ch.isdigit() for ch in l.text), f"{l.key}: no measurement in it"
+        assert len(l.text) > 200, f"{l.key}: too thin to be actionable"
+
+
+def test_lessons_are_not_constitutional():
+    """They must decay and be moved by outcomes. Pinning a measured claim as
+    identity is exactly what [regimes] warns against."""
+    from trdrbot import constitution, lessons
+    assert lessons.TAG != constitution.TAG
+    for l in lessons.LESSONS:
+        assert constitution.TAG not in l.tags

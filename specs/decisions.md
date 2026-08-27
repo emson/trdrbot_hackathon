@@ -1862,3 +1862,35 @@ this tenor, event variance dominates short-dated windows, Kelly overbets short p
 positive skew validates faster), profit-target conventions do not transfer, and a roll is a new
 trade. Each states when it applies and what it changes - the wiki is what the AGENT reads, so
 the evidence is compressed to what alters a decision.
+
+## D-054: Measured lessons seeded into evolving memory
+**Date:** 2026-08-27
+**Status:** accepted
+**Context:** Asked to make sure the agent has actually *learned* to diversify. The routing
+question came first, and the constitution's own `[routing]` principle answers it: the journal
+holds what happened, the wiki holds stable reference (the technique concepts, D-053), the SELF
+frame holds identity, and **evolving patterns whose confidence should move with outcomes belong
+in elfmem**. A measured claim about how OUR book behaves is the third of those.
+**Six lessons, each carrying the numbers that produced it** - a lesson without a measurement is a
+platitude, which is the same test the constitution uses:
+- `[correlated-names-are-one-bet]` - the diversification lesson. Not "diversify" but the specific
+  failure: SPY/QQQ correlate at 0.92, our old universe averaged 0.75 pairwise, and **the
+  per-underlying cap cannot see it because it counts NAMES, not exposures** - three "diversified"
+  tech positions pass every check and lose together.
+- `[friction-is-the-size-of-the-edge]` - EV +$25 -> +$9 after real round-trip cost, a 65% haircut.
+- `[research-notes-go-stale-by-design]` - the desk runs while the market is closed; three caught
+  mismatches (NVDA 224.11 vs 209.37, MRNA 142.57 vs 145.48, SMCI below its own band floor).
+- `[post-event-iv-is-already-gone]` - implied crushes to realised before we look.
+- `[exploration-budget-is-not-a-mandate]` - the agent's own line, preserved: buying a
+  known-negative-EV structure to generate a data point "is a donation with a story attached".
+- `[a-38-percent-trade-can-be-the-right-trade]` - payoff times probability, not win rate.
+**Deliberately NOT constitutional.** These are ordinary knowledge blocks that decay and are moved
+by outcomes. Pinning a measured claim as PERMANENT identity is precisely what `[regimes]` warns
+against - a correlation measured in one regime is a hypothesis in the next.
+**Reused two hard-won lessons from seeding the constitution (D-041) rather than rediscovering
+them:** seeded blocks sit in an inbox until consolidation (measured again here - **0 of 6
+recallable immediately after a successful seed**), and consolidation rewrites content unless we
+supply `host_analyses`, in batches capped at the per-run limit.
+**Verified by retrieval, not by storage:** `trdrbot lessons verify` recalls each lesson by its own
+cue - 6/6, ranks 2-7. And on the real decide-cycle query *"should I open a second position
+alongside the NVDA spread I already hold"*, `[correlated-names-are-one-bet]` surfaces first.

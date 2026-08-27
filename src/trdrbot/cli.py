@@ -246,6 +246,47 @@ async def _prompts() -> int:
     return 0
 
 
+async def _lessons(action: str) -> int:
+    from . import lessons
+    from .elfmem_adapter import ElfmemAdapter
+
+    if action == "show":
+        for l in lessons.LESSONS:
+            print(f"\n[{l.key}]  tags={list(l.tags)}")
+            print(f"  cue: {l.cue}")
+            print(f"  {l.text[:200]}...")
+        print()
+        return 0
+
+    cfg = config_mod.load()
+    mem = await ElfmemAdapter.build(cfg.paths.state / "elfmem.db")
+    try:
+        if action == "seed":
+            r = await lessons.seed(mem.mem)
+            print(f"seeded={r['created']} already_present={r['skipped']}")
+            return 0
+        # verify: can each lesson actually be RECALLED by its own cue? Stored
+        # is not recalled, and only a retrieval check proves it (D-041).
+        await mem.begin()
+        missing = []
+        for l in lessons.LESSONS:
+            hits = await mem.mem.recall(l.cue, frame="attention", top_k=6)
+            if not any(f"[{l.key}]" in getattr(h, "content", "") for h in hits):
+                missing.append(l.key)
+            else:
+                rank = next(i for i, h in enumerate(hits, 1)
+                            if f"[{l.key}]" in getattr(h, "content", ""))
+                print(f"  ok   {l.key:<38} recalled at rank {rank}")
+        await mem.end()
+        for k in missing:
+            print(f"  MISS {k:<38} not recalled by its own cue")
+        print(f"\n{len(lessons.LESSONS) - len(missing)}/{len(lessons.LESSONS)} "
+              f"lessons recallable by their cue.")
+        return 1 if missing else 0
+    finally:
+        await mem.close()
+
+
 def _ledger() -> int:
     from . import ledger as ledger_mod
 
@@ -373,6 +414,8 @@ def main() -> None:
     sub.add_parser("health", help="detect subsystems that run but never produce")
     sub.add_parser("prompts", help="inventory every prompt the models read")
     sub.add_parser("ledger", help="every thesis ever formed, traded or declined")
+    les = sub.add_parser("lessons", help="measured lessons in evolving memory")
+    les.add_argument("action", choices=["show", "seed", "verify"], default="show", nargs="?")
     run = sub.add_parser("run", help="loop ticks continuously until the deadline")
     run.add_argument("--interval", type=int, default=300,
                      help="seconds between ticks while the market is open (default 300)")
@@ -409,6 +452,8 @@ def main() -> None:
         sys.exit(asyncio.run(_prompts()))
     elif args.cmd == "ledger":
         sys.exit(_ledger())
+    elif args.cmd == "lessons":
+        sys.exit(asyncio.run(_lessons(args.action)))
     elif args.cmd == "run":
         sys.exit(asyncio.run(_run_loop(args.interval, args.closed_interval,
                                        max_ticks=args.max_ticks,
