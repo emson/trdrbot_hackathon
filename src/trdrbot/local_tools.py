@@ -15,12 +15,14 @@ from typing import Any
 
 from langchain_core.tools import StructuredTool
 
-from . import experiments, ids, optmath, sizing
+from pathlib import Path
+
+from . import experiments, ids, market_stats, optmath, sizing
 from .calibration import CalibrationStore
 from .positions import Position, PositionStore
 
 
-def build_simulate_experiments(shared: dict[str, Any]) -> StructuredTool:
+def build_simulate_experiments(shared: dict[str, Any], state_dir: "Path | None" = None) -> StructuredTool:
     """Tool: score several expressions of one thesis before risking anything.
 
     Takes ALL candidates in a single call rather than one per call - that is
@@ -88,8 +90,20 @@ def build_simulate_experiments(shared: dict[str, Any]) -> StructuredTool:
                 "an experiment, it is a decision already made."
             )
 
+        # Historical bootstrap, if the research cycle has refreshed this
+        # underlying's closes recently. Demeaned + thesis drift applied, so
+        # the HISTORY row is comparable with the thesis view, and the tail
+        # gap is attributable to distribution shape.
+        factors = None
+        if state_dir is not None:
+            closes = market_stats.load_closes(state_dir, underlying)
+            if closes:
+                factors = market_stats.bootstrap_factors(
+                    closes, days_to_expiry, seed=underlying, drift=drift_pct / 100.0
+                ) or None
         results = [
-            (e, experiments.simulate(e, thesis, spot, iv_pct / 100.0, days_to_expiry))
+            (e, experiments.simulate(e, thesis, spot, iv_pct / 100.0, days_to_expiry,
+                                     terminal_factors=factors))
             for e in built
         ]
         ranked = experiments.rank(results)

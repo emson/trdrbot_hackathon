@@ -1050,3 +1050,47 @@ the edge."
    it the answer. Render path now regression-tested across bounded, unbounded-loss,
    unbounded-profit, calendar and zero-price candidates.
 **Evidence:** live runs, ticks 16-19.
+
+## D-032: A daily research cycle produces the theses - regime, dossiers, opportunities
+**Date:** 2026-08-27
+**Status:** accepted
+**Context:** Everything downstream (simulate -> size -> execute -> attribute) started at "a
+thesis exists," but nothing produced theses with research behind them. The user's intent: a
+top-down process - macro regime from news/calendar/geopolitics, then a researched company
+universe (what it is, why/why not to invest, the people, the environment, historical trading),
+technicals on real price history, Monte Carlo over outcomes, then opportunity selection.
+**Choice:** `research.py`, a once-daily cycle on the slow path (housekeeping-triggered, plus a
+`trdrbot research` command). Division of labour is strict: **numbers are computed, never asked
+of the LLM** (`market_stats.py` - trend vs SMAs, realized vol + percentile, drawdown, momentum,
+from real Alpaca bars); the LLM does what only it can - synthesis and judgment. Event dates must
+come from the supplied news/odds, not model memory ("unknown" is the required answer otherwise -
+and the first live run correctly wrote "date unknown" four times). Outputs:
+- `wiki/context/regime.md` - the standing market assessment, OKF-typed, `stale_after` end of
+  day, stable headings so the augmentation guard enforces the schema.
+- `wiki/research/<ticker>.md` - company dossiers (what it is / bull / bear / people /
+  environment), model-knowledge content explicitly marked as such.
+- 0-3 **opportunity items into the existing inbox seam** - falsifiable (band + horizon
+  validated in code before emission; unscoreable ones are rejected and journalled). Research
+  proposes; the decide cycle still validates against live chain prices, sizes, and disposes.
+**Bootstrap Monte Carlo** (`bootstrap_factors`): terminal distributions resampled from real
+daily returns rather than assumed lognormal - directly addressing the documented wrong-tails
+limitation. Returns are **demeaned** first: the convergence test caught raw resampling
+disagreeing with lognormal by 16pp on identically-distributed data purely because the sample
+path happened to rally - recency bias with a formula wrapped round it. Demeaning keeps the
+shape, strips the luck; direction is applied deliberately via the thesis drift. Verified:
+demeaned bootstrap vs lognormal gap 1.6pp on identical data, E[factor]=1.0004, drift tracks
+exactly. `simulate_experiments` now shows a HISTORY row and flags a >=5pp tail gap as
+"edge is assumption-dependent".
+**The full funnel worked on its first live run - and validated itself.** The decide cycle
+rejected both initial opportunities: one on payoff arithmetic (nearly-free condor premium),
+and one on a **price discrepancy that turned out to be a real data bug** - ascending bars with
+`limit` truncate from the START of the range, so the research stats described a market six
+weeks stale while every log line read healthy. "The research note assumes NVDA at 224.11; the
+tape says 209.37. I won't trade a thesis whose premise is contradicted by the price feed."
+Fixed with `sort=desc` + reverse, which anchors the window to today by construction. That
+catch is the architecture doing its job: research proposes, decide verifies against live data.
+**Evidence:** live research run (4 wiki pages, 3 valid opportunities with current data);
+convergence + drift tests on the bootstrap; the decide cycle's rejection transcript.
+**Revisit if:** the universe grows past ~6 names (one LLM call per day stops being enough), or
+a real fundamentals data source is added (Alpaca has none on our tier - dossier fundamentals
+are model-knowledge + news, explicitly marked).

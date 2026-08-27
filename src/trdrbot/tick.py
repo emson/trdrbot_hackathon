@@ -174,7 +174,7 @@ async def run_tick(
         )
 
         shared: dict[str, Any] = {}
-        sim_tool = local_tools.build_simulate_experiments(shared)
+        sim_tool = local_tools.build_simulate_experiments(shared, config.paths.state)
         size_tool = local_tools.build_size_position(
             calib, snap.equity or 100000.0, len(store.open_positions())
         )
@@ -189,6 +189,12 @@ async def run_tick(
         agent = create_react_agent(build_model(config), agent_tools, prompt=SYSTEM_PROMPT)
 
         prompt_parts = [snap.render(), _render_positions(store)]
+        regime = wiki.read("context/regime")
+        if regime and regime.body.strip():
+            prompt_parts.append(
+                f"## Market regime (research desk, {regime.frontmatter.get('generated',{}).get('at','')[:10]})\n\n"
+                + regime.body[:1800]
+            )
         if ctx.text:
             prompt_parts.append(f"## What you remember\n\n{ctx.text}")
         prompt_parts.append(

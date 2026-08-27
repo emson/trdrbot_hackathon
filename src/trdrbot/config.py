@@ -81,6 +81,10 @@ class Config:
         return int(self.raw["tick"]["watchdog_seconds"])
 
     @property
+    def research_universe(self) -> list[str]:
+        return list((self.raw.get("research") or {}).get("universe") or self.watchlist)
+
+    @property
     def polymarket_queries(self) -> list[str]:
         return list((self.raw.get("polymarket") or {}).get("queries") or [])
 

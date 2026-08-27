@@ -82,6 +82,7 @@ DEFAULT_ROUND_TRIP_COST = 0.10
 def simulate(
     exp: Experiment, thesis: Thesis, spot: float, iv: float, days: float,
     *, round_trip_cost: float = DEFAULT_ROUND_TRIP_COST,
+    terminal_factors: list[float] | None = None,
 ) -> dict[str, Any]:
     """Score one candidate. Exact facts and modelled estimates kept distinct."""
     legs = exp.legs
@@ -114,6 +115,18 @@ def simulate(
     if pop_thesis is not None and pop_market is not None:
         edge = pop_thesis - pop_market
 
+    # Bootstrap from real historical returns (demeaned): same martingale
+    # centering as the lognormal grid, so the GAP between the two is
+    # attributable to tail shape - when they diverge, the edge depends on
+    # the tail assumption, and the agent should know that.
+    pop_bootstrap = None
+    tail_gap = None
+    if terminal_factors:
+        wins = sum(1 for f in terminal_factors if optmath.pnl_at(legs, spot * f) > 0)
+        pop_bootstrap = wins / len(terminal_factors)
+        if pop_market is not None:
+            tail_gap = pop_bootstrap - pop_market
+
     return {
         "usable": True,
         # exact - arithmetic on the contract, no model
@@ -131,6 +144,8 @@ def simulate(
         "ev_after_costs": (ev_market - friction) if ev_market is not None else None,
         "est_friction": friction,
         "thesis_edge": edge,
+        "pop_bootstrap": pop_bootstrap,
+        "tail_gap": tail_gap,
     }
 
 
@@ -222,11 +237,18 @@ def render_comparison(
         pm = f"{m['pop_market']:.0%}" if m["pop_market"] is not None else "n/a"
         pt = f"{m['pop_thesis']:.0%}" if m["pop_thesis"] is not None else "n/a"
         eac = f"${m['ev_after_costs']:+,.0f}" if m["ev_after_costs"] is not None else "n/a"
+        boot = ""
+        if m.get("pop_bootstrap") is not None:
+            gap = m.get("tail_gap")
+            warn = "  <- tails disagree, edge is assumption-dependent" if gap is not None and abs(gap) >= 0.05 else ""
+            boot = f"\n   HISTORY  P(profit) from real-return bootstrap {m['pop_bootstrap']:.0%}" \
+                   f" (vs lognormal {pm}){warn}"
         lines.append(
             f"\n**{i}. {exp.name}** ({m['net']} ${abs(m['entry_cost']):,.0f})"
             f"\n   FACTS    max profit {mp} | max loss {ml} | R:R {rr}"
             f" | breakevens {m['breakevens']}"
             f"\n   MODELLED P(profit) market {pm} -> your view {pt} | thesis edge {edge}"
+            f"{boot}"
             f"\n   COSTS    est. round-trip friction ${m['est_friction']:,.0f}"
             f" | EV after costs {eac}"
             f"\n   {exp.rationale}"

@@ -17,6 +17,11 @@ from .positions import PositionStore
 from .wiki import Wiki
 
 
+def _load_config():
+    from . import config as _cm
+    return _cm.load(quiet=True)
+
+
 async def run(
     store: PositionStore, snap: Snapshot, mem: ElfmemAdapter, wiki: Wiki, journal: Journal,
     *, tools: dict[str, Any] | None = None, verbose: bool = True,
@@ -38,6 +43,25 @@ async def run(
         await mem.resolve(pos, hit=pnl > 0, signal=signal, weight=0.1)
         journal.append("interim_outcome", position_id=pos.position_id, pnl_pct=pnl, weight=0.1)
         interim_scored += 1
+
+    # Daily research cycle (D-032): regime + dossiers + opportunities. Once
+    # per calendar day - it costs an LLM call and regime does not move hourly.
+    researched = 0
+    if tools:
+        from . import ids as _ids, research
+        from .config import Config as _C  # narrow import to avoid a cycle
+        marker = store.dir.parent.parent / "state" / "last_research"
+        today = _ids.utc_now().date().isoformat()
+        if not marker.exists() or marker.read_text().strip() != today:
+            try:
+                cfg = _load_config()
+                from .inbox import Inbox as _Inbox
+                inbox = _Inbox(cfg.paths, max_retries=cfg.max_retries)
+                r = await research.run(tools, cfg, inbox, wiki, journal, verbose=verbose)
+                researched = r["opportunities"]
+                marker.write_text(today)
+            except Exception as exc:  # noqa: BLE001 - research is advisory (INV-8)
+                print(f"[housekeeping] research failed, continuing: {exc!r}")
 
     # Attribute any thesis whose horizon has now arrived (view vs structure).
     attributed = 0

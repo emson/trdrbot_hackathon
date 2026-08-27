@@ -121,6 +121,19 @@ def _calibration() -> int:
     return 0
 
 
+async def _research() -> int:
+    from . import research
+    from .journal import Journal
+    from .wiki import Wiki
+
+    cfg = config_mod.load()
+    tools = {t.name: t for t in await mcp_client.get_tools(cfg)}
+    inbox = Inbox(cfg.paths, max_retries=cfg.max_retries)
+    r = await research.run(tools, cfg, inbox, Wiki(cfg.paths.wiki), Journal(cfg.paths.journal))
+    print(f"research complete: {r}")
+    return 0
+
+
 def main() -> None:
     p = argparse.ArgumentParser(prog="trdrbot")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -139,6 +152,7 @@ def main() -> None:
     jrn.add_argument("-n", type=int, default=20)
 
     sub.add_parser("calibration", help="show forecast calibration (Brier/Murphy)")
+    sub.add_parser("research", help="run the daily research cycle now")
 
     args = p.parse_args()
     if args.cmd == "doctor":
@@ -151,3 +165,5 @@ def main() -> None:
         sys.exit(_journal(args))
     elif args.cmd == "calibration":
         sys.exit(_calibration())
+    elif args.cmd == "research":
+        sys.exit(asyncio.run(_research()))

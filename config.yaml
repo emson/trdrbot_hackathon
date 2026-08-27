@@ -24,6 +24,10 @@ polymarket:
     - "us recession"
     - "cpi inflation"
 
+research:
+  # The company universe the daily research cycle covers. Liquid, optionable.
+  universe: ["SPY", "QQQ", "NVDA"]
+
 trading:
   watchlist: ["SPY"]
   # Force-close everything on/after this date regardless of position expiry

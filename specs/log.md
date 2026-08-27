@@ -115,3 +115,16 @@ Two real bugs found by testing, not review: max_profit_loss reported a finite ma
 for a long straddle whose upside is unbounded (put branch overwrote a correct None), and
 calendar spreads computed silently wrong because Leg had no expiry field. Both fixed and
 verified. Maths validated independently: E[S_T]=spot exactly, EV of a fair option = 0.0000.
+
+## 2026-08-27
+**Did:** Built the research funnel (D-032): market_stats.py (computed technicals + demeaned
+bootstrap MC from real returns - the convergence test caught raw resampling inheriting the
+sample path's directional luck, 16pp off; demeaned it converges to 1.6pp), research.py
+(daily regime page + company dossiers + falsifiable opportunities through the inbox seam),
+HISTORY row + tail-gap warning in simulate_experiments. Full funnel verified live: research
+wrote 4 OKF wiki pages + emitted opportunities; the decide cycle then REJECTED both initial
+opportunities - one on payoff arithmetic, one on a price discrepancy that exposed a real
+bars bug (ascending limit truncates from range START; stats were six weeks stale). Fixed
+with sort=desc. The funnel validated itself on its first run.
+**Open:** live open-market execution of the full chain (market opens 09:30 ET today);
+elfmem constitution + self-frame work deferred - to be done together with the user.
