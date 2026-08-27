@@ -134,6 +134,19 @@ async def _research() -> int:
     return 0
 
 
+async def _discover() -> int:
+    from . import discovery
+    from .journal import Journal
+    from .wiki import Wiki
+
+    cfg = config_mod.load()
+    tools = {t.name: t for t in await mcp_client.get_tools(cfg)}
+    inbox = Inbox(cfg.paths, max_retries=cfg.max_retries)
+    r = await discovery.run(tools, cfg, inbox, Wiki(cfg.paths.wiki), Journal(cfg.paths.journal))
+    print(f"discovery complete: nominees={r['nominees']} opportunities={r['opportunities']}")
+    return 0
+
+
 def main() -> None:
     p = argparse.ArgumentParser(prog="trdrbot")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -153,6 +166,7 @@ def main() -> None:
 
     sub.add_parser("calibration", help="show forecast calibration (Brier/Murphy)")
     sub.add_parser("research", help="run the daily research cycle now")
+    sub.add_parser("discover", help="news-driven company discovery + thesis building")
 
     args = p.parse_args()
     if args.cmd == "doctor":
@@ -167,3 +181,5 @@ def main() -> None:
         sys.exit(_calibration())
     elif args.cmd == "research":
         sys.exit(asyncio.run(_research()))
+    elif args.cmd == "discover":
+        sys.exit(asyncio.run(_discover()))

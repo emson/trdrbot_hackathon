@@ -140,3 +140,10 @@ list (code-backstopped principles lose their slot; market views are a category e
 three-scenario simulation showing blocks 1+6+7 compose into the pattern-degradation arc;
 wiki-ingestion verdict: single chokepoint + schemas-as-data, deferred until a third writer,
 and it owns store promotion/demotion when built. D-033 extended with a note.
+
+Built news-driven discovery (D-035): news+odds nominate companies -> deterministic layer
+(technicals incl. new RSI-14, drift-free bootstrap 5-day forecast, Yahoo fundamentals,
+options-liquidity gate) -> synthesis -> opportunities through the existing seams. First
+run nominated CRM/CRWD/META/MRVL/BBY. Inspection caught the LLM emitting percentage-move
+bands instead of prices (would have made every discovery thesis score as failed);
+fixed with prompt wording + a code gate anchored to computed spot. Second run clean.

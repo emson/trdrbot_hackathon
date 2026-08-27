@@ -40,6 +40,7 @@ class Stats:
     vol_percentile: float | None  # today's 21d vol vs its own 1y history
     sma20_state: str  # above | below
     sma50_state: str
+    rsi14: float | None
     max_drawdown_1y: float | None
 
     def render(self) -> str:
@@ -51,6 +52,7 @@ class Stats:
             f"realized vol {f(self.realized_vol, '%.1f%%')} "
             f"(pctile {f(self.vol_percentile, '%.0f')}) | "
             f"px {self.sma20_state} SMA20, {self.sma50_state} SMA50 | "
+            f"RSI14 {f(self.rsi14, '%.0f')} | "
             f"max DD 1y {f(self.max_drawdown_1y, '%.1f%%')}"
         )
 
@@ -77,6 +79,25 @@ def _rolling_vol(rets: list[float], window: int = 21) -> list[float]:
         var = sum((r - mean) ** 2 for r in chunk) / (window - 1)
         out.append(math.sqrt(var) * math.sqrt(TRADING_DAYS))
     return out
+
+
+def _rsi(closes: list[float], n: int = 14) -> float | None:
+    """Wilder's RSI. >70 conventionally overbought, <30 oversold."""
+    if len(closes) < n + 1:
+        return None
+    gains, losses = [], []
+    for a, b in zip(closes, closes[1:]):
+        d = b - a
+        gains.append(max(d, 0.0))
+        losses.append(max(-d, 0.0))
+    avg_g = sum(gains[:n]) / n
+    avg_l = sum(losses[:n]) / n
+    for g, l in zip(gains[n:], losses[n:]):
+        avg_g = (avg_g * (n - 1) + g) / n
+        avg_l = (avg_l * (n - 1) + l) / n
+    if avg_l == 0:
+        return 100.0
+    return 100.0 - 100.0 / (1.0 + avg_g / avg_l)
 
 
 def compute_stats(symbol: str, closes: list[float]) -> Stats:
@@ -115,6 +136,7 @@ def compute_stats(symbol: str, closes: list[float]) -> Stats:
         ret_63d=total_ret(63),
         realized_vol=realized,
         vol_percentile=pctile,
+        rsi14=_rsi(closes),
         sma20_state="above" if (sma20 and last > sma20) else "below",
         sma50_state="above" if (sma50 and last > sma50) else "below",
         max_drawdown_1y=dd,

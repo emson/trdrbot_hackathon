@@ -1172,3 +1172,37 @@ decide half - research, attribution and interim scoring never run. Correct behav
 whose job is to force the decide path, but worth knowing when reading forced-run output as
 evidence: it is half the system. Noted rather than changed.
 **Evidence:** journal entries (8 x interim_outcome on one unresolved position); live tick 23.
+
+## D-035: News-driven discovery - the news nominates the companies
+**Date:** 2026-08-27
+**Status:** accepted
+**Context:** The daily research cycle (D-032) studies a FIXED universe, so the system could
+never trade a story it wasn't already watching. The user's thesis-building exercise: broad news
++ prediction-market odds -> nominate interesting companies -> forecast with simulations ->
+historic data + technical analysis -> suggest opportunities.
+**Choice:** `discovery.py` (`trdrbot discover`). Two LLM calls with the deterministic layer
+between them: (1) NOMINATE 3-5 companies strictly from supplied evidence - nominations from
+general knowledge alone are forbidden by prompt; (2) SYNTHESISE forecasts and 0-3 falsifiable
+opportunities only after each nominee has been through computed technicals (now incl. Wilder
+RSI-14), a drift-free bootstrap Monte Carlo 5-day forecast from its own returns, a Yahoo
+fundamentals snapshot, and an options-liquidity gate. Gates enforced in code, not prompt: no
+options expiring inside the deadline -> cannot become an opportunity regardless of story;
+horizon past deadline -> rejected; bands that are not plausible prices -> rejected.
+**Data-source split, evidence-based:** Alpaca for price history (authenticated, consistent with
+the bootstrap machinery), Yahoo/yfinance for fundamentals only (market cap, P/E, sector, analyst
+target, next earnings - the data Alpaca has no API for; yfinance's unofficial API is flakiest at
+prices and strongest exactly here). Verified live before choosing: yfinance NVDA close 209.66 vs
+Alpaca IEX 209.77.
+**Bug caught by inspecting the first live run:** the LLM emitted bands as PERCENTAGE MOVES
+([-6.0, 8.0] on an $87 stock). `holds_at()` would have been always-False and attribution would
+have scored every discovery thesis as failed - silently corrupting the learning loop with
+false negatives. Fixed twice over: prompt now states bands are prices in dollars, and a code
+gate anchored to the computed close rejects any band outside [0.3x, 3x] of spot
+(`band_not_a_price`). Second run emitted clean price bands (CRM 198-228, META 555-640).
+**First live run:** nominated CRM, CRWD, META, MRVL, BBY from the morning's news; wrote five
+dossiers; emitted 2 opportunities that survived all gates. Output flows through the existing
+seams (wiki + inbox) so the decide cycle validates against live quotes before anything trades.
+**Evidence:** live runs 1 and 2; journal `discovery_nominees`/`discovery` entries.
+**Revisit if:** yfinance breaks (unofficial API - the fundamentals block already degrades to
+`unavailable` without sinking the run), or nomination quality drifts toward megacap defaults
+(the "not the biggest names, the most interesting ones" instruction stops working).
