@@ -126,5 +126,10 @@ wrote 4 OKF wiki pages + emitted opportunities; the decide cycle then REJECTED b
 opportunities - one on payoff arithmetic, one on a price discrepancy that exposed a real
 bars bug (ascending limit truncates from range START; stats were six weeks stale). Fixed
 with sort=desc. The funnel validated itself on its first run.
+Evaluated the user's proposal to use elfmem's SELF frame for epistemic principles (the
+recency-bias class): worth doing in human-ratified form only — elfmem's own ADR 0003 found
+automatic constitutional evolution never beat baseline across four simulated architectures,
+so autonomous self-amendment is out. Plan + mechanism in notes/009, recorded as D-033.
+notes/009 is the agenda for the joint constitutional session.
 **Open:** live open-market execution of the full chain (market opens 09:30 ET today);
-elfmem constitution + self-frame work deferred - to be done together with the user.
+elfmem constitution + self-frame session with the user — agenda now at notes/009.

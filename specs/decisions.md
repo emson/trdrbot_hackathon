@@ -1094,3 +1094,36 @@ convergence + drift tests on the bootstrap; the decide cycle's rejection transcr
 **Revisit if:** the universe grows past ~6 names (one LLM call per day stops being enough), or
 a real fundamentals data source is added (Alpaca has none on our tier - dossier fundamentals
 are model-knowledge + news, explicitly marked).
+
+## D-033: Epistemic constitution in elfmem's SELF frame — evaluated worth doing, deferred to the joint session
+**Date:** 2026-08-27
+**Status:** accepted as future plan — no build until the planned joint session
+**Context:** The bootstrap-drift finding ("recency bias with a formula wrapped around it") is
+one instance of a class: epistemic failures in market reasoning. Code fixed that instance
+permanently; nothing inoculates the LLM's *judgment* against the next instance of the class —
+three of which occurred within two days. Question evaluated: should elfmem's SELF frame hold
+learned epistemic principles that the decider reads as identity?
+**Verdict: yes, in the human-ratified form only, scoped to the judgment residue code cannot
+reach.** Full brainstorm, mechanism (seed constitution → self-test prompt line → incident-level
+credit assignment on principle blocks → `propose_amendment` for human ratification), and the
+honest case against, in [notes/009](notes/009_epistemic_constitution_plan.md).
+**The two constraints that shaped the verdict:**
+- elfmem's own ADR 0003 simulated four architectures for *automatic* constitutional evolution
+  and none beat baseline — so autonomous self-amendment is contraindicated by the project's own
+  best evidence. Amendments are proposed by the agent with cited incidents, ratified by a human.
+- D-018/D-019's repeated finding that prompt-level guidance is weak — so principles are scoped
+  strictly to judgment errors, where no gate can be built; everything enforceable stays code.
+  A proposal that drifts toward "principle instead of code fix" is rejected on sight.
+**Why elfmem rather than a longer system prompt:** principles carry Beta-posterior confidence
+earned from scored incidents (a system prompt weighs every line equally forever), cite the
+incidents that minted them (D-014's provenance spine extended to reasoning rules), and evolve in
+data while the prompt stays stable and cacheable.
+**Sample-size honesty:** an 8-day window yields too few resolved trades for converged learning;
+principles are therefore scored on incident detections (premise breaks, rejections, tail-gap
+warnings — several per day) as well as trade outcomes, and the within-hackathon value is the
+demonstrated mechanism with honest early posteriors, not converged weights.
+**Evidence:** [notes/009](notes/009_epistemic_constitution_plan.md); elfmem exploration
+(notes/004 §10.1: SELF-frame contract, amendment API, ADR 0003); this project's incident record.
+**Revisit if:** the joint session finds the seed principles impossible to trace to real
+incidents (a sign they are platitudes, not learned rules), or incident-level scoring proves too
+noisy to move a posterior meaningfully.
