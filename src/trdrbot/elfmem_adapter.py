@@ -100,15 +100,31 @@ class ElfmemAdapter:
     async def remember_thesis(self, pos: Position) -> str:
         """Cue is hand-written, not derived - a missing cue means the block is
         findable only by its own wording later (verified against elfmem's own
-        retrieval design: the cue forms the BM25 half of hybrid retrieval)."""
+        retrieval design: the cue forms the BM25 half of hybrid retrieval).
+
+        Pins its own tags on consolidation (D-059). Left to the LLM, a thesis
+        block reading "I did X because Y, expecting Z" gets freely tagged
+        self/goal or self/constraint/self/style during consolidation - the
+        SAME leak the constitution and lessons needed host_analyses to avoid
+        (D-041/D-054). Found live on two real positions: SPY's thesis (tags
+        self/goal, self/constraint) and NVDA's (self/goal, self/style), both
+        competing for SELF-frame slots as if they were identity rather than a
+        dated trade rationale. Position theses are `[routing]`'s "evolving
+        pattern" case, never identity - so every future one is pinned at
+        write time instead of retrofitted after the fact.
+        """
+        text = pos.thesis or f"{pos.strategy} on {pos.underlying}"
+        tags = [pos.underlying.lower(), pos.strategy]
         cue = f"when reasoning about {pos.underlying} {pos.strategy} setups"
-        r = await self.mem.remember(
-            pos.thesis or f"{pos.strategy} on {pos.underlying}",
-            tags=[pos.underlying.lower(), pos.strategy],
-            category="knowledge",
-            source=pos.position_id,
-            cue=cue,
-        )
+        r = await self.mem.remember(text, tags=tags, category="knowledge",
+                                    source=pos.position_id, cue=cue)
+        for _ in range(3):
+            inbox_ids = {b.id for b in await self.mem.inbox(max_count=50)}
+            if r.block_id not in inbox_ids:
+                break
+            await self.mem.consolidate(host_analyses={
+                r.block_id: {"alignment_score": 0.6, "tags": tags, "summary": text},
+            })
         return r.block_id
 
     async def _mind_for(self, underlying: str) -> str:

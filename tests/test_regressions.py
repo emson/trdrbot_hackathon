@@ -1243,3 +1243,20 @@ def test_resolution_falls_back_to_the_positions_own_last_pnl():
     assert "pos.last_pnl_pct" in src
     assert src.index("pos.last_pnl_pct") < src.index("self_resolved ="), \
         "the fallback must run before anything gates on P&L being known"
+
+
+# ------------------------ D-059 memory-quality repair (SPY block, SPY mind)
+
+def test_remember_thesis_pins_tags_to_avoid_a_self_leak():
+    """Left to free consolidation, a thesis block reading 'I did X because Y,
+    expecting Z' gets tagged self/goal or self/constraint/self/style - found
+    live on two real positions (SPY: self/goal+self/constraint; NVDA:
+    self/goal+self/style), both competing for SELF-frame slots as if they
+    were identity rather than a dated trade rationale. Position theses are
+    evolving patterns, never identity, so tags are pinned at write time."""
+    import inspect
+    from trdrbot.elfmem_adapter import ElfmemAdapter
+    src = inspect.getsource(ElfmemAdapter.remember_thesis)
+    assert "host_analyses" in src, "must pin its own tags, not trust free consolidation"
+    assert 'tags = [pos.underlying.lower(), pos.strategy]' in src
+    assert "self/" not in src.split("host_analyses={")[0].split("tags = [")[1][:80]

@@ -2007,3 +2007,63 @@ the first datapoint is a good one: the agent stated **38%** on a trade that retu
 honest underconfidence on a positive-expectancy structure, which is exactly what its reasoning
 claimed at entry ("a losing-more-often-than-not trade with 3.8:1 payoff").
 **Verified:** 100 regression tests.
+
+## D-059: Memory-quality repair - a stale block, a false miss, and a leak found while fixing it
+**Date:** 2026-08-27
+**Status:** accepted
+**Context:** Status review flagged two things: a memory block at reinforcement 49 (the most
+reinforced thing in memory bar the constitution), and the SPY mind reading confidence 0.43,
+hit/total 0/1. Investigated precisely before touching anything, since these are memory
+mutations.
+**Correction to my own earlier framing, stated honestly:** I had described the reinforcement-49
+block as "the loudest voice in the room" implying it was over-TRUSTED. Checking its actual Beta
+confidence (via `recall()`'s `ScoredBlock.confidence`, distinct from the raw `reinforcement_count`
+`ls()` exposes) showed **confidence=0.3** - correctly LOW, because the 8 polluted interim scores
+(D-034) pulled it down as they should have. The real bug was narrower and different: `reinforce_
+blocks()` fires on every `recall()`/`outcome()`/`record_use()` call (confirmed by reading
+elfmem's source), so `reinforcement_count` is a pure FREQUENCY counter, not a trust score - and
+this block's frequency dominance meant it still ranked #1 by overall relevance `score` (0.91) for
+any SPY-adjacent query, low confidence notwithstanding. Two concrete faults, not one vague one:
+(a) it was auto-tagged `self/goal`/`self/constraint` during consolidation, so it competed in the
+SELF identity frame as if it were identity; (b) its retrieval-frequency dominance crowded out
+fresher content in ATTENTION even after the position closed and the content went stale.
+**Fix 1 - the stale block.** `edit()` cannot change tags or reset `reinforcement_count` (checked
+against the API directly), so the correct action was retire-and-replace: `forget(SUPERSEDED)`
+on the polluted block, then a fresh `remember()` with the true outcome, correct tags
+(`history`/`closed-position`, no `self/*`), pinned via `host_analyses` (same discipline as
+D-041/D-054) so free consolidation cannot re-introduce the leak. Verified: old block inactive,
+new block recalls on its cue, reinforcement resets honestly to 1.
+**Fix 2 - the mind's false miss.** The linked prediction had `verify_at: 2026-09-02` but was
+resolved six days early - by the pre-D-043 interim-scoring bug, on a negative unrealized mark.
+`mind_outcome()` **cannot delete a prior resolution, only append another** (confirmed by reading
+`elfmem/operations/mind.py`: it calls `record_outcome`, a Beta-posterior update, never an
+overwrite). Appending the true resolution now is justified because the position has since fully
+closed - real, completed evidence, not speculation ahead of `verify_at`. Called with
+`hit=True` and a `reason` documenting the correction explicitly, consistent with
+`[contradictions]` (mark the tension, do not silently erase it). **Result, stated honestly: this
+partially corrects the record, it does not erase the mistake.** Confidence moved 0.43 -> 0.45,
+a small nudge - the wrong signal remains in the Beta posterior alongside the correction, which is
+the only available and the intellectually honest outcome given the API.
+**Also backfilled, found while fixing the mind:** the SPY position's `last_pnl_pct` was still
+None - D-058's repair script only iterated positions that already had it set, silently skipping
+SPY. Estimated from cumulative account equity (the only SPY position open from $100,000 to
+$100,181 at close, tick 184->186 in the logs): **+8.2%**. Stated explicitly as a cumulative-equity
+estimate, not an exact fill record, same limitation as NVDA's earlier backfill.
+**A THIRD instance of the same leak found while verifying the fix, and deliberately NOT
+retroactively touched.** The NVDA thesis block carries the identical `self/goal`/`self/style`
+tags. Unlike SPY's, this content is not stale - the thesis resolves 2026-09-03 - and NVDA never
+suffered the interim-scoring pollution (0 interim scores; confirmed), so its confidence is clean.
+Forgetting it would destroy real, still-relevant signal for a governance fix with **zero current
+operational cost**: the SELF frame renders 11 blocks with 0 dropped, so this one extra leaked
+block is not actually crowding anything out today. Left as-is, to be retired the same way once
+its thesis resolves and the content becomes genuinely historical.
+**Root cause fixed, not just the two instances.** `remember_thesis()` called plain `remember()`
+with no `host_analyses`, so EVERY future position's thesis block was exposed to the same leak.
+Now pins `[underlying, strategy]` tags at write time, draining the inbox itself rather than
+depending on a caller to do it. Verified against a fresh synthetic position: zero `self/*` tags,
+recallable by its cue.
+**Verified:** live repair script output (printed and reviewed line by line before any write);
+`old block active: False`; `SELF frame leaked blocks: 1 (NVDA, documented, deliberate)`; fresh
+history block recalls on cue; mind confidence 0.43->0.45; 101 regression tests (removed one
+placeholder test that asserted nothing - padding a test suite with `assert True` is the same
+dishonesty as anything else in this note).
