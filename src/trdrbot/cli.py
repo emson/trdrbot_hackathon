@@ -236,6 +236,16 @@ async def _run_loop(interval: int, closed_interval: int, *,
     return 0
 
 
+async def _prompts() -> int:
+    from . import local_tools, prompts
+    shared: dict = {}
+    tools = [local_tools.build_simulate_experiments(shared),
+             local_tools.build_size_position(None, 1.0, 0),
+             local_tools.build_record_position(None, "d")]
+    print(prompts.render_inventory(prompts.inventory(tools)))
+    return 0
+
+
 def _health() -> int:
     from . import health
     from .positions import PositionStore
@@ -338,6 +348,7 @@ def main() -> None:
     sub.add_parser("research", help="run the daily research cycle now")
     sub.add_parser("discover", help="news-driven company discovery + thesis building")
     sub.add_parser("health", help="detect subsystems that run but never produce")
+    sub.add_parser("prompts", help="inventory every prompt the models read")
     run = sub.add_parser("run", help="loop ticks continuously until the deadline")
     run.add_argument("--interval", type=int, default=300,
                      help="seconds between ticks while the market is open (default 300)")
@@ -370,6 +381,8 @@ def main() -> None:
         sys.exit(asyncio.run(_discover()))
     elif args.cmd == "health":
         sys.exit(_health())
+    elif args.cmd == "prompts":
+        sys.exit(asyncio.run(_prompts()))
     elif args.cmd == "run":
         sys.exit(asyncio.run(_run_loop(args.interval, args.closed_interval,
                                        max_ticks=args.max_ticks,

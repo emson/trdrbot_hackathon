@@ -658,3 +658,31 @@ def test_run_lock_survives_a_corrupt_pid_file():
 def test_interval_floor_is_above_any_legitimate_polling_rate():
     from trdrbot.cli import MIN_INTERVAL_SECONDS
     assert MIN_INTERVAL_SECONDS >= 30
+
+
+# ------------------------------- D-046 whole-book liquidation
+
+def test_close_all_positions_is_refused_while_several_are_open():
+    """Observed live: the agent reached for close_all_positions intending to
+    close ONE spread, then placed a separate sell on a leg the sweep had
+    already closed. Only fill sequencing prevented a naked short."""
+    import asyncio
+    from trdrbot import tool_guard
+
+    class FakeTool:
+        name = "close_all_positions"
+        def __init__(self): self.called = False
+        async def coroutine(self, **kw):
+            self.called = True
+            return "liquidated"
+
+    t = FakeTool()
+    orig_called = lambda: t.called
+    tools = tool_guard.redirect_whole_book_close([t], lambda: 3)
+    out = asyncio.run(tools[0].coroutine(cancel_orders=True))
+    assert "REFUSED" in out and not t.called
+
+    t2 = FakeTool()
+    tools2 = tool_guard.redirect_whole_book_close([t2], lambda: 1)
+    out2 = asyncio.run(tools2[0].coroutine(cancel_orders=True))
+    assert out2 == "liquidated" and t2.called, "one position: equivalent to a normal close"

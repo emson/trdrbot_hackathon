@@ -25,6 +25,49 @@ from . import ids
 #: are addressed by order/position id instead.
 _ID_BEARING = {"place_stock_order", "place_option_order", "place_crypto_order"}
 
+#: `close_all_positions` liquidates the ENTIRE book. Observed live (D-046): the
+#: agent reached for it intending to close ONE spread, and followed it with a
+#: separate sell order on a leg the sweep had already closed - which only
+#: failed to leave a naked short because of fill sequencing, not design. With
+#: one position open it is equivalent to a legitimate close; with several it
+#: destroys unrelated theses mid-flight and wrecks the learning record.
+_WHOLE_BOOK = "close_all_positions"
+
+
+def redirect_whole_book_close(tools: Sequence[Any], count_open: "callable") -> list[Any]:
+    """Refuse a whole-book liquidation while more than one position is open.
+
+    NOT a judgment gate (D-009): it vetoes no view and blocks no strategy. It
+    refuses one instrument whose blast radius exceeds any single-position
+    intent, and names the correct one (`close_position` per symbol, which
+    INV-19 already requires for all legs). The agent may still close every
+    position - one at a time, deliberately.
+    """
+    out: list[Any] = []
+    for tool in tools:
+        if tool.name != _WHOLE_BOOK:
+            out.append(tool)
+            continue
+        original = tool.coroutine
+
+        async def _guarded(*args: Any, __orig=original, **kwargs: Any) -> Any:
+            n = count_open()
+            if n > 1:
+                msg = (
+                    f"REFUSED: close_all_positions would liquidate all {n} open "
+                    f"positions, not the one you mean. Close per position with "
+                    f"close_position(symbol_or_asset_id=...) for every leg "
+                    f"(INV-19). If you genuinely intend to flatten the whole "
+                    f"book, do it one position at a time."
+                )
+                print(f"[tool_guard] {msg}")
+                return msg
+            return await __orig(*args, **kwargs)
+
+        tool.coroutine = _guarded
+        out.append(tool)
+    return out
+
 
 def _accepts_client_order_id(tool: Any) -> bool:
     """True if the tool takes a client_order_id argument.

@@ -32,6 +32,7 @@ from langgraph.prebuilt import create_react_agent
 
 from . import (
     idle,
+    prompts,
     sizing,
     analytics,
     exit_rules,
@@ -284,6 +285,10 @@ async def run_tick(
             batch=batch,
             model=config.model,
             tick=n,
+            # Which prompts actually produced this decision. Cannot be
+            # reconstructed later, so it is recorded now even though no
+            # second variant exists yet (D-045).
+            prompts=prompts.fingerprints(),
             item_ids=[i.id for i in items],
             resumed_from=prior["id"] if prior else None,
             elfmem_blocks=ctx.blocks,
@@ -309,6 +314,9 @@ async def run_tick(
             sources=[{"id": i.id, "resource": f"inbox/{i.id}", "author": i.source}
                      for i in items],
             shared=shared,
+        )
+        guarded = tool_guard.redirect_whole_book_close(
+            guarded, lambda: len([p for p in store.open_positions() if p.status == "open"])
         )
         agent_tools = guarded + [sim_tool, size_tool, record_tool]
         agent = create_react_agent(build_model(config), agent_tools, prompt=SYSTEM_PROMPT)

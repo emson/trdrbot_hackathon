@@ -1564,3 +1564,63 @@ unnoticed, for roughly half an hour.
 `logs/current.log`, and its liveness was verified after start rather than assumed.
 **Verified:** second loop refused against a live pid; stale and corrupt locks taken over;
 `--interval 5` refused with a clear message; `--max-ticks 1` self-terminated. 61 tests pass.
+
+## D-045: Prompt inventory and fingerprinting - provenance now, variants later
+**Date:** 2026-08-27
+**Status:** accepted
+**Context:** How many prompts does this system have, and should they move to a `prompts/`
+directory as templates for future A/B testing?
+**Measured: 8 artefacts, ~3,140 tokens.** They are NOT homogeneous, and that is the whole
+answer - "put all prompts in a directory" is the wrong shape because three kinds behave
+differently:
+- **free-standing (4, ~1,684 tok)** - `decide.system`, `research.daily`, `discovery.nominate`,
+  `discovery.synthesise`. Pure text; nothing but an LLM reads them. Safely extractable.
+- **tool contracts (3, ~1,100 tok - a THIRD of the surface)** - the `simulate_experiments`,
+  `size_position` and `record_position` docstrings. Each is the documented contract of a live
+  function signature. Extracting one lets the description drift from the parameters it
+  describes: this project's most familiar failure class, a thing that reads correct and
+  silently is not. These stay next to their functions.
+- **ratified (1, ~356 tok)** - the constitution, already external in elfmem with human
+  ratification and its own change control (D-041). It must not acquire a second home.
+**Why P&L cannot be the A/B metric, and this is decisive:** the project's own power calculation
+(notes/007) shows a genuinely 60%-edge agent beats a coin flip only 69% of the time over 20
+trades, with a zero-skill range of -7.8%/+8.2%. We will resolve perhaps 5-15 trades. Two prompts
+**cannot** be distinguished by returns in this window - not "hard to", cannot. An A/B on P&L
+would measure noise and crown a winner.
+**What CAN be measured are behaviours, which accrue per CYCLE rather than per trade** (50+
+decide cycles against ~10 trades - the sample-size problem solves itself at this level):
+process compliance (simulated before recording? >= 2 genuinely different candidates? an
+`underlying_stop` set? a principle cited by name?), cost (tokens, tool calls), decisiveness
+(trade vs refusal rate), error rate (malformed calls, rejected opportunities), and - slowest but
+truest - calibration (Brier of stated confidences at resolution).
+**Choice: build the provenance, defer the machinery.** Every decision now journals
+`prompts={name: fingerprint}` (sha256[:8] of the exact text). This is the only part with a
+deadline: **a decision recorded today without a prompt label can never be compared against
+tomorrow's.** The variant registry, assignment and reporting can all be built later against
+already-labelled history; provenance cannot be backfilled. Consistent with the project rule of
+adding machinery when a concrete need justifies it, never in anticipation.
+**`trdrbot prompts`** renders the full inventory with fingerprints and token counts.
+**Deferred deliberately:** a `prompts/` directory, variant assignment, and the comparison
+report. Trigger to build them: a genuine second variant worth running, which does not exist yet.
+**Evidence:** measured inventory; 62 tests pass.
+
+## D-046: The agent reached for a whole-book liquidation
+**Date:** 2026-08-27
+**Status:** accepted
+**Context:** Closing out the first live position, the agent called
+`close_all_positions(cancel_orders=True)` - which liquidates the ENTIRE book - intending to
+close one spread, then followed it with a separate `sell_to_close` on the long 750 leg the
+sweep had already closed. The account ended flat and profitable (+$190), but only because of
+fill sequencing: had the second order rested and filled, it would have opened a **naked short
+put**, the exact unbounded-risk structure sizing refuses to size (D-030) and exit rules exist
+to prevent (INV-19).
+**Choice:** `close_all_positions` is refused while more than one position is open, with a
+message naming the correct instrument (`close_position` per symbol, for every leg). With a
+single position open it is equivalent to a legitimate close and passes through untouched.
+**Why this is not a guardrail (D-009):** it vetoes no view, blocks no strategy and gates no
+judgment. It refuses ONE instrument whose blast radius exceeds any single-position intent. The
+agent may still flatten the entire book - one position at a time, deliberately. Same category
+as `tool_guard`'s existing client_order_id enforcement: correctness plumbing, not policy.
+**Evidence:** journal execution 14:46:24 (`close_all_positions` then a separate leg sell);
+broker flat at $100,181.18 with zero open orders; regression test covering both the multi-
+position refusal and the single-position pass-through.

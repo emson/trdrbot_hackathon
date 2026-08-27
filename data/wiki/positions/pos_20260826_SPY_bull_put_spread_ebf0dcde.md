@@ -1,7 +1,7 @@
 ---
 type: Position
 position_id: pos_20260826_SPY_bull_put_spread_ebf0dcde
-status: open
+status: closed
 interim_band: 0
 max_loss_usd: 2210.0
 greeks_at_entry: null
@@ -51,12 +51,12 @@ exit_state:
   - false
   - false
   - false
-close_reason: null
+close_reason: external
 decision_ref: jrn_20260826T185819Z_dece972
 sources: []
 generated:
   by: ''
-  at: '2026-08-27T14:16:56.294313+00:00'
+  at: '2026-08-27T14:50:31.984595+00:00'
 verified:
 - by: trdrbot/reconcile
   at: '2026-08-26T20:05:59.099229+00:00'
