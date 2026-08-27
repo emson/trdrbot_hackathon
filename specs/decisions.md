@@ -1987,3 +1987,23 @@ report.
 **Also:** the sim initially hit an OpenAI 401 because the script skipped `config.load()` and the
 stale shell key shadowed .env - our own D-shadowing lesson, re-learned in miniature.
 **Verified:** the full simulation passes end to end; 99 regression tests.
+
+## D-058: The same measured P&L failed to reach a third consumer
+**Date:** 2026-08-27
+**Status:** accepted
+**Context:** A status review found calibration at **n=0** despite a closed, profitable, recorded
+trade. The forecast row existed (p=0.38) with `outcome=None` - never resolved.
+**Cause, and the pattern:** reconciliation discovers an external close only AFTER the position
+has left the broker, so it calls `learn.on_resolution(pnl_pct=None)`. Every consumer downstream
+gates on P&L being known, so calibration AND credit were both skipped in silence. This is the
+**third** consumer of the same number to miss it: D-056 (attribution scored a close-reason label
+instead), D-057 (credit gated on the label too), and now calibration.
+**Fix placed at the shared entry point, not the detector.** `on_resolution` now falls back to
+`pos.last_pnl_pct` when the caller has none - so every present and future detector inherits it.
+Fixing the reconcile call site alone would have left the same trap for the next detector, which
+is precisely how this reached three consumers.
+**Repaired live:** the NVDA row resolved at +52.8% -> hit=True. **Calibration is now n=1**, and
+the first datapoint is a good one: the agent stated **38%** on a trade that returned **+52.8%** -
+honest underconfidence on a positive-expectancy structure, which is exactly what its reasoning
+claimed at entry ("a losing-more-often-than-not trade with 3.8:1 payoff").
+**Verified:** 100 regression tests.

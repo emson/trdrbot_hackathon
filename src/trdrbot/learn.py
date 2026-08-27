@@ -53,6 +53,17 @@ async def on_resolution(
     holdings) - credit assignment is skipped rather than guessed, same
     philosophy as skipping a non-self-resolved close.
     """
+    # Fall back to the position's own last observed P&L when the detecting
+    # caller has none (D-058). Reconciliation discovers an external close only
+    # AFTER the position has left the broker, so it has no P&L to pass - and
+    # that silently skipped both calibration and credit for our only closed
+    # trade, leaving a recorded 38% forecast permanently unresolved. The
+    # position has carried `last_pnl_pct` since D-056; this is the third place
+    # the same measured number failed to reach its consumer, so the fallback
+    # goes HERE, where every caller inherits it, rather than in each detector.
+    if pnl_pct is None and pos.last_pnl_pct is not None:
+        pnl_pct = pos.last_pnl_pct
+
     self_resolved = pos.close_reason in SELF_RESOLVED
     scored = False
 

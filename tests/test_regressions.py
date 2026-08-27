@@ -1228,3 +1228,18 @@ def test_resolve_self_heals_when_outcomes_hit_unconsolidated_blocks():
     src = inspect.getsource(ElfmemAdapter.resolve)
     assert "blocks_updated" in src and "consolidate" in src, \
         "resolve must detect a short-count and consolidate-then-retry"
+
+
+def test_resolution_falls_back_to_the_positions_own_last_pnl():
+    """Reconciliation discovers an external close only AFTER the position has
+    left the broker, so it has no P&L to pass - which silently skipped BOTH
+    calibration and credit for our only closed trade, leaving a recorded 38%
+    forecast permanently unresolved. Third place the same measured number
+    failed to reach its consumer, so the fallback lives at the shared entry
+    point rather than in each detector."""
+    import inspect
+    from trdrbot import learn
+    src = inspect.getsource(learn.on_resolution)
+    assert "pos.last_pnl_pct" in src
+    assert src.index("pos.last_pnl_pct") < src.index("self_resolved ="), \
+        "the fallback must run before anything gates on P&L being known"

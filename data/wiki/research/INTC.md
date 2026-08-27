@@ -5,21 +5,25 @@ sources:
   resource: discovery:news+polymarket+yahoo
   author: trdrbot/discovery
   last_modified: '2026-08-27T15:22:32.579369+00:00'
+- id: src-2
+  resource: discovery:news+polymarket+yahoo
+  author: trdrbot/discovery
+  last_modified: '2026-08-27T17:29:36.143332+00:00'
 generated:
-  at: '2026-08-27T15:22:32.579391+00:00'
+  at: '2026-08-27T17:29:36.143743+00:00'
 ---
 
 # What it is
-Intel - Intel is flagged as surging in a headline explicitly paired with Nvidia, on the same day Dan Ives argues the US has taken the semiconductor lead over China 'for the first time in 30 years' - a policy/nationalism narrative that Intel is the single most levered US-listed name to. This is a sentiment-driven move rather than a fundamentals move, which is exactly the kind of setup that either extends hard on continued headline flow or fully retraces. Deeply liquid options with cheap wide-strike structures.
+Intel - The material frames Intel as the explicit measuring stick for the AI trade's asymmetry — Nvidia's next rally alone could create 'another fourteen Intels' in market value — and lists Intel alongside AMD and MU as the levered read-throughs to the semi cycle. It is also named in the options/IV-crush piece as a name where pre-event premium gets expensive. A cheap, high-beta, hugely liquid optionable proxy on whether the NVDA-led semi surge (best day since April 2025, SMH strength) broadens into the laggards.
 
 # Bull case
-Weakest technical structure of the group: below both SMA20 and SMA50, RSI 43, -24.8% over 63 days, and the headline 'surge' has already faded (5d -1.4%). Notably 5d realized vol (39.1%) is far below 21d (67.0%, only 48th pctile), i.e. the move is decaying into compression rather than extending. The Dan Ives US-semis-leadership narrative is sentiment, not earnings (next print 2026-07-23 is outside the window), and forward PE of 44.5 on a 480bn cap leaves no valuation cushion. Bootstrap is mildly negative-skewed (28% up-5 vs 33% down-5). No catalyst inside the horizon.
+Weakest risk/reward of the tradeable names. It is a narrative proxy (the 'fourteen Intels' framing) rather than a name with its own catalyst: 5d -1.4%, price below both SMA20 and SMA50, RSI 43, and 63d -24.8% while the semi complex rallied — i.e., it did NOT participate in the NVDA-led surge. Bootstrap is the most negatively skewed of the group (P-5% 33% vs P+5% 28%) with the widest tails. Interesting note: 5d realized vol (38.9%) has compressed well below 21d (66.9%), so vol is coiling, but direction is unresolved.
 
 # Bear case
-Policy/nationalism headline flow (US-China semiconductor leadership, government or NVDA-linked support stories) is exactly the kind of news that gaps INTC 8-10% overnight with no warning - short-vol or bearish structures are badly exposed to that tail.
+Directional bet on broadening that the chart explicitly refuses to confirm; forward P/E 44.5 on a name below its moving averages means downside tail (bootstrap 5%ile -15.5%) is larger than upside, and it de-rates hardest if the AI trade narrows back to NVDA.
 
 # People
 (not researched - discovery pass)
 
 # Environment
-Verdict: watch. Evidence: Why Is Intel Stock Surging on Thursday? | benzinga | ['INTC','NVDA']; Dan Ives: Nvidia Earnings Should 'Hang in the Louvre,' US Takes Lead Over China 'For First Time in 30 Years' | benzinga | ['NVDA']; Nvidia Still Dominates AI Chips. Meta, Google and Amazon Still Want Their Own. | benzinga | ['AMZN
+Verdict: watch. Evidence: QUICK SPARK: Nvidia's Next Rally Could Create Another Fourteen Intels in Market Value | benzinga | ['AMD', 'INTC', 'MU', 'NVDA']; The IV Crush Is Only Half The Story: How Options Get So Expensive Before Earnings | benzinga | ['CRM', 'INTC', 'NVDA']; Nvidia's Best Day Since April 2025, Cybersecurity 
