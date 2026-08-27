@@ -80,23 +80,19 @@ class ElfmemAdapter:
             if fr.text:
                 parts.append(fr.text)
 
-        # ATTENTION is built from recall() rather than frame(), because
-        # constitutional blocks are semantically close to almost any reasoning
-        # query AND carry PERMANENT decay - so once seeded they dominate it.
-        # Measured live: 10 of 12 attention hits were principles (0.77-0.96),
-        # and after de-duplicating against SELF the frame returned NOTHING.
-        # The agent's own learned market knowledge had been entirely displaced
-        # by its own identity. Over-fetch, drop anything already in SELF/TASK,
-        # keep what was actually learned.
-        want = ATTENTION_KEEP
-        candidates = await self.mem.recall(query, frame="attention", top_k=want + self_k)
-        kept = [b for b in candidates if b.id not in seen][:want]
-        blocks["attention"] = [b.id for b in kept]
-        if kept:
-            parts.append(
-                "## Relevant memory\n\n"
-                + "\n".join(f"- {b.content.strip()}" for b in kept)
-            )
+        # ATTENTION is a frame again. It was hand-rolled from recall() because
+        # constitutional blocks - semantically close to any reasoning query and
+        # never decaying - took 10 of 12 hits and left NOTHING once deduped
+        # against SELF. elfmem d86e6d6 fixed the exclusion at source
+        # (`exclude_tag_patterns`), verified live: 0 leaked. Reverting restores
+        # the frame template and its TTL cache.
+        fr = await self.mem.frame("attention", query)
+        ids = [b.id for b in fr.blocks if b.id not in seen]
+        seen.update(ids)
+        blocks["attention"] = ids
+        if fr.text:
+            parts.append(fr.text)
+
         return ContextResult(text="\n\n".join(parts), blocks=blocks)
 
     # -- fill-event learning (F2) --

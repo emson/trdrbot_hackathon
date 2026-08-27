@@ -1719,3 +1719,24 @@ diversification and refuses concentration.
 **Verified:** 72 tests, incl. monotonicity across n=0..100, luck/unscoreable blocking promotion,
 poor calibration blocking promotion despite volume, drawdown demotion and recovery, the
 no-calendar assertion, hard-stop position checks, and multi-symbol book behaviour.
+
+## D-049: Principles carry their name in the block; ATTENTION returns to frame()
+**Date:** 2026-08-27
+**Status:** accepted
+**Context (citation):** The agent cited "Principle 10" for what was principle 3. The SELF frame
+numbers its blocks and **re-orders them by how load-bearing each has proven**, so a number
+refers to nothing stable and means a different principle next cycle. Telling it in the prompt to
+cite by wording did not work - the rendered list still presented numbers and nothing else.
+**Choice:** put the name inside the block: `[regimes] A pattern learned in one regime is...`.
+The only handle worth citing is the one the agent can actually see. Costs ~32 tokens; the
+budget guard caught the overrun against the 380 ceiling on the first test run (which is what it
+is for) and the ceiling moved to 430, still comfortably inside the frame's 600.
+**Context (ATTENTION):** elfmem d86e6d6 fixes the partial-exclusion leak reported in
+`frames_and_credit_assignment_report.md` - constitutional blocks no longer reach ATTENTION at
+all. Verified live: 0 leaked, 0 in the dropped list, `excluded_by_filter=10`.
+**Choice:** revert the hand-rolled recall+dedupe workaround and use `frame("attention")` again,
+regaining the frame template and its TTL cache. The cross-frame dedupe stays as cheap
+belt-and-braces.
+**Verified:** 72 tests; 10/10 named principles render in the real decide context; ATTENTION
+carries the agent's own learned blocks (its SPY position note and mind model) rather than its
+identity.

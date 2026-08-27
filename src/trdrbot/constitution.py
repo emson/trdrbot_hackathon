@@ -118,12 +118,15 @@ SELF_FRAME_TOKEN_BUDGET = 600
 #: surplus - it gets LLM-analysed on a later pass instead.
 MAX_INBOX_PER_RUN = 5
 #: Leave room for the identity block, learned self-knowledge, and the template.
-CONSTITUTION_TOKEN_CEILING = 380
+#: Raised from 380 when principles gained their `[name]` prefix (D-049): ~32
+#: tokens buys the only stable handle the agent can cite. The guard caught
+#: the overrun on the first test run, which is what it is for.
+CONSTITUTION_TOKEN_CEILING = 430
 
 
 def estimate_tokens() -> int:
     """Total budget cost of the constitution, using elfmem's own estimator."""
-    return sum(len(p.text) // 4 for p in PRINCIPLES)
+    return sum(len(block_text(p)) // 4 for p in PRINCIPLES)
 
 
 def render() -> str:
@@ -134,6 +137,20 @@ def render() -> str:
                   f"   _cue:_ {p.cue}",
                   f"   _traces to:_ {p.traces_to}", ""]
     return "\n".join(lines)
+
+
+def block_text(p: "Principle") -> str:
+    """The principle as it renders in the SELF frame, name first.
+
+    The frame numbers its blocks and orders them by how load-bearing each has
+    proven, so the numbering CHANGES between cycles - and the agent cited
+    "principle 10" for what was principle 3, a reference pointing at nothing
+    stable. Telling it in the prompt to cite by wording did not work, because
+    the rendered list still presented numbers and nothing else. Putting the
+    name in the block itself is the structural fix: the only stable handle is
+    the one the agent can actually see (D-049).
+    """
+    return f"[{p.key}] {p.text}"
 
 
 async def seed(mem, *, verbose: bool = True) -> dict[str, int]:
@@ -160,11 +177,11 @@ async def seed(mem, *, verbose: bool = True) -> dict[str, int]:
     pending: dict[str, Principle] = {}
     skipped = 0
     for p in PRINCIPLES:
-        if p.text.strip() in existing:
+        if block_text(p).strip() in existing:
             skipped += 1
             continue
         r = await mem.remember(
-            p.text,
+            block_text(p),
             tags=[TAG, f"principle/{p.key}"],
             category="knowledge",
             source=f"constitution:{p.key}",
@@ -199,7 +216,7 @@ async def seed(mem, *, verbose: bool = True) -> dict[str, int]:
             bid: {
                 "alignment_score": 1.0,
                 "tags": [TAG, f"principle/{pr.key}"],
-                "summary": pr.text,
+                "summary": block_text(pr),
             }
             for bid, pr in eligible[:MAX_INBOX_PER_RUN]
         }

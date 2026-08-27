@@ -162,3 +162,44 @@
 {"t":"2026-08-27T15:07:34.836259+00:00","s":1,"ah":0.778759,"k":"asm","ids":["59b91203222b42e4","02cd0d2bd26d4372","465e166c50d74b09","75e029865c8e435d","b6966a829bb7482b"],"frame":"task","sid":"1cf77765982847d3"}
 {"t":"2026-08-27T15:11:03.858397+00:00","s":0,"ah":0.781267,"k":"asm","ids":["59b91203222b42e4","02cd0d2bd26d4372","465e166c50d74b09","75e029865c8e435d","b6966a829bb7482b","c4bc0e4a120042b4","db0fc2a34d0446bd","f42cf6233e384136","c5ea572afbc149e9","78fb513481984036","5c42bcc0efd19526"],"frame":"self","sid":"f9dda519319e41f8"}
 {"t":"2026-08-27T15:11:03.875615+00:00","s":1,"ah":0.781271,"k":"asm","ids":["59b91203222b42e4","02cd0d2bd26d4372","465e166c50d74b09","75e029865c8e435d","b6966a829bb7482b"],"frame":"task","sid":"f9dda519319e41f8"}
+{"t":"2026-08-27T15:22:52.336433+00:00","s":0,"ah":0.836987,"k":"asm","ids":["59b91203222b42e4","02cd0d2bd26d4372","465e166c50d74b09","75e029865c8e435d","b6966a829bb7482b","c4bc0e4a120042b4","db0fc2a34d0446bd","f42cf6233e384136","c5ea572afbc149e9","78fb513481984036","5c42bcc0efd19526"],"frame":"self","sid":"19ea2d2d96e04b73"}
+{"t":"2026-08-27T15:22:52.351736+00:00","s":1,"ah":0.836992,"k":"asm","ids":["59b91203222b42e4","02cd0d2bd26d4372","465e166c50d74b09","75e029865c8e435d","b6966a829bb7482b"],"frame":"task","sid":"19ea2d2d96e04b73"}
+{"t":"2026-08-27T15:24:56.885957+00:00","s":0,"ah":0.837,"k":"asm","ids":["59b91203222b42e4","02cd0d2bd26d4372","465e166c50d74b09","75e029865c8e435d","b6966a829bb7482b","c4bc0e4a120042b4","db0fc2a34d0446bd","f42cf6233e384136","c5ea572afbc149e9","78fb513481984036","5c42bcc0efd19526"],"frame":"self","sid":"249da152a40a4036"}
+{"t":"2026-08-27T15:24:56.904461+00:00","s":1,"ah":0.837005,"k":"asm","ids":["59b91203222b42e4","02cd0d2bd26d4372","465e166c50d74b09","75e029865c8e435d","b6966a829bb7482b"],"frame":"task","sid":"249da152a40a4036"}
+{"t":"2026-08-27T15:27:06.381801+00:00","s":0,"ah":0.896018,"k":"birth","id":"7b36fdbb80f4cc35"}
+{"t":"2026-08-27T15:54:55.734222+00:00","s":0,"ah":0.0,"k":"remove","id":"75e029865c8e435d","why":"forgotten"}
+{"t":"2026-08-27T15:54:55.741678+00:00","s":1,"ah":0.0,"k":"remove","id":"59b91203222b42e4","why":"forgotten"}
+{"t":"2026-08-27T15:54:55.749013+00:00","s":2,"ah":0.0,"k":"remove","id":"465e166c50d74b09","why":"forgotten"}
+{"t":"2026-08-27T15:54:55.754665+00:00","s":3,"ah":0.0,"k":"remove","id":"b6966a829bb7482b","why":"forgotten"}
+{"t":"2026-08-27T15:54:55.759629+00:00","s":4,"ah":0.0,"k":"remove","id":"02cd0d2bd26d4372","why":"forgotten"}
+{"t":"2026-08-27T15:54:55.764496+00:00","s":5,"ah":0.0,"k":"remove","id":"c4bc0e4a120042b4","why":"forgotten"}
+{"t":"2026-08-27T15:54:55.768648+00:00","s":6,"ah":0.0,"k":"remove","id":"db0fc2a34d0446bd","why":"forgotten"}
+{"t":"2026-08-27T15:54:55.773702+00:00","s":7,"ah":0.0,"k":"remove","id":"78fb513481984036","why":"forgotten"}
+{"t":"2026-08-27T15:54:55.777319+00:00","s":8,"ah":0.0,"k":"remove","id":"c5ea572afbc149e9","why":"forgotten"}
+{"t":"2026-08-27T15:54:55.782301+00:00","s":9,"ah":0.0,"k":"remove","id":"f42cf6233e384136","why":"forgotten"}
+{"t":"2026-08-27T15:54:55.795583+00:00","s":10,"ah":0.961736,"k":"birth","id":"95209bc148c6a7b9"}
+{"t":"2026-08-27T15:54:55.799887+00:00","s":11,"ah":0.961737,"k":"birth","id":"1af203536546c2ef"}
+{"t":"2026-08-27T15:54:55.805347+00:00","s":12,"ah":0.961739,"k":"birth","id":"9d43b52dbc4fff0e"}
+{"t":"2026-08-27T15:54:55.810213+00:00","s":13,"ah":0.96174,"k":"birth","id":"cf4026ebe4e5f325"}
+{"t":"2026-08-27T15:54:55.815308+00:00","s":14,"ah":0.961742,"k":"birth","id":"df86248db03497d9"}
+{"t":"2026-08-27T15:54:55.820556+00:00","s":15,"ah":0.961743,"k":"birth","id":"78b0c92502a8cab5"}
+{"t":"2026-08-27T15:54:55.825531+00:00","s":16,"ah":0.961745,"k":"birth","id":"64452a897a4cf9c3"}
+{"t":"2026-08-27T15:54:55.830778+00:00","s":17,"ah":0.961746,"k":"birth","id":"1ce8ed99b7938d82"}
+{"t":"2026-08-27T15:54:55.835906+00:00","s":18,"ah":0.961747,"k":"birth","id":"78ec8cb80ae8e249"}
+{"t":"2026-08-27T15:54:55.844018+00:00","s":19,"ah":0.96175,"k":"birth","id":"fdf58a3178eae813"}
+{"t":"2026-08-27T15:55:23.521999+00:00","s":0,"ah":0.962141,"k":"asm","ids":["5c42bcc0efd19526","622adbc1707582cd"],"frame":"attention","sid":"56bfb5d165d445bc"}
+{"t":"2026-08-27T15:55:53.065746+00:00","s":0,"ah":0.962157,"k":"promote","id":"7b36fdbb80f4cc35","conf":0.3,"sig":0.3,"lam":0.001,"sum":"NVDA reported strong Q2 earnings with a +7.3% gap to ~225.8, broad sell-side PT raises ($300/$330/$400), and expected modest drift higher (+1.5%) to 220-245 by 2026-09-03, invalidated below ~218; the agent applies quantitative analysis (simulator EV: +$10/contract) to identify small edge opportunities while monitoring gap-fill risk from sympathy name weakness (SMCI, MRVL)."}
+{"t":"2026-08-27T15:55:53.070627+00:00","s":1,"ah":0.962157,"k":"promote","id":"95209bc148c6a7b9","conf":1.0,"sig":1.0,"lam":1e-05,"sum":"[regimes] A pattern learned in one regime is a hypothesis in another, not a rule. My confidence in it falls when its regime ends - before the P&L does, not after."}
+{"t":"2026-08-27T15:55:53.071976+00:00","s":2,"ah":0.962157,"k":"promote","id":"1af203536546c2ef","conf":1.0,"sig":1.0,"lam":1e-05,"sum":"[recency] Recent direction is evidence about the recent past. A directional view must name a causal driver; the shape of the chart is not one."}
+{"t":"2026-08-27T15:55:53.073092+00:00","s":3,"ah":0.962157,"k":"promote","id":"9d43b52dbc4fff0e","conf":1.0,"sig":1.0,"lam":1e-05,"sum":"[premise] When live data contradicts a thesis's premise, the thesis is dead however good the structure looks. I check premises against the tape before acting."}
+{"t":"2026-08-27T15:55:55.297032+00:00","s":4,"ah":0.963878,"k":"promote","id":"cf4026ebe4e5f325","conf":1.0,"sig":1.0,"lam":1e-05,"sum":"[earned-confidence] How often I recall something is not evidence it is true. Only scored outcomes move my trust in a memory."}
+{"t":"2026-08-27T15:55:55.299428+00:00","s":5,"ah":0.963878,"k":"promote","id":"df86248db03497d9","conf":1.0,"sig":1.0,"lam":1e-05,"sum":"[cues] I store every fact with the situation I will need it in, phrased as I would ask for it. A memory findable only by its own wording is lost."}
+{"t":"2026-08-27T15:55:55.300819+00:00","s":6,"ah":0.963878,"k":"promote","id":"78b0c92502a8cab5","conf":1.0,"sig":1.0,"lam":1e-05,"sum":"[contradictions] When evidence conflicts with something I hold, I keep both and mark the tension. Where my memory disagrees with the world is the most informative place I have."}
+{"t":"2026-08-27T15:55:55.301858+00:00","s":7,"ah":0.963878,"k":"promote","id":"64452a897a4cf9c3","conf":1.0,"sig":1.0,"lam":1e-05,"sum":"[precision] Context serves the decision at hand. Unvalidated memories dilute the ones that matter; letting unused patterns decay is how relevance survives."}
+{"t":"2026-08-27T15:55:55.302980+00:00","s":8,"ah":0.963878,"k":"promote","id":"1ce8ed99b7938d82","conf":1.0,"sig":1.0,"lam":1e-05,"sum":"[routing] Events to the journal, evolving patterns to memory, stable reference to the wiki. Knowledge in the wrong store will not be found, or will not adapt."}
+{"t":"2026-08-27T15:55:56.539767+00:00","s":9,"ah":0.964493,"k":"promote","id":"78ec8cb80ae8e249","conf":1.0,"sig":1.0,"lam":1e-05,"sum":"[fallible-recall] Not finding a memory is not evidence it did not happen. When a judgment rests on absence I check the journal: it is the record, my memory only reconstructs it."}
+{"t":"2026-08-27T15:55:56.541973+00:00","s":10,"ah":0.964493,"k":"promote","id":"fdf58a3178eae813","conf":1.0,"sig":1.0,"lam":1e-05,"sum":"[amendments] I propose amendments to these principles; I never enact them. A change cites the incidents that motivate it and waits for ratification."}
+{"t":"2026-08-27T15:55:59.548740+00:00","s":0,"ah":0.964839,"k":"asm","ids":["78ec8cb80ae8e249","cf4026ebe4e5f325","78b0c92502a8cab5","fdf58a3178eae813","64452a897a4cf9c3","1ce8ed99b7938d82","95209bc148c6a7b9","1af203536546c2ef","9d43b52dbc4fff0e","df86248db03497d9","5c42bcc0efd19526"],"frame":"self","sid":"52c871017bf34801"}
+{"t":"2026-08-27T15:56:14.854405+00:00","s":0,"ah":0.964838,"k":"asm","ids":["78ec8cb80ae8e249","cf4026ebe4e5f325","78b0c92502a8cab5","95209bc148c6a7b9","1af203536546c2ef","9d43b52dbc4fff0e","64452a897a4cf9c3","1ce8ed99b7938d82","fdf58a3178eae813","df86248db03497d9","5c42bcc0efd19526"],"frame":"self","sid":"542fb7e8f20c429e"}
+{"t":"2026-08-27T15:56:14.865580+00:00","s":1,"ah":0.964841,"k":"asm","ids":["5c42bcc0efd19526","78ec8cb80ae8e249","cf4026ebe4e5f325","78b0c92502a8cab5","95209bc148c6a7b9"],"frame":"task","sid":"542fb7e8f20c429e"}
+{"t":"2026-08-27T15:56:15.520985+00:00","s":2,"ah":0.965023,"k":"asm","ids":["5c42bcc0efd19526","622adbc1707582cd","7b36fdbb80f4cc35"],"frame":"attention","sid":"542fb7e8f20c429e"}

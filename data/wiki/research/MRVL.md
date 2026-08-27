@@ -13,21 +13,25 @@ sources:
   resource: discovery:news+polymarket+yahoo
   author: trdrbot/discovery
   last_modified: '2026-08-27T13:39:36.192078+00:00'
+- id: src-4
+  resource: discovery:news+polymarket+yahoo
+  author: trdrbot/discovery
+  last_modified: '2026-08-27T15:22:32.575691+00:00'
 generated:
-  at: '2026-08-27T13:39:36.192986+00:00'
+  at: '2026-08-27T15:22:32.576575+00:00'
 ---
 
 # What it is
-Marvell Technology - Hard, imminent catalyst: 'Marvell Technology Earnings Are Imminent; These Most Accurate Analysts Revise Forecasts Ahead Of Earnings Call,' with GOOG/GOOGL tagged (custom AI silicon exposure). It prints into a tape where NVDA just delivered a blockbuster, AVGO and COHR are moving on AI optics/compute, and SNPS raised guidance on AI design complexity — i.e., the whole AI-semi complex is confirming demand while the sell side is still revising Marvell numbers. Dislocation risk cuts both ways because the memory-cost story is squeezing hardware margins.
+Marvell Technology - Marvell reports imminently and the material explicitly frames it as a prediction-market event ('What Will Matt Murphy Say?'), tied to custom AI silicon for AMZN/GOOGL. Separately, headlines say Meta, Google and Amazon all still want their own chips despite Nvidia's dominance - which is the exact thesis Marvell's custom ASIC business trades on. Nvidia's blowout Q2 has already lifted the AI hardware complex, so Marvell's print is a high-implied-vol binary: either the custom-silicon narrative confirms into a strong tape, or a soft guide creates a sharp dislocation against a stretched sector bid.
 
 # Bull case
-Hardest dated catalyst on the desk — earnings land inside the 5-day window with sell-side numbers still being revised, into an AI-semi tape that NVDA, AVGO, COHR and SNPS have all just confirmed on the demand side. Setup is technically constructive (above SMA20 and SMA50, RSI 59, +52.7% 21d, +21.9% 63d) but that run is exactly what makes direction a coin flip: a beat is partly discounted while a guide dinged by memory/HBM input costs would hit a crowded long. Realized 5d vol (67.8%) is compressing beneath 21d (83.8%), the pre-print lull that usually precedes a gap. Bootstrap has P(+5%) 28% / P(-5%) 32% — nearly 60% chance of a 5%+ absolute move in five days with no drift assumed.
+Binary event risk dominates: earnings on 2026-08-27 land on a name that has already run +49.8% in 21 days with 21d realized vol of 84% (76th pctile) and price above both SMA20 and SMA50, but 5d momentum has stalled (-2.6%) and RSI is only 58 despite the run. The drift-free bootstrap gives 28% odds of +5% and 32% of -5% over 5 sessions, i.e. roughly a 60% chance of a >5% absolute move - the market will price a large straddle, so the edge is not in owning raw vol but in the asymmetry of a very high bar into the print after a parabolic 21-day move. Confirmation of the AMZN/GOOGL custom-ASIC ramp likely produces a muted 'sell-the-news' given positioning; a soft guide produces a sharp air-pocket toward the 21-day base.
 
 # Bear case
-Event premium is likely already rich at a 76th-percentile vol backdrop; if the print is in-line the post-event IV crush can lose money on a long-vol structure even with a 5-7% gap. Trailing P/E of 83.9 leaves no valuation cushion under a disappointment.
+A blowout custom-silicon guide on top of NVDA's record Q2 re-rates the whole ASIC complex and MRVL gaps toward/through analyst target 269; realized vol at 84% means a 12% up-move is a routine 1-sigma outcome.
 
 # People
 (not researched - discovery pass)
 
 # Environment
-Verdict: opportunity. Evidence: Marvell Technology Earnings Are Imminent; These Most Accurate Analysts Revise Forecasts Ahead Of Earnings Call | benzinga | ['GOOG','GOOGL','MRVL']; What's Going On With Broadcom Stock Thursday? | benzinga | ['AVGO','NVDA','SOXQ','SOXX']; Why Is Coherent Stock Surging Thursday? | benzinga | ['COHR',
+Verdict: opportunity. Evidence: Marvell Earnings Prediction Market Preview: What Will Matt Murphy Say? | benzinga | ['AMZN','GOOGL','MRVL','NVDA']; Nvidia Still Dominates AI Chips. Meta, Google and Amazon Still Want Their Own. | benzinga | ['AMZN','GOOG','GOOGL','META','NVDA']; Nasdaq Surges 200 Points; Nvidia Posts Upbeat Q2 Resu
