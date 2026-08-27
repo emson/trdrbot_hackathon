@@ -31,6 +31,8 @@ from typing import Any
 from langgraph.prebuilt import create_react_agent
 
 from . import (
+    idle,
+    sizing,
     analytics,
     exit_rules,
     failures,
@@ -207,20 +209,58 @@ async def run_tick(
             return {"status": "fast_only", "tick": n, "market_open": snap.market_open, "exits": triggered}
 
         items = inbox.pending()
-        if not items and snap.market_open:
-            # MARKET PULSE (D-042). The system was purely reactive: with an
-            # empty inbox it never reasoned, even with the market open, a live
-            # position, and the underlying moving. Found live at the 09:30
-            # open - equity had moved and the agent did nothing because no
-            # headline had arrived. No trader waits for news to check their
-            # book. A material move in an underlying we hold, or too long
-            # since the last look, is itself an observation.
-            pulse = _market_pulse(store, snap, journal, config)
-            if pulse:
-                inbox.write("market_pulse", pulse, source="pulse", trust="primary")
+
+        # Stale candidates are worse than none: they were priced against
+        # quotes that no longer exist, and the agent has correctly declined
+        # them on exactly that basis. Expire before they reach the prompt.
+        if items:
+            fresh = inbox.expire_stale(idle.OPPORTUNITY_STALE_MIN, journal)
+            if fresh:
                 items = inbox.pending()
                 if verbose:
-                    print(f"[tick {n}] pulse: {pulse['reason']}")
+                    print(f"[tick {n}] expired {fresh} stale opportunity item(s)")
+
+        if not items:
+            # An empty inbox is several states, not one (D-043). The ladder
+            # picks the cheapest rung that the situation actually justifies.
+            from datetime import datetime
+            import zoneinfo
+            et = datetime.now(zoneinfo.ZoneInfo("America/New_York"))
+            action = idle.decide(
+                market_open=snap.market_open,
+                positions=store.open_positions(),
+                underlying_prices=snap.underlying_prices,
+                last_decision_at=journal.last_decision_at(),
+                last_hunt_at=journal.last_hunt_at(),
+                open_risk_usd=sum(p.max_loss_usd or 0.0 for p in store.open_positions()),
+                equity=snap.equity or 100000.0,
+                risk_cap_fraction=sizing.PORTFOLIO_MAX_AT_RISK,
+                minutes_to_close_=idle.minutes_to_close(et),
+            )
+            if verbose:
+                print(f"[tick {n}] idle -> {action.level}: {action.reason}")
+
+            if action.level == "hunt" and tools:
+                # Intraday opportunity generation, priced at LIVE quotes. Every
+                # candidate the agent had seen until now was researched while
+                # the market was CLOSED, and it kept declining them for exactly
+                # that reason ("any spread I priced now would be simulated on
+                # prices that no longer exist").
+                try:
+                    from . import discovery
+                    r = await discovery.run(tools, config, inbox, wiki, journal,
+                                            verbose=verbose)
+                    journal.append("hunt", opportunities=r["opportunities"],
+                                   reason=action.reason)
+                    items = inbox.pending()
+                except Exception as exc:  # noqa: BLE001 - hunting is advisory
+                    print(f"[tick {n}] hunt failed, continuing: {exc!r}")
+                    journal.append("hunt", opportunities=0, error=repr(exc))
+            elif action.level == "review":
+                inbox.write("position_review", {
+                    "reason": action.reason, **action.detail,
+                }, source="idle", trust="primary")
+                items = inbox.pending()
 
         if not items:
             if verbose:

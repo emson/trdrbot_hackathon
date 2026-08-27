@@ -161,11 +161,21 @@ class ElfmemAdapter:
 
     # -- resolution learning (F3) - the actual credit-assignment step --
 
-    async def resolve(self, pos: Position, *, hit: bool, signal: float, weight: float = 1.0) -> None:
+    async def resolve(self, pos: Position, *, hit: bool, signal: float, weight: float = 1.0,
+                      interim: bool = False) -> None:
         """Score both systems: the mind prediction, and the recalled blocks
         that informed the decision. This is what makes elfmem learn instead of
-        merely accumulate (D-011's design goal)."""
-        if pos.mind_decision_block_id:
+        merely accumulate (D-011's design goal).
+
+        `interim=True` scores the BLOCKS at low weight but leaves the mind
+        alone. A mind prediction is a claim about the thesis at its horizon; it
+        is right or wrong once. `mind_outcome` takes a binary hit with no
+        weight, so an interim mark recorded a full miss - live, the SPY mind
+        sat at confidence 0.34 with hit/total 0/1 because an unrealised
+        mark-to-mid wobble on a position that is currently PROFITABLE was
+        recorded as a failed prediction (D-043).
+        """
+        if pos.mind_decision_block_id and not interim:
             await self.mem.mind_outcome(
                 pos.mind_decision_block_id, hit=hit, reason=pos.close_reason or "resolved"
             )

@@ -71,6 +71,34 @@ class Inbox:
         item.path = path
         return item
 
+    def expire_stale(self, max_age_min: float, journal=None) -> int:
+        """Move opportunity items older than max_age_min out of pending.
+
+        An opportunity priced against quotes that no longer exist is worse
+        than no opportunity: it occupies the decide context and the agent
+        spends a cycle rejecting it on staleness, which it has done
+        repeatedly. Only `opportunity` items expire - news and fills are
+        history and stay valid however old (D-043).
+        """
+        from datetime import datetime, timezone
+        n = 0
+        for item in self.pending():
+            if item.type != "opportunity":
+                continue
+            try:
+                age = (datetime.now(timezone.utc)
+                       - datetime.fromisoformat(item.ts)).total_seconds() / 60.0
+            except (ValueError, TypeError, AttributeError):
+                continue
+            if age > max_age_min:
+                self.archive([item])
+                if journal is not None:
+                    journal.append("inbox_expired", item_id=item.id,
+                                   age_min=round(age, 1), kind=item.type,
+                                   reason="stale_opportunity")
+                n += 1
+        return n
+
     def pending(self) -> list[Item]:
         items: list[Item] = []
         for p in sorted(self.paths.inbox_pending.glob("*.json")):

@@ -60,6 +60,24 @@ class Journal:
                 latest = dt
         return latest
 
+    def last_hunt_at(self):
+        """When opportunity hunting last ran. Gates the hunt cooldown."""
+        from datetime import datetime
+        latest = None
+        for row in self.read():
+            if row.get("kind") not in ("hunt", "discovery"):
+                continue
+            ts = row.get("ts")
+            if not ts:
+                continue
+            try:
+                dt = datetime.fromisoformat(ts)
+            except ValueError:
+                continue
+            if latest is None or dt > latest:
+                latest = dt
+        return latest
+
     def unresolved_decision(self, batch: str) -> dict[str, Any] | None:
         """INV-27: a decision for this batch with no terminal entry after it.
 

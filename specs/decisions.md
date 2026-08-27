@@ -1491,3 +1491,44 @@ principle), read its book greeks ("a book already carrying +$29.9k delta"), enfo
 pre-registered rule ("skip entirely if the ATM straddle prices materially above 9-10%" - it
 priced at 12.5%, so it skipped), and killed a thesis on a stale premise (its note said MRNA
 142.57; the tape said 145.48). 48 regression tests pass.
+
+## D-043: The idle ladder - what to do when nothing has happened
+**Date:** 2026-08-27
+**Status:** accepted
+**Context:** With an empty inbox the system did nothing, even with the market open and a live
+position. The naive fix is "run every analysis every tick" - which is the amateur answer:
+re-underwriting the market every five minutes costs LLM spend, burns context, and manufactures
+activity. A professional's day is a ladder, and the rung is chosen by what changed and by what
+is at risk.
+**Choice (`idle.py`), cheapest rung first:**
+- **L0 sleep** - nothing at risk, nothing moved, looked recently. Free, and usually correct.
+- **L1 health** - deterministic per-tick work that already runs: reconcile, exit rules, greeks.
+- **L2 review** - a material move (0.4%) under a held underlying, or 90 minutes of silence
+  while holding risk. One LLM call.
+- **L3 hunt** - capital idle and deployable: run discovery for fresh, LIVE-priced candidates.
+**The asymmetry that sets the thresholds:** the cost of NOT looking scales with what is at
+risk; the cost of looking scales with LLM spend. A full book on a quiet tape is left alone -
+stops already guard it and churning donates edge to the spread. An empty book is the opposite,
+and the case this system kept getting wrong: **idle capital is a position too, 100% cash at 0%
+expected return, and against a deadline that is a decision to be justified, not defaulted into.**
+**Intraday opportunity generation (L3) closes the real gap:** every candidate the agent had seen
+was researched while the market was CLOSED, and it declined them on exactly that basis - "any
+spread I priced now would be simulated on prices that no longer exist". Hunting now happens
+in-session against live quotes.
+**Edge cases, each mitigated deterministically:**
+- *Hunting while the book is full* - gated on remaining risk budget. Do not hunt when you cannot
+  shoot: candidates sizing will refuse are spend with no possible outcome.
+- *Churning* - 120-minute hunt cooldown; news does not turn over faster than that.
+- *Opening risk into the close* - refused inside 30 minutes of the bell: fills are worst into
+  the close and an overnight gap cannot be reacted to.
+- *Stale candidates lingering* - opportunity items expire from the inbox after 180 minutes and
+  are journalled. Only opportunities expire; news and fills are history and stay valid.
+- *Flapping on noise* - the 0.4% move threshold is ~1/3 of a typical index daily range.
+**Also fixed here: interim marks were resolving the mind prediction.** `mind_outcome` takes a
+binary hit with no weight, so every interim score recorded a full MISS - live, the SPY mind sat
+at `confidence=0.34, hit/total=0/1` on a position that was profitable and whose horizon had not
+arrived. `resolve(interim=True)` now scores blocks at low weight and leaves the mind alone; a
+prediction is right or wrong once, at its horizon.
+**Verified:** 8 ladder scenarios (sleep/review-on-move/review-on-silence/hunt/cap-full/cooldown/
+near-close/market-closed), 57 regression tests, and live at 09:59 ET - "idle -> sleep: positions
+healthy, tape quiet, looked recently".

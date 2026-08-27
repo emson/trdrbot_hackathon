@@ -524,3 +524,89 @@ def test_market_pulse_wakes_the_agent_on_a_material_move():
 
     # Nothing at risk -> silence is the correct output, not a missed check.
     assert _market_pulse(Store([]), snap, J(), None) is None
+
+
+# -------------------------------------------- D-043 the idle ladder
+
+def _idle(**kw):
+    from datetime import datetime, timedelta, timezone
+    from trdrbot import idle
+    now = datetime.now(timezone.utc)
+    base = dict(market_open=True, positions=[], underlying_prices={},
+                last_decision_at=now - timedelta(minutes=5),
+                last_hunt_at=now - timedelta(minutes=5),
+                open_risk_usd=0.0, equity=100_000, risk_cap_fraction=0.15,
+                minutes_to_close_=180.0)
+    return idle.decide(**{**base, **kw})
+
+
+def _held(spot=766.5):
+    return Position(position_id="p", status="open", underlying="SPY",
+                    entry_spot=spot, max_loss_usd=2210.0)
+
+
+def test_idle_sleeps_when_the_book_is_quiet_and_recently_checked():
+    a = _idle(positions=[_held()], underlying_prices={"SPY": 766.9},
+              open_risk_usd=14_500)
+    assert a.level == "sleep"
+
+
+def test_idle_reviews_on_a_material_move_under_a_held_position():
+    a = _idle(positions=[_held()], underlying_prices={"SPY": 761.9},
+              open_risk_usd=14_500)
+    assert a.level == "review" and "-0.6" in a.reason
+
+
+def test_idle_reviews_after_too_long_without_looking():
+    from datetime import datetime, timedelta, timezone
+    a = _idle(positions=[_held()], underlying_prices={"SPY": 766.9},
+              open_risk_usd=14_500,
+              last_decision_at=datetime.now(timezone.utc) - timedelta(minutes=125))
+    assert a.level == "review"
+
+
+def test_idle_hunts_when_capital_is_idle():
+    """Idle capital is a position too - 100% cash at 0% expected return. With
+    a deadline that is a decision, not a default."""
+    from datetime import datetime, timedelta, timezone
+    a = _idle(last_hunt_at=datetime.now(timezone.utc) - timedelta(minutes=200))
+    assert a.level == "hunt"
+
+
+def test_idle_does_not_hunt_when_the_risk_cap_is_full():
+    """Do not hunt when you cannot shoot: candidates sizing will refuse are
+    spend with no possible outcome."""
+    from datetime import datetime, timedelta, timezone
+    a = _idle(positions=[_held()], underlying_prices={"SPY": 766.9},
+              open_risk_usd=15_000,
+              last_hunt_at=datetime.now(timezone.utc) - timedelta(minutes=200))
+    assert a.level == "sleep"
+
+
+def test_idle_does_not_open_new_risk_into_the_close():
+    from datetime import datetime, timedelta, timezone
+    a = _idle(last_hunt_at=datetime.now(timezone.utc) - timedelta(minutes=300),
+              minutes_to_close_=15.0)
+    assert a.level == "sleep" and "close" in a.reason
+
+
+def test_idle_respects_the_hunt_cooldown():
+    a = _idle()  # hunted 5 minutes ago
+    assert a.level == "sleep"
+
+
+def test_idle_sleeps_when_the_market_is_closed():
+    a = _idle(market_open=False, positions=[_held()],
+              underlying_prices={"SPY": 700.0})
+    assert a.level == "sleep" and "closed" in a.reason
+
+
+def test_interim_marks_do_not_score_the_mind_prediction():
+    """A mind prediction is a claim about the thesis at its horizon - right or
+    wrong once. mind_outcome takes a binary hit with no weight, so an interim
+    mark recorded a full miss: live, the SPY mind sat at confidence 0.34,
+    hit/total 0/1, on a position that was PROFITABLE."""
+    import inspect
+    from trdrbot.elfmem_adapter import ElfmemAdapter
+    src = inspect.getsource(ElfmemAdapter.resolve)
+    assert "not interim" in src, "mind_outcome must be gated on a true resolution"

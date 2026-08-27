@@ -75,7 +75,7 @@ async def run(
         # fully resolve - not to substitute for resolution. Narrower signal
         # (0.7/0.3, not resolution's 0.9/0.1) reflects that lower certainty.
         signal = 0.7 if pnl > 0 else 0.3
-        await mem.resolve(pos, hit=pnl > 0, signal=signal, weight=0.1)
+        await mem.resolve(pos, hit=pnl > 0, signal=signal, weight=0.1, interim=True)
         journal.append(
             "interim_outcome", position_id=pos.position_id, pnl_pct=pnl,
             weight=0.1, band=band,
