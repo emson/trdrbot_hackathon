@@ -19,10 +19,12 @@ from pathlib import Path
 
 from . import experiments, ids, market_stats, optmath, sizing
 from .calibration import CalibrationStore
+from .ledger import STANDALONE
 from .positions import Position, PositionStore
 
 
-def build_simulate_experiments(shared: dict[str, Any], state_dir: "Path | None" = None) -> StructuredTool:
+def build_simulate_experiments(shared: dict[str, Any], state_dir: "Path | None" = None,
+                               ledger: "Any" = None) -> StructuredTool:
     """Tool: score several expressions of one thesis before risking anything.
 
     Takes ALL candidates in a single call rather than one per call - that is
@@ -131,6 +133,21 @@ def build_simulate_experiments(shared: dict[str, Any], state_dir: "Path | None" 
             for e, fr in zip(built, frictions)
         ]
         ranked = experiments.rank(results)
+        # Pre-registration is AUTOMATIC (D-052). Every thesis simulated is
+        # recorded here, traded or not - the agent cannot forget it, cannot
+        # skip it under pressure, and pays no extra prompt burden. An LLM
+        # generates far more theses than it trades, and the discarded ones are
+        # exactly what a multiple-testing correction needs to count.
+        if ledger is not None:
+            try:
+                ledger.register(
+                    kind="thesis", underlying=underlying, claim=thesis_claim,
+                    probability=0.5, horizon=horizon,
+                    band_low=band_low, band_high=band_high,
+                    notes=f"{len(built)} structures simulated",
+                )
+            except Exception as exc:  # noqa: BLE001 - never block a decision
+                print(f"[ledger] register failed: {exc!r}")
         shared["thesis"] = thesis
         # Market params of this simulation - record_position derives the
         # entry greeks from these, same derive-not-declare pattern as sizing.
@@ -154,6 +171,7 @@ def build_record_position(
     calibration: "CalibrationStore | None" = None,
     sources: list[dict[str, Any]] | None = None,
     shared: dict[str, Any] | None = None,
+    ledger: Any = None,
 ) -> StructuredTool:
     def record_position(
         underlying: str,
@@ -286,6 +304,13 @@ def build_record_position(
             pos.thesis_band_low = th.band_low
             pos.thesis_band_high = th.band_high
             pos.thesis_drift = th.drift
+        # Close the loop: mark the pre-registered thesis as traded, so the
+        # ledger distinguishes ideas acted on from ideas declined.
+        if ledger is not None and pos.thesis_horizon:
+            try:
+                ledger.mark_traded(pos.underlying, pos.thesis_horizon, pos.position_id)
+            except Exception as exc:  # noqa: BLE001
+                print(f"[ledger] mark_traded failed: {exc!r}")
         path = store.save(pos)
         if calibration is not None:
             calibration.record(pos.position_id, confidence)
@@ -390,4 +415,60 @@ def build_size_position(
 
     return StructuredTool.from_function(
         func=size_position, name="size_position", description=size_position.__doc__
+    )
+
+
+def build_record_forecast(ledger: Any) -> StructuredTool:
+    """Tool: put a view on the record without trading it.
+
+    The cheapest evidence available to this agent. Size is gated on measured
+    calibration, and calibration needs roughly 50 resolved forecasts to mean
+    anything - a number trade-level observations will never reach at 1-5
+    concurrent positions. A forecast on a setup you DECLINE costs nothing and
+    scores exactly the same judgement.
+    """
+
+    def record_forecast(
+        underlying: str,
+        claim: str,
+        probability: float,
+        horizon: str,
+        band_low: float | None = None,
+        band_high: float | None = None,
+        why: str = "",
+    ) -> str:
+        """Record a falsifiable prediction you are NOT trading.
+
+        Use this every time you form a view and decline to act on it - a setup
+        whose edge did not survive costs, a name you looked at and passed, a
+        call on where something lands. It is scored exactly like a traded
+        thesis and it moves your calibration record, which is what earns size.
+
+        Args:
+            underlying: ticker the prediction is about
+            claim: the prediction in one sentence
+            probability: your honest P(0-1) that the band holds at the horizon.
+                Do not round to 0.5/0.75 - granularity matters, and rounding
+                measurably degrades forecast accuracy.
+            horizon: YYYY-MM-DD when this is judged
+            band_low: holds only if price >= this at the horizon
+            band_high: holds only if price <= this at the horizon.
+                Give at least one, or it cannot be scored and will be refused.
+            why: brief reasoning, for the record
+        """
+        e = ledger.register(
+            kind=STANDALONE, underlying=underlying, claim=claim,
+            probability=probability, horizon=horizon,
+            band_low=band_low, band_high=band_high, notes=why,
+        )
+        if e is None:
+            return ("REFUSED: no band given, so this could never be scored. "
+                    "Give band_low and/or band_high.")
+        return (f"Recorded forecast {e.id} on {e.underlying}: {e.probability:.0%} that "
+                f"[{e.band_low}, {e.band_high}] holds on {e.horizon}. "
+                f"It will be scored automatically and counts toward your calibration.")
+
+    return StructuredTool.from_function(
+        func=record_forecast, name="record_forecast",
+        description=record_forecast.__doc__,
     )

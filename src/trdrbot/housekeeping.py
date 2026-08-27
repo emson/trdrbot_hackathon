@@ -101,6 +101,33 @@ async def run(
             except Exception as exc:  # noqa: BLE001 - research is advisory (INV-8)
                 print(f"[housekeeping] research failed, continuing: {exc!r}")
 
+    # Resolve matured forecasts against the tape (D-052). This is where the
+    # cheap evidence lands: theses we DECLINED get scored exactly like traded
+    # ones, and they are the only realistic route to a calibration sample large
+    # enough to mean anything.
+    forecasts_resolved = 0
+    if tools:
+        from . import ids as _i, ledger as _ledger
+        from .attribution import _spot
+        cfg2 = _load_config()
+        book = _ledger.Ledger(cfg2.paths.state / "ledger.jsonl")
+        due = book.matured_unresolved()
+        for e in due:
+            spot = await _spot(tools, e.underlying)
+            if spot is None:
+                continue  # never guess the price; try again next cycle
+            done = book.resolve(e.id, spot, _i.utc_now().isoformat())
+            if done:
+                forecasts_resolved += 1
+                journal.append(
+                    "forecast_resolved", entry_id=e.id, underlying=e.underlying,
+                    traded=e.traded, stated=e.probability, held=done.outcome,
+                    price_at_horizon=spot,
+                )
+        if due:
+            journal.append("forecast_run", due=len(due), resolved=forecasts_resolved,
+                           skipped_no_price=len(due) - forecasts_resolved)
+
     # Attribute any thesis whose horizon has now arrived (view vs structure).
     attributed = 0
     if tools:
@@ -117,4 +144,5 @@ async def run(
     if verbose:
         print(f"[housekeeping] interim_scored={interim_scored} dream_ok={dreamed}")
 
-    return {"interim_scored": interim_scored, "dream_ok": dreamed, "attributed": attributed}
+    return {"interim_scored": interim_scored, "dream_ok": dreamed, "attributed": attributed,
+            "forecasts_resolved": forecasts_resolved}

@@ -26,6 +26,7 @@ manually and never calls dream() itself.
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from typing import Any
 
 from langgraph.prebuilt import create_react_agent
@@ -33,6 +34,7 @@ from langgraph.prebuilt import create_react_agent
 from . import (
     competence,
     idle,
+    ledger as ledger_mod,
     prompts,
     sizing,
     analytics,
@@ -82,7 +84,14 @@ def _text_of(message: Any) -> str:
     return str(content)
 
 
-def _render_positions(store: PositionStore, snap: "analytics.Snapshot | None" = None) -> str:
+#: Beta-weighted book delta above this share of equity per 1% market move is
+#: called out as a directional bet. Reported, never gated (D-009): it bounds
+#: variance, not ruin, and defined-risk legs already bound the worst case.
+BETA_DELTA_FLAG_PCT = 1.5
+
+
+def _render_positions(store: PositionStore, snap: "analytics.Snapshot | None" = None,
+                      state_dir: "Path | None" = None, equity: float = 0.0) -> str:
     """Two-tier context (D-019): detail for what needs attention, one line for the rest."""
     positions = store.open_positions()
     if not positions:
@@ -94,7 +103,8 @@ def _render_positions(store: PositionStore, snap: "analytics.Snapshot | None" = 
     # +delta/-vega/+theta position - this line is where that becomes
     # visible before a fourth one gets added (D-040).
     if snap is not None:
-        bg = analytics.book_greeks(positions, snap.underlying_prices)
+        bg = analytics.book_greeks(positions, snap.underlying_prices,
+                                   state_dir=state_dir, equity=equity)
         if bg:
             skip = f" ({bg['positions_skipped']} unpriced)" if bg["positions_skipped"] else ""
             lines.append(
@@ -103,10 +113,34 @@ def _render_positions(store: PositionStore, snap: "analytics.Snapshot | None" = 
                 f" | vega ${bg['vega_dollars']:+,.0f}/IVpt{skip}. Before adding a"
                 f" position, check whether it grows or offsets these."
             )
+            if "beta_weighted_delta" in bg:
+                pct = bg.get("pct_equity_per_1pct_spy")
+                flag = ""
+                if pct is not None and abs(pct) >= BETA_DELTA_FLAG_PCT:
+                    flag = ("  <- CONCENTRATED: this book is a directional market bet, "
+                            "whatever the names suggest")
+                assumed = bg.get("betas_assumed") or []
+                note = (f" ({len(assumed)} beta assumed - poor fit or no history: "
+                        f"{', '.join(assumed)})" if assumed else "")
+                lines.append(
+                    f"Beta-weighted to SPY: ${bg['beta_weighted_delta']:+,.0f} delta"
+                    + (f", i.e. {pct:+.2f}% of equity per 1% SPY move" if pct is not None else "")
+                    + f". Betas {bg['betas']}{note}.{flag}"
+                )
+                lines.append(
+                    "Names are not exposures: three positions on correlated names are one "
+                    "bet. Judge a new position by whether it offsets this number or grows it."
+                )
             lines.append("")
     for p in positions:
         rules = ", ".join(
-            f"{r['type']}={r.get('threshold', r.get('days_before_expiry'))}" for r in p.exit_rules
+            # `level` for underlying stops, `threshold` for mark-based ones.
+            # Reading only `threshold` printed "underlying_stop=None" on a
+            # position whose thesis stop WAS set - a rendering bug that told
+            # the agent its most important guard was missing.
+            f"{r['type']}="
+            f"{r.get('threshold', r.get('level', r.get('days_before_expiry')))}"
+            for r in p.exit_rules
         ) or "NO EXIT RULES"
         lines.append(f"- **{p.position_id}** [{p.status}] {p.strategy} on {p.underlying} "
                       f"(trust: {p.trust_tier()})")
@@ -296,7 +330,9 @@ async def run_tick(
         )
 
         shared: dict[str, Any] = {}
-        sim_tool = local_tools.build_simulate_experiments(shared, config.paths.state)
+        book = ledger_mod.Ledger(config.paths.state / "ledger.jsonl")
+        sim_tool = local_tools.build_simulate_experiments(shared, config.paths.state, book)
+        forecast_tool = local_tools.build_record_forecast(book)
         open_pos = store.open_positions()
         open_risk = sum(p.max_loss_usd or 0.0 for p in open_pos)
         by_underlying: dict[str, float] = {}
@@ -307,7 +343,9 @@ async def run_tick(
                 )
         equity_now = snap.equity or 100000.0
         hw = competence.update_high_water(config.paths.state, equity_now)
-        cal_now = calib.score()
+        # Calibration draws on declined-thesis forecasts too (D-052).
+        cal_now = calib.score(ledger_mod.as_forecasts(
+            ledger_mod.Ledger(config.paths.state / "ledger.jsonl").resolved()))
         posture = competence.assess(
             resolved=cal_now.n, reliability=cal_now.reliability,
             positions=store.all(), equity=equity_now, high_water=hw,
@@ -331,15 +369,15 @@ async def run_tick(
             calibration=calib,
             sources=[{"id": i.id, "resource": f"inbox/{i.id}", "author": i.source}
                      for i in items],
-            shared=shared,
+            shared=shared, ledger=book,
         )
         guarded = tool_guard.redirect_whole_book_close(
             guarded, lambda: len([p for p in store.open_positions() if p.status == "open"])
         )
-        agent_tools = guarded + [sim_tool, size_tool, record_tool]
+        agent_tools = guarded + [sim_tool, size_tool, record_tool, forecast_tool]
         agent = create_react_agent(build_model(config), agent_tools, prompt=SYSTEM_PROMPT)
 
-        prompt_parts = [snap.render(), _render_positions(store, snap)]
+        prompt_parts = [snap.render(), _render_positions(store, snap, config.paths.state, snap.equity or 0.0)]
         _ok, _why = competence.can_open(config.deadline, None)
         prompt_parts.append(
             f"## Competence tier: {posture.tier.upper()}\n"
@@ -436,9 +474,19 @@ async def run_tick(
 
         inbox.archive(items)
 
-        # An order placed without a recorded position has no exit rules and
-        # nothing can act on it - worth surfacing rather than discovering it days later.
-        if orders and not recorded:
+        # An order that OPENS a position without a recorded position has no
+        # exit rules and nothing can act on it. Only opening orders qualify:
+        # this fired on `replace_order_by_id` when the agent repriced its own
+        # exit, demanding a record_position for a position it was closing. A
+        # warning that cries wolf teaches everyone to ignore warnings - the
+        # same class as the underlying_stop=None rendering bug (D-056).
+        opening_orders = [
+            o for o in orders
+            if str(o.get("name", "")).startswith("place_")
+            and "close" not in str(o.get("args_as_model_supplied", {})
+                                   .get("position_intent", "")).lower()
+        ]
+        if opening_orders and not recorded:
             print("\n[tick] WARNING: order placed but record_position was not called - "
                   "this position has no exit rules and the evaluator cannot see it.")
 

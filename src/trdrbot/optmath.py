@@ -275,7 +275,80 @@ def _norm_pdf(x: float) -> float:
     return math.exp(-0.5 * x * x) / math.sqrt(2.0 * math.pi)
 
 
-def bs_greeks(right: str, strike: float, spot: float, iv: float, days: float) -> dict[str, float] | None:
+#: Volatility does not accrue evenly across the calendar. A business day is a
+#: full unit; a weekend or holiday day contributes far less, because the
+#: underlying is not trading. Weighting them gives roughly a 308-day year.
+#:
+#: At 30 DTE this is a rounding error. At OUR 2-10 DTE it dominates: Friday
+#: close to Monday open is 2.25 CALENDAR days but ~1.25 vol days - a 33% error
+#: in every greek, every cross-expiry IV comparison, and the expected move the
+#: thesis band is checked against. An unadjusted clock also manufactures a
+#: spurious IV jump every Monday morning.
+#:
+#: Corroborated independently: removing Friday->Monday positions from a 1DTE
+#: SPX put-write study (Mar 2018 - Sep 2025) cut cumulative return from 28.07%
+#: to 8.94% - about two thirds of all profit came from weekend-spanning trades,
+#: which is what over-counting weekend time looks like from the other side.
+WEEKEND_VOL_WEIGHT = 0.5
+VOL_DAYS_PER_YEAR = 308.0
+
+
+def vol_days(days: float, start: "date | None" = None) -> float:
+    """Calendar days -> volatility-weighted days.
+
+    Without a start date we cannot know which days are weekends, so we scale
+    by the average weekday share - honest, and still better than counting
+    weekends at full weight.
+    """
+    from datetime import date as _date, timedelta
+
+    if days <= 0:
+        return 0.0
+    if start is None:
+        return days * (5 + 2 * WEEKEND_VOL_WEIGHT) / 7.0
+    total = 0.0
+    whole = int(days)
+    for i in range(whole):
+        d = start + timedelta(days=i)
+        total += 1.0 if d.weekday() < 5 else WEEKEND_VOL_WEIGHT
+    frac = days - whole
+    if frac:
+        d = start + timedelta(days=whole)
+        total += frac * (1.0 if d.weekday() < 5 else WEEKEND_VOL_WEIGHT)
+    return total
+
+
+def gamma_breakeven(greeks: dict[str, float] | None) -> float | None:
+    """The daily underlying move at which gamma P&L exactly offsets theta.
+
+    From theta ~= -0.5 * gamma * sigma^2 * S^2, so breakeven = sqrt(2|theta|/|gamma|).
+
+    **It does not discriminate between structures, and sources claiming it does
+    are wrong.** Measured: at a flat 13% IV a short put spread, a long straddle
+    and an iron condor all return $5.21 - because theta/gamma is that same BS
+    identity for every position at one spot and one vol. What it actually
+    returns is **the daily move implied by IV, in dollars** ($3.21 at 8% IV,
+    $14.03 at 35%), varying between structures only through skew when legs
+    carry different IVs.
+
+    That makes it useful for exactly one thing, which is the important thing:
+    compare it against the underlying's REALISED daily range. Implied above
+    realised means short premium is being paid for; below means it is being
+    donated. It is the implied-vs-realised edge test, denominated in dollars a
+    day instead of vol points - which is the same test as an IV/forecast-RV
+    ratio, in units the agent can check against the tape directly.
+    """
+    if not greeks:
+        return None
+    theta = greeks.get("theta_dollars", 0.0)
+    gamma = greeks.get("gamma_shares", 0.0)
+    if gamma == 0:
+        return None
+    return math.sqrt(2.0 * abs(theta) / abs(gamma))
+
+
+def bs_greeks(right: str, strike: float, spot: float, iv: float, days: float,
+              start: "date | None" = None) -> dict[str, float] | None:
     """Per-share greeks for one contract. None when the model is undefined.
 
     At days <= 0 or iv <= 0 the formulas divide by zero - and the honest
@@ -285,19 +358,23 @@ def bs_greeks(right: str, strike: float, spot: float, iv: float, days: float) ->
     """
     if days <= 0 or iv <= 0 or spot <= 0 or strike <= 0:
         return None
-    t = days / 365.0
+    # Vol time, not calendar time (see WEEKEND_VOL_WEIGHT).
+    t = vol_days(days, start) / VOL_DAYS_PER_YEAR
     st = iv * math.sqrt(t)
     d1 = (math.log(spot / strike) + 0.5 * iv * iv * t) / st
     delta = _norm_cdf(d1) if right == "C" else _norm_cdf(d1) - 1.0
     gamma = _norm_pdf(d1) / (spot * st)
     # theta per DAY, r=0 (call and put theta coincide at r=0)
+    # Theta is quoted per CALENDAR day (what a holder actually experiences),
+    # even though t is measured in vol time.
     theta = -(spot * _norm_pdf(d1) * iv) / (2.0 * math.sqrt(t)) / 365.0
     # vega per 1 IV POINT (0.01), the unit traders quote
     vega = spot * _norm_pdf(d1) * math.sqrt(t) / 100.0
     return {"delta": delta, "gamma": gamma, "theta": theta, "vega": vega}
 
 
-def net_greeks(legs: list[Leg], spot: float, iv: float, days: float) -> dict[str, float] | None:
+def net_greeks(legs: list[Leg], spot: float, iv: float, days: float,
+               start: "date | None" = None) -> dict[str, float] | None:
     """Whole-position greeks in trader units, or None if any leg is undefined.
 
     delta_shares  equivalent stock shares (signed)
@@ -313,7 +390,8 @@ def net_greeks(legs: list[Leg], spot: float, iv: float, days: float) -> dict[str
     """
     d_sh = g_sh = th = ve = 0.0
     for leg in legs:
-        g = bs_greeks(leg.right, leg.strike, spot, leg.iv if leg.iv is not None else iv, days)
+        g = bs_greeks(leg.right, leg.strike, spot,
+                      leg.iv if leg.iv is not None else iv, days, start)
         if g is None:
             return None
         k = leg.sign * leg.qty * CONTRACT_MULTIPLIER
@@ -330,7 +408,8 @@ def net_greeks(legs: list[Leg], spot: float, iv: float, days: float) -> dict[str
     }
 
 
-def expected_move(spot: float, iv: float, days: float) -> float | None:
+def expected_move(spot: float, iv: float, days: float,
+                  start: "date | None" = None) -> float | None:
     """The market's own 1-sigma move by the horizon, in dollars.
 
     The first professional sanity check on any thesis: a band INSIDE the
@@ -339,7 +418,7 @@ def expected_move(spot: float, iv: float, days: float) -> float | None:
     reason the whole market lacks."""
     if spot <= 0 or iv <= 0 or days <= 0:
         return None
-    return spot * iv * math.sqrt(days / 365.0)
+    return spot * iv * math.sqrt(vol_days(days, start) / VOL_DAYS_PER_YEAR)
 
 
 # OCC symbol: ROOT + YYMMDD + C/P + strike*1000 zero-padded to 8.

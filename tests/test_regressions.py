@@ -861,3 +861,370 @@ def test_reliability_is_never_negative():
     for s in range(20):
         c = score(_synthetic("perfect", 12, seed=s))
         assert c.reliability >= 0.0 and c.resolution >= 0.0
+
+
+# --------------------------- D-051 vol clock and gamma breakeven
+
+def test_weekend_time_is_not_full_volatility_time():
+    """Friday->Monday is 2.25 calendar days but ~1.25 vol days. At 30 DTE that
+    is a rounding error; at 2-10 DTE it corrupts every greek and the expected
+    move the thesis band is checked against."""
+    import datetime
+    from trdrbot.optmath import vol_days
+    friday = datetime.date(2026, 8, 28)
+    monday = datetime.date(2026, 8, 31)
+    assert vol_days(3, friday) < vol_days(3, monday)
+    assert abs(vol_days(3, monday) - 3.0) < 1e-9, "a midweek run is all trading days"
+    assert vol_days(3, friday) == 2.0, "Fri 1.0 + Sat 0.5 + Sun 0.5"
+    assert vol_days(0, friday) == 0.0
+
+
+def test_vol_clock_degrades_honestly_without_a_start_date():
+    from trdrbot.optmath import vol_days
+    assert 0 < vol_days(7) < 7, "must discount weekends even when we cannot date them"
+
+
+def test_expected_move_shrinks_across_a_weekend():
+    """The number the agent compares its thesis band against."""
+    import datetime
+    from trdrbot.optmath import expected_move
+    fri = expected_move(770, 0.13, 3, datetime.date(2026, 8, 28))
+    mon = expected_move(770, 0.13, 3, datetime.date(2026, 8, 31))
+    assert fri < mon and fri / mon < 0.9
+
+
+def test_gamma_breakeven_is_the_implied_daily_move_not_a_structure_score():
+    """Sources claim it discriminates structures. It does not: theta/gamma is
+    the same BS identity for every position at one spot and one vol. What it
+    returns is the daily move implied by IV - useful against REALISED range."""
+    from trdrbot.optmath import Leg, net_greeks, gamma_breakeven
+
+    def L(r, k, side, q=1):
+        return Leg.parse({"right": r, "strike": k, "side": side, "qty": q, "price": 1.0})
+
+    spread = net_greeks([L("P", 755, "short", 5), L("P", 750, "long", 5)], 766.0, 0.13, 6)
+    straddle = net_greeks([L("C", 766, "long"), L("P", 766, "long")], 766.0, 0.13, 6)
+    assert abs(gamma_breakeven(spread) - gamma_breakeven(straddle)) < 0.01
+
+    low = gamma_breakeven(net_greeks([L("C", 766, "long")], 766.0, 0.08, 6))
+    high = gamma_breakeven(net_greeks([L("C", 766, "long")], 766.0, 0.35, 6))
+    assert high > 2 * low, "it must scale with IV - that is its actual content"
+    assert gamma_breakeven(None) is None
+
+
+# ------------------- D-052 pre-registration ledger & unconditional forecasts
+
+def _book():
+    import tempfile
+    from pathlib import Path
+    from trdrbot.ledger import Ledger
+    return Ledger(Path(tempfile.mkdtemp()) / "ledger.jsonl")
+
+
+def test_unfalsifiable_forecasts_are_refused_at_write_time():
+    """A thesis that can never be judged is not evidence, and counting it would
+    make the multiple-testing correction more punitive for no gain."""
+    from trdrbot.ledger import STANDALONE
+    b = _book()
+    assert b.register(kind=STANDALONE, underlying="QQQ", claim="vibes", probability=0.6,
+                      horizon="2026-09-30", band_low=None, band_high=None) is None
+    assert b.trials() == 0
+
+
+def test_declined_theses_still_score_calibration():
+    """The whole point: at 1-5 concurrent positions, trade-level observations
+    never reach the ~50 needed for calibration to mean anything. Forecasts on
+    setups we DECLINE cost nothing and score the same judgement."""
+    import datetime
+    from trdrbot.calibration import CalibrationStore
+    from trdrbot.ledger import STANDALONE, as_forecasts
+    import tempfile
+    from pathlib import Path
+
+    b = _book()
+    past = (datetime.date.today() - datetime.timedelta(days=1)).isoformat()
+    for i, (lo, hi, px) in enumerate([(200.0, 238.0, 249.0), (100.0, 150.0, 120.0)]):
+        e = b.register(kind=STANDALONE, underlying=f"X{i}", claim="declined",
+                       probability=0.45, horizon=past, band_low=lo, band_high=hi)
+        b.resolve(e.id, px, "now")
+
+    cal = CalibrationStore(Path(tempfile.mkdtemp()) / "c.json")
+    assert cal.score().n == 0, "no traded positions"
+    assert cal.score(as_forecasts(b.resolved())).n == 2, "declined forecasts must count"
+
+
+def test_resolution_checks_the_band_against_the_tape():
+    import datetime
+    from trdrbot.ledger import THESIS
+    b = _book()
+    past = (datetime.date.today() - datetime.timedelta(days=1)).isoformat()
+    e = b.register(kind=THESIS, underlying="NVDA", claim="holds", probability=0.38,
+                   horizon=past, band_low=220.0, band_high=245.0)
+    assert b.resolve(e.id, 231.0, "now").outcome is True
+    e2 = b.register(kind=THESIS, underlying="SPY", claim="holds", probability=0.7,
+                    horizon=past, band_low=750.0, band_high=None)
+    assert b.resolve(e2.id, 740.0, "now").outcome is False
+
+
+def test_a_forecast_is_not_resolved_before_its_horizon():
+    import datetime
+    from trdrbot.ledger import STANDALONE
+    b = _book()
+    future = (datetime.date.today() + datetime.timedelta(days=5)).isoformat()
+    b.register(kind=STANDALONE, underlying="SMCI", claim="later", probability=0.3,
+               horizon=future, band_low=38.0, band_high=48.0)
+    assert b.matured_unresolved() == []
+
+
+def test_the_same_thesis_is_not_double_registered():
+    """The agent often simulates twice while comparing structures; the trial
+    count must not inflate from that."""
+    from trdrbot.ledger import THESIS
+    b = _book()
+    for _ in range(3):
+        b.register(kind=THESIS, underlying="NVDA", claim="holds", probability=0.4,
+                   horizon="2099-01-01", band_low=220.0, band_high=245.0)
+    assert b.trials() == 1
+
+
+def test_traded_and_declined_are_distinguishable():
+    from trdrbot.ledger import THESIS, STANDALONE
+    b = _book()
+    b.register(kind=THESIS, underlying="NVDA", claim="a", probability=0.4,
+               horizon="2099-01-01", band_low=220.0, band_high=245.0)
+    b.register(kind=STANDALONE, underlying="SPY", claim="b", probability=0.6,
+               horizon="2099-01-02", band_low=750.0, band_high=None)
+    b.mark_traded("NVDA", "2099-01-01", "pos_1")
+    s = b.summary()
+    assert s["traded"] == 1 and s["declined"] == 1 and s["trials"] == 2
+
+
+# ------------------------------------------- D-054 measured lessons
+
+def test_every_lesson_is_cued_named_and_specific():
+    """A lesson findable only by its own wording is lost ([cues] applied to
+    itself), and one without numbers is a platitude."""
+    from trdrbot import lessons
+    keys = [l.key for l in lessons.LESSONS]
+    assert len(keys) == len(set(keys))
+    for l in lessons.LESSONS:
+        assert l.cue.strip().startswith("when"), f"{l.key}: cue must name a situation"
+        assert lessons.block_text(l).startswith(f"[{l.key}]"), "name-first for stable citation"
+        assert any(ch.isdigit() for ch in l.text), f"{l.key}: no measurement in it"
+        assert len(l.text) > 200, f"{l.key}: too thin to be actionable"
+
+
+def test_lessons_are_not_constitutional():
+    """They must decay and be moved by outcomes. Pinning a measured claim as
+    identity is exactly what [regimes] warns against."""
+    from trdrbot import constitution, lessons
+    assert lessons.TAG != constitution.TAG
+    for l in lessons.LESSONS:
+        assert constitution.TAG not in l.tags
+
+
+def test_a_reworded_lesson_replaces_rather_than_duplicates():
+    """Content-based idempotence looks right until a lesson is REWORDED: the
+    new text does not match, a second block is written, and the stale twin
+    lives on saying something subtly different. Measured: rewording one lesson
+    produced 7 blocks for 6 lessons. Keys must be the handle, not content."""
+    import inspect
+    from trdrbot import lessons
+    src = inspect.getsource(lessons.seed)
+    assert "lesson/" in src, "must key on a per-lesson tag"
+    assert "forget" in src, "must drop the superseded block"
+
+
+# ----------------------------- D-055 beta-weighted book delta
+
+def test_beta_is_returned_with_its_fit_quality():
+    """A beta without R-squared is a number pretending to be knowledge.
+    Measured on real data: MU came out at -0.45 and NVDA at +1.85 over the
+    same 120 sessions - both semiconductors. That is one estimate dominated by
+    name-specific moves, not two market sensitivities."""
+    import math, random
+    from trdrbot.market_stats import beta, shrunk_beta
+    rng = random.Random(5)
+    bench = [100.0]
+    for _ in range(150):
+        bench.append(bench[-1] * math.exp(rng.gauss(0, 0.01)))
+    br = [math.log(b / a) for a, b in zip(bench, bench[1:])]
+
+    # a true 2x tracker: high beta, high R2, taken at face value
+    tracker = [100.0]
+    for r in br:
+        tracker.append(tracker[-1] * math.exp(2 * r))
+    raw, r2 = beta(tracker, bench)
+    assert abs(raw - 2.0) < 0.1 and r2 > 0.9
+    assert abs(shrunk_beta(raw, r2) - raw) < 0.05, "a well-fitted beta is not shrunk"
+
+    # pure noise: whatever beta falls out must be shrunk back toward the market
+    noise = [100.0]
+    for _ in range(150):
+        noise.append(noise[-1] * math.exp(rng.gauss(0, 0.02)))
+    raw_n, r2_n = beta(noise, bench)
+    assert r2_n < 0.2
+    assert abs(shrunk_beta(raw_n, r2_n) - 1.0) < abs(raw_n - 1.0), "noise must shrink to market"
+
+
+def test_beta_refuses_rather_than_guessing_on_thin_history():
+    import math, random
+    from trdrbot.market_stats import beta
+    rng = random.Random(3)
+    short = [100.0 * math.exp(rng.gauss(0, 0.01)) for _ in range(30)]
+    assert beta(short, short) is None
+
+
+def test_negative_beta_is_preserved_not_clamped():
+    """An offsetting position is the whole point of measuring this."""
+    import math, random
+    from trdrbot.market_stats import beta
+    rng = random.Random(9)
+    bench = [100.0]
+    for _ in range(150):
+        bench.append(bench[-1] * math.exp(rng.gauss(0, 0.01)))
+    inverse = [100.0]
+    for a, b in zip(bench, bench[1:]):
+        inverse.append(inverse[-1] * math.exp(-math.log(b / a)))
+    raw, r2 = beta(inverse, bench)
+    assert raw < -0.9 and r2 > 0.9
+
+
+def test_book_delta_is_beta_weighted_and_can_offset():
+    """Raw delta treats $10k of a 1.85-beta name as $10k of the market. On our
+    own live book that understated market exposure by 85%."""
+    import tempfile
+    from pathlib import Path
+    from trdrbot.analytics import book_greeks, Snapshot
+    from trdrbot import market_stats
+
+    d = Path(tempfile.mkdtemp())
+    import math, random
+    rng = random.Random(4)
+    spy = [100.0]
+    for _ in range(200):
+        spy.append(spy[-1] * math.exp(rng.gauss(0, 0.01)))
+    hi = [100.0]
+    for a, b in zip(spy, spy[1:]):
+        hi.append(hi[-1] * math.exp(2 * math.log(b / a)))
+    market_stats.save_closes(d, "SPY", spy)
+    market_stats.save_closes(d, "HI", hi)
+
+    betas, assumed = market_stats.betas_for(d, ["SPY", "HI"])
+    assert betas["SPY"] == 1.0
+    assert betas["HI"] > 1.7, "a 2x tracker must weight roughly double"
+    assert "HI" not in assumed
+
+
+def test_beta_weighting_reveals_a_hedge_that_raw_delta_hides():
+    """The demonstration that justifies the whole feature: adding an
+    inverse-beta position RAISED raw book delta from $90k to $253k while
+    beta-weighted delta FELL from $181k to $18k. Raw delta said "more
+    exposed"; the truth was "almost flat"."""
+    import math, random, tempfile
+    from pathlib import Path
+    from trdrbot import market_stats
+    from trdrbot.analytics import book_greeks
+
+    d = Path(tempfile.mkdtemp())
+    rng = random.Random(4)
+    spy = [100.0]
+    for _ in range(200):
+        spy.append(spy[-1] * math.exp(rng.gauss(0, 0.01)))
+
+    def track(m):
+        o = [100.0]
+        for a, b in zip(spy, spy[1:]):
+            o.append(o[-1] * math.exp(m * math.log(b / a)))
+        return o
+
+    market_stats.save_closes(d, "SPY", spy)
+    market_stats.save_closes(d, "HIB", track(2.0))
+    market_stats.save_closes(d, "INV", track(-1.0))
+
+    def pos(u, qty):
+        return Position(position_id=f"p_{u}", status="open", underlying=u, entry_iv=0.30,
+                        legs=[{"symbol": f"{u}990904C00095000", "side": "buy", "qty": qty}])
+
+    prices = {"HIB": 100.0, "INV": 100.0}
+    one = book_greeks([pos("HIB", 10)], prices, state_dir=d, equity=100_000)
+    two = book_greeks([pos("HIB", 10), pos("INV", 18)], prices, state_dir=d, equity=100_000)
+
+    assert two["positions_priced"] == 2, "OCC roots are max 6 chars - both must price"
+    assert two["delta_dollars"] > one["delta_dollars"], "raw delta grows"
+    assert abs(two["beta_weighted_delta"]) < abs(one["beta_weighted_delta"]) / 5, "true exposure falls"
+    assert two["betas"]["INV"] < 0
+
+
+# ------------------- D-056 measured profit, and a warning that cried wolf
+
+def test_attribution_scores_measured_profit_not_the_close_label():
+    """close_reason was standing in for profit, so anything closed outside our
+    own exit rules - 'external' - scored as a LOSS however much it made. Caught
+    live: an NVDA spread the agent closed itself by repricing its profit target
+    made +$1,290 and would have taught the loop the opposite of what happened."""
+    import inspect
+    from trdrbot import attribution, experiments
+    src = inspect.getsource(attribution.run)
+    assert "last_pnl_pct" in src, "profit must be measured, not inferred from a label"
+
+    # the two verdicts must differ on a profitable trade whose thesis failed
+    right, _ = experiments.attribute(True, True)
+    lucky, _ = experiments.attribute(False, True)
+    assert experiments.ATTRIBUTION_SIGNAL[right] > experiments.ATTRIBUTION_SIGNAL[lucky]
+
+
+def test_last_pnl_survives_a_position_leaving_the_broker():
+    import tempfile
+    from pathlib import Path
+    from trdrbot.positions import PositionStore, Position
+    st = PositionStore(Path(tempfile.mkdtemp()))
+    st.save(Position(position_id="pos_x", status="open", last_pnl_pct=0.53))
+    assert [p for p in st.all() if p.position_id == "pos_x"][0].last_pnl_pct == 0.53
+    st.save(Position(position_id="pos_y", status="open"))
+    assert [p for p in st.all() if p.position_id == "pos_y"][0].last_pnl_pct is None
+
+
+def test_only_opening_orders_demand_a_recorded_position():
+    """The warning fired on replace_order_by_id when the agent repriced its own
+    EXIT, demanding a record_position for a position it was closing. A warning
+    that cries wolf teaches everyone to ignore warnings."""
+    def demands(o):
+        return (str(o.get("name", "")).startswith("place_")
+                and "close" not in str(o.get("args_as_model_supplied", {})
+                                       .get("position_intent", "")).lower())
+
+    assert not demands({"name": "replace_order_by_id", "args_as_model_supplied": {}})
+    assert not demands({"name": "cancel_order_by_id", "args_as_model_supplied": {}})
+    assert not demands({"name": "place_option_order",
+                        "args_as_model_supplied": {"position_intent": "sell_to_close"}})
+    assert demands({"name": "place_option_order",
+                    "args_as_model_supplied": {"order_class": "mleg", "qty": "10"}})
+
+
+# ---------------- D-057 credit lost on external closes and inbox blocks
+
+def test_credit_gates_on_measured_pnl_not_the_close_label():
+    """close_reason in SELF_RESOLVED silently skipped credit assignment for
+    every 'external' close - and both real closes so far have been external,
+    because the agent manages its own exits through the broker. Found by the
+    learning-loop simulation: the credited block ended with reinforcement=None."""
+    import inspect
+    from trdrbot import learn
+    src = inspect.getsource(learn.on_resolution)
+    assert "if pnl_pct is not None:\n        hit = pnl_pct > 0" in src
+    # the None-P&L guess path must still be skipped
+    assert "skipped rather than guessed" in src
+
+
+def test_resolve_self_heals_when_outcomes_hit_unconsolidated_blocks():
+    """outcome() on a block still in elfmem's inbox returns updated=0
+    SILENTLY. Theses are remembered at FILL and consolidation runs only at
+    market-closed housekeeping, so any same-day resolution - like our first
+    profitable NVDA trade - lost its memory credit invisibly. Measured:
+    updated=0 before consolidation, updated=1 after."""
+    import inspect
+    from trdrbot.elfmem_adapter import ElfmemAdapter
+    src = inspect.getsource(ElfmemAdapter.resolve)
+    assert "blocks_updated" in src and "consolidate" in src, \
+        "resolve must detect a short-count and consolidate-then-retry"

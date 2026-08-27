@@ -65,7 +65,15 @@ async def on_resolution(
     if calibration is not None and pnl_pct is not None:
         calibration.resolve(pos.position_id, outcome=pnl_pct > 0, at=ids.utc_now().isoformat())
 
-    if self_resolved and pnl_pct is not None:
+    # Credit gates on a KNOWN P&L, not on the close-reason label (D-057).
+    # It used to require close_reason in SELF_RESOLVED, which silently skipped
+    # credit assignment for every 'external' close - and both real closes so
+    # far have been external, because the agent manages its own exits through
+    # the broker (repricing its profit-target limit) rather than through our
+    # evaluator. A close with a measured P&L is honest evidence however the
+    # position ended; only an UNKNOWN P&L skips, because that would be a guess.
+    # Same principle as D-056: measured, not inferred from a label.
+    if pnl_pct is not None:
         hit = pnl_pct > 0
         # elfmem's own idiom for this signal shape (verified against its
         # mind_outcome usage during the earlier exploration): 0.9/0.1, not a

@@ -1776,3 +1776,214 @@ size.**
 **Verified:** 4 new tests - a perfect forecaster is not penalised at n=20; a genuinely
 overconfident one still scores 3x higher at n=60; the gate exists only where it discriminates;
 reliability is never negative. 76 tests pass.
+
+## D-051: Volatility clock and implied daily move
+**Date:** 2026-08-27
+**Status:** accepted
+**Context:** Two items from the technique research ([docs/sources/trading_techniques_review.md](../docs/sources/trading_techniques_review.md)).
+**1. The volatility clock.** Black-Scholes counted calendar days; volatility does not accrue when
+the market is shut. Weighting a weekend/holiday day at 0.5 gives a ~308-day year. **At 30 DTE
+this is a rounding error; at our 2-10 DTE it dominates.** Measured: 3 calendar days from a Friday
+is **2.00 vol days, a 50% overstatement**, which moved the expected move the thesis band is
+checked against from $9.88 to $8.07 and theta by 22%. An unadjusted clock also manufactures a
+spurious IV jump every Monday. Corroborated independently: removing Friday->Monday positions from
+a 1DTE SPX put-write study (Mar 2018 - Sep 2025) cut cumulative return from 28.07% to 8.94% -
+about two thirds of all profit came from weekend-spanning trades, which is what over-counting
+weekend time looks like from the other side. Theta is still quoted per CALENDAR day, because that
+is what a holder actually experiences.
+**2. Implied daily move (gamma breakeven), and a correction to the source.** `sqrt(2|theta|/|gamma|)`
+was recommended as a structure-selection guard. **It is not one, and the sources claiming it is
+are wrong.** Measured: at a flat 13% IV a short put spread, a long straddle and an iron condor all
+return $5.21, because theta/gamma is the same Black-Scholes identity for every position at one
+spot and one vol. What it actually returns is **the daily move implied by IV in dollars** ($3.21
+at 8% IV, $14.03 at 35%), varying between structures only through skew. That makes it useful for
+exactly one thing, which is the important thing: **compare it against the underlying's realised
+daily range.** Above realised, short premium is being paid for; below, it is being donated. It is
+the implied-vs-realised edge test denominated in dollars a day - the same test as an
+IV/forecast-RV ratio, in units the agent can check against the tape directly. Rendered on every
+candidate with that instruction in the prompt.
+**Verified:** 4 new tests, incl. one asserting the breakeven does NOT discriminate structures, so
+nobody re-adds that belief later. 80 tests pass.
+
+## D-052: Pre-registration ledger and unconditional forecasts
+**Date:** 2026-08-27
+**Status:** accepted
+**Context:** Two findings from the technique research that turn out to be one mechanism -
+**record the forecast even when you do not act on it.**
+**Why pre-registration:** a human quant tests ~20 ideas a year; an LLM generates 200 plausible
+theses in an afternoon and silently discards the ones that look bad. Under a TRUE Sharpe of
+zero, the expected maximum Sharpe across N filtered trials is 1.19 sigma at N=5, **1.90 at
+N=20**, 2.53 at N=100 - and the competence ladder (D-048) would promote it. The ledger supplies
+the trial count N without which a Deflated Sharpe Ratio is uncomputable. It cannot be
+reconstructed later, which is the whole point.
+**Why unconditional forecasts:** size is gated on measured calibration, and the honest
+thresholds are ~50 resolved forecasts before calibration is measured rather than guessed, 152
+before a 60% hit rate is distinguishable from a coin flip. At 1-5 concurrent positions,
+trade-level observations will never get there. But a forecast on a setup we DECLINE costs
+nothing and scores the same judgement. The agent had already declined ~10 times with detailed,
+falsifiable reasoning that was thrown away.
+**The design decision that matters: pre-registration is AUTOMATIC.** Every thesis passed to
+`simulate_experiments` is registered from inside the tool - the agent cannot forget it, cannot
+skip it under pressure, and pays no extra prompt burden. Same derive-don't-declare principle
+that made position risk trustworthy (D-037). A separate `record_forecast` tool exists for
+standalone views the agent wants on the record.
+**Refusal at write time:** a forecast with no price band could never be scored, so it is
+rejected rather than stored. Counting an unjudgeable thesis would make the multiple-testing
+correction *more* punitive for no informational gain. Repeat registrations of one thesis within
+a cycle are de-duplicated, so comparing structures twice does not inflate N.
+**Resolution:** matured forecasts are scored against the tape at housekeeping and flow into
+`CalibrationStore.score(extra=...)`. Verified end to end: 4 theses registered (1 traded, 3
+declined), 3 matured and resolved against real prices, calibration **n=0 -> n=3 from trades we
+never made**. `trdrbot ledger` reports trials/traded/declined/resolved and the hit rate.
+**Verified:** 6 new tests. 86 pass.
+
+## D-053: Our research universe was one bet wearing three hats
+**Date:** 2026-08-27
+**Status:** accepted
+**Context:** Asked whether to add symbols. Measured the correlation of daily returns over the
+last ~120 sessions before answering:
+
+```
+        SPY    QQQ   NVDA    XLE    GLD    TLT    XLV    XLP
+SPY    1.00   0.92   0.66  -0.42   0.52   0.43   0.16  -0.04
+```
+
+**SPY/QQQ correlate at 0.92.** The old universe (SPY/QQQ/NVDA) had a mean pairwise correlation
+of **0.75** - researching it produced three views on one factor, and the per-underlying risk cap
+(D-037) cannot see that, because it counts names rather than exposures.
+**Choice:** universe becomes `SPY, NVDA, XLE, XLV, XLP`. QQQ dropped as redundant with SPY; XLE
+(-0.42 vs SPY), XLP (-0.04) and XLV (+0.16) added for measured independence, all liquid and
+optionable. Mean |pairwise correlation| **0.75 -> 0.27**. Discovery still nominates any liquid
+name freely - this list only governs what gets researched daily.
+**Also written: 8 technique concepts into the wiki** (`technique/*`), as operational rules the
+agent recalls rather than a literature review: implied-vs-realised as THE edge test, the weekend
+vol clock, credit-vs-debit is not a choice (put-call parity), skew does not select structures at
+this tenor, event variance dominates short-dated windows, Kelly overbets short premium (and
+positive skew validates faster), profit-target conventions do not transfer, and a roll is a new
+trade. Each states when it applies and what it changes - the wiki is what the AGENT reads, so
+the evidence is compressed to what alters a decision.
+
+## D-054: Measured lessons seeded into evolving memory
+**Date:** 2026-08-27
+**Status:** accepted
+**Context:** Asked to make sure the agent has actually *learned* to diversify. The routing
+question came first, and the constitution's own `[routing]` principle answers it: the journal
+holds what happened, the wiki holds stable reference (the technique concepts, D-053), the SELF
+frame holds identity, and **evolving patterns whose confidence should move with outcomes belong
+in elfmem**. A measured claim about how OUR book behaves is the third of those.
+**Six lessons, each carrying the numbers that produced it** - a lesson without a measurement is a
+platitude, which is the same test the constitution uses:
+- `[correlated-names-are-one-bet]` - the diversification lesson. Not "diversify" but the specific
+  failure: SPY/QQQ correlate at 0.92, our old universe averaged 0.75 pairwise, and **the
+  per-underlying cap cannot see it because it counts NAMES, not exposures** - three "diversified"
+  tech positions pass every check and lose together.
+- `[friction-is-the-size-of-the-edge]` - EV +$25 -> +$9 after real round-trip cost, a 65% haircut.
+- `[research-notes-go-stale-by-design]` - the desk runs while the market is closed; three caught
+  mismatches (NVDA 224.11 vs 209.37, MRNA 142.57 vs 145.48, SMCI below its own band floor).
+- `[post-event-iv-is-already-gone]` - implied crushes to realised before we look.
+- `[exploration-budget-is-not-a-mandate]` - the agent's own line, preserved: buying a
+  known-negative-EV structure to generate a data point "is a donation with a story attached".
+- `[a-38-percent-trade-can-be-the-right-trade]` - payoff times probability, not win rate.
+**Deliberately NOT constitutional.** These are ordinary knowledge blocks that decay and are moved
+by outcomes. Pinning a measured claim as PERMANENT identity is precisely what `[regimes]` warns
+against - a correlation measured in one regime is a hypothesis in the next.
+**Reused two hard-won lessons from seeding the constitution (D-041) rather than rediscovering
+them:** seeded blocks sit in an inbox until consolidation (measured again here - **0 of 6
+recallable immediately after a successful seed**), and consolidation rewrites content unless we
+supply `host_analyses`, in batches capped at the per-run limit.
+**Verified by retrieval, not by storage:** `trdrbot lessons verify` recalls each lesson by its own
+cue - 6/6, ranks 2-7. And on the real decide-cycle query *"should I open a second position
+alongside the NVDA spread I already hold"*, `[correlated-names-are-one-bet]` surfaces first.
+
+## D-055: Beta-weighted book delta - names are not exposures
+**Date:** 2026-08-27
+**Status:** accepted
+**Context:** Closes the gap D-054's `[correlated-names-are-one-bet]` lesson names but could not
+enforce: the per-underlying risk cap counts NAMES, so three correlated positions pass every
+check and lose together. Until now the lesson told the agent to check by hand what the code
+should check for it.
+**Choice:** every position's delta is converted to SPY-equivalent by its measured beta and
+summed, giving one number for the whole book. Betas come from the closes the research cycle
+already persists, so this costs **no network calls**.
+**Beta is returned with its R-squared, and shrunk toward 1.0 when the fit is poor.** This
+mattered immediately: on our own stored data MU estimated at **-0.45 while NVDA estimated at
++1.85** over the same 120 sessions - both semiconductors. That is not two market sensitivities,
+it is one estimate dominated by name-specific news. A beta without its explanatory power is a
+number pretending to be knowledge. After shrinkage (same logic sizing already applies to stated
+probabilities): MU -0.45 at R2=0.00 becomes 0.98, MRNA -1.52 at R2=0.02 becomes 0.86, while
+QQQ (R2=0.84) and NVDA (R2=0.47) keep their genuine betas. Negative beta is never clamped - an
+offsetting position is the entire point.
+**Reported as P&L per 1% market move, not raw delta dollars.** Raw delta is notional and looks
+alarming on any spread - our live NVDA position carries $63,987 of delta against $2,100 of max
+loss. The interpretable form is "+1.17% of equity per 1% SPY move".
+**What it revealed on the live book immediately:** one NVDA position, raw delta $63,987,
+**beta-weighted $118,261** - raw delta understated market exposure by 85%, because NVDA runs a
+beta of 1.85. A book that looks small is a levered directional bet.
+**Demonstration that justifies the feature:** adding an inverse-beta position RAISED raw book
+delta from $90k to $253k while beta-weighted delta FELL from $181k to $18k, and the
+concentration flag cleared. Raw delta said "more exposed"; the truth was "almost flat".
+**Reported, never gated (D-009):** flagged above 1.5% of equity per 1% market move. It bounds
+variance, not ruin, and defined-risk legs already bound the worst case.
+**Also fixed:** the positions block rendered `underlying_stop=None` because it read only
+`threshold`, while underlying stops carry `level` - telling the agent its most important guard
+was missing when it was set.
+**Verified:** 5 new tests incl. a 2x tracker recovering beta 2.0 at R2>0.9, pure noise shrinking
+back to the market, negative beta preserved, thin history refused, and the hedge demonstration.
+93 tests pass.
+
+## D-056: Attribution scored a label, not a profit
+**Date:** 2026-08-27
+**Status:** accepted
+**Context:** The NVDA spread closed while the loop was running - and it closed *well*. The agent
+noticed its own profit-target limit had gone stale ("3.40 sat ~5% above mid while the position
+bleeds -$84/day. A stale profit-target price is not an exit; it's a hope"), repriced it to 3.18,
+and it filled. Total P&L **+$1,290** on the day.
+**The bug that exposed:** because the agent closed it with its own order rather than through our
+exit-rule evaluator, reconciliation marked it `close_reason='external'` - and attribution read
+`profited = close_reason in ("target_hit", "thesis_resolved")`. So a **+52% trade would have
+been attributed as a loss**, teaching the learning loop the exact opposite of what happened, on
+the only position with a scoreable thesis. It was about to fire on the 2026-09-03 horizon.
+**Fix:** profit is MEASURED. `Position.last_pnl_pct` is written every tick while the position is
+visible at the broker, because a position closing outside our rules leaves the broker taking its
+final P&L with it - the last observation is the honest one. Attribution scores that, falling
+back to the label only when no observation exists. The live position was backfilled from measured
+equity (100,181.18 -> 101,290.18 with nothing else open, +$1,109 on $2,100 risk = +52.8%);
+attribution now yields `thesis_right_expression_right` if NVDA lands in [220, 245] and
+`thesis_wrong_profited_anyway` (signal 0.5, teaches nothing) if it does not - which is the
+correct pair of answers.
+**Second fix - a warning that cried wolf.** "order placed but record_position was not called"
+fired on `replace_order_by_id` when the agent repriced its own EXIT, demanding a position record
+for something it was closing. Only orders that OPEN a position now qualify. A warning that fires
+on correct behaviour trains everyone to ignore warnings - the same class as the
+`underlying_stop=None` rendering bug (D-055), a signal that lies.
+**Verified:** 3 new tests; 97 pass.
+
+## D-057: The learning-loop simulation - two credit-loss bugs found and fixed
+**Date:** 2026-08-27
+**Status:** accepted
+**Context:** Ran the learning loop end to end with KNOWN inputs (scratchpad sim): synthetic
+agents with known calibration through the real scorer/ladder/sizer, then four known positions -
+one per attribution quadrant - through the real resolution -> attribution -> memory path.
+**What passed first time:** the career arcs. A perfectly calibrated agent promotes
+EXPLORE->ESTABLISH->SCALE->MATURE over 8 weeks with size 1->4 contracts, monotonic. An
+overconfident agent (says 85%, right 55%) with lucky wins is held at ESTABLISH by the
+attribution gate and sized at half. Drawdown demotes to EXPLORE at -11% and recovery restores.
+All four attribution quadrants produce the correct verdict, and the attributable rate excludes
+exactly the lucky win.
+**Bug 1: credit assignment silently skipped on every external close.** `learn.on_resolution`
+gated `mem.resolve()` on `close_reason in SELF_RESOLVED` - and BOTH real closes so far have been
+'external', because the agent manages its own exits through the broker (repricing its own
+profit-target limit) rather than through our evaluator. The gate predates D-056's measured P&L;
+with P&L now measured, an external close is honest evidence. Credit now gates on a KNOWN P&L,
+skipping only when P&L is unknown (a guess would be worse than silence).
+**Bug 2: `outcome()` on an unconsolidated block is a silent zero.** Measured directly:
+updated=0 before consolidation, updated=1 after, no error either way. Theses are remembered at
+FILL and consolidation runs at market-closed housekeeping - so any same-day resolution loses its
+memory credit invisibly. Our first profitable NVDA trade did exactly this. `resolve()` now
+detects a short count, consolidates, and retries once; the live NVDA credit was repaired
+manually (3 blocks, updated=3). Reported upstream (report addendum 2) with the suggested
+`OutcomeResult.pending_inbox` field - same silent-reducer pattern as everything else in that
+report.
+**Also:** the sim initially hit an OpenAI 401 because the script skipped `config.load()` and the
+stale shell key shadowed .env - our own D-shadowing lesson, re-learned in miniature.
+**Verified:** the full simulation passes end to end; 99 regression tests.

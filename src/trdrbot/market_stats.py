@@ -264,3 +264,95 @@ async def fetch_daily_closes(tools: dict[str, Any], symbol: str, *, days: int = 
             closes.append(float(c))
     closes.reverse()  # desc -> oldest-first, which every consumer expects
     return closes
+
+
+# ------------------------------------------------------- beta to the market
+
+#: Sessions of overlap used to estimate beta. Long enough to be stable, short
+#: enough that a regime change eventually shows up in it.
+BETA_WINDOW = 120
+MIN_BETA_SAMPLE = 60
+#: What an unknown name is assumed to be. 1.0 is the market itself - and for a
+#: single name that is usually an UNDERSTATEMENT (most single stocks run above
+#: 1). So this default makes the book look safer than it is, which is the
+#: absence-as-zero failure class (D-038). It is therefore always REPORTED as
+#: assumed rather than silently applied.
+ASSUMED_BETA = 1.0
+BENCHMARK = "SPY"
+
+
+def beta(sym_closes: list[float], bench_closes: list[float],
+         window: int = BETA_WINDOW) -> tuple[float, float] | None:
+    """OLS beta against the benchmark, with its R-squared. None if not estimable.
+
+    **The R-squared is returned because the beta is meaningless without it.**
+    Measured on our own stored data: MU came out at -0.45 while NVDA came out
+    at +1.85 - both semiconductors, over the same 120 sessions. That is not two
+    different market sensitivities, it is one estimate dominated by
+    name-specific moves. A single-name beta with low explanatory power is a
+    number pretending to be knowledge, and shrinking it toward 1.0 in
+    proportion to how little it explains is the honest treatment.
+
+    Sign is preserved deliberately. A negative beta is not an error and must
+    not be clamped: XLE ran -0.42 correlation to SPY over the same window, and
+    a genuinely offsetting position is the entire point of measuring this.
+    """
+    a, b = _log_returns(sym_closes), _log_returns(bench_closes)
+    n = min(len(a), len(b), window)
+    if n < MIN_BETA_SAMPLE:
+        return None
+    a, b = a[-n:], b[-n:]
+    ma, mb = sum(a) / n, sum(b) / n
+    var_b = sum((y - mb) ** 2 for y in b)
+    var_a = sum((x - ma) ** 2 for x in a)
+    if var_b <= 0 or var_a <= 0:
+        return None
+    cov = sum((x - ma) * (y - mb) for x, y in zip(a, b))
+    raw = cov / var_b
+    r2 = (cov * cov) / (var_a * var_b)
+    return raw, r2
+
+
+#: Below this explanatory power the beta says more about one name's own news
+#: than about its market sensitivity, so it is shrunk toward the market.
+MIN_R2_FOR_FULL_WEIGHT = 0.30
+
+
+def shrunk_beta(raw: float, r2: float) -> float:
+    """Pull a poorly-fitted beta toward 1.0, in proportion to how little it explains.
+
+    Same shrinkage logic already used for stated probabilities (sizing.py): an
+    estimate is trusted to the degree it is supported. A beta explaining 5% of
+    variance is almost pure noise and should barely move the exposure estimate;
+    one explaining 60% is worth taking at close to face value.
+    """
+    w = min(1.0, max(0.0, r2 / MIN_R2_FOR_FULL_WEIGHT))
+    return 1.0 + (raw - 1.0) * w
+
+
+def betas_for(state_dir: Path, symbols: list[str]) -> tuple[dict[str, float], list[str]]:
+    """{symbol: beta} from persisted closes, plus the symbols we had to assume.
+
+    Reads only what the research cycle already stored, so this costs no network
+    calls. The benchmark is beta 1.0 by definition, never estimated against
+    itself.
+    """
+    bench = load_closes(state_dir, BENCHMARK, max_age_days=10)
+    out: dict[str, float] = {}
+    assumed: list[str] = []
+    for sym in symbols:
+        u = sym.upper()
+        if u == BENCHMARK:
+            out[u] = 1.0
+            continue
+        closes = load_closes(state_dir, u, max_age_days=10) if bench else None
+        est = beta(closes, bench) if closes and bench else None
+        if est is None:
+            out[u] = ASSUMED_BETA
+            assumed.append(u)
+        else:
+            raw, r2 = est
+            out[u] = shrunk_beta(raw, r2)
+            if r2 < MIN_R2_FOR_FULL_WEIGHT:
+                assumed.append(u)  # reported: the fit does not support the raw number
+    return out, assumed

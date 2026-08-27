@@ -70,6 +70,12 @@ class Position:
     #: Feeds the portfolio-level at-risk cap (D-036). None on legacy
     #: positions - counted as zero risk by the cap, leniently.
     max_loss_usd: float | None = None
+    #: Last observed P&L fraction while the position was visible at the
+    #: broker. When a position closes OUTSIDE our exit rules - the agent
+    #: repricing its own limit, an assignment, an expiry - the broker no
+    #: longer has it and its final P&L cannot be fetched. This is the last
+    #: honest observation, and it is what attribution scores (D-056).
+    last_pnl_pct: float | None = None
     #: Net position greeks computed at entry (D-040) - the risk SHAPE the
     #: agent chose, quotable at entry and re-priceable on later ticks.
     greeks_at_entry: dict | None = None
@@ -122,6 +128,7 @@ class Position:
             "status": self.status,
             "interim_band": self.interim_band,
             "max_loss_usd": self.max_loss_usd,
+            "last_pnl_pct": self.last_pnl_pct,
             "greeks_at_entry": self.greeks_at_entry,
             "entry_iv": self.entry_iv,
             "entry_spot": self.entry_spot,
@@ -196,6 +203,7 @@ class PositionStore:
             status=d.get("status", "proposed"),
             interim_band=int(d.get("interim_band", 0) or 0),
             max_loss_usd=(float(d["max_loss_usd"]) if d.get("max_loss_usd") is not None else None),
+            last_pnl_pct=(float(d["last_pnl_pct"]) if d.get("last_pnl_pct") is not None else None),
             greeks_at_entry=d.get("greeks_at_entry") or None,
             entry_iv=(float(d["entry_iv"]) if d.get("entry_iv") is not None else None),
             entry_spot=(float(d["entry_spot"]) if d.get("entry_spot") is not None else None),
