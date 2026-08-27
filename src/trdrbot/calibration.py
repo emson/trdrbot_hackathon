@@ -125,16 +125,47 @@ def score(forecasts: list[Forecast]) -> Calibration:
     # Round to a coarse bin so near-identical forecasts share a group -
     # with a handful of trades, per-unique-value grouping would make every
     # group size 1 and reliability trivially (and misleadingly) zero.
+    # Bin width adapts to sample size (D-050). Fixed 0.1 bins leave ~4
+    # forecasts per bin at n=20, and a bin of one cannot have its sampling
+    # variance estimated at all - so it escapes the bias correction entirely
+    # and re-imports the very bias the correction exists to remove. Target
+    # roughly 8 forecasts per bin, between 2 and 10 bins.
+    n_bins = max(2, min(10, n // 8))
+    width = 1.0 / n_bins
     bins: dict[float, list[float]] = {}
     for p, o in zip(probs, outs):
-        bins.setdefault(round(p, 1), []).append(o)
+        centre = min(n_bins - 1, int(p / width)) * width + width / 2
+        bins.setdefault(round(centre, 4), []).append(o)
 
     reliability = sum(
-        len(os_) * (b - (sum(os_) / len(os_))) ** 2 for b, os_ in bins.items()
+        len(os_) * (sum(pb for pb in [b]) - (sum(os_) / len(os_))) ** 2
+        for b, os_ in bins.items()
     ) / n
     resolution = sum(
         len(os_) * ((sum(os_) / len(os_)) - base) ** 2 for b, os_ in bins.items()
     ) / n
+
+    # Ferro-Fricker bias correction (D-050). The empirical decomposition
+    # OVERSTATES reliability at small n, because each bin's observed frequency
+    # is itself estimated from few outcomes and its sampling variance lands in
+    # the reliability term. Measured on this very code: a PERFECTLY calibrated
+    # agent (true reliability 0) scored 0.072 at n=15 and 0.061 at n=20 -
+    # which, against a promotion gate demanding <0.05, blocked a flawless
+    # agent 58-67% of the time. Worse, the bias shrinks as n grows, so it
+    # would have looked exactly like "the agent is learning" when nothing had
+    # changed. Unbiased estimator of p(1-p) from m samples is m/(m-1) * o(1-o),
+    # so the variance leaking into each bin is o(1-o)/(m-1).
+    #   Ferro & Fricker, QJRMS 2012.
+    within = sum(
+        len(os_) * (sum(os_) / len(os_)) * (1 - sum(os_) / len(os_)) / (len(os_) - 1)
+        for os_ in bins.values() if len(os_) > 1
+    ) / n
+    overall = base * (1 - base) / (n - 1) if n > 1 else 0.0
+    # Reliability cannot truly be negative; clamping keeps the gate honest
+    # rather than rewarding an over-correction on a tiny sample.
+    reliability = max(0.0, reliability - within)
+    resolution = max(0.0, resolution - within + overall)
+    uncertainty = uncertainty + overall
 
     return Calibration(
         n=n,

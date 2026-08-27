@@ -1740,3 +1740,39 @@ belt-and-braces.
 **Verified:** 72 tests; 10/10 named principles render in the real decide context; ATTENTION
 carries the agent's own learned blocks (its SPY position note and mind model) rather than its
 identity.
+
+## D-050: Our calibration scorer was penalising a perfect forecaster
+**Date:** 2026-08-27
+**Status:** accepted
+**Context:** Web research (Ferro & Fricker, QJRMS 2012) flagged that the empirical Brier
+decomposition **overstates reliability at small n** - each bin's observed frequency is itself
+estimated from few outcomes, and its sampling variance lands in the reliability term. Checked
+against our own scorer rather than taken on trust, by simulating a PERFECTLY calibrated agent
+(true reliability = 0):
+
+| n | measured reliability | SCALE gate (needed <0.05) | MATURE gate (needed <0.03) |
+|---|---|---|---|
+| 15 | 0.072 | blocked 67% | blocked 83% |
+| 20 | 0.061 | blocked 58% | blocked 83% |
+| 40 | 0.027 | blocked 10% | blocked 33% |
+
+A flawless agent was denied promotion most of the time by a **phantom penalty**. Worse, the bias
+shrinks as n grows - so it would have looked exactly like "the agent is learning" while nothing
+had changed. This was a live defect in the competence ladder shipped hours earlier (D-048).
+**Fix 1 - Ferro-Fricker bias correction.** The unbiased estimator of p(1-p) from m samples is
+m/(m-1)·o(1-o), so the variance leaking into each bin is o(1-o)/(m-1). Subtract it from
+reliability, adjust resolution and uncertainty correspondingly, clamp at zero. Perfect-agent
+reliability at n=15 fell 0.072 -> 0.024.
+**Fix 2 - adaptive binning.** Fixed 0.1-wide bins leave ~4 forecasts per bin at n=20, and a bin
+of ONE cannot have its sampling variance estimated at all, so it escapes the correction and
+re-imports the bias. Bins now target ~8 forecasts each, between 2 and 10 bins.
+**Fix 3 - gate only where the statistic discriminates.** Measured after correction: at n=15-20 a
+perfect agent scores 0.022 and a badly overconfident one (says 80%, right 55%) scores 0.038 -
+**overlapping distributions**, so any threshold there rejects good agents and passes bad ones at
+similar rates. At n>=40 the separation is real: perfect blocked 2%, bad blocked 92%. So the
+reliability gate moved to MATURE only (n>=40, <0.04); SCALE now gates on sample size and
+attribution alone. **Gating on a statistic before it can discriminate is theatre that costs real
+size.**
+**Verified:** 4 new tests - a perfect forecaster is not penalised at n=20; a genuinely
+overconfident one still scores 3x higher at n=60; the gate exists only where it discriminates;
+reliability is never negative. 76 tests pass.

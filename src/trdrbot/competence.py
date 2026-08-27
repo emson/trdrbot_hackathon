@@ -13,8 +13,12 @@ system can actually measure:
     tier        needs                                            book cap
     EXPLORE     nothing - the starting allocation                   10%
     ESTABLISH   >=5 resolved theses                                 15%
-    SCALE       >=15, reliability <0.05, >=60% attributable         20%
-    MATURE      >=40, reliability <0.03, >=70% attributable         25%
+    SCALE       >=15 resolved, >=60% attributable                   20%
+    MATURE      >=40 resolved, >=70% attributable, reliability<0.04 25%
+
+Reliability gates MATURE only, not SCALE - see D-050. It is not a measurable
+discriminator below ~n=40, and gating on a statistic before it can discriminate
+rejects good agents and passes bad ones at roughly the same rate.
 
 Three properties, each deliberate:
 
@@ -60,8 +64,15 @@ SEED_FRACTION = 0.022
 TIERS: dict[str, dict[str, Any]] = {
     EXPLORE:   {"cap": 0.10, "kelly": 0.00, "min_n": 0,  "max_rel": None, "min_attr": 0.0},
     ESTABLISH: {"cap": 0.15, "kelly": 0.10, "min_n": 5,  "max_rel": None, "min_attr": 0.0},
-    SCALE:     {"cap": 0.20, "kelly": 0.18, "min_n": 15, "max_rel": 0.05, "min_attr": 0.6},
-    MATURE:    {"cap": 0.25, "kelly": 0.25, "min_n": 40, "max_rel": 0.03, "min_attr": 0.7},
+    # SCALE deliberately has NO reliability gate. Measured on our own scorer
+    # (D-050): at n=15-20 a perfectly calibrated agent and a badly
+    # overconfident one score 0.022 vs 0.038 - overlapping distributions, so
+    # any threshold there rejects good agents and passes bad ones roughly
+    # alike. Reliability only becomes a real discriminator around n=40, where
+    # a perfect agent is blocked 2% of the time and a bad one 92%. Gating on a
+    # statistic before it can discriminate is theatre that costs real size.
+    SCALE:     {"cap": 0.20, "kelly": 0.18, "min_n": 15, "max_rel": None, "min_attr": 0.6},
+    MATURE:    {"cap": 0.25, "kelly": 0.25, "min_n": 40, "max_rel": 0.04, "min_attr": 0.7},
 }
 
 #: Continuous ramp within a tier, so no single trade is a step change. The

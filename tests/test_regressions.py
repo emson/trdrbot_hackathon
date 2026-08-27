@@ -760,9 +760,12 @@ def test_unscoreable_theses_do_not_buy_size():
     assert c.tier == competence.ESTABLISH
 
 
-def test_poor_calibration_blocks_promotion_despite_volume():
+def test_poor_calibration_blocks_the_top_tier_only():
+    """Reliability gates MATURE, not SCALE (D-050): below ~n=40 the statistic
+    cannot separate a perfect forecaster from a badly overconfident one, so a
+    gate there would reject good agents and pass bad ones alike."""
     from trdrbot import competence
-    assert _comp(40, rel=0.09).tier == competence.ESTABLISH
+    assert _comp(40, rel=0.09).tier == competence.SCALE
     assert _comp(40, rel=0.02).tier == competence.MATURE
 
 
@@ -807,3 +810,54 @@ def test_next_tier_is_visible_to_the_agent():
     c = _comp(7, rel=0.06, verdicts=_hist(5, GOOD_V) + _hist(2, LUCK_V))
     needs = c.next_tier_needs()
     assert "SCALE" in needs and "15" in needs
+
+
+# ------------------------------- D-050 calibration bias at small n
+
+def _synthetic(kind, n, seed=11):
+    import random
+    from trdrbot.calibration import Forecast
+    rng = random.Random(seed)
+    out = []
+    for i in range(n):
+        if kind == "perfect":
+            p = rng.choice([0.3, 0.4, 0.5, 0.6, 0.7]); hit = rng.random() < p
+        else:  # badly overconfident: says 80%, right 55%
+            p = 0.8; hit = rng.random() < 0.55
+        out.append(Forecast(position_id=f"f{i}", probability=p, outcome=hit))
+    return out
+
+
+def test_a_perfect_forecaster_is_not_penalised_at_small_n():
+    """The empirical Brier decomposition OVERSTATES reliability at small n.
+    Measured before the fix: a perfectly calibrated agent scored 0.072 at
+    n=15 against a promotion gate demanding <0.05 - blocking a flawless agent
+    most of the time, with the phantom penalty shrinking as n grew so it would
+    have looked exactly like learning."""
+    from trdrbot.calibration import score
+    rels = [score(_synthetic("perfect", 20, seed=s)).reliability for s in range(40)]
+    assert sum(rels) / len(rels) < 0.035, "small-sample bias is back"
+
+
+def test_a_genuinely_overconfident_forecaster_is_still_caught():
+    """The correction must not launder real miscalibration."""
+    from trdrbot.calibration import score
+    perfect = [score(_synthetic("perfect", 60, seed=s)).reliability for s in range(30)]
+    bad = [score(_synthetic("overconf", 60, seed=s)).reliability for s in range(30)]
+    assert sum(bad) / len(bad) > 3 * (sum(perfect) / len(perfect))
+
+
+def test_reliability_gates_only_where_it_can_discriminate():
+    """At n=15-20 perfect and bad forecasters score 0.022 vs 0.038 -
+    overlapping. Gating there is theatre that costs real size."""
+    from trdrbot import competence
+    assert competence.TIERS[competence.SCALE]["max_rel"] is None
+    assert competence.TIERS[competence.MATURE]["max_rel"] is not None
+    assert competence.TIERS[competence.MATURE]["min_n"] >= 40
+
+
+def test_reliability_is_never_negative():
+    from trdrbot.calibration import score
+    for s in range(20):
+        c = score(_synthetic("perfect", 12, seed=s))
+        assert c.reliability >= 0.0 and c.resolution >= 0.0
