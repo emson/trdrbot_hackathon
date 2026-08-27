@@ -158,10 +158,21 @@ def check(journal_path: Path, positions: list[Any]) -> list[tuple[str, str, str]
                              f"watches {', '.join(watching) or 'nothing'} - no "
                              "thesis-level stop, so a break in the underlying "
                              "closes nothing"))
-        # An unfalsifiable thesis can never be attributed, so it can never teach.
-        if getattr(p, "thesis_claim", "") and not (
-            p.thesis_band_low is not None or p.thesis_band_high is not None
-        ):
+        # No thesis at all is worse than an unfalsifiable one: the position
+        # will NEVER be attributed, silently, because pending() filters on
+        # thesis_claim being truthy. Found live: the very first position ever
+        # opened (tick 1) went get_option_chain -> place_option_order ->
+        # record_position with simulate_experiments never called in between,
+        # so the `shared["thesis"]` record_position reads from was never
+        # populated. BAD, not WARN - this position's view-vs-structure
+        # learning is permanently lost, not merely degraded.
+        if not getattr(p, "thesis_claim", ""):
+            findings.append((BAD, f"position:{p.position_id[:28]}",
+                             "no thesis recorded at all - will NEVER be attributed "
+                             "(simulate_experiments likely skipped before entry)"))
+        # An unfalsifiable thesis can never be attributed either, so it can
+        # never teach - a lesser version of the same failure.
+        elif not (p.thesis_band_low is not None or p.thesis_band_high is not None):
             findings.append((WARN, f"position:{p.position_id[:28]}",
                              "thesis has no band - unscoreable, will never attribute"))
 

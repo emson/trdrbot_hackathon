@@ -19,7 +19,7 @@ from pathlib import Path
 
 import pytest
 
-from trdrbot import discovery, experiments, market_stats, optmath, sizing
+from trdrbot import discovery, experiments, local_tools, market_stats, optmath, sizing
 from trdrbot.analytics import Snapshot
 from trdrbot.exit_rules import evaluate, watched_signals
 from trdrbot.housekeeping import _materiality_band
@@ -329,3 +329,34 @@ def test_health_stays_quiet_while_a_subsystem_is_merely_young():
     assert not any(f[0] == health.BAD and f[1] == "attribution" for f in findings), (
         "one quiet run is not evidence of failure"
     )
+
+
+# ---------------------------------------- thesis-missing-at-entry (D-038)
+
+def test_health_flags_a_position_with_no_thesis_at_all():
+    """The very first position ever opened: get_option_chain -> place_order ->
+    record_position with simulate_experiments never called in between, so
+    shared["thesis"] was never set. Worse than an unfalsifiable thesis - this
+    position can NEVER be attributed, and nothing noticed."""
+    from trdrbot import health
+    p = Position(position_id="pos_x", status="open", underlying="SPY",
+                 max_loss_usd=2210.0, thesis_claim="",
+                 exit_rules=[{"type": "underlying_stop", "direction": "below", "level": 750.0}])
+    findings = health.check(Path(tempfile.mkdtemp()) / "none.jsonl", [p])
+    assert any(f[0] == health.BAD and "no thesis recorded" in f[2] for f in findings)
+
+
+def test_record_position_warns_when_simulate_was_skipped():
+    import tempfile as tf
+    from trdrbot.calibration import CalibrationStore
+    d = Path(tf.mkdtemp())
+    store = PositionStore(d)
+    calib = CalibrationStore(d / "c.json")
+    rec = local_tools.build_record_position(store, "dec_z", shared={}, calibration=calib)
+    msg = rec.func(underlying="SPY", strategy="x",
+                   legs=[{"symbol": "A", "side": "sell", "qty": 1}],
+                   thesis="prose the model wrote, but never wired to shared",
+                   confidence=0.6, expiry="2026-09-04")
+    assert "no thesis on file" in msg
+    pos = store.all()[0]
+    assert pos.thesis_claim == ""  # the free-text `thesis` arg is NOT thesis_claim

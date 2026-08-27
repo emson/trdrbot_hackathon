@@ -1320,3 +1320,32 @@ opinion is cheap, compute it and journal the delta.
 **Evidence:** `trdrbot health` output before and after the backfill; 31 passing tests incl.
 three that test the detector itself (flags zero-risk position, flags run-but-never-produced,
 stays quiet while a subsystem is merely young).
+
+## D-039: The first-ever position has no thesis and can never be attributed
+**Date:** 2026-08-27
+**Status:** accepted (documented gap, not fixed - see below)
+**Context:** User asked "why no thesis horizon has arrived?" - investigating the honest answer
+surfaced a second, more serious fact hiding behind the first. The open SPY position (tick 1,
+2026-08-26, the system's very first trade) has `thesis_claim: ''`. Its tool-call sequence was
+`get_option_chain -> place_option_order -> record_position` with `simulate_experiments` never
+called in between, so the `shared["thesis"]` that `record_position` reads was never populated.
+This is worse than an unfalsifiable thesis (which at least attempts scoring and gets marked
+unscoreable): this position **can never be attributed at all**, silently, because
+`attribution.pending()` filters on `thesis_claim` being truthy.
+**Why `trdrbot health` (D-038) missed it on its first run:** the band-check only fired when
+`thesis_claim` was already truthy - an empty thesis skipped the check entirely and surfaced only
+as the vaguer "attribution never ran" warning, which is also true for the mundane reason that no
+position has closed yet. Two different causes, one indistinguishable symptom.
+**Fix:** `health.check()` now flags a missing thesis as its own BAD finding, ranked above the
+weaker unfalsifiable-thesis WARN. `record_position` now detects the same condition live and
+returns an explicit note: "no thesis on file - simulate_experiments was not called... this
+position can NEVER be scored." Reporting, not enforcement (D-009) - the position is not
+retroactively fixable (no thesis was ever formed to attach), so the fix is visibility for every
+position from here forward, not repair of this one.
+**Left as-is, deliberately:** this specific position is not backfilled with an invented thesis.
+Fabricating one after the fact would be worse than the gap it patches - it would look like an
+attributed judgment where none exists, exactly the kind of manufactured signal this project's
+attribution machinery exists to prevent. It remains a known, visible, permanent gap in the
+learning record: one trade this loop cannot learn from.
+**Evidence:** journal `jrn_20260826T185911Z_exe9276`, tool_calls confirms simulate_experiments
+absent from the sequence; live `trdrbot health` before/after; 2 new regression tests.

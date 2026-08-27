@@ -243,8 +243,14 @@ def build_record_position(
             pos.max_loss_usd = float(max_loss_usd)
 
         # Carry the thesis onto the position so resolution can attribute the
-        # outcome to the VIEW or the STRUCTURE rather than just to P&L.
+        # outcome to the VIEW or the STRUCTURE rather than just to P&L. Found
+        # live: the very first position ever opened went straight from
+        # get_option_chain to place_option_order to record_position with
+        # simulate_experiments never called in between, so `shared["thesis"]`
+        # was never set and this position can NEVER be attributed - silently,
+        # since nothing before this line noticed (D-038).
         th = (shared or {}).get("thesis")
+        thesis_missing = th is None
         if th is not None:
             pos.thesis_claim = th.claim
             pos.thesis_horizon = th.horizon
@@ -260,8 +266,15 @@ def build_record_position(
         from .exit_rules import watched_signals
         watching = watched_signals(pos)
         note = ""
+        if thesis_missing:
+            note += (
+                " NOTE: no thesis on file - simulate_experiments was not called "
+                "(or not before this), so this position can NEVER be scored for "
+                "view-vs-structure learning. Call simulate_experiments before "
+                "record_position next time."
+            )
         if "underlying" not in watching:
-            note = (
+            note += (
                 " NOTE: no underlying_stop - your exit rules watch only "
                 f"{', '.join(watching) or 'nothing'}, so a thesis break in the "
                 "underlying will not close this position. Add "
