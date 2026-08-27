@@ -1127,3 +1127,18 @@ demonstrated mechanism with honest early posteriors, not converged weights.
 **Revisit if:** the joint session finds the seed principles impossible to trace to real
 incidents (a sign they are platitudes, not learned rules), or incident-level scoring proves too
 noisy to move a posterior meaningfully.
+
+**Note (2026-08-27, D-033 extension):** the constitutional *content* is now brainstormed and
+evaluated in [notes/010](notes/010_constitutional_blocks_brainstorm.md) — nine candidate blocks
+(three epistemic, five meta-memory, one change-control), each traced to a real incident or
+verified elfmem mechanic, sized to the SELF frame's ~600-token budget. As important: an explicit
+cut list — everything with a deterministic backstop (luck-neutrality, friction, payoff-ratio,
+defined-risk) *loses* its slot per notes/009's boundary, and market views are ruled a category
+error for the constitution outright. Simulated against three scenarios: blocks 1+6+7 compose
+into the pattern-degradation arc the user asked for (contradiction recorded → pattern demoted to
+hypothesis on regime mismatch → decays if never re-validated). Wiki ingestion evaluated: a
+single `wiki_ingest.py` chokepoint with per-type schemas-as-data, deferred until a third writer
+or an agent wiki-write tool exists; when built, it also owns promotion/demotion between stores
+(elfmem pattern that survives a regime change → promoted to wiki; wiki page past stale_after
+unverified → deprecated), completing the consolidation arc D-011 designed but never assigned an
+owner. notes/010 ends with the joint-session agenda.

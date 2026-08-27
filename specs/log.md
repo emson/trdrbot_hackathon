@@ -133,3 +133,10 @@ so autonomous self-amendment is out. Plan + mechanism in notes/009, recorded as 
 notes/009 is the agenda for the joint constitutional session.
 **Open:** live open-market execution of the full chain (market opens 09:30 ET today);
 elfmem constitution + self-frame session with the user — agenda now at notes/009.
+
+Brainstormed the constitutional content for the joint session (notes/010): nine candidate
+blocks under the SELF frame's 600-token budget, each incident-traceable; an explicit cut
+list (code-backstopped principles lose their slot; market views are a category error);
+three-scenario simulation showing blocks 1+6+7 compose into the pattern-degradation arc;
+wiki-ingestion verdict: single chokepoint + schemas-as-data, deferred until a third writer,
+and it owns store promotion/demotion when built. D-033 extended with a note.
