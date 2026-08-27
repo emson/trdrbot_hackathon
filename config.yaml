@@ -25,8 +25,18 @@ polymarket:
     - "cpi inflation"
 
 research:
-  # The company universe the daily research cycle covers. Liquid, optionable.
-  universe: ["SPY", "QQQ", "NVDA"]
+  # The universe the daily research cycle covers. Liquid, optionable, and
+  # chosen for LOW MUTUAL CORRELATION - measured, not assumed (D-053).
+  #
+  # The previous universe (SPY/QQQ/NVDA) had a mean pairwise correlation of
+  # 0.75 over the last 120 sessions, with SPY/QQQ at 0.92. That is one bet
+  # wearing three hats: researching it produced three views on the same
+  # factor, and the per-underlying risk cap could not see that.
+  #
+  # Measured vs SPY over the same window: XLE -0.42, XLP -0.04, XLV +0.16.
+  # QQQ dropped as redundant with SPY. Discovery still nominates any liquid
+  # name freely; this list is only what gets researched every day.
+  universe: ["SPY", "NVDA", "XLE", "XLV", "XLP"]
 
 events:
   # Known macro events. Dates here are RULE-DERIVED or user-verified, never

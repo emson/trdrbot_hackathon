@@ -910,3 +910,90 @@ def test_gamma_breakeven_is_the_implied_daily_move_not_a_structure_score():
     high = gamma_breakeven(net_greeks([L("C", 766, "long")], 766.0, 0.35, 6))
     assert high > 2 * low, "it must scale with IV - that is its actual content"
     assert gamma_breakeven(None) is None
+
+
+# ------------------- D-052 pre-registration ledger & unconditional forecasts
+
+def _book():
+    import tempfile
+    from pathlib import Path
+    from trdrbot.ledger import Ledger
+    return Ledger(Path(tempfile.mkdtemp()) / "ledger.jsonl")
+
+
+def test_unfalsifiable_forecasts_are_refused_at_write_time():
+    """A thesis that can never be judged is not evidence, and counting it would
+    make the multiple-testing correction more punitive for no gain."""
+    from trdrbot.ledger import STANDALONE
+    b = _book()
+    assert b.register(kind=STANDALONE, underlying="QQQ", claim="vibes", probability=0.6,
+                      horizon="2026-09-30", band_low=None, band_high=None) is None
+    assert b.trials() == 0
+
+
+def test_declined_theses_still_score_calibration():
+    """The whole point: at 1-5 concurrent positions, trade-level observations
+    never reach the ~50 needed for calibration to mean anything. Forecasts on
+    setups we DECLINE cost nothing and score the same judgement."""
+    import datetime
+    from trdrbot.calibration import CalibrationStore
+    from trdrbot.ledger import STANDALONE, as_forecasts
+    import tempfile
+    from pathlib import Path
+
+    b = _book()
+    past = (datetime.date.today() - datetime.timedelta(days=1)).isoformat()
+    for i, (lo, hi, px) in enumerate([(200.0, 238.0, 249.0), (100.0, 150.0, 120.0)]):
+        e = b.register(kind=STANDALONE, underlying=f"X{i}", claim="declined",
+                       probability=0.45, horizon=past, band_low=lo, band_high=hi)
+        b.resolve(e.id, px, "now")
+
+    cal = CalibrationStore(Path(tempfile.mkdtemp()) / "c.json")
+    assert cal.score().n == 0, "no traded positions"
+    assert cal.score(as_forecasts(b.resolved())).n == 2, "declined forecasts must count"
+
+
+def test_resolution_checks_the_band_against_the_tape():
+    import datetime
+    from trdrbot.ledger import THESIS
+    b = _book()
+    past = (datetime.date.today() - datetime.timedelta(days=1)).isoformat()
+    e = b.register(kind=THESIS, underlying="NVDA", claim="holds", probability=0.38,
+                   horizon=past, band_low=220.0, band_high=245.0)
+    assert b.resolve(e.id, 231.0, "now").outcome is True
+    e2 = b.register(kind=THESIS, underlying="SPY", claim="holds", probability=0.7,
+                    horizon=past, band_low=750.0, band_high=None)
+    assert b.resolve(e2.id, 740.0, "now").outcome is False
+
+
+def test_a_forecast_is_not_resolved_before_its_horizon():
+    import datetime
+    from trdrbot.ledger import STANDALONE
+    b = _book()
+    future = (datetime.date.today() + datetime.timedelta(days=5)).isoformat()
+    b.register(kind=STANDALONE, underlying="SMCI", claim="later", probability=0.3,
+               horizon=future, band_low=38.0, band_high=48.0)
+    assert b.matured_unresolved() == []
+
+
+def test_the_same_thesis_is_not_double_registered():
+    """The agent often simulates twice while comparing structures; the trial
+    count must not inflate from that."""
+    from trdrbot.ledger import THESIS
+    b = _book()
+    for _ in range(3):
+        b.register(kind=THESIS, underlying="NVDA", claim="holds", probability=0.4,
+                   horizon="2099-01-01", band_low=220.0, band_high=245.0)
+    assert b.trials() == 1
+
+
+def test_traded_and_declined_are_distinguishable():
+    from trdrbot.ledger import THESIS, STANDALONE
+    b = _book()
+    b.register(kind=THESIS, underlying="NVDA", claim="a", probability=0.4,
+               horizon="2099-01-01", band_low=220.0, band_high=245.0)
+    b.register(kind=STANDALONE, underlying="SPY", claim="b", probability=0.6,
+               horizon="2099-01-02", band_low=750.0, band_high=None)
+    b.mark_traded("NVDA", "2099-01-01", "pos_1")
+    s = b.summary()
+    assert s["traded"] == 1 and s["declined"] == 1 and s["trials"] == 2

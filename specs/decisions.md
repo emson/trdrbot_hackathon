@@ -1804,3 +1804,61 @@ IV/forecast-RV ratio, in units the agent can check against the tape directly. Re
 candidate with that instruction in the prompt.
 **Verified:** 4 new tests, incl. one asserting the breakeven does NOT discriminate structures, so
 nobody re-adds that belief later. 80 tests pass.
+
+## D-052: Pre-registration ledger and unconditional forecasts
+**Date:** 2026-08-27
+**Status:** accepted
+**Context:** Two findings from the technique research that turn out to be one mechanism -
+**record the forecast even when you do not act on it.**
+**Why pre-registration:** a human quant tests ~20 ideas a year; an LLM generates 200 plausible
+theses in an afternoon and silently discards the ones that look bad. Under a TRUE Sharpe of
+zero, the expected maximum Sharpe across N filtered trials is 1.19 sigma at N=5, **1.90 at
+N=20**, 2.53 at N=100 - and the competence ladder (D-048) would promote it. The ledger supplies
+the trial count N without which a Deflated Sharpe Ratio is uncomputable. It cannot be
+reconstructed later, which is the whole point.
+**Why unconditional forecasts:** size is gated on measured calibration, and the honest
+thresholds are ~50 resolved forecasts before calibration is measured rather than guessed, 152
+before a 60% hit rate is distinguishable from a coin flip. At 1-5 concurrent positions,
+trade-level observations will never get there. But a forecast on a setup we DECLINE costs
+nothing and scores the same judgement. The agent had already declined ~10 times with detailed,
+falsifiable reasoning that was thrown away.
+**The design decision that matters: pre-registration is AUTOMATIC.** Every thesis passed to
+`simulate_experiments` is registered from inside the tool - the agent cannot forget it, cannot
+skip it under pressure, and pays no extra prompt burden. Same derive-don't-declare principle
+that made position risk trustworthy (D-037). A separate `record_forecast` tool exists for
+standalone views the agent wants on the record.
+**Refusal at write time:** a forecast with no price band could never be scored, so it is
+rejected rather than stored. Counting an unjudgeable thesis would make the multiple-testing
+correction *more* punitive for no informational gain. Repeat registrations of one thesis within
+a cycle are de-duplicated, so comparing structures twice does not inflate N.
+**Resolution:** matured forecasts are scored against the tape at housekeeping and flow into
+`CalibrationStore.score(extra=...)`. Verified end to end: 4 theses registered (1 traded, 3
+declined), 3 matured and resolved against real prices, calibration **n=0 -> n=3 from trades we
+never made**. `trdrbot ledger` reports trials/traded/declined/resolved and the hit rate.
+**Verified:** 6 new tests. 86 pass.
+
+## D-053: Our research universe was one bet wearing three hats
+**Date:** 2026-08-27
+**Status:** accepted
+**Context:** Asked whether to add symbols. Measured the correlation of daily returns over the
+last ~120 sessions before answering:
+
+```
+        SPY    QQQ   NVDA    XLE    GLD    TLT    XLV    XLP
+SPY    1.00   0.92   0.66  -0.42   0.52   0.43   0.16  -0.04
+```
+
+**SPY/QQQ correlate at 0.92.** The old universe (SPY/QQQ/NVDA) had a mean pairwise correlation
+of **0.75** - researching it produced three views on one factor, and the per-underlying risk cap
+(D-037) cannot see that, because it counts names rather than exposures.
+**Choice:** universe becomes `SPY, NVDA, XLE, XLV, XLP`. QQQ dropped as redundant with SPY; XLE
+(-0.42 vs SPY), XLP (-0.04) and XLV (+0.16) added for measured independence, all liquid and
+optionable. Mean |pairwise correlation| **0.75 -> 0.27**. Discovery still nominates any liquid
+name freely - this list only governs what gets researched daily.
+**Also written: 8 technique concepts into the wiki** (`technique/*`), as operational rules the
+agent recalls rather than a literature review: implied-vs-realised as THE edge test, the weekend
+vol clock, credit-vs-debit is not a choice (put-call parity), skew does not select structures at
+this tenor, event variance dominates short-dated windows, Kelly overbets short premium (and
+positive skew validates faster), profit-target conventions do not transfer, and a roll is a new
+trade. Each states when it applies and what it changes - the wiki is what the AGENT reads, so
+the evidence is compressed to what alters a decision.

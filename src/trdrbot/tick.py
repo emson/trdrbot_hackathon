@@ -33,6 +33,7 @@ from langgraph.prebuilt import create_react_agent
 from . import (
     competence,
     idle,
+    ledger as ledger_mod,
     prompts,
     sizing,
     analytics,
@@ -296,7 +297,9 @@ async def run_tick(
         )
 
         shared: dict[str, Any] = {}
-        sim_tool = local_tools.build_simulate_experiments(shared, config.paths.state)
+        book = ledger_mod.Ledger(config.paths.state / "ledger.jsonl")
+        sim_tool = local_tools.build_simulate_experiments(shared, config.paths.state, book)
+        forecast_tool = local_tools.build_record_forecast(book)
         open_pos = store.open_positions()
         open_risk = sum(p.max_loss_usd or 0.0 for p in open_pos)
         by_underlying: dict[str, float] = {}
@@ -307,7 +310,9 @@ async def run_tick(
                 )
         equity_now = snap.equity or 100000.0
         hw = competence.update_high_water(config.paths.state, equity_now)
-        cal_now = calib.score()
+        # Calibration draws on declined-thesis forecasts too (D-052).
+        cal_now = calib.score(ledger_mod.as_forecasts(
+            ledger_mod.Ledger(config.paths.state / "ledger.jsonl").resolved()))
         posture = competence.assess(
             resolved=cal_now.n, reliability=cal_now.reliability,
             positions=store.all(), equity=equity_now, high_water=hw,
@@ -331,12 +336,12 @@ async def run_tick(
             calibration=calib,
             sources=[{"id": i.id, "resource": f"inbox/{i.id}", "author": i.source}
                      for i in items],
-            shared=shared,
+            shared=shared, ledger=book,
         )
         guarded = tool_guard.redirect_whole_book_close(
             guarded, lambda: len([p for p in store.open_positions() if p.status == "open"])
         )
-        agent_tools = guarded + [sim_tool, size_tool, record_tool]
+        agent_tools = guarded + [sim_tool, size_tool, record_tool, forecast_tool]
         agent = create_react_agent(build_model(config), agent_tools, prompt=SYSTEM_PROMPT)
 
         prompt_parts = [snap.render(), _render_positions(store, snap)]

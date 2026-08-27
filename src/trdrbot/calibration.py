@@ -104,8 +104,15 @@ class CalibrationStore:
     def pending(self) -> list[Forecast]:
         return [f for f in self._items if f.outcome is None]
 
-    def score(self) -> Calibration:
-        return score(self.resolved())
+    def score(self, extra: list[Forecast] | None = None) -> Calibration:
+        """Calibration over closed positions PLUS any extra resolved forecasts.
+
+        The extras are ledger entries - predictions on setups the agent
+        declined to trade (D-052). They cost nothing, they score exactly the
+        same judgement, and at 1-5 concurrent positions they are the only way
+        this sample ever reaches a size where calibration means anything.
+        """
+        return score(self.resolved() + list(extra or []))
 
 
 def score(forecasts: list[Forecast]) -> Calibration:

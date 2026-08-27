@@ -246,6 +246,29 @@ async def _prompts() -> int:
     return 0
 
 
+def _ledger() -> int:
+    from . import ledger as ledger_mod
+
+    cfg = config_mod.load(quiet=True)
+    book = ledger_mod.Ledger(cfg.paths.state / "ledger.jsonl")
+    s = book.summary()
+    print(f"\n=== pre-registration ledger ===\n")
+    print(f"  theses considered (N for multiple-testing): {s['trials']}")
+    print(f"  traded {s['traded']} | declined {s['declined']} | "
+          f"resolved {s['resolved']} | pending {s['pending']}")
+    if s["hit_rate"] is not None:
+        print(f"  hit rate on resolved: {s['hit_rate']:.0%}")
+    print()
+    for e in book.all()[-15:]:
+        state = ("HELD" if e.outcome else "MISSED") if e.outcome is not None else "pending"
+        tag = "traded" if e.traded else "declined"
+        print(f"  [{tag:>8}] {e.underlying:<6} {e.probability:>4.0%} "
+              f"[{e.band_low},{e.band_high}] by {e.horizon}  {state}")
+        print(f"             {e.claim[:88]}")
+    print()
+    return 0
+
+
 def _health() -> int:
     from . import health
     from .positions import PositionStore
@@ -349,6 +372,7 @@ def main() -> None:
     sub.add_parser("discover", help="news-driven company discovery + thesis building")
     sub.add_parser("health", help="detect subsystems that run but never produce")
     sub.add_parser("prompts", help="inventory every prompt the models read")
+    sub.add_parser("ledger", help="every thesis ever formed, traded or declined")
     run = sub.add_parser("run", help="loop ticks continuously until the deadline")
     run.add_argument("--interval", type=int, default=300,
                      help="seconds between ticks while the market is open (default 300)")
@@ -383,6 +407,8 @@ def main() -> None:
         sys.exit(_health())
     elif args.cmd == "prompts":
         sys.exit(asyncio.run(_prompts()))
+    elif args.cmd == "ledger":
+        sys.exit(_ledger())
     elif args.cmd == "run":
         sys.exit(asyncio.run(_run_loop(args.interval, args.closed_interval,
                                        max_ticks=args.max_ticks,
