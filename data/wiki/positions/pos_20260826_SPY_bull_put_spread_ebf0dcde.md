@@ -24,6 +24,9 @@ exit_rules:
   threshold: 50.0%
 - type: time_stop
   days_before_expiry: 1
+- type: underlying_stop
+  direction: below
+  level: 757.5
 exit_state:
   stop_loss:
   - false
@@ -33,12 +36,20 @@ exit_state:
   - false
   - false
   - false
+  days_to_deadline:below:0:
+  - false
+  position_mark:below:-1:
+  - false
+  position_mark:above:0.5:
+  - false
+  days_to_expiry:below:1:
+  - false
 close_reason: null
 decision_ref: jrn_20260826T185819Z_dece972
 sources: []
 generated:
   by: ''
-  at: '2026-08-27T10:27:20.783079+00:00'
+  at: '2026-08-27T12:02:20.574252+00:00'
 verified:
 - by: trdrbot/reconcile
   at: '2026-08-26T20:05:59.099229+00:00'

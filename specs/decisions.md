@@ -1236,3 +1236,51 @@ IV-rank store (post-hackathon), mark-vs-liquidation honesty (F1+F3 cover the sha
 **Evidence:** live verification of each: debounced underlying stop fires 2-of-3 at 756.8 vs
 757.5 and immediately at 748; portfolio cap 3 contracts empty-book, refused at $14.5k open
 risk; real friction $6 vs flat $9 flowing into EV-after-costs; tick 24 clean end-to-end.
+
+## D-037: One exit-signal registry, one risk unit - collapsing D-036's five mechanisms
+**Date:** 2026-08-27
+**Status:** accepted
+**Supersedes:** the *implementation* of D-036 F1/F2 (findings unchanged, mechanisms replaced)
+**Context:** D-036 fixed five real trader-review findings in one pass, but each as its own
+ad-hoc mechanism. Reviewing the result against "minimal, elegant, consistent": four exit-rule
+branches with copy-pasted debounce and two different severity conventions; a `max_loss_usd`
+field the LLM had to remember or the book cap silently under-counted; three overlapping size
+limits; debounce state keyed by rule TYPE so two rules of one type shared history; and nothing
+connecting the agent's stated invalidation to what was enforced.
+**Choice - the unifying insight:** every exit rule is *read a signal, compare to a threshold,
+debounce*. Rule types differ only in which signal they read, so signals became a registry
+(`EXIT_SIGNALS`) with one uniform evaluator - the same shape as the sensor registry (D-015),
+which is what "consistent with the underlying system" means here. Consequences:
+- Severity unified as **relative overshoot**, reproducing both old conventions from one
+  comparison (1.0 = 2x a percentage stop; 0.01 = 1% through a price level; 0.0 = time is not
+  noisy so any breach is decisive).
+- The deadline sweep became an ordinary implicit rule instead of a special case above the loop.
+- Debounce keys are now `signal:direction:threshold`, fixing a **real bug**: two
+  `underlying_stop` rules at different levels shared one history.
+- Multiple simultaneous triggers resolve by explicit priority (deadline > stop/underlying >
+  time > target) instead of list order, so a position at both its stop and its target exits as
+  a stop rather than booking a fictional win.
+- Stale pre-registry state self-heals on first evaluation.
+**Risk is derived, not declared.** `size_position` stashes the size it computed in `shared`;
+`record_position` reads it - the same mechanism already carrying `thesis`. A forgotten field
+used to count a position as **zero risk** and quietly loosen the caps; that path is gone.
+Cross-ticker mismatch is guarded (NVDA sizing never attaches to a META position).
+**Risk measured one way.** The opaque `frac /= (1 + open_count)` divisor - a proxy invented
+before real risk was tracked - is replaced by a per-underlying cap (8% of equity), joining the
+per-position (5%) and portfolio (15%) caps. Three caps, three distinct meanings, all in dollars
+of defined max loss. The proxy punished an uncorrelated fourth position exactly as hard as a
+fourth position in the same name; the explicit cap permits diversification and refuses
+concentration, which is the behaviour that was actually wanted.
+**Stated vs enforced (F1's root cause) is now visible:** `watched_signals()` reports which
+signals a position's rules read, and `record_position` returns it - warning explicitly when a
+position watches only the mark. Reporting, not gating (D-009): observability beats a veto.
+**Verified:** 10 exit scenarios incl. both old bugs (wide-quote debounce, decisive underlying
+break with a healthy mark, per-rule debounce isolation, stop-beats-target, missing signal holds,
+legacy rule shapes, immediate time stop, implicit deadline, deadline outranking a target);
+6 sizing scenarios (concentration refusal, diversification permitted, portfolio refusal,
+shrink-to-fit, the uncorrelated-fourth case the old divisor punished); 4 derived-risk scenarios
+incl. the model omitting `max_loss_usd` entirely ($3,600 derived correctly). Tick 25 clean.
+**Applied to the live position:** the open SPY spread was the F1 case in the flesh - the agent
+had narrated "invalidated on a decisive break below ~757-758" while its rules watched only the
+mark. Added `underlying_stop below 757.5`, encoding what it had already said. Backup at
+scratchpad/pos_backup.md.

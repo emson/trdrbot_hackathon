@@ -32,9 +32,14 @@ from .calibration import Calibration
 #: A hard ceiling, because every input to Kelly is an estimate and estimates
 #: fail together in exactly the conditions that matter.
 MAX_FRACTION = 0.05
-#: Aggregate cap: total defined max-loss across ALL open positions plus the
-#: candidate. Per-position caps alone let a book of five 5% positions become
-#: one 25% correlated bet wearing five hats - trader review finding, D-036.
+#: Three caps, each a distinct meaning, all measured the same way: dollars of
+#: DEFINED max loss against equity (D-037). Per-position bounds a single
+#: mistake; per-underlying bounds correlated mistakes (several options
+#: positions on one name are one bet wearing hats); portfolio bounds the book.
+#: This replaced an opaque `frac /= (1 + open_count)` divisor that was a proxy
+#: for the same idea, invented before real risk was tracked - it double-counted
+#: with the portfolio cap and produced an effective limit nobody chose.
+PER_UNDERLYING_MAX_AT_RISK = 0.08
 PORTFOLIO_MAX_AT_RISK = 0.15
 
 #: Kelly multiplier once calibration is genuinely established. Quarter-Kelly
@@ -107,8 +112,9 @@ def size_position(
     max_profit: float | None,
     max_loss: float | None,
     calibration: Calibration,
-    open_position_count: int = 0,
+    underlying: str = "",
     open_risk_usd: float = 0.0,
+    open_risk_by_underlying: dict[str, float] | None = None,
 ) -> SizingDecision:
     """How many contracts to trade. Returns 0 when there is no defensible size."""
     adj = shrink_probability(stated_confidence, calibration)
@@ -135,12 +141,6 @@ def size_position(
     mult = ESTABLISHED_KELLY if established else UNPROVEN_KELLY
 
     frac = min(full * mult, MAX_FRACTION)
-
-    # Concentration: each additional open position divides the budget, because
-    # several options positions on one underlying are one bet wearing hats.
-    if open_position_count > 0:
-        frac /= (1 + open_position_count)
-
     risk_budget = equity * frac
     per_contract_risk = abs(max_loss)
     contracts = int(risk_budget // per_contract_risk) if per_contract_risk > 0 else 0
@@ -152,19 +152,25 @@ def size_position(
             f"max loss ${per_contract_risk:,.0f}. Position too large for the account.",
         )
 
-    # Portfolio cap: shrink to fit the aggregate at-risk budget, refuse when
-    # the book is already full. Unknown-risk open positions count as zero
-    # here, which is lenient - the honest direction would be to refuse, but
-    # legacy positions predate the field and would deadlock the book.
-    budget_left = PORTFOLIO_MAX_AT_RISK * equity - open_risk_usd
-    if budget_left < per_contract_risk:
-        return SizingDecision(
-            0, 0.0, full, frac, adj,
-            f"REFUSED: portfolio already carries ${open_risk_usd:,.0f} of defined "
-            f"max-loss vs a {PORTFOLIO_MAX_AT_RISK:.0%} cap (${PORTFOLIO_MAX_AT_RISK * equity:,.0f}). "
-            f"Adding more risk means the book, not this trade, is the bet.",
-        )
-    contracts = min(contracts, int(budget_left // per_contract_risk))
+    # Book caps, tightest-binding wins. Both measured in dollars of defined
+    # max loss so the number means the same thing everywhere.
+    same_name = (open_risk_by_underlying or {}).get(underlying.upper(), 0.0)
+    caps = [
+        ("portfolio", PORTFOLIO_MAX_AT_RISK * equity - open_risk_usd,
+         PORTFOLIO_MAX_AT_RISK, open_risk_usd, "the book"),
+        (f"{underlying.upper() or 'underlying'} concentration",
+         PER_UNDERLYING_MAX_AT_RISK * equity - same_name,
+         PER_UNDERLYING_MAX_AT_RISK, same_name, f"{underlying.upper() or 'one name'}"),
+    ]
+    for label, budget_left, pct, already, subject in caps:
+        if budget_left < per_contract_risk:
+            return SizingDecision(
+                0, 0.0, full, frac, adj,
+                f"REFUSED ({label}): already carrying ${already:,.0f} of defined max-loss "
+                f"against a {pct:.0%} cap (${pct * equity:,.0f}). Adding more means "
+                f"{subject}, not this trade, is the bet.",
+            )
+        contracts = min(contracts, int(budget_left // per_contract_risk))
 
     actual = (contracts * per_contract_risk) / equity
     track = (
@@ -177,5 +183,6 @@ def size_position(
         contracts, actual, full, frac, adj,
         f"stated {stated_confidence:.0%} -> calibration-adjusted {adj:.0%}; "
         f"full Kelly {full:.3f}; {track}"
-        + (f"; divided by {1+open_position_count} for concentration" if open_position_count else ""),
+        + (f"; ${open_risk_usd:,.0f} already at risk in the book"
+           f" (${same_name:,.0f} on {underlying.upper()})" if open_risk_usd else ""),
     )

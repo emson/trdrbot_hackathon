@@ -179,8 +179,15 @@ async def run_tick(
         sim_tool = local_tools.build_simulate_experiments(shared, config.paths.state)
         open_pos = store.open_positions()
         open_risk = sum(p.max_loss_usd or 0.0 for p in open_pos)
+        by_underlying: dict[str, float] = {}
+        for op in open_pos:
+            if op.underlying:
+                by_underlying[op.underlying.upper()] = (
+                    by_underlying.get(op.underlying.upper(), 0.0) + (op.max_loss_usd or 0.0)
+                )
         size_tool = local_tools.build_size_position(
-            calib, snap.equity or 100000.0, len(open_pos), open_risk_usd=open_risk
+            calib, snap.equity or 100000.0, len(open_pos),
+            open_risk_usd=open_risk, open_risk_by_underlying=by_underlying, shared=shared,
         )
         record_tool = local_tools.build_record_position(
             store, decision_id, elfmem_blocks=ctx.blocks, generated_by=config.model,

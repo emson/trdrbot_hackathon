@@ -226,11 +226,22 @@ def build_record_position(
             # the credit-assignment targets at resolution (D-011).
             elfmem_blocks=dict(elfmem_blocks or {}),
             generated_by=generated_by,
-            max_loss_usd=max_loss_usd,
             # OKF sources (D-022): what the agent actually read this cycle,
             # so a resolved position can credit or discredit its inputs.
             sources=list(sources or []),
         )
+        # Risk is DERIVED, not declared: prefer what size_position actually
+        # computed this cycle, falling back to the model's own figure only if
+        # sizing was skipped. Keeps the book caps honest without depending on
+        # the model remembering a field.
+        sized = (shared or {}).get("sizing") or {}
+        if sized.get("max_loss_usd") is not None and (
+            not sized.get("underlying") or sized["underlying"] == underlying.upper()
+        ):
+            pos.max_loss_usd = float(sized["max_loss_usd"])
+        elif max_loss_usd is not None:
+            pos.max_loss_usd = float(max_loss_usd)
+
         # Carry the thesis onto the position so resolution can attribute the
         # outcome to the VIEW or the STRUCTURE rather than just to P&L.
         th = (shared or {}).get("thesis")
@@ -243,10 +254,26 @@ def build_record_position(
         path = store.save(pos)
         if calibration is not None:
             calibration.record(pos.position_id, confidence)
+        # Say exactly which signals are enforced. The failure this guards
+        # against is a stated invalidation level that no rule actually
+        # watches - visible here rather than discovered at a loss (D-037).
+        from .exit_rules import watched_signals
+        watching = watched_signals(pos)
+        note = ""
+        if "underlying" not in watching:
+            note = (
+                " NOTE: no underlying_stop - your exit rules watch only "
+                f"{', '.join(watching) or 'nothing'}, so a thesis break in the "
+                "underlying will not close this position. Add "
+                "underlying_stop_below/_above at your invalidation level if you "
+                "stated one."
+            )
+        risk = f" risk ${pos.max_loss_usd:,.0f}" if pos.max_loss_usd else ""
         return (
             f"Recorded {pos.position_id} with {len(rules)} exit rule(s) at {path.name}, "
-            f"confidence {confidence:.0%} (will be scored for calibration at close). "
-            f"Exit rules are now evaluated automatically every tick."
+            f"confidence {confidence:.0%} (scored for calibration at close),{risk}. "
+            f"Watching: {', '.join(watching) or 'no signals'}. "
+            f"Exit rules are evaluated automatically every tick.{note}"
         )
 
     return StructuredTool.from_function(
@@ -256,8 +283,12 @@ def build_record_position(
     )
 
 
-def build_size_position(calibration: "CalibrationStore", equity: float, open_count: int,
-                        open_risk_usd: float = 0.0) -> StructuredTool:
+def build_size_position(
+    calibration: "CalibrationStore", equity: float, open_count: int,
+    open_risk_usd: float = 0.0,
+    open_risk_by_underlying: dict[str, float] | None = None,
+    shared: dict[str, Any] | None = None,
+) -> StructuredTool:
     """Tool: how many contracts, given edge, bankroll, and earned trust.
 
     Sizing used to be the model's free choice, which made every other piece of
@@ -270,6 +301,7 @@ def build_size_position(calibration: "CalibrationStore", equity: float, open_cou
         stated_confidence: float,
         max_profit: float,
         max_loss: float,
+        underlying: str = "",
     ) -> str:
         """Compute the defensible position size. Call this BEFORE placing an order.
 
@@ -283,16 +315,29 @@ def build_size_position(calibration: "CalibrationStore", equity: float, open_cou
             stated_confidence: your honest probability (0-1) this closes profitable
             max_profit: from simulate_experiments (use a positive number)
             max_loss: from simulate_experiments (use a NEGATIVE number)
+            underlying: the ticker, so per-name concentration is checked
         """
         d = sizing.size_position(
             equity=equity,
+            underlying=underlying,
             open_risk_usd=open_risk_usd,
+            open_risk_by_underlying=open_risk_by_underlying,
             stated_confidence=stated_confidence,
             max_profit=max_profit,
             max_loss=max_loss,
             calibration=calibration.score(),
-            open_position_count=open_count,
         )
+        # The system now KNOWS this position's true worst case. Stashing it
+        # here means record_position can fill max_loss_usd itself instead of
+        # asking the model to re-declare a number it was just given - a
+        # forgotten field would have silently counted the position as zero
+        # risk and quietly loosened the book caps (D-037).
+        if shared is not None and d.contracts > 0:
+            shared["sizing"] = {
+                "underlying": underlying.upper(),
+                "contracts": d.contracts,
+                "max_loss_usd": abs(max_loss) * d.contracts,
+            }
         return d.explain()
 
     return StructuredTool.from_function(

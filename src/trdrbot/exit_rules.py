@@ -5,21 +5,28 @@ it may rewrite or delete any of them on any decide cycle. This just makes sure
 that what it said it would do actually happens, on a cadence far faster than
 the LLM runs.
 
-Two rules from the regression pass (D-019):
-  - N-of-M debounce, not strictly-consecutive. A single stale or abnormally
-    wide quote must not reset progress toward a real breach.
-  - Magnitude override: a breach beyond 2x the threshold fires immediately,
-    because that is not plausibly a quote artifact.
+Every exit rule is the same operation: read a SIGNAL, compare it to a
+threshold in one direction, debounce. Rule types differ only in which signal
+they read, so they live in a registry (D-037) rather than as branches - the
+same shape as the sensor registry (D-015). Adding a rule type is a registry
+entry plus one clause in `_normalise`, not another copy of the debounce logic.
 
-And INV-19: a trigger closes ALL legs of a position. Closing one leg of a
-spread can leave an unbounded naked short - strictly worse than the position it
-was meant to protect.
+Invariants preserved from the regression pass (D-019):
+  - N-of-M debounce, not strictly-consecutive: a single stale or abnormally
+    wide quote must not reset progress toward a real breach.
+  - Magnitude override: a breach far beyond the threshold fires immediately,
+    because that is not plausibly a quote artifact. Expressed once, as
+    relative overshoot, so it means the right thing for percentages (2x a
+    -50% stop) and for prices (1% through a level) without special cases.
+  - INV-19: a trigger closes ALL legs. Closing one leg of a spread can leave
+    an unbounded naked short - strictly worse than the position it protected.
 """
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import date
-from typing import Any
+from typing import Any, Callable
 
 from . import learn, mcp_client
 from .analytics import Snapshot, _f, position_pnl_pct
@@ -31,105 +38,172 @@ from .wiki import Wiki
 
 WINDOW = 3  # M
 NEEDED = 2  # N
-MAGNITUDE_OVERRIDE = 2.0
 
 
-def _days_to(expiry: str) -> int | None:
+def _days_to(day: str) -> int | None:
     try:
-        return (date.fromisoformat(str(expiry)) - date.today()).days
+        return (date.fromisoformat(str(day)) - date.today()).days
     except (ValueError, TypeError):
         return None
 
 
-def evaluate(pos: Position, snap: Snapshot, deadline: str) -> tuple[str | None, str, float | None]:
-    """Return (close_reason, explanation, pnl_pct). close_reason None means hold.
+@dataclass(frozen=True)
+class ExitSignal:
+    """One observable an exit rule can watch."""
 
-    pnl_pct is returned alongside the reason so the caller can feed it
-    straight to learn.on_resolution() without recomputing it - the position's
-    net mark is exactly the signal credit assignment needs (D-018 #9).
+    name: str
+    read: Callable[[Position, Snapshot, str], float | None]
+    #: Relative overshoot past the threshold that fires immediately, skipping
+    #: debounce. 1.0 = twice the threshold (the old percentage rule); 0.01 =
+    #: 1% through a price level; 0.0 = any breach is decisive (time is not
+    #: noisy, so a date-based rule never needs confirming).
+    immediate_overshoot: float
+    render: Callable[[float], str]
+
+
+#: The registry. A new rule type usually needs no new signal at all.
+EXIT_SIGNALS: dict[str, ExitSignal] = {
+    # Noisiest signal available on an options position: a wide or stale quote
+    # can print -100%-of-credit on a healthy spread. Debounce matters most here.
+    "position_mark": ExitSignal(
+        "position_mark", lambda p, s, d: position_pnl_pct(p.symbols, s),
+        1.0, lambda v: f"{v:+.1%}",
+    ),
+    # What a professional actually exits on: the underlying breaking the level
+    # that invalidates the thesis. Prints continuously and tightly.
+    "underlying": ExitSignal(
+        "underlying", lambda p, s, d: s.underlying_prices.get(p.underlying),
+        0.01, lambda v: f"{v:.2f}",
+    ),
+    "days_to_expiry": ExitSignal(
+        "days_to_expiry", lambda p, s, d: _days_to(p.expiry),
+        0.0, lambda v: f"{v:.0f}d",
+    ),
+    # The competition sweep (INV-26): an ordinary rule, implicit on every
+    # position, rather than a special case sitting above the loop.
+    "days_to_deadline": ExitSignal(
+        "days_to_deadline", lambda p, s, d: _days_to(d),
+        0.0, lambda v: f"{v:.0f}d",
+    ),
+}
+
+#: Lower fires first when several rules trigger in one tick. Risk before
+#: reward: a position simultaneously at its stop and its target (a crazy
+#: quote, or a gap through both) must exit as a stop, not book a fictional
+#: win. Previously this was list order, i.e. accidental.
+_PRIORITY = {"deadline": 0, "stop_loss": 1, "underlying_stop": 1,
+             "time_stop": 2, "profit_target": 3}
+
+
+def _pct(v: Any) -> float:
+    return _f(str(v).rstrip("%")) / 100.0
+
+
+def _normalise(rule: dict[str, Any]) -> tuple[str, str, float, str] | None:
+    """A rule in any recorded form -> (signal, direction, threshold, type).
+
+    Reads both current and legacy shapes - position files written before the
+    registry carry `basis: position_mark` and a "-100%" string threshold.
+    Returns None for anything unrecognised or incomplete, which holds rather
+    than guesses.
+    """
+    kind = str(rule.get("type") or "")
+
+    if kind == "deadline":
+        return ("days_to_deadline", "below", 0.0, kind)
+    if kind == "stop_loss" and rule.get("threshold") is not None:
+        return ("position_mark", "below", _pct(rule["threshold"]), kind)
+    if kind == "profit_target" and rule.get("threshold") is not None:
+        return ("position_mark", "above", _pct(rule["threshold"]), kind)
+    if kind == "time_stop":
+        return ("days_to_expiry", "below", float(rule.get("days_before_expiry", 0)), kind)
+    if kind == "underlying_stop":
+        level = _f(str(rule.get("level")), 0.0)
+        if level > 0:
+            return ("underlying", str(rule.get("direction", "below")), level, kind)
+    return None
+
+
+def _overshoot(x: float, thr: float, direction: str) -> float:
+    """How far past the threshold, relative to the threshold's own size."""
+    past = (thr - x) if direction == "below" else (x - thr)
+    return past / abs(thr) if thr else past
+
+
+def watched_signals(pos: Position) -> list[str]:
+    """Which signals this position's rules actually read (F1 transparency).
+
+    The failure that motivated the underlying stop was a position whose agent
+    NARRATED a thesis-invalidation level while its coded rules watched only
+    the mark. Surfacing this at record time makes the divergence visible
+    instead of silent - reporting, not gating (D-009).
+    """
+    out: list[str] = []
+    for rule in pos.exit_rules:
+        norm = _normalise(rule)
+        if norm and norm[0] not in out:
+            out.append(norm[0])
+    return out
+
+
+def evaluate(pos: Position, snap: Snapshot, deadline: str) -> tuple[str | None, str, float | None]:
+    """Return (close_reason, explanation, pnl_pct). None means hold.
+
+    pnl_pct comes back alongside the reason so the caller can feed it straight
+    to learn.on_resolution() without recomputing - the position's net mark is
+    exactly the signal credit assignment needs (D-018 #9).
     """
     pnl = position_pnl_pct(pos.symbols, snap)
+    fired: list[tuple[int, str, str]] = []
 
-    # The deadline sweep is independent of any position's own expiry (INV-26).
-    # A conventional-DTE position would otherwise never resolve inside the
-    # competition, and the learning loop would produce nothing at all.
-    try:
-        if date.today() >= date.fromisoformat(deadline):
-            return "deadline", f"competition deadline {deadline} reached", pnl
-    except (ValueError, TypeError):
-        pass
+    # Self-healing: drop debounce state written by the pre-registry engine,
+    # which keyed on rule type alone. Inert (new keys always contain ":") but
+    # position files are human-readable artifacts and stale state reads as
+    # live state to anyone inspecting one.
+    for stale in [k for k in pos.exit_state if ":" not in k]:
+        pos.exit_state.pop(stale, None)
 
-    dte = _days_to(pos.expiry)
-
-    for rule in pos.exit_rules:
-        kind = rule.get("type")
-        key = str(kind)
-
-        if kind == "underlying_stop":
-            # The thesis stop a professional actually uses: spreads are exited
-            # when the UNDERLYING breaks the thesis level, not when a wide
-            # option mark wobbles across a P&L line. The mark is the noisiest
-            # signal available on an options position; the underlying prints
-            # continuously and tightly. Found live: the agent NARRATED
-            # "invalidated on a decisive break below ~757-758" while its coded
-            # rules only watched the mark - stated plan and executed plan
-            # disagreed. Same N-of-M debounce; magnitude override at 1% beyond
-            # the level.
-            u_px = snap.underlying_prices.get(pos.underlying)
-            level = _f(str(rule.get("level")), 0.0)
-            if u_px is None or level <= 0:
-                continue
-            direction = rule.get("direction", "below")
-            breached = u_px < level if direction == "below" else u_px > level
-            severe = (
-                u_px < level * 0.99 if direction == "below" else u_px > level * 1.01
-            )
-            history = list(pos.exit_state.get(key, []))[-(WINDOW - 1):] + [breached]
-            pos.exit_state[key] = history
-            if severe:
-                return kind, (
-                    f"underlying {u_px:.2f} decisively {direction} thesis level "
-                    f"{level:.2f} - immediate"
-                ), pnl
-            if sum(history) >= NEEDED:
-                return kind, (
-                    f"underlying {u_px:.2f} {direction} {level:.2f} "
-                    f"({sum(history)}/{len(history)} checks)"
-                ), pnl
+    # The deadline is an implicit rule on every position (INV-26): without it
+    # a conventional-DTE position never resolves inside the competition and
+    # the learning loop produces nothing at all.
+    for rule in [{"type": "deadline"}] + list(pos.exit_rules):
+        norm = _normalise(rule)
+        if norm is None:
+            continue
+        sig_name, direction, thr, kind = norm
+        signal = EXIT_SIGNALS.get(sig_name)
+        if signal is None:
             continue
 
-        if kind == "time_stop":
-            n = int(rule.get("days_before_expiry", 0))
-            if dte is not None and dte <= n:
-                return "time_stop", f"{dte}d to expiry <= {n}d", pnl
-            continue
+        x = signal.read(pos, snap, deadline)
+        if x is None:
+            continue  # unobservable signal holds; it never fires blind
 
-        if pnl is None:
-            continue
+        breached = x <= thr if direction == "below" else x >= thr
 
-        threshold = rule.get("threshold")
-        if threshold is None:
-            continue
-        thr = _f(str(threshold).rstrip("%")) / 100.0
-
-        if kind == "stop_loss":
-            breached = pnl <= thr
-            severe = pnl <= thr * MAGNITUDE_OVERRIDE
-        elif kind == "profit_target":
-            breached = pnl >= thr
-            severe = pnl >= thr * MAGNITUDE_OVERRIDE
-        else:
-            continue
-
-        history = list(pos.exit_state.get(key, []))[-(WINDOW - 1) :] + [breached]
+        # Debounce state is keyed by the WHOLE rule, not its type: two
+        # underlying stops at different levels are different rules and must
+        # not share a history (they did, before the registry).
+        key = f"{sig_name}:{direction}:{thr:g}"
+        history = list(pos.exit_state.get(key, []))[-(WINDOW - 1):] + [breached]
         pos.exit_state[key] = history
+        if not breached:
+            continue
 
-        if severe:
-            return kind, f"{pnl:+.1%} beyond {MAGNITUDE_OVERRIDE}x threshold {thr:+.0%} - immediate", pnl
-        if sum(history) >= NEEDED:
-            return kind, f"{pnl:+.1%} vs threshold {thr:+.0%} ({sum(history)}/{len(history)} checks)", pnl
+        decisive = _overshoot(x, thr, direction) >= signal.immediate_overshoot
+        if decisive or sum(history) >= NEEDED:
+            why = (
+                f"{sig_name} {signal.render(x)} {direction} {signal.render(thr)}"
+                + (" - decisive, immediate" if decisive
+                   else f" ({sum(history)}/{len(history)} checks)")
+            )
+            fired.append((_PRIORITY.get(kind, 5), kind, why))
 
-    return None, "", pnl
+    if not fired:
+        return None, "", pnl
+    fired.sort(key=lambda t: t[0])
+    _, kind, why = fired[0]
+    return kind, why, pnl
 
 
 async def run(
