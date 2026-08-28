@@ -1437,10 +1437,18 @@ def test_build_model_raises_clearly_when_nothing_is_usable():
 # ---------------------------- D-065 context diet
 
 def _chain_payload(spot=767, strikes=range(600, 940, 5)):
+    """Realistic fixture: full bar dicts, matching the ~850 chars/contract the
+    live API sends. The first version slimmed bars to {"c": 1} and the 10x
+    ratio assertion then failed against an unrealistically THIN payload - the
+    fixture was the bug, not the compactor."""
     def snap(bid, ask, last):
-        return {"dailyBar": {"c": 1}, "minuteBar": {"c": 1}, "prevDailyBar": {"c": 1},
-                "latestQuote": {"ap": ask, "as": 10, "bp": bid, "bs": 25},
-                "latestTrade": {"p": last}}
+        bar = {"c": last, "h": last * 1.1, "l": last * 0.9, "n": 62, "o": last,
+               "t": "2026-08-27T04:00:00Z", "v": 255, "vw": last}
+        return {"dailyBar": dict(bar), "minuteBar": dict(bar), "prevDailyBar": dict(bar),
+                "latestQuote": {"ap": ask, "as": 10, "ax": "D", "bp": bid, "bs": 25,
+                                "bx": "Z", "c": " ", "t": "2026-08-27T19:59:59.97Z"},
+                "latestTrade": {"c": "I", "p": last, "s": 1,
+                                "t": "2026-08-27T19:30:30.09Z", "x": "Q"}}
     snaps = {}
     for k in strikes:
         ic, ip = max(0.0, spot - k), max(0.0, k - spot)
