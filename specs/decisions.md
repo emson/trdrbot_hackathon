@@ -2108,3 +2108,34 @@ duplicate spend. The unimplemented top items from it (event variance extraction,
 validator) stay next in the build queue.
 **Verified:** 104 tests; muse live run end to end; Theo rendering in the real SELF frame;
 weekend gate unit-checked via weekday logic.
+
+## D-061: Rename "You are elf" to "You are Theo" at our boundary
+**Date:** 2026-08-28
+**Status:** accepted
+**Context:** Named the agent Theo (D-060). elfmem's SELF frame still opened every rendered
+context with "## You are elf... answer as elf" - checked directly against the installed
+package: `context/rendering.py::_SELF_PREAMBLE` is a hardcoded module-level string, with no
+config field or name parameter threaded through `frame()`, `FrameDefinition`, or anywhere else
+in the API. Not fixable from our config; genuinely upstream-only if fixed at the source.
+**Choice: patch the two exact phrases at OUR boundary**, downstream of `frame("self")`, in
+`assemble_context` - the same place we already post-process text for ATTENTION dedupe.
+Monkey-patching elfmem's private module constant was the alternative and was rejected: reaching
+into a dependency's internal state is a larger, less reversible surface than rewriting text we
+already own after it crosses into our process.
+**My own verification test caught a real bug before it shipped.** A plain `.replace("You are
+elf", "You are Theo")` also matches as a substring of a hypothetical "You are elfbot9000" -
+producing "You are Theobot9000" instead of leaving it alone. Fixed with a word-boundaried regex
+(`\bYou are elf\b`), so a future lookalike name passes through untouched rather than being
+mangled.
+**Fails safe by construction.** If upstream ever changes the wording, the pattern doesn't
+match, the text passes through unchanged, and a warning prints naming the exact heading seen -
+the same null-path-must-leave-evidence discipline as everything else this project has built
+(D-038). Silently reintroducing "elf" or emitting garbled text were both live risks; neither
+survived the test suite.
+**Verified against real memory, not just the unit function:** `assemble_context()` on the live
+decide-cycle query now renders "You are Theo... answer as Theo" with zero remaining occurrences
+of "elf" outside the word "elfmem" itself.
+**Issue I-7 closed** (was open since D-060), with a note that the upstream gap - no name
+override for the SELF preamble - is still worth reporting, just no longer blocking.
+**Verified:** 4 new tests (real text renames; lookalike name not mangled; unrelated content
+untouched; safe no-op with a printed warning on a genuine rewording). 108 pass.

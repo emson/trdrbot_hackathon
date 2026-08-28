@@ -16,6 +16,7 @@ which silently drops the self/task frames' contribution to credit assignment.
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -23,6 +24,36 @@ from typing import Any
 from elfmem import MemorySystem
 
 from .positions import Position
+
+#: elfmem's SELF template hardcodes a preamble naming the host "elf"
+#: (`context/rendering.py::_SELF_PREAMBLE`) - a module-level constant with no
+#: config knob or name parameter anywhere in the library (checked directly;
+#: filed upstream as issues.md I-7). Renaming it means either monkey-patching
+#: a third-party module's private state, or rewriting the two exact phrases
+#: at OUR boundary, downstream of frame("self"), where we already post-process
+#: text for other reasons (ATTENTION dedupe). The latter is the smaller, more
+#: reversible surface, and it fails SAFE: if upstream ever changes the wording,
+#: neither phrase matches, the text passes through unchanged, and the mismatch
+#: is printed rather than silently reintroducing "elf" - the same null-path
+#: discipline as everything else in this project (D-038).
+_SELF_NAME_FROM, _SELF_NAME_TO = "elf", "Theo"
+
+
+#: Word-boundaried, not a plain substring replace - "You are elf" as a plain
+#: substring also matches inside "You are elfbot9000", which a naive
+#: .replace() would silently mangle into "You are Theobot9000" instead of
+#: leaving alone (caught by this module's own regression test). \b anchors
+#: each phrase to whole words only.
+_SELF_PATTERN = re.compile(rf"\b(You are|answer as) {_SELF_NAME_FROM}\b")
+
+
+def _rename_self_preamble(text: str) -> str:
+    heading = text.split("\n", 1)[0]  # "## You are elf"
+    fixed, n = _SELF_PATTERN.subn(rf"\1 {_SELF_NAME_TO}", text)
+    if n == 0 and "You are" in heading:
+        print(f"[elfmem_adapter] SELF preamble rename did not match ({heading!r}) - "
+              f"upstream wording may have changed (see issues.md I-7)")
+    return fixed
 
 #: How many learned blocks ATTENTION contributes to a decide cycle.
 ATTENTION_KEEP = 5
@@ -77,8 +108,11 @@ class ElfmemAdapter:
             ids = [b.id for b in fr.blocks if b.id not in seen]
             seen.update(ids)
             blocks[name] = ids
-            if fr.text:
-                parts.append(fr.text)
+            text = fr.text
+            if text and name == "self":
+                text = _rename_self_preamble(text)
+            if text:
+                parts.append(text)
 
         # ATTENTION is a frame again. It was hand-rolled from recall() because
         # constitutional blocks - semantically close to any reasoning query and

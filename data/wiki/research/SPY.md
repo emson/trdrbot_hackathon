@@ -13,21 +13,25 @@ sources:
   resource: computed:market_stats
   author: trdrbot/research
   last_modified: '2026-08-27T10:02:36.751198+00:00'
+- id: src-4
+  resource: computed:market_stats
+  author: trdrbot/research
+  last_modified: '2026-08-28T00:06:31.229258+00:00'
 generated:
-  at: '2026-08-27T10:02:36.751771+00:00'
+  at: '2026-08-28T00:06:31.229854+00:00'
 ---
 
 # What it is
-SPY is the SPDR S&P 500 ETF, the most liquid broad-market US large-cap index vehicle and the default proxy for beta. It closed at 765.94, up 3.4% over 21 days and 2.0% over 63 days, with a 1-year max drawdown of only 9.1%.
+SPDR S&P 500 ETF Trust, the most heavily traded exchange-traded fund tracking the large-cap US equity benchmark. It is the default instrument for expressing broad US equity beta and the deepest listed options market in the world.
 
 # Bull case
-Price is still above its 50-day average with a shallow one-year drawdown and realized vol of just 12.8% (58th percentile) — the hallmarks of an orderly uptrend absorbing a pullback. Recession odds are low (8% by end-2026), and the AI capex cycle is still delivering earnings beats, per NVDA's double beat and broad chip-complex strength.
+Closed at 771.18, above both its 20- and 50-day averages, up 5.7% over 21 days with a 1-year max drawdown of only 9.1% and RSI14 at a constructive 59. Realized vol at 11.3% sits at just the 40th percentile, and the crowd prices only an 8% chance of US recession by end-2026 — a calm, trending tape with low priced macro stress.
 
 # Bear case
-The index has slipped below its 20-day average, the week was negative, and the hot PCE print has removed the Fed cut as a backstop (1% odds by September 2026, 5% by October). If rate-hike chatter builds, multiple compression can drag the index through the 50-day without any deterioration in earnings.
+The 63-day return of only +2.2% versus +5.7% over 21 days shows the entire quarter's gain was compressed into one month, which is fragile construction. Prediction markets price essentially no Fed easing (2% cut probability by the September 2026 meeting), so there is no policy cushion, and index-level vol at the 40th percentile means protection is cheap precisely because nobody is worried.
 
 # People
-Fed policy leadership sets the discount-rate backdrop that dominates this tape, and the headline set references Jackson Hole commentary as a market driver. Commentators cited in the material — Jim Cramer, Michael Burry, Gene Munster, Ross Gerber — shape sentiment mainly through the AI complex rather than the index directly (model knowledge).
+Managed by State Street Global Advisors as a unit investment trust; index composition governed by the S&P Dow Jones Indices committee (model knowledge). Index direction is currently hostage to a handful of AI-complex CEOs — notably Jensen Huang — whose commentary moves the top of the cap-weighted stack.
 
 # Environment
-Inflation data is running hot enough to shift the conversation from cuts to hikes, while growth risk stays contained per crowd recession odds. Realized vol has cooled in percentile terms, meaning index options are priced for calm into a macro-sensitive tape.
+No-landing, no-help macro: growth intact, recession odds low, and no monetary easing priced across the visible horizon. Reported single-day flows of $3.8B out of SPY against $3.7B into QQQ indicate allocators are rotating within beta toward tech rather than reducing equity exposure.

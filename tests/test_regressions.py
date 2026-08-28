@@ -1293,3 +1293,48 @@ def test_muse_keeps_a_breakout_call_against_a_calm_base():
     src = inspect.getsource(muse.run)
     assert "disagrees" in src
     assert "not disagrees" in src, "ceiling must only reject when the model AGREES"
+
+
+# --------------------------- D-061 rename the SELF preamble at our boundary
+
+_REAL_SELF_PREAMBLE = (
+    "## You are elf\n"
+    "The numbered principles below are your own constitution, ordered by how "
+    "load-bearing each has proven. Reason from them and answer as elf. When a "
+    "principle and the evidence point different ways, say so plainly -- an "
+    "identity that cannot disagree is decoration."
+)
+
+
+def test_self_preamble_is_renamed_to_theo():
+    from trdrbot.elfmem_adapter import _rename_self_preamble
+    fixed = _rename_self_preamble(_REAL_SELF_PREAMBLE)
+    assert "You are Theo" in fixed and "answer as Theo" in fixed
+    assert "elf" not in fixed
+
+
+def test_rename_does_not_mangle_a_lookalike_word():
+    """'You are elf' matches as a plain SUBSTRING of 'You are elfbot9000', which
+    a naive .replace() mangled into 'You are Theobot9000' - caught by this
+    module's own verification, not written correctly the first time."""
+    from trdrbot.elfmem_adapter import _rename_self_preamble
+    lookalike = "## You are elfbot9000\nSome new phrasing entirely."
+    out = _rename_self_preamble(lookalike)
+    assert out == lookalike, "must pass through unchanged, not mangle a similar word"
+
+
+def test_rename_leaves_unrelated_content_untouched():
+    from trdrbot.elfmem_adapter import _rename_self_preamble
+    text = "The shelf holds itself steady; this is not about elf in isolation."
+    assert _rename_self_preamble(text) == text
+
+
+def test_rename_is_a_safe_noop_if_upstream_rewords(capsys):
+    """If elfmem ever changes this wording, the patch must fail SAFE - pass the
+    text through unchanged and print evidence, never silently reintroduce
+    'elf' or emit garbled text (the null-path discipline, D-038)."""
+    from trdrbot.elfmem_adapter import _rename_self_preamble
+    changed = "## You are somebody-else\nCompletely different heading."
+    out = _rename_self_preamble(changed)
+    assert out == changed
+    assert "upstream wording may have changed" in capsys.readouterr().out
