@@ -123,7 +123,11 @@ def simulate(
     # The payoff this bet actually offers, conditional on winning and on
     # losing. `size_position` uses it as Kelly's `b` in place of max/max, which
     # pairs a tail-to-tail ratio with a whole-region probability.
-    payoff = optmath.payoff_ratio(legs, spot, iv, days, drift=thesis.drift)
+    # Friction charged to both sides: it is paid whether the trade wins or
+    # loses, and netting it here is what makes the sizing gate open at exactly
+    # the point EV-after-costs turns positive instead of ahead of it.
+    payoff = optmath.payoff_ratio(legs, spot, iv, days, drift=thesis.drift,
+                                  friction=friction)
 
     # WHAT HAS TO BE TRUE. An EV is one number resting on one volatility
     # assumption, and choosing that assumption is where a whole board of
@@ -315,7 +319,7 @@ def _payoff_line(m: dict[str, Any]) -> str:
         return ""
     rr = m.get("risk_reward")
     drift = f" (max/max says {rr:.2f})" if rr is not None else ""
-    return (f"\n   PAYOFF   when it wins ${w:,.0f}, when it loses ${l:,.0f}"
+    return (f"\n   PAYOFF   after costs, when it wins ${w:,.0f}, when it loses ${l:,.0f}"
             f" -> {r:.2f}:1{drift}. Sizing uses this, not max/max")
 
 

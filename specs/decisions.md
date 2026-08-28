@@ -3105,3 +3105,71 @@ not decay).
 held-position exemption, revival, and template divergence) + 14 contract tests. Live discovery run
 writing a clean split, and the exact NVDA collision that was poisoned this morning now reads
 "Nvidia designs the GPUs and accelerated-computing platforms..." with no price in it.
+
+## D-079: Scaffold - the payoff fix has an exact property, and friction had one gap left
+**Date:** 2026-08-28
+**Status:** accepted
+**Context:** A scaffold run over a zoo of 25 option structures - verticals both ways, condors wide
+and narrow, a butterfly, a straddle, a strangle - sweeping the whole decision stack and checking
+the invariants a desk would insist on. `tests/scaffold_structure_zoo.py`, re-runnable.
+
+**The method is what made it decisive.** Every structure is priced at its expected intrinsic under
+**the same lognormal grid the stack prices with**, so a fair bet is fair BY CONSTRUCTION. Any edge
+the stack then reports on one is an artefact of the stack, not of the market. That converts a vague
+"is the sizing biased?" into an exact measurement.
+
+**D-077's conditional payoff ratio turns out to have an exact property, not just a smaller bias.**
+With `b = E[win|win]/E[loss|loss]` and the model's own `p`, the algebra collapses: EV = 0 implies
+`p*E[win] = (1-p)*E[loss]`, so `b = (1-p)/p`, so Kelly `= p - (1-p)/b = 0`. **Kelly is zero exactly
+when EV is zero, so their signs agree.** Verified across the whole zoo: conditional Kelly came back
++-0.000 on every fairly priced structure, while max/max ranged to **-2.313** on bets with precisely
+zero edge.
+
+The shape of that old bias is worse than D-077 described. Expressed as the probability the agent had
+to claim for the gate to open, against the structure's own fair win rate:
+
+    put credit 95/100      fair 63.9%   gate opened at 74.4%   +10.5pp penalty
+    iron condor (wide)     fair 87.0%   gate opened at 95.5%    +8.5pp penalty
+    call debit 100/105     fair 35.2%   gate opened at 25.1%   -10.1pp FAVOUR
+    call debit 103/108     fair 16.6%   gate opened at  7.3%    -9.3pp FAVOUR
+
+The negative rows are the dangerous ones: **the gate opened BELOW the fair rate**, so an agent
+claiming 10% on a structure whose honest win rate is 16.6% - a claim of NEGATIVE edge - would have
+passed and been sized. After the fix every row reads +-0.0pp: the gate opens exactly when the agent
+claims more than the market-implied probability, which is the correct economic criterion and is now
+exact rather than approximate.
+
+**The gap the scaffold found: the sizing gate could not see friction.** `size_position` decided on
+GROSS edge while the agent read EV after costs - two layers disagreeing about cost, the same defect
+class as two clocks (D-074) or two calibration numbers (D-076). Measured as the extra edge needed
+beyond what the gate demanded, purely to cover the round trip:
+
+    iron condor (wide)      +1.4pp
+    call debit / put credit +4.7pp
+    iron condor (NARROW)   +16.4pp   <- four legs, four spreads, invisible to Kelly
+
+**Fixed by charging friction to BOTH conditional expectations**, since it is paid whether the trade
+wins or loses. The same algebra as above then makes the gate open at exactly `(E[loss]+f) /
+(E[win]+E[loss])`, which IS the condition for EV-after-costs to be positive - verified at +-0.0pp
+across every structure. A structure whose entire expected win is eaten by friction returns None
+rather than a negative ratio: there is no payoff to bet on, and sizing should refuse rather than
+compute with it.
+
+**What the scaffold confirmed already held:** conditional expectations stay inside each structure's
+own max profit/loss; a fairly priced structure breaks even at exactly the vol it was priced at
+(25.00% across the zoo, the cleanest possible check that the root-finder finds the right root);
+`dominant_risk` classifies condors, butterflies, straddles and strangles as vol bets and every
+vertical as a direction bet; and size is monotonic in evidence across 25 structures x 9 sample
+sizes, 0 inversions.
+
+**One honest reading recorded rather than fixed.** The reachability check fires on lopsided
+structures - a deep-ITM debit spread whose max profit is 2% of its premium cannot reach a +50%
+target, a far-OTM credit spread whose max loss is 8% of its credit cannot reach a -50% stop. Both
+are correct warnings. The related case, a far-OTM condor collecting a tiny credit where a "-100%
+stop" fires on a trivial move, is left alone because sizing already refuses it upstream: at a
+conditional payoff of 0.07 the gate needs a claimed 93.5%. The layers cover each other, which is
+what balance looks like.
+
+**Verified:** 205 default tests (8 new, one per scaffold invariant) + 14 contract tests. Live board
+after the change shows the condor at "wins if realized vol < 7.6%" with a post-cost payoff of
+0.42:1 against a max/max of 0.59.

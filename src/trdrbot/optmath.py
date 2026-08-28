@@ -262,7 +262,8 @@ MIN_CONDITIONAL_MASS = 0.01
 
 
 def payoff_ratio(legs: Iterable[Leg], spot: float, iv: float, days: float,
-                 *, drift: float = 0.0) -> tuple[float, float, float] | None:
+                 *, drift: float = 0.0, friction: float = 0.0
+                 ) -> tuple[float, float, float] | None:
     """(E[win | win], E[loss | loss], ratio) - the payoff the bet ACTUALLY offers.
 
     Kelly's `b` is "how much do I win per unit staked when I win". Sizing has
@@ -288,6 +289,20 @@ def payoff_ratio(legs: Iterable[Leg], spot: float, iv: float, days: float,
     The agent's own probability is deliberately NOT replaced here. It supplies
     `p`, calibration shrinks it, and this supplies the payoff shape - the same
     facts-and-models split the rest of the module keeps.
+
+    **`friction` is charged to BOTH sides, because you pay it either way.** It
+    is what closes the last gap between the two layers that decide a trade: the
+    sizing gate opens when `p > 1/(1+b)`, and with friction netted out that is
+    algebraically identical to "expected value after costs is positive". Without
+    it the gate ran ahead of the EV column by a structure-dependent margin -
+    measured on a fair-value zoo at 1.4pp for a wide condor, 4.7pp for a
+    vertical, and **16.4pp for a narrow four-leg condor**, which pays four
+    spreads that Kelly could not see. Two layers disagreeing about cost is the
+    same defect class as two clocks or two calibration numbers.
+
+    A structure whose entire expected win is eaten by friction returns None,
+    not a negative ratio: there is no payoff to bet on, and `kelly_fraction`
+    should refuse rather than compute with it.
     """
     legs = list(legs)
     if not legs or spot <= 0:
@@ -303,8 +318,9 @@ def payoff_ratio(legs: Iterable[Leg], spot: float, iv: float, days: float,
             e_loss += w * -pnl
     if p_win < MIN_CONDITIONAL_MASS or p_loss < MIN_CONDITIONAL_MASS:
         return None
-    mean_win, mean_loss = e_win / p_win, e_loss / p_loss
-    if mean_loss <= 0:
+    mean_win = e_win / p_win - friction
+    mean_loss = e_loss / p_loss + friction
+    if mean_loss <= 0 or mean_win <= 0:
         return None
     return (mean_win, mean_loss, mean_win / mean_loss)
 

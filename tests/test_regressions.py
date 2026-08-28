@@ -2955,3 +2955,159 @@ def test_both_dossier_writers_keep_identical_headings():
     # muse relies on cannot drift away from the template that produces it.
     from trdrbot.wiki import LIFECYCLE
     assert LIFECYCLE["CompanyDossier"].durable_section in DOSSIER_HEADINGS
+
+
+# ============================ D-079 the scaffold's invariants, made permanent
+
+
+def _fair_leg(right, strike, side, qty=1, spot=100.0, iv=0.25, days=7.0):
+    """A leg priced at expected intrinsic under the SAME grid the stack uses,
+    so a structure built from these is fair BY CONSTRUCTION and any edge the
+    stack reports on it is an artefact of the stack."""
+    from trdrbot.optmath import Leg, _lognormal_grid
+    grid = _lognormal_grid(spot, iv, days)
+    price = sum(w * max(0.0, (s - strike) if right == "C" else (strike - s))
+                for s, w in grid)
+    return Leg(right=right, strike=strike, side=side, qty=qty, price=price)
+
+
+def _fair_zoo():
+    F = _fair_leg
+    return {
+        "call debit 100/105": [F("C", 100, "long"), F("C", 105, "short")],
+        "call debit 103/108": [F("C", 103, "long"), F("C", 108, "short")],
+        "put credit 95/100": [F("P", 100, "short"), F("P", 95, "long")],
+        "put credit 90/95": [F("P", 95, "short"), F("P", 90, "long")],
+        "condor wide": [F("P", 95, "short"), F("P", 90, "long"),
+                        F("C", 105, "short"), F("C", 110, "long")],
+        "condor narrow": [F("P", 99, "short"), F("P", 97, "long"),
+                          F("C", 101, "short"), F("C", 103, "long")],
+        "butterfly": [F("C", 95, "long"), F("C", 100, "short", 2), F("C", 105, "long")],
+    }
+
+
+def test_kelly_is_zero_on_a_fair_bet_and_max_max_was_not():
+    """The deep property the conditional payoff ratio buys. With b =
+    E[win|win]/E[loss|loss] and the model's own p, Kelly = 0 exactly when
+    EV = 0 - so the sign of Kelly agrees with the sign of EV.
+
+    Under max/max they could disagree, and did: swept over a fair-value zoo,
+    max/max Kelly ranged to -2.3 on a bet with precisely zero edge. It refused
+    high-probability structures and OPENED THE GATE BELOW THE FAIR RATE for
+    long shots - a structure at a fair 16.6% win rate passed at a claimed
+    7.3%, i.e. the system would size a claim it should have refused."""
+    from trdrbot import optmath, sizing
+
+    worst_maxmax = 0.0
+    for name, legs in _fair_zoo().items():
+        ev = optmath.expected_value(legs, 100.0, 0.25, 7.0)
+        assert abs(ev) < 1.0, f"{name}: fair-value construction broken, EV {ev}"
+        p = optmath.prob_profit(legs, 100.0, 0.25, 7.0)
+        mp, ml = optmath.max_profit_loss(legs)
+        b = optmath.payoff_ratio(legs, 100.0, 0.25, 7.0)[2]
+
+        k_cond = sizing.kelly_fraction(p, mp, ml, payoff_ratio=b)
+        assert abs(k_cond) < 0.02, f"{name}: conditional Kelly {k_cond:+.3f} on a FAIR bet"
+        worst_maxmax = max(worst_maxmax, abs(sizing.kelly_fraction(p, mp, ml)))
+    assert worst_maxmax > 1.0, "max/max should be wildly off on a fair bet - it was"
+
+
+def test_the_gate_is_structure_neutral():
+    """The gate must open at the same place for every structure type: when the
+    agent claims MORE than the market-implied probability. Under max/max it
+    demanded up to +10.5pp extra from premium-selling and opened up to 10.1pp
+    EARLY for premium-buying - a preference between structure families that
+    nobody chose."""
+    from trdrbot import optmath
+
+    for name, legs in _fair_zoo().items():
+        p_fair = optmath.prob_profit(legs, 100.0, 0.25, 7.0)
+        b = optmath.payoff_ratio(legs, 100.0, 0.25, 7.0)[2]
+        gate_opens_at = 1.0 / (1.0 + b)
+        assert abs(gate_opens_at - p_fair) < 0.005, (
+            f"{name}: gate opens at {gate_opens_at:.1%} against a fair rate of "
+            f"{p_fair:.1%} - a {abs(gate_opens_at - p_fair) * 100:.1f}pp structural bias")
+
+
+def test_friction_makes_the_gate_agree_with_the_ev_column():
+    """The last gap between the two layers that decide a trade. The gate opens
+    when p > 1/(1+b); with friction netted into both conditional expectations
+    that is algebraically identical to 'EV after costs is positive'. Measured
+    before the fix: the gate ran ahead of the EV column by 1.4pp on a wide
+    condor, 4.7pp on a vertical and 16.4pp on a narrow four-leg condor, which
+    pays four spreads Kelly could not see."""
+    from trdrbot import experiments, optmath
+
+    for name, legs in _fair_zoo().items():
+        gross = sum(l.price * l.qty * 100 for l in legs)
+        fr = gross * experiments.DEFAULT_ROUND_TRIP_COST
+        gross_pr = optmath.payoff_ratio(legs, 100.0, 0.25, 7.0)
+        net_pr = optmath.payoff_ratio(legs, 100.0, 0.25, 7.0, friction=fr)
+        if net_pr is None:
+            continue  # friction ate the whole expected win - correctly refused
+        gate_opens_at = 1.0 / (1.0 + net_pr[2])
+        net_ev_positive_at = (gross_pr[1] + fr) / (gross_pr[0] + gross_pr[1])
+        assert abs(gate_opens_at - net_ev_positive_at) < 0.005, (
+            f"{name}: gate at {gate_opens_at:.1%}, net EV turns positive at "
+            f"{net_ev_positive_at:.1%}")
+
+
+def test_a_fair_bet_that_costs_money_is_refused_not_merely_sized_small():
+    from trdrbot import experiments, optmath, sizing
+
+    for name, legs in _fair_zoo().items():
+        p = optmath.prob_profit(legs, 100.0, 0.25, 7.0)
+        mp, ml = optmath.max_profit_loss(legs)
+        fr = sum(l.price * l.qty * 100 for l in legs) * experiments.DEFAULT_ROUND_TRIP_COST
+        pr = optmath.payoff_ratio(legs, 100.0, 0.25, 7.0, friction=fr)
+        if pr is None:
+            continue
+        k = sizing.kelly_fraction(p, mp, ml, payoff_ratio=pr[2])
+        assert k < 0, f"{name}: Kelly {k:+.3f} on a coin flip that costs ${fr:.0f} to enter"
+
+
+def test_payoff_ratio_is_scale_invariant_with_friction():
+    """`_matching_payoff_ratio` matches on R:R across a quantity change, so the
+    ratio itself must not move with lot size - friction scales with quantity
+    exactly as the conditional expectations do."""
+    from trdrbot import optmath
+
+    def at(qty):
+        legs = [_fair_leg("P", 100, "short", qty), _fair_leg("P", 95, "long", qty)]
+        fr = sum(l.price * l.qty * 100 for l in legs) * 0.10
+        return optmath.payoff_ratio(legs, 100.0, 0.25, 7.0, friction=fr)[2]
+
+    assert abs(at(1) - at(10)) < 1e-9, "ratio moved with lot size"
+
+
+def test_conditional_expectations_stay_inside_the_structures_own_bounds():
+    from trdrbot import optmath
+
+    for name, legs in _fair_zoo().items():
+        mp, ml = optmath.max_profit_loss(legs)
+        w, l, _ = optmath.payoff_ratio(legs, 100.0, 0.25, 7.0)
+        assert w <= mp + 1e-6, f"{name}: E[win] {w} exceeds max profit {mp}"
+        assert l <= abs(ml) + 1e-6, f"{name}: E[loss] {l} exceeds max loss {abs(ml)}"
+
+
+def test_a_fairly_priced_structure_breaks_even_at_the_vol_it_was_priced_at():
+    """The cleanest possible check that the root-finder finds the right root."""
+    from trdrbot import optmath
+
+    for name, legs in _fair_zoo().items():
+        be = optmath.breakeven_vol(legs, 100.0, 7.0, friction=0.0)
+        assert be and be.crossings, f"{name}: no breakeven vol found"
+        assert abs(be.crossings[0] - 0.25) < 0.01, (
+            f"{name}: breaks even at {be.crossings[0]:.1%}, priced at 25%")
+
+
+def test_dominant_risk_classifies_the_zoo_the_way_a_desk_would():
+    from trdrbot import optmath
+
+    want = {"condor wide": "volatility", "condor narrow": "volatility",
+            "butterfly": "volatility"}
+    for name, legs in _fair_zoo().items():
+        got = optmath.dominant_risk(optmath.net_greeks(legs, 100.0, 0.25, 7.0))
+        assert got, f"{name}: unclassified"
+        assert got[0] == want.get(name, "direction"), (
+            f"{name}: classified {got[0]}, a desk would say {want.get(name, 'direction')}")
