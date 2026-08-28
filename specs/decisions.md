@@ -3565,3 +3565,40 @@ model was pulled first. I-24 (third-party pricing) is now partially resolved: gp
 figure is the first of three today sourced from the provider's own page directly, though still
 time-boxed and needing a re-check after November. I-25 (Grok outage) is now low-priority rather
 than urgent, since nothing live depends on it answering.
+
+## D-086: interim_scoring's silence check needed two flags, not one
+**Date:** 2026-08-28
+**Status:** accepted
+**Context:** A routine status check hit a live `health` FAIL: `interim_scoring ran 6x, produced
+nothing`. Investigated before reporting it, since D-082 already fixed this exact tautology once
+for `exit_rules` - checked whether this was a real regression or the same false alarm one probe
+over.
+
+**False alarm, confirmed against live state.** The open SPY spread sits at -12.66% unrealized;
+`INTERIM_BANDS = (0.25, 0.50)` means nothing is due until 25%. Six housekeeping runs across under
+two hours of a freshly opened position had correctly found nothing material - `health` was
+reading "eligible every cycle" as evidence of brokenness, exactly the D-074 tautology, in the one
+probe D-082's fix didn't reach.
+
+**The first fix attempt was wrong, and a pre-existing regression test caught it before it
+shipped.** Applying `exit_rules`' `silence_is_normal=True` flag directly to `interim_scoring`
+fixed the live false alarm but broke `test_health_sees_a_subsystem_that_produced_once_and_then_died`
+- the test literally encoding the original D-074 bug shape (scored once, then 40 silent runs
+despite continued eligibility). The flag's implementation suppressed staleness-after-production
+for BOTH the "never yet due" case and the "produced once, now suspiciously quiet" case, because
+one boolean was controlling two different verdict paths in `check()`.
+
+**The two cases are genuinely different, not the same question asked twice.** For `exit_rules`,
+BOTH are legitimately fine: one trigger closes ITS position, so 40 quiet runs after it predicts
+nothing about the next 40. For `interim_scoring`, only the FIRST is fine - "not yet due" is
+common and healthy - but the second is exactly the failure this probe exists to catch: a units
+bug silently zeroing every score after one correct one is indistinguishable, from `eligible`
+alone, from genuine calm. Split into two independent fields: `never_producing_is_ok` (controls
+the `made==0` verdict) and `stopping_after_output_is_ok` (controls staleness-after-production).
+`exit_rules` sets both; `interim_scoring` sets only the first, so the D-074 regression test's
+protection survives unchanged.
+
+**Verified:** 225 default tests (1 new, `test_interim_scoring_does_not_cry_wolf_on_a_calm_young_position`,
+plus the existing D-074 regression test re-passing unmodified in behaviour - only its exact
+message-matching updated for the shared wording). Live: `health` now reads 0 problems where it
+read 1 an hour ago, with the underlying position genuinely unchanged.

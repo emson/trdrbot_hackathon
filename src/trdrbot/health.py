@@ -50,12 +50,23 @@ class Probe:
     #: the reader to skip the one line that finally matters. When this is
     #: given and returns 0, silence is explained rather than alarming.
     work: Callable[[list[dict[str, Any]]], int] | None = None
-    #: Some subsystems are CORRECT when they produce nothing. An exit engine is
-    #: a fire alarm: evaluating every tick and never firing is the healthy
-    #: state, not a stall, and the staleness check would otherwise escalate a
-    #: quiet market into a PROBLEM. Set only where zero output is the expected
-    #: steady state - never as a way to silence a probe that is genuinely dead.
-    silence_is_normal: bool = False
+    #: Some subsystems are CORRECT when they have NEVER YET produced anything.
+    #: An exit engine is a fire alarm: evaluating every tick and never firing
+    #: is the healthy state, not a stall. Set only where zero output so far is
+    #: a plausible steady state - never as a way to silence a probe that is
+    #: genuinely dead.
+    never_producing_is_ok: bool = False
+    #: Distinct from the above, and NOT implied by it. Some subsystems fire
+    #: once as a genuinely one-shot event (a triggered exit closes ITS
+    #: position; nothing about that predicts the next 40 ticks), so staying
+    #: quiet after one real production is not staleness. Others - interim
+    #: scoring above all - are the OPPOSITE: producing once and then going
+    #: silent despite continued eligibility is the exact shape a units bug
+    #: took once already (D-074), and that staleness check must survive
+    #: `never_producing_is_ok` being set for the same probe's "not yet due"
+    #: case. Keep this False unless a one-shot event is genuinely all the
+    #: subsystem is allowed to ever produce for one input.
+    stopping_after_output_is_ok: bool = False
 
 
 PROBES: tuple[Probe, ...] = (
@@ -99,19 +110,41 @@ PROBES: tuple[Probe, ...] = (
         "positions were watched and no rule ever fired - check that the "
         "thresholds are reachable against the net-cost base",
         work=lambda rows: sum(int(r.get("rules") or 0) for r in rows),
-        silence_is_normal=True,
+        never_producing_is_ok=True,
+        stopping_after_output_is_ok=True,
     ),
     # `ran` is the HEARTBEAT, not the output. Reading the output rows as
     # evidence of running makes the probe a tautology (see the `interim_run`
     # note in housekeeping): it can only report "never ran" or "ran Nx,
     # produced N", so a scorer that fired eight times and then died read as
     # healthy for two days and ~250 ticks.
+    #
+    # `never_producing_is_ok`: the bands are deliberately wide (25%/50%) so
+    # they do not fire on noise, and most positions plausibly close - by
+    # stop, target or deadline - before ever crossing one. "Eligible every
+    # cycle, never scored" is therefore the SAME shape as an exit rule that
+    # never breaches: a threshold watcher that stays quiet for a position's
+    # whole life is a legitimate, common, healthy outcome, not evidence of
+    # brokenness. Found live: a position at -12.66% (well under the first
+    # 25% band) read `interim_scoring FAIL` after six housekeeping runs
+    # across under two hours of a freshly opened position - the exact false
+    # alarm this flag exists to prevent, one probe over from where D-082
+    # first fixed it for exit_rules.
+    #
+    # `stopping_after_output_is_ok` is DELIBERATELY NOT set here, unlike
+    # exit_rules. The class of bug this probe WAS built to catch - a units
+    # mismatch silently zeroing every score despite real moves, after having
+    # scored correctly once - is exactly "produced before, now suspiciously
+    # quiet", and that staleness check must survive `never_producing_is_ok`
+    # covering the unrelated "not yet due" case. Regression-tested directly
+    # against the original bug's shape (score once, then 40 silent runs).
     Probe(
         "interim_scoring", ("interim_run",),
         lambda rows: sum(int(r.get("scored") or 0) for r in rows), 3,
         "positions were eligible every cycle and none was ever scored - check "
         "the materiality bands against the units position_pnl_pct returns",
         work=lambda rows: sum(int(r.get("eligible") or 0) for r in rows),
+        never_producing_is_ok=True,
     ),
 )
 
@@ -168,16 +201,17 @@ def check(journal_path: Path, positions: list[Any]) -> list[tuple[str, str, str]
         elif made == 0 and probe.work is not None and probe.work(ran) == 0:
             findings.append((OK, probe.name,
                              f"ran {len(ran)}x, nothing was due - idle, not stalled"))
-        elif made == 0 and probe.silence_is_normal:
+        elif made == 0 and probe.never_producing_is_ok:
             findings.append((OK, probe.name,
-                             f"ran {len(ran)}x, nothing breached - armed, not stalled"))
+                             f"ran {len(ran)}x, nothing to report - watching, not stalled"))
         elif made == 0 and len(ran) >= probe.min_runs > 0:
             findings.append((BAD, probe.name,
                              f"ran {len(ran)}x, produced nothing - {probe.meaning}"))
         else:
             # It has produced SOMETHING - but when? A total cannot tell a live
             # subsystem from one that worked at the start and then died.
-            since = 0 if probe.silence_is_normal else _runs_since_last_output(ran, probe)
+            since = (0 if probe.stopping_after_output_is_ok
+                     else _runs_since_last_output(ran, probe))
             if since >= STALE_AFTER_RUNS:
                 findings.append((BAD, probe.name,
                                  f"ran {len(ran)}x, produced {made} - but nothing in the "

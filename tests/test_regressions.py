@@ -3306,7 +3306,7 @@ def test_health_can_tell_an_armed_exit_engine_from_a_missing_one(tmp_path):
     p.write_text("\n".join(_json.dumps(r) for r in rows) + "\n")
     found = {n: (l, d) for l, n, d in health.check(p, [])}
     assert found["exit_rules"][0] == health.OK, found["exit_rules"]
-    assert "armed, not stalled" in found["exit_rules"][1], (
+    assert "not stalled" in found["exit_rules"][1], (
         "an exit engine is a fire alarm - evaluating and never firing is the "
         "healthy state, and the staleness check must not escalate a quiet market")
 
@@ -3479,3 +3479,24 @@ def test_model_options_composes_with_a_provider_override(monkeypatch):
     assert kwargs["temperature"] == 0.1
 
 
+
+
+def test_interim_scoring_does_not_cry_wolf_on_a_calm_young_position(tmp_path):
+    """Found live: a position at -12.66% (well under the first 25% band) read
+    `interim_scoring FAIL` after six housekeeping runs across under two hours
+    of a freshly opened position. `eligible` counts positions the scorer
+    COULD score if a band were crossed - it does not mean one was DUE, so
+    treating any eligible-but-unscored run as evidence of brokenness produced
+    exactly the false alarm D-082 already fixed for exit_rules one probe
+    over. Most positions plausibly close - by stop, target or deadline -
+    before ever crossing 25%, which makes lifelong silence here the same
+    legitimate, common outcome it is for an exit rule that never breaches."""
+    import json as _json
+    from trdrbot import health
+
+    p = tmp_path / "journal.jsonl"
+    rows = [{"kind": "interim_run", "eligible": 1, "scored": 0}] * 6
+    p.write_text("\n".join(_json.dumps(r) for r in rows) + "\n")
+    found = {n: (l, d) for l, n, d in health.check(p, [])}
+    assert found["interim_scoring"][0] == health.OK, found["interim_scoring"]
+    assert "not stalled" in found["interim_scoring"][1]
