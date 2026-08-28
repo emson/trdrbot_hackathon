@@ -397,7 +397,7 @@ def build_record_position(
                 print(f"[ledger] mark_traded failed: {exc!r}")
         path = store.save(pos)
         if calibration is not None:
-            calibration.record(pos.position_id, confidence)
+            calibration.record(pos.position_id, confidence, pos.underlying)
         # Say exactly which signals are enforced. The failure this guards
         # against is a stated invalidation level that no rule actually
         # watches - visible here rather than discovered at a loss (D-037).

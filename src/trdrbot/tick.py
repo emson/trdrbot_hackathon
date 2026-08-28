@@ -498,7 +498,8 @@ async def _run_tick(
                 f"## Your calibration so far\n\n{cal_now.verdict()}\n\n"
                 f"Base rate: {cal_now.base_rate:.0%} of your resolved forecasts and closed "
                 f"positions came in. Use this to set `confidence` honestly - it is scored, "
-                f"and it is the same number size_position shrinks your claim against."
+                f"and it is the same number size_position shrinks your claim against.\n"
+                f"Sample: {cal_now.sample_note()}."
             )
         prompt_parts.append(
             f"## Constraints\n- Competition deadline: {config.deadline} "

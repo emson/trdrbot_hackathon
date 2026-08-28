@@ -152,6 +152,7 @@ def _calibration() -> int:
         print(f"  resolution   : {cal.resolution:.4f}   (higher is better - discrimination)")
         print(f"  uncertainty  : {cal.uncertainty:.4f}   (irreducible, given the base rate)")
         print(f"  base rate    : {cal.base_rate:.0%} of resolved forecasts came in")
+    print(f"\n  sample       : {cal.sample_note()}")
     print(f"\n  resolved: {cal.n}   pending: {len(pending) + len(pending_ledger)}")
     for f in pending:
         print(f"    - position {f.position_id}: forecast {f.probability:.0%}, not yet resolved")

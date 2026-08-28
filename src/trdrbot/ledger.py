@@ -69,6 +69,14 @@ class Entry:
     resolved_at: str | None = None
     price_at_horizon: float | None = None
     notes: str = ""
+    #: Which gate threw this candidate out, if one did. Structured rather than
+    #: buried in `notes`, because the useful question is about the GATES:
+    #: a rejected thesis still carries a band and a horizon, so it still
+    #: resolves - and comparing "we refused it" against "it would have held"
+    #: is a scored test of the gate's own threshold. That scores the SYSTEM,
+    #: never the agent; the reject is not a claim anybody made, which is why
+    #: `probability_stated` stays False (D-080).
+    rejected_by: str = ""
 
     def scoreable(self) -> bool:
         return self.band_low is not None or self.band_high is not None
@@ -159,6 +167,15 @@ class Ledger:
         self._append(e)
         return e
 
+    def mark_rejected(self, entry_id: str, reason: str) -> bool:
+        """Record which gate refused this candidate, keeping it as a trial."""
+        for e in self._items:
+            if e.id == entry_id:
+                e.rejected_by = reason[:120]
+                self._rewrite()
+                return True
+        return False
+
     def mark_stated(self, entry_id: str) -> bool:
         """Promote a trial to a SCOREABLE claim - it survived every gate.
 
@@ -248,7 +265,10 @@ def as_forecasts(entries: list[Entry]) -> list[Any]:
 
     return [
         Forecast(position_id=e.position_id or e.id, probability=e.probability,
-                 outcome=bool(e.outcome), resolved_at=e.resolved_at)
+                 outcome=bool(e.outcome), resolved_at=e.resolved_at,
+                 # Carried so concentration is measurable: 17 SPY theses in one
+                 # week are not 17 pieces of evidence (D-081).
+                 subject=e.underlying)
         # Only forecasts the agent actually STATED. A pre-registered thesis
         # carries a 0.5 placeholder so the trial can be counted for
         # multiple-testing purposes - feeding that into calibration would score

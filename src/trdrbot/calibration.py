@@ -34,6 +34,9 @@ class Forecast:
     probability: float  # stated P(profitable) at decision time
     outcome: bool | None = None  # None until resolved
     resolved_at: str | None = None
+    #: What this forecast is ABOUT - the underlying. Carried only so the
+    #: sample's concentration can be measured; never used for scoring.
+    subject: str = ""
 
     def to_dict(self) -> dict:
         return {
@@ -41,7 +44,44 @@ class Forecast:
             "probability": self.probability,
             "outcome": self.outcome,
             "resolved_at": self.resolved_at,
+            "subject": self.subject,
         }
+
+
+#: Below this share, the sample is concentrated enough that its face value
+#: materially overstates the evidence, and every surface says so.
+CONCENTRATION_WARN = 0.6
+
+
+def effective_n(forecasts: list["Forecast"]) -> float | None:
+    """Independent-equivalent sample size: inverse-Herfindahl over subjects.
+
+    `n` counts forecasts. This counts BETS. Seventeen SPY theses in one week
+    are not seventeen pieces of evidence, and the difference is not academic -
+    measured on this system's own ledger, 38 theses came to **4.2** effective,
+    and the 9 with a positive Kelly came to **2.0**, so sizing each at its
+    individual Kelly would have overbet by 4.6x (D-080).
+
+    `(sum n_i)^2 / sum(n_i^2)` - the effective number of categories. Equal to
+    `n` when every forecast is about a different underlying, and to 1 when they
+    are all about the same one.
+
+    Deliberately REPORTED, never used as a gate. Calibration asks "when I say
+    70%, does it happen 70% of the time", and repeated forecasts on one name at
+    different bands and horizons are genuinely separate judgements even when
+    their outcomes correlate. Concentration is a reason to distrust
+    GENERALISING from the sample, which is a judgement for the reader - and
+    D-009's report-don't-gate posture is the house rule for exactly that.
+    A forecast with no recorded subject counts as its own singleton.
+    """
+    if not forecasts:
+        return None
+    counts: dict[str, int] = {}
+    for i, f in enumerate(forecasts):
+        key = f.subject.upper() if f.subject else f"__unknown_{i}"
+        counts[key] = counts.get(key, 0) + 1
+    denom = sum(v * v for v in counts.values())
+    return (len(forecasts) ** 2) / denom if denom else None
 
 
 @dataclass
@@ -52,12 +92,34 @@ class Calibration:
     resolution: float | None
     uncertainty: float | None
     base_rate: float | None
+    #: Independent-equivalent sample size (see `effective_n`). None when there
+    #: is nothing to measure.
+    n_eff: float | None = None
+
+    @property
+    def concentration(self) -> float | None:
+        """n_eff as a share of n. 1.0 = every forecast a different name."""
+        if not self.n or self.n_eff is None:
+            return None
+        return self.n_eff / self.n
+
+    def sample_note(self) -> str:
+        """One line on how much this sample is really worth."""
+        if self.n_eff is None or not self.n:
+            return f"{self.n} forecast(s)"
+        base = f"{self.n} forecast(s), {self.n_eff:.1f} effective"
+        share = self.concentration
+        if share is not None and share < CONCENTRATION_WARN:
+            return (base + f" ({share:.0%} of face value - the sample is concentrated "
+                           f"in a few names, so it says less about NEW ones than the "
+                           f"count suggests)")
+        return base
 
     def verdict(self) -> str:
         """Plain-language read - the point of the exercise, not the raw numbers."""
         if self.n < 3 or self.brier is None:
             return f"only {self.n} resolved forecast(s) - too few to judge calibration"
-        parts = [f"Brier {self.brier:.3f} over {self.n} forecasts"]
+        parts = [f"Brier {self.brier:.3f} over {self.sample_note()}"]
         if self.reliability is not None and self.reliability > 0.05:
             parts.append("poorly calibrated - stated confidence does not match observed frequency")
         elif self.reliability is not None:
@@ -85,9 +147,10 @@ class CalibrationStore:
             "\n".join(json.dumps(f.to_dict()) for f in self._items) + "\n"
         )
 
-    def record(self, position_id: str, probability: float) -> None:
+    def record(self, position_id: str, probability: float, subject: str = "") -> None:
         probability = max(0.0, min(1.0, probability))
-        self._items.append(Forecast(position_id=position_id, probability=probability))
+        self._items.append(Forecast(position_id=position_id, probability=probability,
+                                    subject=subject.upper()))
         self._flush()
 
     def resolve(self, position_id: str, outcome: bool, at: str) -> bool:
@@ -119,7 +182,8 @@ def score(forecasts: list[Forecast]) -> Calibration:
     """Brier score with Murphy's three-way decomposition."""
     n = len(forecasts)
     if n == 0:
-        return Calibration(0, None, None, None, None, None)
+        return Calibration(0, None, None, None, None, None, None)
+    n_eff = effective_n(forecasts)
 
     probs = [f.probability for f in forecasts]
     outs = [1.0 if f.outcome else 0.0 for f in forecasts]
@@ -202,4 +266,5 @@ def score(forecasts: list[Forecast]) -> Calibration:
         resolution=resolution,
         uncertainty=uncertainty,
         base_rate=base,
+        n_eff=n_eff,
     )

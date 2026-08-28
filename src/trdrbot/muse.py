@@ -87,8 +87,12 @@ multi-step thesis into one session just to be early. SPREAD your candidates acro
 window rather than clustering on one date, and place each horizon where its own chain \
 actually resolves.
 
-band_low/band_high are PRICES IN DOLLARS between which the claim HOLDS at the horizon \
-(at least one non-null); probability is your honest P(band holds), not rounded to \
+band_low_pct/band_high_pct are PERCENT MOVES FROM THE UNDERLYING'S CURRENT PRICE between \
+which the claim HOLDS at the horizon - band_low_pct=-8 and band_high_pct=-2 means "it falls \
+between 2%% and 8%%". At least one non-null. **Do NOT give absolute dollar prices: you do not \
+know the current price of anything here, and a level recalled from memory will be wrong by a \
+factor of three.** The prices are computed from these percentages against live data. \
+probability is your honest P(band holds), not rounded to \
 0.5/0.75. Bands must be TIGHT enough to be informative - a band the underlying almost \
 always stays inside says nothing; place the band edges where your causal chain actually \
 bites. It is fine for some candidates to be long-shot (p 0.15-0.35) if the reasoning is \
@@ -96,9 +100,72 @@ genuinely non-obvious - that is where mispricing lives.
 
 Respond with ONLY a JSON array:
 [{{"underlying": str, "claim": str, "chain": [str, ...], "direction": "bullish"|"bearish"|"neutral",
-   "probability": float, "band_low": float|null, "band_high": float|null,
+   "probability": float, "band_low_pct": float|null, "band_high_pct": float|null,
    "horizon": "YYYY-MM-DD", "suggested_structures": [str, ...]}}]
 """
+
+
+#: Widest percentage move the muse may claim for a horizon inside 10 days.
+#: Beyond this it is not a thesis, it is a typo - and a band 3x from spot is
+#: exactly what absolute-price bands produced.
+MAX_BAND_PCT = 60.0
+
+
+def _reject(ledger: Ledger, entry: "Any", reason: str) -> None:
+    """Record the gate that refused a candidate, on its own ledger row.
+
+    The reason used to live only in the journal, so "which gate rejects most,
+    and was it right?" needed a manual join across two stores. A rejected
+    candidate still carries a band and a horizon, so it still RESOLVES - and
+    comparing the refusal against what actually happened is a scored test of
+    the gate's threshold. It scores the system, not the agent.
+    """
+    if entry is not None:
+        try:
+            ledger.mark_rejected(entry.id, reason)
+        except Exception as exc:  # noqa: BLE001 - bookkeeping never blocks a run
+            print(f"[muse] could not record rejection: {exc!r}")
+
+
+def _bands_from_pct(cand: dict[str, Any], spot: "float | None") -> tuple[float | None, float | None]:
+    """Percent moves -> prices, computed against live closes.
+
+    **The muse is never asked for an absolute price.** It was, and it answered
+    from training data: NVDA [650, 920] against a spot of 218.97, QQQ
+    [355, 385] against 716, MSTR [420, 860] against 126.87. Its own gates
+    caught 13 of 15 such candidates, so the defect was contained - but it was
+    contained by refusing whole LLM calls, which is an expensive way to be
+    right.
+
+    The project already states the rule, in research.py's own docstring:
+    *numbers are COMPUTED, never asked of the LLM*. A model can reason about
+    "this falls 2-8%"; it cannot recall what a stock costs today. So ask for
+    the relationship and compute the number.
+
+    Note this needs no spot at PROMPT time, which matters because the muse
+    names arbitrary underlyings - a central price service could not have
+    supplied them in advance, because nobody knows which names it will pick
+    until it has answered.
+    """
+    if spot is None or spot <= 0:
+        return (None, None)
+
+    def one(key: str) -> float | None:
+        v = cand.get(key)
+        if v is None:
+            return None
+        try:
+            pct = float(v)
+        except (TypeError, ValueError):
+            return None
+        if abs(pct) > MAX_BAND_PCT:
+            return None
+        return round(spot * (1.0 + pct / 100.0), 2)
+
+    lo, hi = one("band_low_pct"), one("band_high_pct")
+    if lo is not None and hi is not None and lo > hi:
+        lo, hi = hi, lo
+    return (lo, hi)
 
 
 def _sample_concepts(wiki: Wiki, rng: random.Random, k: int) -> list[tuple[str, str]]:
@@ -207,7 +274,23 @@ async def run(
                    "stated": float(cand.get("probability", 0.5)),
                    "chain": cand.get("chain", [])}
 
-        # 1. register EVERY candidate before any gate can discard it - the
+        # 1. PRICE HISTORY FIRST, because the band arrives as a percentage move
+        # and cannot become a price without one. This is data availability, not
+        # a judgement gate - a candidate that gets this far is still registered
+        # below whatever happens next.
+        closes = market_stats.load_closes(config.paths.state, u)
+        if closes is None:
+            try:
+                closes = await market_stats.fetch_daily_closes(tools, u)
+                if len(closes) >= 60:
+                    market_stats.save_closes(config.paths.state, u, closes)
+            except Exception:  # noqa: BLE001
+                closes = None
+        usable = bool(closes) and len(closes) >= 60
+        spot = closes[-1] if usable else None
+        band_low, band_high = _bands_from_pct(cand, spot)
+
+        # 2. register EVERY candidate before any gate can discard it - the
         # multiple-testing correction needs the trials that failed (D-052).
         # But registered as a TRIAL, not as a claim: `probability_stated=False`
         # until it survives every gate below, at which point `mark_stated`
@@ -220,29 +303,26 @@ async def run(
             probability=float(cand.get("probability", 0.5)),
             probability_stated=False,
             horizon=str(cand.get("horizon", "")),
-            band_low=cand.get("band_low"), band_high=cand.get("band_high"),
+            band_low=band_low, band_high=band_high,
             notes="muse: " + " -> ".join(str(c) for c in cand.get("chain", []))[:300],
         )
+        if not usable:
+            verdict["fate"] = "rejected: no usable price history"
+            _reject(ledger, entry, verdict["fate"])
+            evaluated.append(verdict)
+            continue
         if entry is None:
             verdict["fate"] = "rejected: unfalsifiable (no band)"
+            _reject(ledger, entry, verdict["fate"])
             evaluated.append(verdict)
             continue
-
-        # 2. deterministic evaluation, adversarial by construction
-        closes = market_stats.load_closes(config.paths.state, u)
-        if closes is None:
-            try:
-                closes = await market_stats.fetch_daily_closes(tools, u)
-                if len(closes) >= 60:
-                    market_stats.save_closes(config.paths.state, u, closes)
-            except Exception:  # noqa: BLE001
-                closes = None
-        if not closes or len(closes) < 60:
-            verdict["fate"] = "rejected: no usable price history"
-            evaluated.append(verdict)
-            continue
-        if not _plausible_band(cand, closes[-1]):
-            verdict["fate"] = f"rejected: band is not a plausible price (spot {closes[-1]:.2f})"
+        # The bands are now COMPUTED from live closes, so a level recalled from
+        # training data cannot get in. `_plausible_band` stays as a backstop for
+        # an absurd percentage rather than as the primary defence it used to be.
+        cand["band_low"], cand["band_high"] = band_low, band_high
+        if not _plausible_band(cand, spot):
+            verdict["fate"] = f"rejected: band is not a plausible price (spot {spot:.2f})"
+            _reject(ledger, entry, verdict["fate"])
             evaluated.append(verdict)
             continue
 
@@ -257,11 +337,13 @@ async def run(
         # given: all five live forecasts landed on the last useful day but one.
         if days <= 0 or days > 10:
             verdict["fate"] = f"rejected: horizon {cand.get('horizon')} outside 1-10 days"
+            _reject(ledger, entry, verdict["fate"])
             evaluated.append(verdict)
             continue
         if latest and str(cand.get("horizon", "")) > latest:
             verdict["fate"] = (f"rejected: horizon {cand.get('horizon')} resolves too late "
                                f"to act on before {config.deadline} (latest useful {latest})")
+            _reject(ledger, entry, verdict["fate"])
             evaluated.append(verdict)
             continue
 
@@ -285,17 +367,20 @@ async def run(
         disagrees = abs(verdict["claimed_edge"]) >= 0.25
         if base < BASE_PROB_FLOOR:
             verdict["fate"] = f"rejected: base probability {base:.0%} - a lottery ticket"
+            _reject(ledger, entry, verdict["fate"])
             evaluated.append(verdict)
             continue
         if base > BASE_PROB_CEIL and not disagrees:
             verdict["fate"] = (f"rejected: base {base:.0%} and the model agrees - "
                                f"vacuous, carries no information")
+            _reject(ledger, entry, verdict["fate"])
             evaluated.append(verdict)
             continue
 
         gate = await _options_gate(tools, u, config.deadline)
         if not gate.get("tradeable"):
             verdict["fate"] = "rejected: no options chain inside the deadline"
+            _reject(ledger, entry, verdict["fate"])
             evaluated.append(verdict)
             continue
 

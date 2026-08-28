@@ -3160,3 +3160,131 @@ def test_muse_only_promotes_candidates_that_survive_every_gate():
     for fate in ("a lottery ticket", "not a plausible price", "resolves too late",
                  "vacuous", "no usable price history"):
         assert src.index(fate) < promote, f"rejection '{fate}' happens after promotion"
+
+
+# ====================== D-081 n_eff, and never ask a model for a price
+
+
+def test_effective_n_counts_bets_not_forecasts():
+    """17 SPY theses in one week are not 17 pieces of evidence. Measured on the
+    live ledger: 38 theses -> 4.2 effective; the 9 with positive Kelly -> 2.0,
+    so sizing each at its own Kelly overbets by 4.6x (D-080)."""
+    from trdrbot.calibration import Forecast, effective_n, score
+
+    F = lambda i, s: Forecast(position_id=f"f{i}", probability=0.6, outcome=True, subject=s)
+    all_spy = [F(i, "SPY") for i in range(10)]
+    all_different = [F(i, f"N{i}") for i in range(10)]
+    assert effective_n(all_spy) == 1.0, "ten bets on one name is one bet"
+    assert effective_n(all_different) == 10.0
+    mixed = [F(i, "SPY") for i in range(6)] + [F(i, f"N{i}") for i in range(4)]
+    assert 2.0 < effective_n(mixed) < 4.0
+    assert effective_n([]) is None
+
+    # It reaches every surface that reports n.
+    c = score(mixed)
+    assert c.n == 10 and abs(c.n_eff - effective_n(mixed)) < 1e-9
+    assert "effective" in c.sample_note()
+    assert "concentrated" in c.sample_note(), "a concentrated sample must say so"
+    assert "effective" in score(all_different).sample_note()
+    assert "concentrated" not in score(all_different).sample_note()
+
+
+def test_effective_n_is_reported_never_gated():
+    """Calibration asks 'when I say 70%, does it happen 70% of the time' -
+    repeated forecasts on one name at different bands are separate judgements
+    even when outcomes correlate. Concentration is a reason to distrust
+    GENERALISING, which is the reader's judgement (D-009)."""
+    import inspect
+    from trdrbot import competence, sizing
+
+    for mod in (sizing, competence):
+        assert "n_eff" not in inspect.getsource(mod), (
+            f"{mod.__name__} gates on n_eff - it must only ever be reported")
+
+
+def test_a_forecast_carries_what_it_is_about(tmp_path):
+    from trdrbot.calibration import CalibrationStore
+
+    s = CalibrationStore(tmp_path / "f.jsonl")
+    s.record("pos_x", 0.6, "NVDA")
+    s.record("pos_y", 0.7)                      # legacy caller, no subject
+    again = CalibrationStore(tmp_path / "f.jsonl")   # survives a round trip
+    assert [f.subject for f in again._items] == ["NVDA", ""]
+    # An unknown subject counts as its own singleton rather than colliding.
+    for f in again._items:
+        f.outcome = True
+    assert again.score().n_eff == 2.0
+
+
+def test_the_muse_is_never_asked_for_an_absolute_price():
+    """It was, and it answered from training data: NVDA [650,920] against a
+    spot of 218.97, QQQ [355,385] against 716, MSTR [420,860] against 126.87.
+    research.py's own docstring already states the rule - numbers are COMPUTED,
+    never asked of the LLM."""
+    from trdrbot import muse
+
+    p = muse.MUSE_PROMPT
+    assert "band_low_pct" in p and "band_high_pct" in p
+    assert "PRICES IN DOLLARS" not in p, "the prompt asks for a recalled number again"
+    assert '"band_low": float' not in p, "the schema still accepts absolute prices"
+
+
+def test_percentage_bands_become_prices_against_live_closes():
+    from trdrbot.muse import MAX_BAND_PCT, _bands_from_pct
+
+    lo, hi = _bands_from_pct({"band_low_pct": -8.0, "band_high_pct": -2.0}, 100.0)
+    assert (lo, hi) == (92.0, 98.0)
+    # One-sided is fine; a reversed pair is repaired, not rejected.
+    assert _bands_from_pct({"band_high_pct": 5.0}, 200.0) == (None, 210.0)
+    assert _bands_from_pct({"band_low_pct": 5.0, "band_high_pct": -5.0}, 100.0) == (95.0, 105.0)
+    # No spot -> no band, so the row registers as a trial and is refused as
+    # unfalsifiable rather than inventing a level.
+    assert _bands_from_pct({"band_low_pct": -3.0}, None) == (None, None)
+    # An absurd percentage is a typo, not a thesis.
+    assert _bands_from_pct({"band_low_pct": -(MAX_BAND_PCT + 1)}, 100.0) == (None, None)
+    # And the failure mode that started this cannot recur: whatever the model
+    # says, the price is anchored to the spot we supplied.
+    lo, _ = _bands_from_pct({"band_low_pct": -10.0}, 218.97)
+    assert 190 < lo < 220, "a band must land near the real spot, not 650"
+
+
+def test_a_rejection_records_which_gate_refused_it(tmp_path):
+    """A rejected candidate still carries a band and a horizon, so it still
+    RESOLVES - and comparing 'we refused it' against 'it would have held' is a
+    scored test of the gate's own threshold. That is the retrospective value of
+    keeping rejects, and it needs the reason on the row rather than only in the
+    journal, or the question needs a manual join across two stores.
+
+    It scores the SYSTEM, never the agent: `probability_stated` stays False,
+    so a reject can never reach calibration (D-080)."""
+    from trdrbot.ledger import Ledger, as_forecasts
+
+    book = Ledger(tmp_path / "l.jsonl")
+    e = book.register(kind="muse", underlying="INTC", claim="c", probability=0.61,
+                      probability_stated=False, horizon="2026-09-03",
+                      band_low=32.0, band_high=44.0)
+    assert book.mark_rejected(e.id, "rejected: base probability 0% - a lottery ticket")
+    back = Ledger(tmp_path / "l.jsonl").all()[0]
+    assert back.rejected_by.startswith("rejected: base probability 0%")
+    assert back.scoreable(), "it must still resolve - that is the whole point"
+
+    book.resolve(e.id, 38.0, "now")
+    assert Ledger(tmp_path / "l.jsonl").all()[0].outcome is True
+    assert as_forecasts(book.resolved()) == [], "a reject never scores the agent"
+
+
+def test_every_muse_rejection_path_records_itself():
+    import inspect, re
+    from trdrbot import muse
+
+    src = inspect.getsource(muse.run)
+    # Checked per-path, not by counting: a multi-line fate string slipped
+    # through a count-based check, and that path really was missing its record.
+    lines = src.splitlines()
+    missing = [
+        l.strip()[:70] for i, l in enumerate(lines)
+        if 'verdict["fate"]' in l and "rejected" in l
+        and "_reject(ledger, entry" not in " ".join(lines[i:i + 4])
+    ]
+    assert not missing, f"rejection path(s) do not record which gate refused: {missing}"
+    assert sum(1 for l in lines if 'verdict["fate"]' in l and "rejected" in l) >= 6

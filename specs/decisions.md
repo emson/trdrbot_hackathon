@@ -3241,3 +3241,65 @@ it next to `n` on every calibration and sizing surface is the natural follow-on 
 
 **Verified:** 207 default tests (2 new). Live calibration now reads 1 resolved of 13 pending
 claims rather than 26.
+
+## D-081: n_eff everywhere, and never ask a model for a number it can only recall
+**Date:** 2026-08-28
+**Status:** accepted
+**Context:** Closing I-21 and I-22 from D-080, plus a decision on whether to keep rejected theses.
+
+**1. `n_eff` next to `n`, on every surface (I-21).** `n` counts forecasts; `effective_n` counts
+BETS - inverse-Herfindahl over the underlying each forecast is about. Measured on this ledger, 38
+theses are **4.2** effective and the 9 positive-Kelly claims are **2.0**, so sizing each at its own
+Kelly overbets by 4.6x. `Forecast` gained a `subject`, threaded from `Entry.underlying` and from
+`record_position`; `Calibration` gained `n_eff` and a `sample_note()` that says *"26 forecast(s),
+8.2 effective (32% of face value - concentrated in a few names, so it says less about NEW ones than
+the count suggests)"*. It appears in `verdict()`, in `trdrbot calibration`, and in the decide
+prompt.
+
+**Deliberately REPORTED, never gated, and a test enforces that** (`n_eff` must not appear in
+`sizing` or `competence`). Two different questions were nearly conflated: calibration asks "when I
+say 70%, does it happen 70% of the time", and repeated forecasts on one name at different bands and
+horizons are genuinely separate judgements even when their outcomes correlate. Concentration is a
+reason to distrust GENERALISING from the sample - a judgement for the reader, which is exactly
+D-009's report-don't-gate posture. The place correlation genuinely must bite is PORTFOLIO sizing,
+where the beta-weighted book delta already measures it directly.
+
+**2. Never ask the model for a price (I-22).** The muse was asked for "band_low/band_high are
+PRICES IN DOLLARS" and given concepts, news and odds - **no spot, anywhere in its prompt.** So it
+answered from training data: NVDA [650, 920] against a spot of 218.97, QQQ [355, 385] against 716,
+MSTR [420, 860] against 126.87. D-078 made this marginally worse by removing the stale price that
+used to leak through the dossier's first 400 characters - a worse anchor, but an anchor.
+
+**A central price service would NOT have fixed this**, which was the tempting answer. The muse
+names ARBITRARY underlyings; nobody knows which spots to supply until it has already replied. The
+real defect is that the project holds a principle it was not applying - research.py's own
+docstring: *"numbers are COMPUTED (market_stats), never asked of the LLM"*. So: ask for the
+RELATIONSHIP, compute the number. The schema now takes `band_low_pct`/`band_high_pct` as percent
+moves from the current price, and `_bands_from_pct` converts them against live closes. No spot
+needed at prompt time, no second LLM call, and a level wrong by a factor of three is not
+expressible.
+
+Ordering had to change - the price history is fetched BEFORE registration now, because a percentage
+cannot become a price without a spot. That is data availability rather than a judgement gate, and
+the candidate is still registered whatever happens next, so D-052's trial count is untouched.
+`_plausible_band` is demoted from primary defence to backstop.
+
+**Measured, same day, same code path:** the muse went from **13 of 15 candidates rejected** to
+**1 of 5**, with bands landing -2.1% and +3.8% from live spot. It had been spending whole LLM calls
+to be right by refusal.
+
+**3. Should we capture rejected theses? Yes - and we already did; what was missing is WHY.** A
+rejected candidate still carries a band and a horizon, so it still RESOLVES. Comparing "we refused
+it" against "it would have held" is a scored test of the GATE's own threshold - it tells us whether
+`BASE_PROB_FLOOR = 0.10` is calibrated, at zero cost. That scores the SYSTEM, never the agent, and
+the distinction is load-bearing: `probability_stated` stays False so a reject can never reach
+calibration (D-080's whole finding). `Entry.rejected_by` now records the gate, structured, on the
+row - it lived only in the journal, so "which gate rejects most, and was it right?" needed a manual
+join across two stores.
+
+**The test found a real gap while being written.** A count-based check (`_reject` calls >= rejection
+paths) passed while one multi-line fate string had no record at all. Rewritten to check each path
+individually against the following lines; the missed path - "horizon resolves too late" - is fixed.
+
+**Verified:** 214 default tests (7 new) + 14 contract tests. Live muse run with 4 of 5 candidates
+surviving and every band anchored to real spot.

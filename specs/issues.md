@@ -47,13 +47,13 @@ Sorted by severity.
   essentially every payoff tested. The real step-ups are SCALE and MATURE, both gated on
   attribution, which has never run. Coherent, but the first rung currently changes nothing but the
   book cap.
-- **I-21 · Nothing computes effective sample size** (D-080). 38 theses are 4.2 independent bets;
+- ~~**I-21 · Nothing computes effective sample size**~~ **FIXED 2026-08-28 (D-081)** - 38 theses are 4.2 independent bets;
   the 9 positive-Kelly claims are 2.0. Naive per-bet Kelly across them overbets by **4.6x**, and
   only the book caps prevented it - luck, not design, and it stops being luck at SCALE/MATURE where
   the multipliers rise. `[correlated-names-are-one-bet]` says this in prose and the per-underlying
   cap counts NAMES rather than exposures. Surface `n_eff` (inverse-Herfindahl over underlyings)
   next to `n` on every calibration and sizing surface.
-- **I-22 · The muse places bands at prices that do not exist** (D-080). NVDA [650,920] against a
+- ~~**I-22 · The muse places bands at prices that do not exist**~~ **FIXED 2026-08-28 (D-081)** - NVDA [650,920] against a
   spot of 218.97; QQQ [355,385] against 716; MSTR [420,860] against 126.87 - real-world levels
   recalled from training data. Its own gates catch most of them (13 of 15 candidates rejected), so
   the leak was the LEDGER not the muse, and that is fixed - but the underlying prompt still invites
