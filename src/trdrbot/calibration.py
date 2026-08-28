@@ -139,17 +139,38 @@ def score(forecasts: list[Forecast]) -> Calibration:
     # roughly 8 forecasts per bin, between 2 and 10 bins.
     n_bins = max(2, min(10, n // 8))
     width = 1.0 / n_bins
-    bins: dict[float, list[float]] = {}
+    # Each bin keeps BOTH halves of the pair. Reliability asks "when you said
+    # X, how often did it happen" - so it needs the mean STATED probability in
+    # the bin, not the bin's geometric centre. This used to read
+    # `sum(pb for pb in [b])`, which is just `b`, the centre. At the sample
+    # sizes this system actually runs at that is not a rounding error: n_bins
+    # is 2 below n=24, so every forecast under 0.5 was scored as if it had
+    # been stated at 0.25 and everything above it at 0.75.
+    #
+    # Measured against the live record - one resolved forecast, stated 0.38,
+    # outcome true: the centre form returned reliability 0.5625 where the
+    # honest figure is 0.3844. Measured on a synthetic agent stating 0.95 and
+    # right half the time at n=16: 0.019 against a true 0.150, which PASSES the
+    # MATURE gate (<0.04) that exists to catch precisely that agent. The error
+    # runs both ways - it also punishes an underconfident forecaster - and it
+    # feeds `sizing.shrink_probability`, where an understated reliability buys
+    # real size. It also breaks the decomposition identity
+    # (brier = reliability - resolution + uncertainty), which is now pinned as
+    # a test, because an identity that holds is the cheapest possible guard
+    # against this class of error returning.
+    bins: dict[float, tuple[list[float], list[float]]] = {}
     for p, o in zip(probs, outs):
         centre = min(n_bins - 1, int(p / width)) * width + width / 2
-        bins.setdefault(round(centre, 4), []).append(o)
+        ps_, os_ = bins.setdefault(round(centre, 4), ([], []))
+        ps_.append(p)
+        os_.append(o)
 
     reliability = sum(
-        len(os_) * (sum(pb for pb in [b]) - (sum(os_) / len(os_))) ** 2
-        for b, os_ in bins.items()
+        len(os_) * ((sum(ps_) / len(ps_)) - (sum(os_) / len(os_))) ** 2
+        for ps_, os_ in bins.values()
     ) / n
     resolution = sum(
-        len(os_) * ((sum(os_) / len(os_)) - base) ** 2 for b, os_ in bins.items()
+        len(os_) * ((sum(os_) / len(os_)) - base) ** 2 for _, os_ in bins.values()
     ) / n
 
     # Ferro-Fricker bias correction (D-050). The empirical decomposition
@@ -165,7 +186,7 @@ def score(forecasts: list[Forecast]) -> Calibration:
     #   Ferro & Fricker, QJRMS 2012.
     within = sum(
         len(os_) * (sum(os_) / len(os_)) * (1 - sum(os_) / len(os_)) / (len(os_) - 1)
-        for os_ in bins.values() if len(os_) > 1
+        for _, os_ in bins.values() if len(os_) > 1
     ) / n
     overall = base * (1 - base) / (n - 1) if n > 1 else 0.0
     # Reliability cannot truly be negative; clamping keeps the gate honest

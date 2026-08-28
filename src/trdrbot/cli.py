@@ -130,12 +130,20 @@ def _journal(args: argparse.Namespace) -> int:
 
 
 def _calibration() -> int:
+    from . import ledger as ledger_mod
     from .calibration import CalibrationStore
 
     cfg = config_mod.load()
     store = CalibrationStore(cfg.paths.state / "forecasts.jsonl")
-    cal = store.score()
+    # THE SAME number the ladder and the sizing tool read. This command used to
+    # score closed positions only, so it reported one calibration while size
+    # was gated on another - and the declined-thesis forecasts D-052 exists to
+    # accumulate were invisible in the very report you would check them in.
+    book = ledger_mod.Ledger(cfg.paths.state / "ledger.jsonl")
+    cal = store.score(ledger_mod.as_forecasts(book.resolved()))
     pending = store.pending()
+    pending_ledger = [e for e in book.all()
+                      if e.outcome is None and e.scoreable() and e.probability_stated]
 
     print(f"\n{cal.verdict()}\n")
     if cal.n:
@@ -143,10 +151,13 @@ def _calibration() -> int:
         print(f"  reliability  : {cal.reliability:.4f}   (lower is better - overconfidence signal)")
         print(f"  resolution   : {cal.resolution:.4f}   (higher is better - discrimination)")
         print(f"  uncertainty  : {cal.uncertainty:.4f}   (irreducible, given the base rate)")
-        print(f"  base rate    : {cal.base_rate:.0%} of closed positions profitable")
-    print(f"\n  resolved: {cal.n}   pending: {len(pending)}")
+        print(f"  base rate    : {cal.base_rate:.0%} of resolved forecasts came in")
+    print(f"\n  resolved: {cal.n}   pending: {len(pending) + len(pending_ledger)}")
     for f in pending:
-        print(f"    - {f.position_id}: forecast {f.probability:.0%}, not yet resolved")
+        print(f"    - position {f.position_id}: forecast {f.probability:.0%}, not yet resolved")
+    for e in sorted(pending_ledger, key=lambda x: x.horizon):
+        print(f"    - {e.horizon} {e.underlying}: {e.probability:.0%} "
+              f"[{e.band_low}, {e.band_high}]")
     return 0
 
 
@@ -156,9 +167,13 @@ async def _research() -> int:
     from .wiki import Wiki
 
     cfg = config_mod.load()
-    tools = {t.name: t for t in await mcp_client.get_tools(cfg)}
     inbox = Inbox(cfg.paths, max_retries=cfg.max_retries)
-    r = await research.run(tools, cfg, inbox, Wiki(cfg.paths.wiki), Journal(cfg.paths.journal))
+    # One session for the whole cycle: research fetches bars and chains for the
+    # entire universe, and per-call sessions respawn `uvx alpaca-mcp-server`
+    # for every one of them (mcp_client.session_tools).
+    async with mcp_client.session_tools(cfg) as tl:
+        tools = {t.name: t for t in tl}
+        r = await research.run(tools, cfg, inbox, Wiki(cfg.paths.wiki), Journal(cfg.paths.journal))
     print(f"research complete: {r}")
     return 0
 
@@ -169,9 +184,10 @@ async def _discover() -> int:
     from .wiki import Wiki
 
     cfg = config_mod.load()
-    tools = {t.name: t for t in await mcp_client.get_tools(cfg)}
     inbox = Inbox(cfg.paths, max_retries=cfg.max_retries)
-    r = await discovery.run(tools, cfg, inbox, Wiki(cfg.paths.wiki), Journal(cfg.paths.journal))
+    async with mcp_client.session_tools(cfg) as tl:
+        tools = {t.name: t for t in tl}
+        r = await discovery.run(tools, cfg, inbox, Wiki(cfg.paths.wiki), Journal(cfg.paths.journal))
     print(f"discovery complete: nominees={r['nominees']} opportunities={r['opportunities']}")
     return 0
 
@@ -435,11 +451,12 @@ async def _muse() -> int:
     from .wiki import Wiki
 
     cfg = config_mod.load()
-    tools = {t.name: t for t in await mcp_client.get_tools(cfg)}
     inbox = Inbox(cfg.paths, max_retries=cfg.max_retries)
     book = ledger_mod.Ledger(cfg.paths.state / "ledger.jsonl")
-    r = await muse.run(tools, cfg, inbox, Wiki(cfg.paths.wiki),
-                       Journal(cfg.paths.journal), book)
+    async with mcp_client.session_tools(cfg) as tl:
+        tools = {t.name: t for t in tl}
+        r = await muse.run(tools, cfg, inbox, Wiki(cfg.paths.wiki),
+                           Journal(cfg.paths.journal), book)
     print(f"muse complete: {r['candidates']} candidates, {r['emitted']} emitted")
     return 0
 

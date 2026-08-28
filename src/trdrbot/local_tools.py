@@ -24,6 +24,57 @@ from .ledger import STANDALONE
 from .positions import Position, PositionStore
 
 
+def _legs_key(legs: list[tuple[str, float, str]]) -> tuple:
+    """Identity of a structure, independent of quantity. (right, strike, side)."""
+    return tuple(sorted((str(r).upper()[:1], round(float(k), 4), str(s).lower())
+                        for r, k, s in legs))
+
+
+def _unreachable_rules(
+    stop_loss_pct: float | None, profit_target_pct: float | None,
+    net_cost: float, max_profit: float | None, max_loss: float | None,
+) -> list[str]:
+    """Mark-based rules that can never fire, given this structure's own payoff.
+
+    A percentage stop is a percentage OF THE NET ENTRY COST (see
+    `analytics.position_pnl_pct`), so its trigger is a dollar amount that the
+    position's bounded payoff may simply never reach. Both live positions had
+    this and nobody could see it:
+
+        NVDA 230/240 debit spread, stop -60%   needs -$2,287 against a $2,253
+                                               max loss - it could never fire
+        SPY  755/750 credit spread, target +50% needs +$1,057 against a $535
+                                               max profit - never
+
+    The agent believed it had a stop. It had a sentence. This is the same
+    failure `watched_signals` was written for - a stated invalidation level no
+    rule watches - one level deeper: a rule that IS watched and cannot trigger.
+    Reported, never blocked (D-009).
+    """
+    out: list[str] = []
+    base = abs(net_cost)
+    if base <= 0:
+        return out
+    if stop_loss_pct is not None and max_loss is not None:
+        need = abs(stop_loss_pct) / 100.0 * base
+        if need > abs(max_loss) + 1e-9:
+            out.append(
+                f"stop_loss {stop_loss_pct:g}% needs a ${need:,.0f} loss but this "
+                f"structure can only lose ${abs(max_loss):,.0f} - it can NEVER fire. "
+                f"The whole max loss is {abs(max_loss) / base:.0%} of what you paid; "
+                f"a stop must be tighter than that"
+            )
+    if profit_target_pct is not None and max_profit is not None:
+        need = abs(profit_target_pct) / 100.0 * base
+        if need > max_profit + 1e-9:
+            out.append(
+                f"profit_target {profit_target_pct:g}% needs a ${need:,.0f} gain but "
+                f"max profit is ${max_profit:,.0f} - it can NEVER fire. Max profit is "
+                f"{max_profit / base:.0%} of what you paid; a target must be under that"
+            )
+    return out
+
+
 def build_simulate_experiments(shared: dict[str, Any], state_dir: "Path | None" = None,
                                ledger: "Any" = None) -> StructuredTool:
     """Tool: score several expressions of one thesis before risking anything.
@@ -156,6 +207,20 @@ def build_simulate_experiments(shared: dict[str, Any], state_dir: "Path | None" 
         # entry greeks from these, same derive-not-declare pattern as sizing.
         shared["market"] = {"spot": spot, "iv": iv_pct / 100.0, "days": days_to_expiry}
         shared["ranked"] = [(e.name, m) for e, m in ranked]
+        # Every simulated structure, keyed by its LEGS, so record_position can
+        # find the one actually traded without the model re-declaring anything
+        # (D-037's derive-not-declare). Used to tell the agent when an exit
+        # rule it just wrote can never fire.
+        shared["structures"] = [
+            {
+                "key": _legs_key([(l.right, l.strike, l.side) for l in e.legs]),
+                "qty": sum(l.qty for l in e.legs),
+                "entry_cost": m.get("entry_cost"),
+                "max_profit": m.get("max_profit"),
+                "max_loss": m.get("max_loss"),
+            }
+            for e, m in results if m.get("usable")
+        ]
         return experiments.render_comparison(thesis, ranked)
 
     return StructuredTool.from_function(
@@ -209,8 +274,18 @@ def build_record_position(
                 0.55 is worth more than an inflated 0.9. Be honest, not
                 optimistic.
             expiry: option expiry as YYYY-MM-DD
-            stop_loss_pct: close at this loss, as a negative percent (-50 = -50%)
-            profit_target_pct: close at this gain, as a percent (50 = +50%)
+            stop_loss_pct: close at this loss, as a negative percent. **Percent
+                OF THE NET DEBIT PAID OR CREDIT RECEIVED**, the way a broker
+                quotes position P&L - not of the notional. On a debit spread
+                -100% is the whole premium, so any tighter stop is a fraction
+                of it; on a credit spread -100% means giving back the entire
+                credit, and the classic stop is -200% (twice the credit).
+                A stop that needs a bigger loss than the structure can produce
+                will never fire, and this tool says so if you write one.
+            profit_target_pct: close at this gain, same base. On a credit
+                spread +50% is the standard "buy it back for half the credit";
+                note that a credit spread's max profit IS the credit, so a
+                target above +100% can never fire.
             time_stop_days_before_expiry: close this many days before expiry
             underlying_stop_below: close if the UNDERLYING trades below this
                 price - your thesis-invalidation level. Prefer this to
@@ -323,6 +398,29 @@ def build_record_position(
         from .exit_rules import watched_signals
         watching = watched_signals(pos)
         note = ""
+
+        # Can the mark-based rules the agent just wrote actually fire? Matched
+        # by LEGS against what simulate_experiments priced, so nothing is
+        # re-declared and a mismatch simply skips the check.
+        traded_key = _legs_key([
+            (o["right"], o["strike"],
+             "long" if str(l.get("side", "")).lower() in ("long", "buy") else "short")
+            for l in legs
+            if (o := optmath.parse_occ(str(l.get("symbol", "")))) is not None
+        ]) if legs else ()
+        for st in (shared or {}).get("structures") or []:
+            if st["key"] != traded_key or not st["qty"]:
+                continue
+            scale = sum(int(l.get("qty", 1) or 1) for l in legs) / st["qty"]
+            bad = _unreachable_rules(
+                stop_loss_pct, profit_target_pct,
+                (st["entry_cost"] or 0.0) * scale,
+                (st["max_profit"] * scale) if st["max_profit"] is not None else None,
+                (st["max_loss"] * scale) if st["max_loss"] is not None else None,
+            )
+            if bad:
+                note += " WARNING - exit rule(s) that cannot trigger: " + "; ".join(bad) + "."
+            break
         if thesis_missing:
             note += (
                 " NOTE: no thesis on file - simulate_experiments was not called "
@@ -363,6 +461,7 @@ def build_size_position(
     open_risk_by_underlying: dict[str, float] | None = None,
     shared: dict[str, Any] | None = None,
     posture: Any = None,
+    extra_forecasts: "list[Any] | None" = None,
 ) -> StructuredTool:
     """Tool: how many contracts, given edge, bankroll, and earned trust.
 
@@ -400,7 +499,15 @@ def build_size_position(
             stated_confidence=stated_confidence,
             max_profit=max_profit,
             max_loss=max_loss,
-            calibration=calibration.score(),
+            # The SAME calibration the competence ladder was assessed on.
+            # `calibration.score()` with no argument counts only closed
+            # positions, so sizing was shrinking confidence against one sample
+            # while the tier that supplies its Kelly multiplier and book cap
+            # had been computed on another - the ledger-inclusive one that
+            # D-052 built precisely because position closes will never reach a
+            # meaningful n. Two numbers called "your calibration", disagreeing,
+            # inside one decision.
+            calibration=calibration.score(extra_forecasts),
             posture=posture,
         )
         # The system now KNOWS this position's true worst case. Stashing it

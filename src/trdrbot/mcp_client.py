@@ -9,9 +9,12 @@ this case at the open-source server with API-key auth.
 from __future__ import annotations
 
 import json
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from typing import Any
 
 from langchain_mcp_adapters.client import MultiServerMCPClient
+from langchain_mcp_adapters.tools import load_mcp_tools
 
 from .config import Config
 
@@ -36,8 +39,32 @@ def build_client(config: Config) -> MultiServerMCPClient:
 
 
 async def get_tools(config: Config) -> list[Any]:
+    """Tools that open a NEW session - and therefore a new `uvx` subprocess -
+    per call. Fine for a one-shot CLI command; never use it inside a tick.
+    See `session_tools`."""
     client = build_client(config)
     return await client.get_tools()
+
+
+@asynccontextmanager
+async def session_tools(config: Config) -> "AsyncIterator[list[Any]]":
+    """Tools bound to ONE session, so the whole tick shares one subprocess.
+
+    `MultiServerMCPClient.get_tools()` returns tools that start a fresh session
+    on every call - the adapter's own documented default - and for a stdio
+    server that means spawning `uvx alpaca-mcp-server` again, ~1.6s of process
+    start, for each individual tool call. A quiet housekeeping tick was doing
+    six of them; one long run's log carries 515 server banners.
+
+    Measured on the six calls a housekeeping tick makes: 12.33s across seven
+    subprocesses, against 2.75s in one - a 78% saving, and far more on a decide
+    cycle, which calls chains, snapshots and quotes many times over. It also
+    buys back headroom against `tick.watchdog_seconds`, which a slow cycle was
+    spending on process startup rather than on thinking.
+    """
+    client = build_client(config)
+    async with client.session("alpaca") as session:
+        yield await load_mcp_tools(session)
 
 
 def unwrap(result: Any) -> Any:

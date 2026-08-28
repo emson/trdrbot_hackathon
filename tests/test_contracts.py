@@ -273,3 +273,58 @@ async def test_frame_similarity_is_min_max_normalised_within_the_result_set(cfg)
         await mem.end()
     finally:
         await mem.close()
+
+
+async def test_anthropic_serves_a_marked_prefix_from_the_prompt_cache():
+    """The belief the decide path's cost now rests on: a content block carrying
+    `cache_control` is cached, and the SECOND call reads it back rather than
+    paying full rate. 81% of this system's bill is input tokens and a react
+    agent re-sends its prefix on every turn, so if this stops being true the
+    decide cycle silently costs ~3x more."""
+    from langchain.chat_models import init_chat_model
+    from langchain_core.messages import HumanMessage, SystemMessage
+    from trdrbot.usage import _cache_split
+
+    big = "You are a trading agent. " + "Standing rule to consider. " * 250
+    sys = SystemMessage(content=[{"type": "text", "text": big,
+                                  "cache_control": {"type": "ephemeral"}}])
+    m = init_chat_model("anthropic:claude-opus-5", max_tokens=64)
+
+    first = await m.ainvoke([sys, HumanMessage(content="Reply with the number 1.")])
+    second = await m.ainvoke([sys, HumanMessage(content="Reply with the number 2.")])
+
+    r1, w1 = _cache_split((first.usage_metadata or {}).get("input_token_details") or {})
+    r2, _w2 = _cache_split((second.usage_metadata or {}).get("input_token_details") or {})
+    assert w1 > 100, f"first call must WRITE the cache, saw {w1}"
+    assert r2 > 100, f"second call must READ it back, saw {r2}"
+    # And the total already includes them, so pricing must adjust not add.
+    assert (second.usage_metadata or {})["input_tokens"] >= r2
+
+
+async def test_openai_tolerates_a_cache_control_block():
+    """The decide prompt carries `cache_control` for Anthropic. The fallback
+    chain sends the SAME message to OpenAI, so an OpenAI that rejected the key
+    would turn a provider outage into a total outage."""
+    from langchain.chat_models import init_chat_model
+    from langchain_core.messages import HumanMessage
+
+    block = [{"type": "text", "text": "Reply with OK.",
+              "cache_control": {"type": "ephemeral"}}]
+    r = await init_chat_model("openai:gpt-4o-mini", max_tokens=16).ainvoke(
+        [HumanMessage(content=block)])
+    assert r is not None
+
+
+async def test_one_mcp_session_serves_many_tool_calls(cfg):
+    """`MultiServerMCPClient.get_tools()` returns tools that start a NEW stdio
+    session per call, which for this server means respawning
+    `uvx alpaca-mcp-server` every time - 12.3s across seven subprocesses for the
+    six calls a housekeeping tick makes, against 2.75s in one."""
+    from trdrbot import mcp_client
+
+    async with mcp_client.session_tools(cfg) as tools_list:
+        tools = {t.name: t for t in tools_list}
+        assert "get_clock" in tools and "get_option_chain" in tools
+        for _ in range(3):
+            clock = await mcp_client.call(tools, "get_clock")
+            assert isinstance(clock, dict) and "is_open" in clock

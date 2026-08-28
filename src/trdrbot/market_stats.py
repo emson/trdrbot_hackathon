@@ -178,18 +178,27 @@ def bootstrap_factors(
     rets = _log_returns(closes)
     if len(rets) < 60 or days <= 0:
         return []
+    # `days` is CALENDAR days to expiry, but the returns being resampled are
+    # per SESSION - so drawing one per calendar day priced in weekends that
+    # never traded. On a typical 6-calendar-day tenor that is 6 draws where 4
+    # sessions occur: variance 1.45x too high, the distribution ~20% too wide.
+    # The bootstrap is compared directly against the lognormal to produce
+    # `tail_gap`, which warns above 5pp - so a fifth of every "the tails
+    # disagree, this edge is assumption-dependent" flag was manufactured by the
+    # units, not by tail shape. Round to at least one draw.
+    draws = max(1, round(days * TRADING_DAYS / 365.0))
     mean = sum(rets) / len(rets)
     var = sum((r - mean) ** 2 for r in rets) / (len(rets) - 1)
-    # Center so E[exp(r')] ~= 1 per day (martingale), same correction as the
-    # lognormal grid - which is what makes the two comparable, and their GAP
-    # attributable to tail shape rather than to drift.
-    target_mean = -0.5 * var + (math.log(1.0 + drift) / days if drift > -1 else 0.0)
+    # Center so E[exp(r')] ~= 1 per session (martingale), same correction as
+    # the lognormal grid - which is what makes the two comparable, and their
+    # GAP attributable to tail shape rather than to drift.
+    target_mean = -0.5 * var + (math.log(1.0 + drift) / draws if drift > -1 else 0.0)
     adj = [r - mean + target_mean for r in rets]
 
     rng = random.Random(f"{seed}|{len(adj)}|{days}|{drift:.6f}")
     out = []
     for _ in range(n_paths):
-        out.append(math.exp(sum(rng.choice(adj) for _ in range(days))))
+        out.append(math.exp(sum(rng.choice(adj) for _ in range(draws))))
     return out
 
 

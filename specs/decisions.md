@@ -2687,3 +2687,149 @@ a dict-shaped position round-trips through YAML frontmatter intact. A forced dec
 the weighted shape into the journal for all three frames, and the agent declined four structures
 on negative post-friction EV, noting it could have made them print positive "by feeding the
 simulator 9% vol instead of 11% - that is tuning the input until it agrees with me, not analysis."
+
+## D-074: Shakedown - four capabilities that were not running, and a 62% cheaper cycle
+**Date:** 2026-08-28
+**Status:** accepted
+**Context:** A full professional-trader review of the running implementation, traced in
+[notes/013](notes/013_shakedown_trader_review.md). Method unchanged from D-070 because it keeps
+working: read LIVE state against what the code claims, and compute what reasoning cannot settle.
+14 defects. The 156-test suite was green throughout and caught none of them - the fourth
+consecutive pass where that is true.
+
+**The four that were not running at all.** Each is a documented capability with a module and
+tests that produced nothing in production.
+
+**1. Every mark-based exit rule on the book was unreachable.** `position_pnl_pct` divided by the
+GROSS premium summed across legs; on a vertical spread that is 2-7x the net. Priced at their own
+entry parameters: NVDA's `stop_loss -60%` fired at -$2,287 against a $2,253 max loss, SPY's
+`profit_target +50%` at +$1,057 against $535 max profit, SPY's `stop_loss -100%` at -$2,114 against
+$1,965. **Three of four could never trigger; the fourth triggered at +118% of the debit rather than
++70%.** `health` has said `exit_rules never ran` for two days and it was read as a quiet market. The
+denominator is now the NET debit paid or credit received - what a broker's P&L% column shows and
+what a trader means - so a debit spread's loss bounds at -100% and a credit spread's +50% is the
+standard buy-back-at-half-credit. A near-zero net returns None rather than dividing by noise.
+`record_position` additionally NAMES any rule that cannot fire, matched by legs against what
+`simulate_experiments` priced: the same shape as `watched_signals` one level deeper, a rule that IS
+watched and cannot trigger.
+
+**2. Interim scoring has been dead since the day it was added.** `INTERIM_BANDS = (25.0, 50.0)`
+against a caller passing a FRACTION - band 1 needed +2500%. This is INV-24, the mechanism that
+exists to make the learning loop turn inside an 8-day window. The journal: eight `interim_outcome`
+rows, ALL dated 2026-08-26, none across ~250 subsequent ticks. Both unit tests passed throughout
+because they spoke percents while the caller spoke fractions - each internally consistent, jointly
+wrong. The replacement derives its input from `position_pnl_pct` itself rather than from a literal.
+
+**3. Option-chain compaction has never once executed.** `langchain_mcp_adapters` builds tools with
+`response_format="content_and_artifact"`, so a coroutine returns `([{"type":"text","text":json}],
+artifact)` - never the dict the compactors were written against. Every call took the FAIL-OPEN path
+and returned the original, silently, for all 28 chain calls on the journal. So D-065's measured 48%
+saving came entirely from the tool allowlist and the lever it called the larger of the two had
+never been pulled. Fixed and verified live: **79,542 -> 6,076 chars, -92%**. Working compaction then
+exposed two more: the ATM inference was 6% out (a real SPY page is 100 contracts, strikes 500-773,
+ALL CALLS, no puts, with a next page - so the parity method found nothing and the median-strike
+fallback said 724 against a tape of 771.67; one-sided parity `min(C+K)` gives 769.67), and the
+header now states what is actually ON the page, because an agent pricing a put spread off a
+calls-only page is pricing nothing and could not see that from a table of rows.
+
+**4. `_market_pulse` was defined, unit-tested and never called.** `idle.decide` absorbed the rung at
+D-043 and nothing removed the original. Worse than dead: it carried its OWN copies of both
+thresholds, so tuning `PULSE_MOVE` would have changed behaviour by exactly nothing while its test
+kept passing. Deleted; `idle.MATERIAL_MOVE` and `idle.MAX_SILENCE_MIN` are the only copies now.
+
+**Calibration was out of tune in three places.** (a) Murphy reliability read the BIN CENTRE, not the
+bin's mean stated probability - `sum(pb for pb in [b])` is just `b`. Below n=24 there are two bins,
+so everything under 0.5 scored as 0.25 and everything above as 0.75. On the live record (one
+forecast, stated 0.38, resolved true) it returned **0.5625 against an honest 0.3844**; on a
+synthetic agent stating 0.95 while right half the time at n=16, **0.019 against 0.150 - which
+PASSES the MATURE gate that exists to catch it**. It feeds `shrink_probability`, where an
+understated reliability buys real size, and Kelly's whole fragility is estimate quality. The
+decomposition identity is now a test. (b) **The size ladder inverted twice**, against its own
+stated invariant: promotion EXPLORE->ESTABLISH took a 1:1 bet at 62% from 4 contracts to 1 (the
+first Kelly rung sits below the exploration allocation), and crossing MIN_SAMPLE took an 88% credit
+spread from 1 contract to ZERO at fixed excellent reliability, because the GATE swapped from the
+stated probability to the shrunk one while the trust term was still n/30. Fixed by making the
+exploration allocation a FLOOR that Kelly can only raise, and by gating on the stated probability
+always: "is there an edge at this payoff" is a question about the STRUCTURE, "how much do we bet" is
+the question about the record, and fractional Kelly plus the tier cap is the entire answer to the
+second. Letting the record also veto charges the same evidence twice, discontinuously. The shrunk
+view is REPORTED instead (D-009's posture). Verified monotonic across four payoff shapes x twelve
+sample sizes; a genuinely edgeless structure is still refused. The original invariant test missed
+both because it measured integer CONTRACTS at ONE payoff, where the `contracts < 1 -> 1` floor
+pinned every rung to the same number. (c) **Two numbers called "your calibration" disagreed inside
+one decision**: the tier used the ledger-inclusive sample, `size_position` used positions-only, the
+prompt showed a third, and `trdrbot calibration` - the command you would check it in - hid the
+eleven pending ledger forecasts entirely. One number now, computed once.
+
+**The EV the agent decides on could not be moved by its thesis.** `ev_after_costs` was expected
+value at drift ZERO - the market's own distribution - minus friction. A fairly priced structure is
+worth about nothing under the distribution its own price implies, so after friction that number is
+negative for EVERY candidate, always. The journal is full of cycles declining on exactly it, and
+that was never a finding about those trades. One grid with a `drift` parameter now (there were two
+copies of the loop, which is how the market view and the agent's view came to be computed by
+different code), and both columns render. Live, first cycle after the change, the agent built its
+own comparison table of "EV at my view" against "EV at market drift" across four structures and
+declined all four because the edge lived entirely in its own drift assumption - the comparison the
+column exists to enable, and one it could not have made before.
+
+**Two clocks, and the weekend one was the wrong one.** `bs_greeks`/`expected_move` used
+vol-days/308 while the lognormal grid used calendar/365 - greeks and probabilities for one position
+on different axes, rendered side by side. Choosing which survives is the part that matters: OPRA
+inverts Black-Scholes with T = calendar/365, so a Friday IV is ALREADY deflated by the weekend it
+spans (that is the Monday IV jump, seen from the price side), and discounting it again shrinks the
+modelled Friday-to-Monday move to 89% of what the option's own price implies - in the direction
+that makes short premium look safer than it is. D-051's observation is right; it was being applied
+to a number that already carried it. Inert in production only because no caller ever passed
+`start`, which made it a landmine for whoever supplied the missing argument. `start` is now
+accepted and ignored, and that is a test. `vol_days` survives for the job it IS right for, and
+`implied_vs_realized` is new: implied annualises over 365 calendar days, realized over 252
+sessions, and comparing them raw understates implied by 17% every time. **The bootstrap had the
+same bug in reverse** - it drew one daily return per CALENDAR day, 1.45x too much variance on a
+6-day tenor, so a fifth of every "the tails disagree" warning was units rather than tails.
+
+**Cost: 62% cheaper per decide cycle, measured, with better output.** The bill was $11.63, $10.37 of
+it 18 Opus decide calls, 81% input tokens. Three levers: compaction (above), one MCP session per
+tick instead of one `uvx` subprocess PER TOOL CALL (12.3s for six calls against 2.75s; 515 server
+spawns in one run log), and prompt caching, which was simply absent. A cache breakpoint at the end
+of the opening message covers tool schemas, system prompt and prompt together. Verified safe across
+the fallback chain - gpt-5-mini and gpt-4o-mini both accept a `cache_control` block and ignore the
+key. The ledger had to learn about it too: `usage_metadata.input_tokens` is the TOTAL and already
+includes cached tokens, so pricing them at full rate would have made caching look free of benefit;
+cached share is now a column in `trdrbot usage`, and a zero next to a large `in` means caching is
+not engaging. Adjacent cycles, same command: **$3.46 -> $3.12 -> $1.32**, wall clock 5:19 -> 1:56.
+
+**Also fixed:** `health` read a subsystem's own OUTPUT rows as evidence it had RUN, making three
+probes tautologies - `interim_scoring` reported "ran 8x, produced 8" off day-one rows for two days.
+A heartbeat must be a DIFFERENT record from the output, or "ran" and "produced" are the same number;
+`interim_run` now carries eligible/scored, and a produced-then-stopped subsystem no longer reads as
+healthy. `Ledger.register` deduped across `probability_stated`, so a standalone forecast could be
+swallowed by a pre-registration placeholder and its stated probability never written - D-062's
+exact symptom in the one place D-062 did not look.
+
+**Not fixed, recorded:** the exit-rule engine has still never fired on live data and the book is
+flat, so both the corrected arithmetic and the new reachability warning remain unexercised in
+production; interim scoring is fixed but unfired for want of an open position; the muse still dates
+every forecast at the far horizon (D-070 fixed the guidance in `record_forecast`'s docstring only);
+ESTABLISH is barely a promotion, since its Kelly ceiling keeps size at the exploration allocation
+for essentially every payoff tested; and Kelly still uses max_profit/max_loss as the payoff ratio
+against p = P(profitable), which are two different events - the same grid could produce a
+conditional E[win]/E[loss] instead, deferred because it changes what the size tool means and this
+pass had already changed the gate.
+
+**Verified:** 173 default tests (14 new, one per defect) + 14 contract tests against real Alpaca,
+real elfmem 0.20.0 and real LLMs. Two live decide cycles on the fixed code, one of which produced
+the two-column EV table above.
+
+## D-075: elfmem 0.20.0
+**Date:** 2026-08-28
+**Status:** accepted
+**Context:** `uv lock --upgrade-package elfmem` on the `elfmem_index` branch, `cebc242e` ->
+`9527951c` (0.20.0.dev0 -> 0.20.0).
+**Verified against the real library, not re-pointed:** 14 contract tests pass, including the two
+beliefs D-073's credit weighting rests on - that `ScoredBlock.similarity` is min-max normalised
+within a result set, and that elfmem's `_validate_weight` rejects `weight <= 0`. Both still hold,
+so `CREDIT_WEIGHT_FLOOR` is still load-bearing for the reason it was introduced. 173 default tests
+pass unchanged.
+**Still open upstream:** I-5, `history()` raises `TypeError: '<' not supported between instances of
+'str' and 'int'`. Re-checked directly against 0.20.0 on the live database - unchanged. Per-block
+audit trails remain blocked. Carry to the next elfmem report.

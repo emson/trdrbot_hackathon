@@ -93,12 +93,9 @@ configured model, because a fallback that has never been exercised is a promise,
 
 ### Which role needs which model — and where the money actually goes
 
-Measured on a real decide cycle: **7 LLM calls, 553k input tokens, $0.83** — of which **84% is
-input, not output**, at ~79k tokens *per call*. The single largest component is the options
-chain: one `get_option_chain` payload is **~15,000 tokens**, and an agent re-sends its
-accumulated context on every turn.
-
-Two conclusions follow, and the second is the counterintuitive one:
+**~80% of the bill is input tokens, not output**, because a tool-using agent re-sends its whole
+accumulated context on every turn. So the levers are all about what enters context and how often
+it is paid for — not about model tier.
 
 - **`decide` should keep the strongest model.** It is multi-step tool use under uncertainty, and
   it is the only role where a bad judgment costs real money. Economising here is false thrift.
@@ -107,12 +104,25 @@ Two conclusions follow, and the second is the counterintuitive one:
   **resilience** (they keep working when the primary provider is down or out of credit) and
   tidiness, not cost.
 
-**The real cost lever is context size, not model tier.** Trimming option chains to a strike
-window near spot before they enter context would cut far more than any model downgrade. That is
-the next optimisation, not a cheaper `decide`.
+Three levers, measured on adjacent real cycles rather than estimated:
+
+| lever | before | after |
+|---|---|---|
+| option chain into context | 79,542 chars (~20k tokens), re-sent every turn | 6,076 chars (**−92%**) |
+| Alpaca MCP | a new `uvx` subprocess **per tool call** | one session per tick (**−78%** wall clock) |
+| the repeated prefix | full price on all 7 turns | cached, read back at **0.1x** |
+
+**$3.46 → $1.32 per decide cycle**, and the reasoning got sharper rather than thinner — trimming a
+61k-character chain to the strikes near spot is not a trade-off against accuracy, because burying
+the relevant rows in 57k of noise is exactly where model recall degrades.
+
+The lesson that generalises: **all three had shipped as code that ran and did nothing.** The
+compactor failed open against an envelope shape it did not recognise, the session was never shared,
+the cache was never asked for. `trdrbot usage` now prints the cached share per model, because a
+zero there next to a large input count is the only visible sign that caching stopped engaging.
 
 ```bash
-uv run trdrbot usage          # spend by model and role, from the live ledger
+uv run trdrbot usage          # spend by model and role, with cached share
 ```
 
 ## Commands
@@ -123,7 +133,7 @@ uv run trdrbot usage          # spend by model and role, from the live ledger
 | `tick` / `tick --force` | one cycle; `--force` runs the decide path outside market hours |
 | `run` | loop until the deadline, two cadences |
 | `health` | which subsystems ran but produced nothing |
-| `journal` / `ledger` / `usage` | what happened / every thesis ever formed / LLM spend |
+| `journal` / `ledger` / `usage` | what happened / every thesis ever formed / LLM spend and cached share |
 | `calibration` | Brier score with Murphy decomposition |
 | `research` / `discover` / `muse` | the three thesis sources, on demand |
 | `constitution show\|seed\|verify` | the epistemic principles in memory |
@@ -153,6 +163,12 @@ is the distinctive part: **a profit on a wrong thesis is luck, and a book of luc
 competence however good the P&L looks.** Promotion past ESTABLISH requires that most resolved
 theses were actually explicable. Drawdown demotes immediately; recovery restores.
 
+**Percentages mean what a trader means.** A stop or
+target is a percent of the net debit paid or credit received, not of the notional or the gross
+premium traded. Getting that wrong is not cosmetic: on the gross base, three of the four
+mark-based exit rules this book has ever carried could not fire at all, and `record_position` now
+says so out loud when a rule it is handed can never trigger.
+
 **Facts and models are never mixed.** Payoff at expiry, max loss and breakevens are arithmetic on
 the contract. Probability and expected value need a distribution and are labelled MODELLED. The
 agent sees them under separate headings, because one deserves far more weight.
@@ -167,9 +183,17 @@ priced, and **beta-weighted book delta** — because names are not exposures. Me
 QQQ correlate at 0.92, and one NVDA position showed $63,987 of raw delta but **$118,261**
 beta-weighted.
 
-**Costs are charged before the decision.** Real bid/ask when quotes are available, and a
-volatility clock that doesn't count weekends as full trading days (three calendar days from a
-Friday is 2.0 vol days — a 50% error at our tenor).
+**Costs are charged before the decision**, and against the agent's *own* view. Two EV columns
+sit side by side: expected value under the market's own drift — where a fairly priced structure is
+worth about nothing, so after friction it is negative for everything, always — and expected value
+under the drift the thesis actually claims. A thesis that cannot move the second column is
+decorative, and for a while only the first one existed.
+
+**One clock, and it is the market's.** Implied vol is quoted on ACT/365, so a Friday quote already
+prices the weekend it spans; discounting it again counts the same adjustment twice. Greeks,
+probabilities and the expected move now share that clock. The trading-day clock survives for the
+one job it is right for — comparing a 365-day implied vol against a 252-session realised one, which
+raw is a 17% error in the direction that says don't sell.
 
 **Exit rules are the agent's own commitments, executed deterministically.** One signal registry:
 every rule reads a signal, compares to a threshold, debounces. Thesis-level stops watch the
@@ -203,18 +227,28 @@ uv run pytest -m contract     # real APIs; before a deploy or after a dependency
 uv run trdrbot health         # runtime: what ran but produced nothing
 ```
 
-Four tiers, weighted by where our bugs actually came from — we categorised all ~24 of them, and
-**9 were found by measuring, 5 by running, 4 by verifying output; essentially none by a unit test
-catching a logic error.** They were wrong beliefs about a seam, and silent no-ops. So:
+Four tiers, weighted by where our bugs actually came from — we categorised all ~38 of them, and
+**essentially none were found by a unit test catching a logic error.** They were wrong beliefs
+about a seam, and silent no-ops. So:
 
 - **unit + invariant** — a monotonicity check over the whole ladder caught two shipped size
   inversions; a convergence check caught a 16pp drift bug. One invariant beats ten examples.
+  With a caveat learned the hard way: an invariant is only as good as the space it sweeps. That
+  same monotonicity check went on passing through **two more** ladder inversions because it
+  measured integer contracts at one payoff, where a rounding floor pinned every rung to the same
+  number.
+- **derive test inputs from the real producer, never from a literal.** Two capabilities were dead
+  in production while their tests passed, because the test and the caller disagreed about units
+  (percent vs fraction) or types (dict vs tuple) while each was internally consistent. A test that
+  builds its own input proves a function is self-consistent and says nothing about the seam.
 - **loop smoke** — the whole learning ladder offline with known inputs. Found two
   credit-assignment bugs every unit test passed straight over.
 - **contract** — one file, one belief per test, checked against the real service, written so the
   failure names the belief: *"price is no longer nested under `trades`"*.
 - **health** — not a test. Catches what tests structurally cannot: a path that runs, returns,
-  logs healthily, and does nothing.
+  logs healthily, and does nothing. **A subsystem's heartbeat must be a different record from its
+  output**, or "ran" and "produced" are the same number and the check is a tautology — which is
+  how a scorer that fired eight times and then died reported "ran 8x, produced 8" for two days.
 
 Rationale and rules: [`docs/principles_testing.md`](docs/principles_testing.md).
 
@@ -232,5 +266,5 @@ Rationale and rules: [`docs/principles_testing.md`](docs/principles_testing.md).
 - **Known issues are tracked openly** in [`specs/issues.md`](specs/issues.md) — recorded the
   moment they are found, removed only by the commit that fixes them.
 
-Design decisions and their reasoning: [`specs/decisions.md`](specs/decisions.md) (D-001…D-063).
+Design decisions and their reasoning: [`specs/decisions.md`](specs/decisions.md) (D-001…D-075).
 Architecture and invariants: [`specs/architecture.md`](specs/architecture.md).

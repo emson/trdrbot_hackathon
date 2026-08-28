@@ -96,11 +96,34 @@ def test_bootstrap_refuses_insufficient_history():
 
 # ------------------------------------- D-034 interim scoring accumulation
 
+def test_materiality_bands_speak_the_unit_the_caller_passes():
+    """The bands were 25.0/50.0 against a caller passing a FRACTION, so band 1
+    needed +2500% and interim scoring was dead from the day it was added -
+    silently, because `health` reported the eight rows written before the
+    bands existed. Both these tests passed throughout: they spoke percents,
+    the caller spoke fractions, and each was internally consistent.
+
+    So the unit is pinned to its ONE producer rather than to a literal."""
+    from trdrbot.analytics import Snapshot, position_pnl_pct
+    from trdrbot.housekeeping import INTERIM_BANDS
+
+    # A debit spread: $2,000 paid, now worth $600 less. -30% by any trader's
+    # reckoning, and materially past the first band.
+    snap = Snapshot(broker_positions=[
+        {"symbol": "X1", "cost_basis": 3000.0, "unrealized_pl": -600.0},
+        {"symbol": "X2", "cost_basis": -1000.0, "unrealized_pl": 0.0},
+    ])
+    pnl = position_pnl_pct(["X1", "X2"], snap)
+    assert abs(pnl - (-0.30)) < 1e-9, "P&L is a fraction of NET entry cost"
+    assert max(INTERIM_BANDS) < 1.0, "bands must be fractions, like their input"
+    assert _materiality_band(pnl) == 1, "a real -30% move must be material"
+
+
 def test_noise_marks_never_fire_interim_scoring():
     """Eight interim scores accumulated on one unresolved position - 0.8 of
     evidence against a resolution's 1.0 - all from a -$45 bid/ask wobble."""
     band, fired = 0, 0
-    for pnl in [-3.1, -4.2, -2.8, -3.5, -4.0, -3.2, -2.9, -3.6]:
+    for pnl in [-0.031, -0.042, -0.028, -0.035, -0.040, -0.032, -0.029, -0.036]:
         b = _materiality_band(pnl)
         if b > band:
             band, fired = b, fired + 1
@@ -109,7 +132,7 @@ def test_noise_marks_never_fire_interim_scoring():
 
 def test_interim_scoring_is_bounded_and_monotonic():
     band, fired = 0, 0
-    for pnl in [-3, -12, -27, -31, -26, -30, -55, -52, -58]:  # incl. oscillation
+    for pnl in [-0.03, -0.12, -0.27, -0.31, -0.26, -0.30, -0.55, -0.52, -0.58]:  # incl. oscillation
         b = _materiality_band(pnl)
         if b > band:
             band, fired = b, fired + 1
@@ -529,36 +552,37 @@ def test_credit_assignment_excludes_the_constitution():
     assert set(p.recalled_block_ids()) == {"c1", "c2", "t1", "a1", "a2"}
 
 
-def test_market_pulse_wakes_the_agent_on_a_material_move():
+def test_material_move_wakes_the_agent_through_the_idle_ladder():
     """The system was purely reactive: an empty inbox meant no reasoning, even
     with the market open and a live position moving. No trader waits for a
-    headline to check their book."""
-    from trdrbot.tick import _market_pulse, PULSE_MOVE
-    from trdrbot.journal import Journal
+    headline to check their book.
 
-    class Store:
-        def __init__(self, ps): self._p = ps
-        def open_positions(self): return self._p
+    This used to test `tick._market_pulse`, which was defined, tested and NEVER
+    CALLED - `idle.decide` had absorbed the rung and kept its own copy of the
+    two thresholds. The test passed for as long as the function was dead. It
+    now exercises the path production actually takes."""
+    from datetime import datetime, timezone
+    from trdrbot import idle
 
-    class J:
-        def last_decision_at(self):
-            from datetime import datetime, timezone
-            return datetime.now(timezone.utc)  # just decided: silence is fine
-
+    just_now = datetime.now(timezone.utc)
     pos = Position(position_id="p", status="open", underlying="SPY", entry_spot=766.5)
-    snap = Snapshot(); snap.market_open = True
 
-    snap.underlying_prices = {"SPY": 766.6}
-    assert _market_pulse(Store([pos]), snap, J(), None) is None, "must not fire on noise"
+    def rung(price, positions=(pos,)):
+        return idle.decide(
+            market_open=True, positions=list(positions),
+            underlying_prices={"SPY": price}, last_decision_at=just_now,
+            last_hunt_at=just_now, open_risk_usd=2_000.0, equity=100_000.0,
+            risk_cap_fraction=0.15, minutes_to_close_=120.0,
+        ).level
 
-    snap.underlying_prices = {"SPY": 766.5 * (1 + PULSE_MOVE * 1.5)}
-    assert _market_pulse(Store([pos]), snap, J(), None) is not None
+    assert rung(766.6) == "sleep", "must not fire on noise"
+    assert rung(766.5 * (1 + idle.MATERIAL_MOVE * 1.5)) == "review"
+    assert rung(766.5 * (1 - idle.MATERIAL_MOVE * 1.5)) == "review"
 
-    snap.underlying_prices = {"SPY": 766.5 * (1 - PULSE_MOVE * 1.5)}
-    assert _market_pulse(Store([pos]), snap, J(), None) is not None
-
-    # Nothing at risk -> silence is the correct output, not a missed check.
-    assert _market_pulse(Store([]), snap, J(), None) is None
+    # And the thresholds live in exactly one place now.
+    import trdrbot.tick as tick_mod
+    assert not hasattr(tick_mod, "PULSE_MOVE"), "duplicate threshold reintroduced"
+    assert not hasattr(tick_mod, "_market_pulse"), "dead pulse reintroduced"
 
 
 # -------------------------------------------- D-043 the idle ladder
@@ -904,13 +928,60 @@ def test_vol_clock_degrades_honestly_without_a_start_date():
     assert 0 < vol_days(7) < 7, "must discount weekends even when we cannot date them"
 
 
-def test_expected_move_shrinks_across_a_weekend():
-    """The number the agent compares its thesis band against."""
+def test_the_vol_clock_is_never_applied_on_top_of_a_quoted_iv():
+    """A quoted IV ALREADY prices the weekend, so discounting it again is a
+    double count - and it used to be one, silently.
+
+    `bs_greeks`/`expected_move` divided vol-weighted days by 308 while the
+    lognormal grid divided calendar days by 365: two clocks, one table, greeks
+    and probabilities for the same position on different time axes. The
+    weekend half was inert in production only because no caller ever passed
+    `start`, which made it a landmine for whoever supplied the missing
+    argument - doing so shrinks the modelled 1-sigma Friday-to-Monday move to
+    ~89% of what the option's own price implies, in the direction that makes
+    short premium look safer than it is.
+
+    So `start` is accepted and IGNORED, and this pins that."""
     import datetime
-    from trdrbot.optmath import expected_move
-    fri = expected_move(770, 0.13, 3, datetime.date(2026, 8, 28))
-    mon = expected_move(770, 0.13, 3, datetime.date(2026, 8, 31))
-    assert fri < mon and fri / mon < 0.9
+    from trdrbot.optmath import expected_move, bs_greeks, year_fraction
+
+    fri, mon = datetime.date(2026, 8, 28), datetime.date(2026, 8, 31)
+    assert expected_move(770, 0.13, 3, fri) == expected_move(770, 0.13, 3, mon)
+    assert bs_greeks("C", 770, 770, 0.13, 3, fri) == bs_greeks("C", 770, 770, 0.13, 3, mon)
+    assert abs(year_fraction(365) - 1.0) < 1e-12, "ACT/365, the clock IV is struck on"
+
+
+def test_greeks_and_probabilities_share_one_clock():
+    """They did not, and the gap was rendered side by side in one table."""
+    import math
+    from trdrbot.optmath import Leg, bs_greeks, prob_profit, year_fraction
+
+    # A far OTM call's delta and its P(profit) both key off the same sigma*sqrt(T).
+    days, iv, spot = 6, 0.20, 100.0
+    t = year_fraction(days)
+    g = bs_greeks("C", 100.0, spot, iv, days)
+    # N(d1) with d1 = 0.5*sigma*sqrt(t) for an ATM strike at r=0.
+    expect = 0.5 * (1.0 + math.erf((0.5 * iv * math.sqrt(t)) / math.sqrt(2.0)))
+    assert abs(g["delta"] - expect) < 1e-12
+    # And the grid the probabilities come off uses that same t: a long call
+    # profits iff spot ends above break-even, so P must be < 0.5 at any
+    # positive premium and must move with the same sigma.
+    leg = Leg.parse({"right": "C", "strike": 100.0, "side": "long", "qty": 1, "price": 1.0})
+    assert 0.0 < prob_profit([leg], spot, iv, days) < 0.5
+
+
+def test_implied_vs_realized_converts_before_comparing():
+    """252 sessions against 365 calendar days. Comparing raw understates
+    implied by 17% - every time, in the direction that says do not sell."""
+    import math
+    from trdrbot.optmath import implied_vs_realized
+
+    # Implied and realised describing the SAME world must read as 1.0.
+    realized = 0.20                       # annualised over 252 sessions
+    implied = realized * math.sqrt(252 / 365)   # the same vol, ACT/365
+    assert abs(implied_vs_realized(implied, realized) - 1.0) < 1e-12
+    assert implied_vs_realized(0.20, 0.20) > 1.15, "raw equality is really a premium"
+    assert implied_vs_realized(0.20, 0.0) is None
 
 
 def test_gamma_breakeven_is_the_implied_daily_move_not_a_structure_score():
@@ -2065,3 +2136,300 @@ def test_attribution_groups_credit_by_weight():
     src = inspect.getsource(attribution.run)
     assert "credit_weights()" in src, "credit must be weighted, not uniform"
     assert "sorted(groups.items())" in src, "grouping must be deterministic"
+
+
+# =============================================================== D-074 shakedown
+# Every test below names a defect found by reading LIVE state against what the
+# code claims, and pins the belief that was wrong.
+
+
+def test_pnl_percent_is_of_net_entry_cost_not_gross_premium():
+    """The exit-rule denominator. On a vertical spread gross and net differ by
+    2-7x, so every mark-based stop the agent ever wrote was measured against a
+    base several times larger than the money it put up - and three of the four
+    rules on the live book could never fire at all."""
+    from trdrbot.analytics import Snapshot, position_pnl_pct
+
+    # Credit spread: sold for 2.65, bought for 1.58, 5 lots -> $535 credit.
+    snap = Snapshot(broker_positions=[
+        {"symbol": "S", "cost_basis": -1325.0, "unrealized_pl": 267.5},
+        {"symbol": "L", "cost_basis": 790.0, "unrealized_pl": 0.0},
+    ])
+    pnl = position_pnl_pct(["S", "L"], snap)
+    assert abs(pnl - 0.50) < 1e-9, "+50% means half the CREDIT, the trader's meaning"
+    # On the old gross base ($2,115) the same money read as +12.6%, so a +50%
+    # target needed $1,057 against a max profit of $535: unreachable, forever.
+    assert pnl > 267.5 / 2115.0 * 3
+
+
+def test_a_spread_with_no_net_cost_reports_nothing_rather_than_noise():
+    from trdrbot.analytics import Snapshot, position_pnl_pct
+    snap = Snapshot(broker_positions=[
+        {"symbol": "A", "cost_basis": 1000.0, "unrealized_pl": 5.0},
+        {"symbol": "B", "cost_basis": -999.0, "unrealized_pl": 0.0},
+    ])
+    assert position_pnl_pct(["A", "B"], snap) is None, "unobservable holds, never fires blind"
+
+
+def test_unreachable_exit_rules_are_named_at_record_time():
+    """A stop that cannot trigger is a sentence, not a stop."""
+    from trdrbot.local_tools import _unreachable_rules
+
+    # The live NVDA debit spread: $2,253 paid, max loss = that. On the CORRECT
+    # base its -60% stop is reachable, which is the point - the old gross base
+    # is what made it need a $2,287 loss on a position that could only lose
+    # $2,253. Nothing to flag here any more.
+    assert _unreachable_rules(-60.0, 70.0, net_cost=2253.0,
+                              max_profit=7747.0, max_loss=-2253.0) == []
+    # Beyond the whole premium, though, there is nothing left to lose.
+    bad = _unreachable_rules(-120.0, None, net_cost=2253.0,
+                             max_profit=7747.0, max_loss=-2253.0)
+    assert any("stop_loss" in b and "NEVER" in b for b in bad)
+    # A credit spread's max profit IS the credit, so any target above +100%
+    # can never fire - the trap the +50%/-100% pair on the live SPY spread was
+    # one arithmetic slip away from.
+    bad2 = _unreachable_rules(None, 150.0, net_cost=535.0,
+                              max_profit=535.0, max_loss=-1965.0)
+    assert any("profit_target" in b and "NEVER" in b for b in bad2)
+    assert _unreachable_rules(None, 50.0, net_cost=535.0,
+                              max_profit=535.0, max_loss=-1965.0) == []
+    # ...and a credit stop past the structure's own max loss.
+    bad3 = _unreachable_rules(-400.0, None, net_cost=535.0,
+                              max_profit=535.0, max_loss=-1965.0)
+    assert any("stop_loss" in b and "NEVER" in b for b in bad3)
+    assert _unreachable_rules(-50.0, 50.0, net_cost=0.0, max_profit=1.0, max_loss=-1.0) == []
+
+
+def test_murphy_reliability_uses_the_stated_probability_not_the_bin_centre():
+    """It read the bin CENTRE. Below n=24 there are only two bins, so every
+    forecast under 0.5 was scored as if stated at 0.25 and everything above at
+    0.75. Live: one forecast stated 0.38, resolved true, scored 0.5625 against
+    an honest 0.3844."""
+    from trdrbot.calibration import Forecast, score
+
+    c = score([Forecast(position_id="p", probability=0.38, outcome=True)])
+    assert abs(c.reliability - (0.38 - 1.0) ** 2) < 1e-9
+
+    # And the gate it feeds now catches the agent it exists to catch.
+    over = [Forecast(position_id=f"f{i}", probability=0.95, outcome=(i % 2 == 0))
+            for i in range(16)]
+    assert score(over).reliability > 0.04, "a 0.95-claiming coin flip must not pass MATURE"
+
+
+def test_murphy_decomposition_identity_holds():
+    """brier = reliability - resolution + uncertainty. It only holds when the
+    reliability term uses each bin's mean FORECAST, so the identity is the
+    cheapest possible guard against the bin-centre bug returning."""
+    import random
+    from trdrbot.calibration import Forecast, score
+
+    # Deterministic and deliberately BOTH discriminating and miscalibrated, so
+    # neither term hits the small-sample clamp - the clamp is the one place the
+    # identity is allowed to break, and it is not what this test is about.
+    # Says 0.10 when the truth is 0.30, and 0.90 when the truth is 0.70.
+    fs = ([Forecast(position_id=f"lo{i}", probability=0.10, outcome=i < 12) for i in range(40)]
+          + [Forecast(position_id=f"hi{i}", probability=0.90, outcome=i < 28) for i in range(40)])
+    c = score(fs)
+    assert c.reliability > 0.0 and c.resolution > 0.0, "clamp must not bite here"
+    assert abs(c.brier - (c.reliability - c.resolution + c.uncertainty)) < 1e-9
+
+
+def test_size_is_monotonic_in_evidence_across_payoff_shapes():
+    """The original invariant test measured integer CONTRACTS at ONE payoff,
+    where the `contracts < 1 -> 1` floor pinned every rung to the same number
+    and hid two inversions. Sweeping the payoff surfaces both:
+
+      - EXPLORE -> ESTABLISH cut a 1:1 bet at 62% from 4 contracts to 1,
+        because the first Kelly rung sits below the exploration allocation;
+      - crossing MIN_SAMPLE swapped the gate from the stated probability to
+        the shrunk one, taking an 88% credit spread from 1 contract to zero
+        while its calibration was excellent and unchanged."""
+    from trdrbot import competence, sizing
+    from trdrbot.calibration import Calibration
+
+    shapes = [(500.0, -500.0, 0.62), (800.0, -1200.0, 0.70),
+              (300.0, -1700.0, 0.88), (2000.0, -500.0, 0.35)]
+    for mp, ml, conf in shapes:
+        prev = -1.0
+        for n in [0, 1, 4, 5, 8, 12, 15, 20, 30, 40, 60, 100]:
+            cal = Calibration(n=n, brier=0.2, reliability=0.02, resolution=0.05,
+                              uncertainty=0.24, base_rate=0.6)
+            post = competence.assess(resolved=n, reliability=0.02 if n >= 8 else None,
+                                     positions=[], equity=100_000.0, high_water=100_000.0)
+            got = sizing.size_position(
+                equity=100_000.0, stated_confidence=conf, max_profit=mp, max_loss=ml,
+                calibration=cal, posture=post, underlying="SPY").fraction_of_equity
+            assert got >= prev - 1e-9, (
+                f"payoff {mp}/{ml} at {conf:.0%}: n={n} sized {got:.3%}, "
+                f"below the previous {prev:.3%}")
+            prev = got
+
+
+def test_a_genuinely_edgeless_structure_is_still_refused():
+    """The floor must not rescue a bet with no claimed edge at all."""
+    from trdrbot import competence, sizing
+    from trdrbot.calibration import Calibration
+
+    cal = Calibration(n=20, brier=0.2, reliability=0.02, resolution=0.05,
+                      uncertainty=0.24, base_rate=0.6)
+    post = competence.assess(resolved=20, reliability=0.02, positions=[],
+                             equity=100_000.0, high_water=100_000.0)
+    d = sizing.size_position(equity=100_000.0, stated_confidence=0.70, max_profit=300,
+                             max_loss=-1700, calibration=cal, posture=post, underlying="SPY")
+    assert d.contracts == 0 and "NO POSITION" in d.reason
+
+
+def test_a_claim_the_record_does_not_support_is_reported_not_hidden():
+    from trdrbot import competence, sizing
+    from trdrbot.calibration import Calibration
+
+    cal = Calibration(n=20, brier=0.2, reliability=0.02, resolution=0.05,
+                      uncertainty=0.24, base_rate=0.6)
+    post = competence.assess(resolved=20, reliability=0.02, positions=[],
+                             equity=100_000.0, high_water=100_000.0)
+    d = sizing.size_position(equity=100_000.0, stated_confidence=0.88, max_profit=300,
+                             max_loss=-1700, calibration=cal, posture=post, underlying="SPY")
+    assert d.contracts >= 1
+    assert "record does not support" in d.reason
+
+
+def test_expected_value_moves_with_the_thesis():
+    """`ev_after_costs` was computed at drift ZERO - the market's own
+    distribution - where a fairly priced structure is worth about nothing and
+    after friction is negative for every candidate, always. The journal is full
+    of cycles declining on exactly that number."""
+    from trdrbot.experiments import Experiment, Thesis, simulate
+    from trdrbot.optmath import Leg
+
+    legs = [Leg.parse({"right": "C", "strike": 100, "side": "long", "qty": 1, "price": 3.0}),
+            Leg.parse({"right": "C", "strike": 105, "side": "short", "qty": 1, "price": 1.4})]
+    exp = Experiment(name="call spread", legs=legs)
+    flat = simulate(exp, Thesis("no view", "X", "2026-09-04", drift=0.0), 100.0, 0.25, 7)
+    bull = simulate(exp, Thesis("up 4%", "X", "2026-09-04", drift=0.04), 100.0, 0.25, 7)
+
+    assert flat["ev_after_costs"] < bull["ev_after_costs"], "the view must move the number"
+    assert abs(flat["ev_after_costs"] - flat["ev_market_after_costs"]) < 1e-9
+    assert bull["ev_market_after_costs"] == flat["ev_market_after_costs"], (
+        "the market column must not move with the agent's view")
+
+
+def test_bootstrap_resamples_sessions_not_calendar_days():
+    """`days` is calendar days to expiry; the returns are per session. Drawing
+    one per calendar day priced in weekends that never traded - variance 1.45x
+    too high on a typical tenor, and a fifth of every 'the tails disagree'
+    warning was the units rather than the tails."""
+    import statistics
+    from trdrbot import market_stats
+
+    import math
+    closes = gbm(n=2000, seed=5)
+    rets = market_stats._log_returns(closes)
+    sd_session = statistics.pstdev(rets)
+
+    # 7 CALENDAR days is 5 sessions. Dispersion must scale by sqrt(5), not the
+    # sqrt(7) the calendar-day loop produced - a 1.18x over-wide distribution
+    # on this tenor, and 1.45x too much variance.
+    got = statistics.pstdev([math.log(f)
+                             for f in market_stats.bootstrap_factors(closes, 7, seed="a")])
+    sessions, calendar = sd_session * math.sqrt(5), sd_session * math.sqrt(7)
+    assert abs(got - sessions) < abs(got - calendar), (
+        f"spread {got:.5f} sits closer to sqrt(7)={calendar:.5f} than "
+        f"sqrt(5)={sessions:.5f} - still resampling calendar days")
+    assert abs(got / sessions - 1.0) < 0.05
+    assert market_stats.bootstrap_factors(closes, 1, seed="a"), "never zero draws"
+
+
+def test_compaction_understands_the_real_mcp_envelope():
+    """The compactors were written against a dict; the adapter returns
+    `([{'type':'text','text': json}], artifact)` because it builds its tools
+    with response_format='content_and_artifact'. Every call therefore took the
+    fail-open path and returned the original - silently, for all 28 option
+    chains on the journal."""
+    import asyncio
+    import json as _json
+    from trdrbot import compact
+
+    payload = {"snapshots": {
+        f"SPY260902{r}{k * 1000:08d}": {
+            "latestQuote": {"bp": 1.0, "ap": 1.2, "bs": 5, "as": 5},
+            "latestTrade": {"p": 1.1},
+        } for k in range(600, 900, 5) for r in "CP"
+    }}
+    envelope = {"_alpaca_mcp_security": {"trust": "untrusted_tool_output"}, "data": payload}
+
+    class T:
+        name = "get_option_chain"
+        async def coroutine(self, **kw):
+            return ([{"type": "text", "text": _json.dumps(envelope)}], None)
+
+    tool = compact.wrap_heavy_tools([T()])[0]
+    out = asyncio.run(tool.coroutine())
+    assert isinstance(out, tuple) and len(out) == 2, "envelope shape must be preserved"
+    text = out[0][0]["text"]
+    assert "Option chain (compacted)" in text
+    assert len(text) < len(_json.dumps(envelope)) / 2, "the whole point is the size"
+    assert "1.00x5" in text and "1.20x5" in text, "prices reproduced verbatim"
+
+
+def test_atm_is_inferred_by_parity_when_the_page_is_one_sided():
+    """A real SPY chain page comes back as 100 CALLS, no puts, strikes 500-773,
+    with a next page. The median-strike fallback put ATM at 724 against a tape
+    of 771.67; parity from the calls alone gives 768.78."""
+    from trdrbot import compact
+
+    # C + K >= S, tightest at the deepest ITM strike.
+    snaps = {}
+    spot = 771.0
+    for k in (700, 720, 740, 760):
+        mid = spot - k + 0.5  # deep ITM call: intrinsic plus a little extrinsic
+        snaps[f"SPY260902C{k * 1000:08d}"] = {
+            "latestQuote": {"bp": mid - 0.05, "ap": mid + 0.05, "bs": 1, "as": 1}}
+    out = compact.compact_option_chain({"snapshots": snaps})
+    assert "page holds C only" in out
+    header = out.splitlines()[0]
+    atm = float(header.split("ATM~")[1].split(";")[0])
+    assert abs(atm - spot) < 3.0, f"parity ATM {atm} should be near {spot}"
+
+
+def test_a_stated_forecast_is_not_swallowed_by_a_placeholder(tmp_path):
+    """A pre-registered thesis carries an unstated 0.5. Matching a standalone
+    forecast to it returned the PLACEHOLDER, so the agent's real number was
+    never written and the row stayed invisible to calibration."""
+    from trdrbot.ledger import Ledger, STANDALONE, THESIS
+
+    book = Ledger(tmp_path / "ledger.jsonl")
+    book.register(kind=THESIS, underlying="SPY", claim="pre-reg", probability=0.5,
+                  probability_stated=False, horizon="2026-09-02",
+                  band_low=765.0, band_high=None)
+    real = book.register(kind=STANDALONE, underlying="SPY", claim="my call",
+                         probability=0.67, horizon="2026-09-02",
+                         band_low=765.0, band_high=None)
+    assert real.probability == 0.67 and real.probability_stated
+    # ...while a genuine repeat of the SAME kind still dedups.
+    again = book.register(kind=STANDALONE, underlying="SPY", claim="my call",
+                          probability=0.67, horizon="2026-09-02",
+                          band_low=765.0, band_high=None)
+    assert again.id == real.id
+
+
+def test_health_sees_a_subsystem_that_produced_once_and_then_died(tmp_path):
+    """`interim_scoring` read its own OUTPUT rows as evidence it had run, so
+    the probe was a tautology and eight rows from day one read as healthy for
+    two days and ~250 ticks."""
+    import json as _json
+    from trdrbot import health
+
+    rows = [{"kind": "interim_run", "eligible": 1, "scored": 1}]
+    rows += [{"kind": "interim_run", "eligible": 1, "scored": 0}] * 40
+    p = tmp_path / "journal.jsonl"
+    p.write_text("\n".join(_json.dumps(r) for r in rows) + "\n")
+    found = {name: (lvl, detail) for lvl, name, detail in health.check(p, [])}
+    lvl, detail = found["interim_scoring"]
+    assert lvl == health.BAD and "last 40 runs" in detail
+
+    # But an idle subsystem with nothing eligible is not a stalled one.
+    idle_rows = [{"kind": "interim_run", "eligible": 1, "scored": 1}]
+    idle_rows += [{"kind": "interim_run", "eligible": 0, "scored": 0}] * 40
+    p.write_text("\n".join(_json.dumps(r) for r in idle_rows) + "\n")
+    found = {name: (lvl, detail) for lvl, name, detail in health.check(p, [])}
+    assert found["interim_scoring"][0] == health.OK

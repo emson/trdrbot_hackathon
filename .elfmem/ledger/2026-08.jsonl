@@ -392,3 +392,41 @@
 {"t":"2026-08-28T12:48:52.472745+00:00","s":0,"ah":1.658007,"k":"asm","ids":["78ec8cb80ae8e249","cf4026ebe4e5f325","78b0c92502a8cab5","95209bc148c6a7b9","df86248db03497d9","1af203536546c2ef","1ce8ed99b7938d82","9d43b52dbc4fff0e","64452a897a4cf9c3","fdf58a3178eae813","35794dde13c9705d"],"frame":"self","sid":"e71303b678f34002"}
 {"t":"2026-08-28T12:48:52.487596+00:00","s":1,"ah":1.658011,"k":"asm","ids":["35794dde13c9705d","78ec8cb80ae8e249","cf4026ebe4e5f325","78b0c92502a8cab5","95209bc148c6a7b9"],"frame":"task","sid":"e71303b678f34002"}
 {"t":"2026-08-28T12:48:53.370885+00:00","s":2,"ah":1.658256,"k":"asm","ids":["35794dde13c9705d","7b36fdbb80f4cc35","dc689866a285437f","622adbc1707582cd","39fc9a266a7d276c"],"frame":"attention","sid":"e71303b678f34002"}
+{"t":"2026-08-28T13:23:55.741210+00:00","s":0,"ah":1e-06,"k":"birth","id":"aa4a92ee5b1399a3"}
+{"t":"2026-08-28T13:23:55.749753+00:00","s":1,"ah":4e-06,"k":"out","id":"aa4a92ee5b1399a3","sig":0.9,"w":1.0,"src":"t"}
+{"t":"2026-08-28T13:24:01.414489+00:00","s":2,"ah":4e-06,"k":"promote","id":"aa4a92ee5b1399a3","conf":0.0,"sig":0.0,"lam":0.01,"sum":"The block contains only the phrase \"contract probe\" with no additional context or meaning provided."}
+{"t":"2026-08-28T13:24:01.457708+00:00","s":3,"ah":0.001589,"k":"out","id":"aa4a92ee5b1399a3","sig":0.9,"w":1.0,"src":"t"}
+{"t":"2026-08-28T13:24:01.569096+00:00","s":4,"ah":1.708802,"k":"asm","ids":["78ec8cb80ae8e249","cf4026ebe4e5f325","78b0c92502a8cab5","95209bc148c6a7b9","df86248db03497d9","1af203536546c2ef","9d43b52dbc4fff0e","64452a897a4cf9c3","1ce8ed99b7938d82","fdf58a3178eae813","35794dde13c9705d"],"frame":"self","sid":"0c588f0dd4d14029"}
+{"t":"2026-08-28T13:24:08.564974+00:00","s":5,"ah":2e-06,"k":"birth","id":"461f3968b50e172f"}
+{"t":"2026-08-28T13:24:10.858962+00:00","s":6,"ah":2e-06,"k":"promote","id":"461f3968b50e172f","conf":0.2,"sig":0.2,"lam":0.01,"sum":"A technical term or phrase referring to a weight probe, likely a diagnostic or measurement tool used in system analysis or testing."}
+{"t":"2026-08-28T13:24:11.269325+00:00","s":7,"ah":1.708899,"k":"asm","ids":["35794dde13c9705d","7b36fdbb80f4cc35","dc689866a285437f","622adbc1707582cd","bfd61978169a4557"],"frame":"attention","sid":"059d09a108574b04"}
+{"t":"2026-08-28T13:41:55.391551+00:00","s":0,"ah":2e-06,"k":"birth","id":"aa4a92ee5b1399a3"}
+{"t":"2026-08-28T13:41:55.399174+00:00","s":1,"ah":4e-06,"k":"out","id":"aa4a92ee5b1399a3","sig":0.9,"w":1.0,"src":"t"}
+{"t":"2026-08-28T13:41:59.332464+00:00","s":2,"ah":4e-06,"k":"promote","id":"aa4a92ee5b1399a3","conf":0.0,"sig":0.0,"lam":0.01,"sum":"The block contains only the phrase \"contract probe\" with no additional context or meaning provided."}
+{"t":"2026-08-28T13:41:59.364097+00:00","s":3,"ah":0.001106,"k":"out","id":"aa4a92ee5b1399a3","sig":0.9,"w":1.0,"src":"t"}
+{"t":"2026-08-28T13:41:59.466773+00:00","s":4,"ah":1.708915,"k":"asm","ids":["78ec8cb80ae8e249","cf4026ebe4e5f325","78b0c92502a8cab5","95209bc148c6a7b9","df86248db03497d9","1af203536546c2ef","9d43b52dbc4fff0e","64452a897a4cf9c3","1ce8ed99b7938d82","fdf58a3178eae813","35794dde13c9705d"],"frame":"self","sid":"c7bddcc5f620425e"}
+{"t":"2026-08-28T13:42:05.651426+00:00","s":5,"ah":2e-06,"k":"birth","id":"461f3968b50e172f"}
+{"t":"2026-08-28T13:42:07.850476+00:00","s":6,"ah":2e-06,"k":"promote","id":"461f3968b50e172f","conf":0.2,"sig":0.2,"lam":0.01,"sum":"A technical term or phrase referring to a weight probe, likely a diagnostic or measurement tool used in system analysis or testing."}
+{"t":"2026-08-28T13:42:08.179677+00:00","s":7,"ah":1.708987,"k":"asm","ids":["35794dde13c9705d","7b36fdbb80f4cc35","dc689866a285437f","622adbc1707582cd","bfd61978169a4557"],"frame":"attention","sid":"5f939eace26148b6"}
+{"t":"2026-08-28T13:44:59.146057+00:00","s":0,"ah":1.753811,"k":"asm","ids":["78ec8cb80ae8e249","cf4026ebe4e5f325","78b0c92502a8cab5","95209bc148c6a7b9","df86248db03497d9","1af203536546c2ef","1ce8ed99b7938d82","9d43b52dbc4fff0e","64452a897a4cf9c3","fdf58a3178eae813","35794dde13c9705d"],"frame":"self","sid":"bfa0e8f3d9364bae"}
+{"t":"2026-08-28T13:44:59.162941+00:00","s":1,"ah":1.753815,"k":"asm","ids":["7b36fdbb80f4cc35","35794dde13c9705d","dc689866a285437f","bfd61978169a4557","2c3e41c520e7488e"],"frame":"task","sid":"bfa0e8f3d9364bae"}
+{"t":"2026-08-28T13:44:59.620216+00:00","s":2,"ah":1.753942,"k":"asm","ids":["35794dde13c9705d","dc689866a285437f","622adbc1707582cd","39fc9a266a7d276c","7b36fdbb80f4cc35"],"frame":"attention","sid":"bfa0e8f3d9364bae"}
+{"t":"2026-08-28T13:50:30.995809+00:00","s":0,"ah":4e-06,"k":"birth","id":"aa4a92ee5b1399a3"}
+{"t":"2026-08-28T13:50:31.002271+00:00","s":1,"ah":6e-06,"k":"out","id":"aa4a92ee5b1399a3","sig":0.9,"w":1.0,"src":"t"}
+{"t":"2026-08-28T13:50:33.951352+00:00","s":2,"ah":6e-06,"k":"promote","id":"aa4a92ee5b1399a3","conf":0.0,"sig":0.0,"lam":0.01,"sum":"The block contains only the phrase \"contract probe\" with no additional context or meaning provided."}
+{"t":"2026-08-28T13:50:33.974418+00:00","s":3,"ah":0.000832,"k":"out","id":"aa4a92ee5b1399a3","sig":0.9,"w":1.0,"src":"t"}
+{"t":"2026-08-28T13:50:34.094662+00:00","s":4,"ah":1.795867,"k":"asm","ids":["78ec8cb80ae8e249","cf4026ebe4e5f325","78b0c92502a8cab5","95209bc148c6a7b9","df86248db03497d9","1af203536546c2ef","9d43b52dbc4fff0e","64452a897a4cf9c3","1ce8ed99b7938d82","fdf58a3178eae813","35794dde13c9705d"],"frame":"self","sid":"a8a650973cb740d3"}
+{"t":"2026-08-28T13:50:38.483930+00:00","s":5,"ah":2e-06,"k":"birth","id":"461f3968b50e172f"}
+{"t":"2026-08-28T13:50:40.642401+00:00","s":6,"ah":2e-06,"k":"promote","id":"461f3968b50e172f","conf":0.2,"sig":0.2,"lam":0.01,"sum":"A technical term or phrase referring to a weight probe, likely a diagnostic or measurement tool used in system analysis or testing."}
+{"t":"2026-08-28T13:50:41.108433+00:00","s":7,"ah":1.795975,"k":"asm","ids":["35794dde13c9705d","7b36fdbb80f4cc35","dc689866a285437f","622adbc1707582cd","da48c7b3fb414b0d"],"frame":"attention","sid":"ab0455fd61ca4017"}
+{"t":"2026-08-28T13:51:10.888635+00:00","s":0,"ah":4e-06,"k":"birth","id":"aa4a92ee5b1399a3"}
+{"t":"2026-08-28T13:51:10.895938+00:00","s":1,"ah":6e-06,"k":"out","id":"aa4a92ee5b1399a3","sig":0.9,"w":1.0,"src":"t"}
+{"t":"2026-08-28T13:51:13.680320+00:00","s":2,"ah":6e-06,"k":"promote","id":"aa4a92ee5b1399a3","conf":0.0,"sig":0.0,"lam":0.01,"sum":"The block contains only the phrase \"contract probe\" with no additional context or meaning provided."}
+{"t":"2026-08-28T13:51:13.739485+00:00","s":3,"ah":0.000796,"k":"out","id":"aa4a92ee5b1399a3","sig":0.9,"w":1.0,"src":"t"}
+{"t":"2026-08-28T13:51:13.826702+00:00","s":4,"ah":1.79599,"k":"asm","ids":["78ec8cb80ae8e249","cf4026ebe4e5f325","78b0c92502a8cab5","95209bc148c6a7b9","df86248db03497d9","1af203536546c2ef","9d43b52dbc4fff0e","64452a897a4cf9c3","1ce8ed99b7938d82","fdf58a3178eae813","35794dde13c9705d"],"frame":"self","sid":"489b746ce88a49a0"}
+{"t":"2026-08-28T13:51:18.446427+00:00","s":5,"ah":2e-06,"k":"birth","id":"461f3968b50e172f"}
+{"t":"2026-08-28T13:51:20.810360+00:00","s":6,"ah":2e-06,"k":"promote","id":"461f3968b50e172f","conf":0.2,"sig":0.2,"lam":0.01,"sum":"A technical term or phrase referring to a weight probe, likely a diagnostic or measurement tool used in system analysis or testing."}
+{"t":"2026-08-28T13:51:21.175311+00:00","s":7,"ah":1.796075,"k":"asm","ids":["35794dde13c9705d","7b36fdbb80f4cc35","dc689866a285437f","622adbc1707582cd","da48c7b3fb414b0d"],"frame":"attention","sid":"b5bb9151db01442a"}
+{"t":"2026-08-28T13:51:54.886145+00:00","s":0,"ah":1.7969,"k":"asm","ids":["78ec8cb80ae8e249","cf4026ebe4e5f325","78b0c92502a8cab5","95209bc148c6a7b9","df86248db03497d9","1af203536546c2ef","1ce8ed99b7938d82","9d43b52dbc4fff0e","64452a897a4cf9c3","fdf58a3178eae813","35794dde13c9705d"],"frame":"self","sid":"cc86dc2923804815"}
+{"t":"2026-08-28T13:51:54.905629+00:00","s":1,"ah":1.796905,"k":"asm","ids":["7b36fdbb80f4cc35","35794dde13c9705d","dc689866a285437f","da48c7b3fb414b0d","39fc9a266a7d276c"],"frame":"task","sid":"cc86dc2923804815"}
+{"t":"2026-08-28T13:51:55.780211+00:00","s":2,"ah":1.797148,"k":"asm","ids":["35794dde13c9705d","dc689866a285437f","622adbc1707582cd","39fc9a266a7d276c","7b36fdbb80f4cc35"],"frame":"attention","sid":"cc86dc2923804815"}

@@ -85,12 +85,25 @@ PROBES: tuple[Probe, ...] = (
         lambda rows: len(rows), 0,
         "no exit has ever fired (fine early; suspicious once positions resolve)",
     ),
+    # `ran` is the HEARTBEAT, not the output. Reading the output rows as
+    # evidence of running makes the probe a tautology (see the `interim_run`
+    # note in housekeeping): it can only report "never ran" or "ran Nx,
+    # produced N", so a scorer that fired eight times and then died read as
+    # healthy for two days and ~250 ticks.
     Probe(
-        "interim_scoring", ("interim_outcome",),
-        lambda rows: len(rows), 0,
-        "no interim signal yet - expected until a position moves materially",
+        "interim_scoring", ("interim_run",),
+        lambda rows: sum(int(r.get("scored") or 0) for r in rows), 3,
+        "positions were eligible every cycle and none was ever scored - check "
+        "the materiality bands against the units position_pnl_pct returns",
+        work=lambda rows: sum(int(r.get("eligible") or 0) for r in rows),
     ),
 )
+
+#: A subsystem can produce for a while and then stop. Totals hide that
+#: perfectly - which is exactly how a dead interim scorer kept reporting
+#: "ran 8x, produced 8". Once this many runs have gone by since the last
+#: output, say so.
+STALE_AFTER_RUNS = 20
 
 
 def _rows(journal_path: Path) -> list[dict[str, Any]]:
@@ -105,6 +118,23 @@ def _rows(journal_path: Path) -> list[dict[str, Any]]:
             except json.JSONDecodeError:
                 continue
     return out
+
+
+def _runs_since_last_output(ran: list[dict[str, Any]], probe: Probe) -> int:
+    """How many runs have gone by with nothing produced, counting back.
+
+    Zero when the most recent run produced. Also zero when there was no WORK
+    available in those runs - an idle subsystem is not a stalled one, the same
+    distinction `Probe.work` draws for the totals.
+    """
+    idle_tail = 0
+    for row in reversed(ran):
+        if probe.produced([row]) > 0:
+            break
+        idle_tail += 1
+    if idle_tail and probe.work is not None and probe.work(ran[-idle_tail:]) == 0:
+        return 0
+    return idle_tail
 
 
 def check(journal_path: Path, positions: list[Any]) -> list[tuple[str, str, str]]:
@@ -126,7 +156,15 @@ def check(journal_path: Path, positions: list[Any]) -> list[tuple[str, str, str]
             findings.append((BAD, probe.name,
                              f"ran {len(ran)}x, produced nothing - {probe.meaning}"))
         else:
-            findings.append((OK, probe.name, f"ran {len(ran)}x, produced {made}"))
+            # It has produced SOMETHING - but when? A total cannot tell a live
+            # subsystem from one that worked at the start and then died.
+            since = _runs_since_last_output(ran, probe)
+            if since >= STALE_AFTER_RUNS:
+                findings.append((BAD, probe.name,
+                                 f"ran {len(ran)}x, produced {made} - but nothing in the "
+                                 f"last {since} runs. {probe.meaning}"))
+            else:
+                findings.append((OK, probe.name, f"ran {len(ran)}x, produced {made}"))
 
     # --- 2. the null paths, when they explain themselves ----------------
     skipped = sum(int(r.get("skipped_no_price") or 0)

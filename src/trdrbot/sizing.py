@@ -141,23 +141,41 @@ def size_position(
     unmeasured = calibration.n < MIN_SAMPLE
     exploring = unmeasured or (posture is not None and not posture.uses_kelly)
 
-    # Which edge estimate gates the trade depends on what we are claiming to
-    # know. In VALIDATE we do NOT trust the magnitude (hence a fixed size),
-    # but the agent must still claim a positive edge at the real payoff - so
-    # the gate uses its stated confidence, not the shrunk one. Shrinking to
-    # the base rate and THEN demanding Kelly>0 is what produced the deadlock:
-    # a stated 70% on a 0.67 payoff shrinks to exactly break-even, so nothing
-    # could ever be the first trade.
-    gate = kelly_fraction(stated_confidence, max_profit, max_loss) if exploring else full
+    # THE GATE READS THE STATED PROBABILITY, ALWAYS - two questions, two
+    # answers, and conflating them inverted the ladder a second time.
+    #
+    # "Is there an edge at all?" is a question about the STRUCTURE: a 0.18:1
+    # payoff needs ~85% just to break even, and an agent claiming 88% is
+    # claiming an edge. That claim is what gets recorded and scored.
+    # "How much do we bet on it?" is the question about the TRACK RECORD, and
+    # fractional Kelly on the shrunk probability plus the tier cap is the whole
+    # answer to it. Letting the record ALSO veto the trade charges the same
+    # evidence twice, and it did so discontinuously: the gate used to swap from
+    # the stated probability to the shrunk one the moment n crossed
+    # MIN_SAMPLE. Measured across the ladder at fixed, EXCELLENT reliability
+    # (0.02), an 88%-confidence credit spread at a 0.18:1 payoff sized 1
+    # contract at n=5 and ZERO at n=8 - the agent demonstrating more of the
+    # same good calibration lost the ability to trade the structure at all,
+    # because at n=8 the trust term is still only n/30 = 0.27 and shrank 88%
+    # to 72%, below the payoff's break-even. That is the exact failure this
+    # block's own comment describes, arriving one threshold later.
+    #
+    # The shrunk view is not discarded - it is REPORTED (D-009: surface, do not
+    # gate) and it still sets the size below.
+    gate = kelly_fraction(stated_confidence, max_profit, max_loss)
     if gate is None or gate <= 0:
-        which = "your stated" if exploring else "calibration-adjusted"
-        pval = stated_confidence if exploring else adj
         return SizingDecision(
             0, 0.0, full, 0.0, adj,
-            f"NO POSITION: {which} probability {pval:.0%} implies no edge "
+            f"NO POSITION: your stated probability {stated_confidence:.0%} implies no edge "
             f"at this payoff (Kelly {gate if gate is not None else float('nan'):+.3f}). "
             f"Not trading is the correct action.",
         )
+    #: Set when the agent claims an edge its own record does not support. The
+    #: trade is permitted at the exploration allocation and the disagreement is
+    #: stated, rather than being silently refused.
+    record_disagrees = (
+        not exploring and (full is None or full <= 0)
+    )
 
     # Phase posture (D-047) supplies the multiplier and the ceiling. Without
     # one, fall back to the original cliff so callers that predate phases keep
@@ -174,7 +192,17 @@ def size_position(
         else:
             established = calibration.n >= MIN_SAMPLE and (calibration.reliability or 1.0) < 0.05
             mult = ESTABLISHED_KELLY if established else UNPROVEN_KELLY
-        frac = min(full * mult, MAX_FRACTION)
+        # Kelly RAISES size above the exploration allocation; it never lowers
+        # it. Without the floor, promotion out of EXPLORE cut a positive-edge
+        # trade from 2.2% of equity to 0.6%, because the first Kelly rung
+        # (x0.05 of a 0.12 full Kelly) is far below the fixed allocation the
+        # agent was already trusted with when it knew nothing. More evidence
+        # must never mean less size - that is the ladder's stated invariant
+        # and it was being violated at the first promotion (see
+        # competence.assess's seed_fraction note).
+        floor = getattr(posture, "seed_fraction", 0.0) if posture is not None else 0.0
+        kelly_frac = 0.0 if full is None else full * mult
+        frac = min(max(kelly_frac, floor), MAX_FRACTION)
     risk_budget = equity * frac
     per_contract_risk = abs(max_loss)
     contracts = int(risk_budget // per_contract_risk) if per_contract_risk > 0 else 0
@@ -232,10 +260,18 @@ def size_position(
             if established
             else f"calibration unproven (n={calibration.n}) so {UNPROVEN_KELLY:.0%} Kelly"
         )
+    warn = ""
+    if record_disagrees:
+        warn = (
+            f". NOTE: your record does not support this claim - shrunk to {adj:.0%} "
+            f"your stated {stated_confidence:.0%} is break-even or worse at this payoff "
+            f"(Kelly {full:+.3f}), so the size is the exploration allocation, not an "
+            f"earned one. If you take it, take it as a test of the view"
+        )
     return SizingDecision(
         contracts, actual, full, frac, adj,
         f"stated {stated_confidence:.0%} -> calibration-adjusted {adj:.0%}; "
-        f"full Kelly {full:.3f}; {track}"
+        f"full Kelly {full:.3f}; {track}{warn}"
         + (f"; ${open_risk_usd:,.0f} already at risk in the book"
            f" (${same_name:,.0f} on {underlying.upper()})" if open_risk_usd else ""),
     )

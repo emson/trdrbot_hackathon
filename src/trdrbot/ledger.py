@@ -137,9 +137,22 @@ class Ledger:
         )
         # Do not double-register the same thesis on repeated simulate calls in
         # one decide cycle - the agent often simulates twice while comparing.
+        #
+        # `probability_stated` is part of the identity, and it has to be. A
+        # pre-registered thesis carries an unstated 0.5 placeholder; a
+        # standalone forecast on the same name, horizon and band carries the
+        # agent's real number. Matching across that boundary returned the
+        # PLACEHOLDER for a genuine forecast - so the stated probability was
+        # never written, `record_forecast` reported back "50%" for a 67% call,
+        # and the row stayed invisible to calibration because placeholders are
+        # excluded from it. That is D-062's exact symptom ("if the system log
+        # shows 50% instead of 67%, the intent is 0.67") surviving in the one
+        # place D-062 did not look. It has not bitten live only because the
+        # agent has always drawn its standalone bands differently.
         for prior in self._items:
             if (prior.outcome is None and prior.underlying == e.underlying
                     and prior.horizon == e.horizon
+                    and prior.probability_stated == e.probability_stated
                     and prior.band_low == e.band_low and prior.band_high == e.band_high):
                 return prior
         self._items.append(e)

@@ -107,6 +107,18 @@ def simulate(
     pop_market = optmath.prob_profit(legs, spot, iv, days)
     pop_thesis = optmath.pop_given_view(legs, spot, iv, days, drift=thesis.drift)
     ev_market = optmath.expected_value(legs, spot, iv, days)
+    # EV UNDER THE AGENT'S OWN VIEW. Its absence was the quiet defect at the
+    # centre of this whole comparison: `ev_after_costs` was computed at drift
+    # ZERO - the market's own distribution - where a fairly priced structure
+    # has an EV of roughly nothing by definition. Charge friction against that
+    # and the number is negative for every candidate, always, no matter what
+    # the thesis says. The journal is full of cycles declining on exactly this
+    # ("all declined on negative EV after costs"), which was never evidence
+    # about those trades: it is what the arithmetic had to return.
+    #
+    # A thesis that cannot move the number the decision is made on is
+    # decorative. This is the number it moves.
+    ev_thesis = optmath.expected_value(legs, spot, iv, days, drift=thesis.drift)
 
     # Risk/reward only means something when both ends are bounded. An
     # unbounded loss has no ratio - reporting one would imply a cap that
@@ -148,7 +160,13 @@ def simulate(
         "pop_market": pop_market,
         "pop_thesis": pop_thesis,
         "ev_market": ev_market,
-        "ev_after_costs": (ev_market - friction) if ev_market is not None else None,
+        "ev_market_after_costs": (ev_market - friction) if ev_market is not None else None,
+        "ev_thesis": ev_thesis,
+        # The decision number. Kept under the old key as well so nothing that
+        # reads `ev_after_costs` silently starts reading a different quantity -
+        # but it now carries the THESIS EV, which is what the name always
+        # implied and never was.
+        "ev_after_costs": (ev_thesis - friction) if ev_thesis is not None else None,
         "est_friction": friction,
         "thesis_edge": edge,
         "pop_bootstrap": pop_bootstrap,
@@ -292,6 +310,8 @@ def render_comparison(
         pm = f"{m['pop_market']:.0%}" if m["pop_market"] is not None else "n/a"
         pt = f"{m['pop_thesis']:.0%}" if m["pop_thesis"] is not None else "n/a"
         eac = f"${m['ev_after_costs']:+,.0f}" if m["ev_after_costs"] is not None else "n/a"
+        evm = (f"${m['ev_market_after_costs']:+,.0f}"
+               if m.get("ev_market_after_costs") is not None else "n/a")
         boot = ""
         if m.get("pop_bootstrap") is not None:
             gap = m.get("tail_gap")
@@ -306,11 +326,17 @@ def render_comparison(
             f"{_greeks_line(m.get('greeks'), m.get('days') or 0)}"
             f"{boot}"
             f"\n   COSTS    est. round-trip friction ${m['est_friction']:,.0f}"
-            f" | EV after costs {eac}"
+            f" | EV after costs, YOUR VIEW {eac} | at market's own drift {evm}"
             f"\n   {exp.rationale}"
         )
     lines.append(
         "\n_FACTS are arithmetic on the contracts. MODELLED assumes lognormal returns at "
         "current IV - the tails are wrong and IV is itself a forecast. Weight accordingly._"
+        "\n_The two EV columns answer different questions. 'At market's own drift' prices "
+        "the structure under the distribution the QUOTES imply, where a fairly priced "
+        "trade is worth about zero and after friction is negative - that column is close "
+        "to a measure of what you are paying to trade, not a verdict on the trade. 'YOUR "
+        "VIEW' applies the drift you stated. If your thesis cannot make that column "
+        "positive, the thesis is either too weak or too cheap to express this way._"
     )
     return "\n".join(lines)

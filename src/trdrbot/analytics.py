@@ -81,21 +81,54 @@ class Snapshot:
         return "\n".join(lines)
 
 
+#: A spread whose legs nearly cancel has almost no net entry cost, and a P&L
+#: fraction against it is a division by noise. Below this share of the gross
+#: premium traded the base is refused, and an unobservable signal HOLDS rather
+#: than firing blind - the same discipline exit_rules already applies.
+MIN_NET_COST_SHARE = 0.02
+
+
 def position_pnl_pct(symbols: list[str], snap: "Snapshot") -> float | None:
-    """Position-level P&L fraction, summed across legs (INV-19).
+    """Position-level P&L as a fraction of NET ENTRY COST (INV-19).
 
     Shared by C24 (exit rules) and housekeeping's interim scoring (INV-24) -
     one implementation, so the two never quietly disagree on what "the P&L"
     of a position means.
+
+    **The denominator is the net debit paid or net credit received**, which is
+    what "-60%" means to anyone who has traded a spread, and what every broker
+    P&L% column shows. It was previously the GROSS premium summed across legs,
+    and on a vertical spread those differ by 2-7x - so every mark-based stop
+    and target the agent has ever written was evaluated against a base several
+    times larger than the money it actually put up. Measured on the two live
+    positions at the prices they were opened at:
+
+        NVDA 230/240 debit spread, stop -60%   fired at -$2,287 against a
+                                               $2,253 max loss - UNREACHABLE
+        NVDA 230/240 debit spread, target +70% fired at +118% of the debit
+        SPY  755/750 credit spread, target +50% fired at +$1,057 against a
+                                               $535 max profit - UNREACHABLE
+
+    Three of the four mark-based rules on the book could never fire, and the
+    fourth fired at nearly twice the level stated. `trdrbot health` reported
+    "exit_rules never ran" for two days and that was the reason: not a quiet
+    market, an arithmetic base that made the agent's own stops inert.
+
+    On this base a debit spread's loss is bounded at -100% (the debit) and a
+    credit spread's target of +50% is the standard "buy it back for half the
+    credit". A credit spread's LOSS can still exceed -100%, which is correct
+    and is why the classic credit stop is quoted at 2x the credit.
     """
     held = snap.by_symbol()
     legs = [held[s] for s in symbols if s in held]
     if not legs:
         return None
-    cost = sum(abs(_f(l.get("cost_basis"))) for l in legs)
-    if cost == 0:
+    # Signed sum: positive = net debit paid, negative = net credit received.
+    net = abs(sum(_f(l.get("cost_basis")) for l in legs))
+    gross = sum(abs(_f(l.get("cost_basis"))) for l in legs)
+    if gross == 0 or net < MIN_NET_COST_SHARE * gross:
         return None
-    return sum(_f(l.get("unrealized_pl")) for l in legs) / cost
+    return sum(_f(l.get("unrealized_pl")) for l in legs) / net
 
 
 async def snapshot(tools: dict[str, Any], underlyings: list[str] | None = None) -> Snapshot:

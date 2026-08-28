@@ -198,7 +198,19 @@ def assess(
         tier=tier, resolved=resolved, reliability=reliability,
         attributable_rate=attr, drawdown=drawdown,
         book_cap=t["cap"], kelly_multiplier=kelly,
-        seed_fraction=0.0 if kelly > 0 else SEED_FRACTION,
+        # The exploration allocation is a FLOOR, not an alternative. It used to
+        # zero out the moment Kelly engaged, which inverted the ladder at its
+        # very first rung: at n=4 a 1:1 payoff at 62% confidence sized 4
+        # contracts (2.0% of equity), and at n=5 - promoted to ESTABLISH,
+        # strictly MORE evidence - it sized 1 contract (0.5%). ESTABLISH's
+        # Kelly ceiling is 0.10 and its ramp starts at 0.05, so a full Kelly of
+        # 0.12 buys 0.6% of equity: less than the 2.2% the agent was already
+        # permitted while knowing nothing. Sizing takes the larger of the two,
+        # so Kelly can only ever RAISE size above the exploration allocation.
+        # `test_size_is_monotonic_in_evidence` asserted exactly this property
+        # and missed it: it measured integer CONTRACTS at one payoff where the
+        # `contracts < 1 -> 1` floor pinned every rung to the same value.
+        seed_fraction=SEED_FRACTION,
         reason=reason,
     )
 

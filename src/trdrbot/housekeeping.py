@@ -21,11 +21,25 @@ from .wiki import Wiki
 #: these. Below the first band a mark is indistinguishable from bid/ask
 #: noise on a freshly opened spread, which is exactly what was being
 #: learned from before.
-INTERIM_BANDS = (25.0, 50.0)
+#:
+#: **FRACTIONS, not percents, because that is what `position_pnl_pct` returns.**
+#: These read 25.0 and 50.0 - i.e. +2500% and +5000% - so no position could
+#: ever reach band 1 and interim scoring has been dead since the day the bands
+#: were added. The journal proves it: eight `interim_outcome` rows, all from
+#: 2026-08-26, none since, while `trdrbot health` kept reporting
+#: "interim_scoring ran 8x, produced 8" off that historical total. The unit
+#: test agreed with the constants (it passed -3, -12, -27 as PERCENTS) and the
+#: production caller passed fractions, so both sides were internally consistent
+#: and jointly wrong - which is why 156 green tests said nothing about it.
+INTERIM_BANDS = (0.25, 0.50)
 
 
 def _materiality_band(pnl_pct: float) -> int:
-    """0 = not material yet; 1 and 2 = successively larger real moves."""
+    """0 = not material yet; 1 and 2 = successively larger real moves.
+
+    `pnl_pct` is a FRACTION of net entry cost (0.25 = a 25% move), the same
+    unit `analytics.position_pnl_pct` returns.
+    """
     mag = abs(pnl_pct)
     band = 0
     for i, threshold in enumerate(INTERIM_BANDS, start=1):
@@ -44,6 +58,7 @@ async def run(
     *, tools: dict[str, Any] | None = None, verbose: bool = True,
 ) -> dict[str, int]:
     interim_scored = 0
+    interim_eligible = 0
 
     for pos in store.open_positions():
         if pos.status != "open" or not pos.all_elfmem_block_ids:
@@ -51,6 +66,7 @@ async def run(
         pnl = position_pnl_pct(pos.symbols, snap)
         if pnl is None:
             continue
+        interim_eligible += 1
         # Score only on FIRST entry into a materiality band, never once per
         # cycle. The per-event weight was always low (0.1); repetition was the
         # hole. Found live: one unresolved position accumulated EIGHT interim
@@ -81,6 +97,16 @@ async def run(
             weight=0.1, band=band,
         )
         interim_scored += 1
+
+    # Heartbeat, same shape as `attribution_run` and for the same reason: the
+    # interim probe used to read the `interim_outcome` rows themselves, so
+    # "ran" and "produced" were the SAME rows and the check was a tautology -
+    # it could only ever say "never ran" or "ran Nx, produced N". Interim
+    # scoring died the day the materiality bands were added and health went on
+    # reporting "ran 8x, produced 8" off eight rows written before that, for
+    # two days and ~250 ticks. A subsystem that worked once and then stopped
+    # must not read as healthy forever.
+    journal.append("interim_run", eligible=interim_eligible, scored=interim_scored)
 
     # Daily research cycle (D-032): regime + dossiers + opportunities. Once
     # per calendar day - it costs an LLM call and regime does not move hourly.

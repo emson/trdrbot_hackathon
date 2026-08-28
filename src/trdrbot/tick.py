@@ -208,52 +208,37 @@ def _render_positions(store: PositionStore, snap: "analytics.Snapshot | None" = 
     return "\n".join(lines)
 
 
-#: A move of this fraction in an underlying we hold is worth a fresh look,
-#: even with nothing in the news. Roughly a third of a typical daily range on
-#: an index - big enough not to fire on noise, small enough to precede a stop.
-PULSE_MOVE = 0.004
-#: And look at least this often while the market is open, regardless.
-PULSE_MAX_SILENCE_MIN = 90
-
-
-def _market_pulse(store, snap, journal, config) -> dict | None:
-    """Should the agent look, absent any external event? Deterministic, no LLM."""
-    positions = [p for p in store.open_positions() if p.status == "open"]
-    if not positions:
-        return None  # nothing at risk; silence is correct
-
-    last = journal.last_decision_at()
-    silent_min = None
-    if last is not None:
-        from datetime import datetime, timezone
-        silent_min = (datetime.now(timezone.utc) - last).total_seconds() / 60.0
-
-    moves = []
-    for p in positions:
-        px = snap.underlying_prices.get(p.underlying)
-        if px and p.entry_spot:
-            moves.append((p.underlying, (px / p.entry_spot) - 1.0))
-
-    big = [(u, m) for u, m in moves if abs(m) >= PULSE_MOVE]
-    if big:
-        return {
-            "reason": "material move since entry: "
-                      + ", ".join(f"{u} {m:+.2%}" for u, m in big),
-            "moves": dict(moves),
-            "positions": [p.position_id for p in positions],
-        }
-    if silent_min is None or silent_min >= PULSE_MAX_SILENCE_MIN:
-        return {
-            "reason": f"no decide cycle for {silent_min:.0f}min" if silent_min
-                      else "no decide cycle yet today",
-            "moves": dict(moves),
-            "positions": [p.position_id for p in positions],
-        }
-    return None
+# `_market_pulse` lived here: it decided whether a material move or too long a
+# silence warranted a fresh look. It was defined, unit-tested, and NEVER CALLED
+# - `idle.decide` absorbed the whole rung when D-043 landed and nothing removed
+# the original. Deleted rather than wired up, because it was not merely dead: it
+# carried its own copies of the two thresholds (PULSE_MOVE / MATERIAL_MOVE and
+# PULSE_MAX_SILENCE_MIN / MAX_SILENCE_MIN), so anyone tuning the pulse would
+# have changed the system's behaviour by exactly nothing while its test kept
+# passing. Duplicated constants behind a dead function are worse than no
+# function. `idle.MATERIAL_MOVE` and `idle.MAX_SILENCE_MIN` are now the only
+# copies, and `test_material_move_wakes_the_agent_through_the_idle_ladder`
+# tests the path that actually runs.
 
 
 async def run_tick(
     config: Config, *, verbose: bool = True, force_decide: bool = False
+) -> dict[str, Any]:
+    """One tick, on ONE MCP session.
+
+    The session wraps the whole tick because the adapter's default tools start
+    a fresh stdio subprocess per tool CALL - measured at 12.3s for the six
+    calls a quiet housekeeping tick makes, against 2.75s sharing one
+    (mcp_client.session_tools).
+    """
+    async with mcp_client.session_tools(config) as tools_list:
+        return await _run_tick(config, tools_list, verbose=verbose,
+                               force_decide=force_decide)
+
+
+async def _run_tick(
+    config: Config, tools_list: list[Any], *, verbose: bool = True,
+    force_decide: bool = False,
 ) -> dict[str, Any]:
     journal = Journal(config.paths.journal)
     inbox = Inbox(config.paths, max_retries=config.max_retries)
@@ -262,7 +247,6 @@ async def run_tick(
     calib = CalibrationStore(config.paths.state / "forecasts.jsonl")
 
     n = _tick_count(config)
-    tools_list = await mcp_client.get_tools(config)
     tools = {t.name: t for t in tools_list}
 
     mem = await ElfmemAdapter.build(config.paths.state / "elfmem.db")
@@ -410,9 +394,12 @@ async def run_tick(
                 )
         equity_now = snap.equity or 100000.0
         hw = competence.update_high_water(config.paths.state, equity_now)
-        # Calibration draws on declined-thesis forecasts too (D-052).
-        cal_now = calib.score(ledger_mod.as_forecasts(
-            ledger_mod.Ledger(config.paths.state / "ledger.jsonl").resolved()))
+        # Calibration draws on declined-thesis forecasts too (D-052). Computed
+        # ONCE and passed everywhere it is needed: the ladder, the sizing tool
+        # and the prompt all used to derive their own, and the sizing tool's
+        # omitted the ledger entirely.
+        declined = ledger_mod.as_forecasts(book.resolved())
+        cal_now = calib.score(declined)
         posture = competence.assess(
             resolved=cal_now.n, reliability=cal_now.reliability,
             positions=store.all(), equity=equity_now, high_water=hw,
@@ -429,7 +416,7 @@ async def run_tick(
         size_tool = local_tools.build_size_position(
             calib, equity_now, len(open_pos),
             open_risk_usd=open_risk, open_risk_by_underlying=by_underlying,
-            shared=shared, posture=posture,
+            shared=shared, posture=posture, extra_forecasts=declined,
         )
         record_tool = local_tools.build_record_position(
             store, decision_id, elfmem_blocks=ctx.blocks, generated_by=config.model,
@@ -503,12 +490,15 @@ async def run_tick(
                               for i in news_items]
         obs_lines += [f"- [{i.type} | trust={i.trust}] {json.dumps(i.payload)}" for i in other_items]
         prompt_parts.append("## Observations this cycle\n\n" + "\n".join(obs_lines))
-        cal = calib.score()
-        if cal.n:
+        # Same `cal_now` the ladder and the sizing tool read - one number, one
+        # meaning. The prompt used to show a position-only figure while size
+        # was gated on a ledger-inclusive one.
+        if cal_now.n:
             prompt_parts.append(
-                f"## Your calibration so far\n\n{cal.verdict()}\n\n"
-                f"Base rate: {cal.base_rate:.0%} of your closed positions were profitable. "
-                f"Use this to set `confidence` honestly - it is scored."
+                f"## Your calibration so far\n\n{cal_now.verdict()}\n\n"
+                f"Base rate: {cal_now.base_rate:.0%} of your resolved forecasts and closed "
+                f"positions came in. Use this to set `confidence` honestly - it is scored, "
+                f"and it is the same number size_position shrinks your claim against."
             )
         prompt_parts.append(
             f"## Constraints\n- Competition deadline: {config.deadline} "
@@ -528,8 +518,23 @@ async def run_tick(
         # call, not after, or a slow cycle would pick up the next one's calls.
         decide_started_at = ids.utc_now().isoformat()
 
+        # PROMPT CACHING, and this is the one lever that matters for spend.
+        # 81% of this system's bill is INPUT tokens, and a react agent re-sends
+        # its whole accumulated context on every turn - measured at 7 calls
+        # averaging 22-33k input tokens each for ONE decide cycle, of which the
+        # tool schemas, the system prompt and this opening message are byte
+        # identical every time. A cache breakpoint at the end of the opening
+        # message covers all three (Anthropic caches the prefix up to and
+        # including the marked block, and tool definitions sit ahead of the
+        # messages), so turns 2..n read it back at a tenth of the rate.
+        #
+        # Safe across the fallback chain: verified that gpt-5-mini and
+        # gpt-4o-mini both accept a content block carrying `cache_control` and
+        # simply ignore the key, so an Anthropic outage still falls through.
+        cached_prompt = [{"type": "text", "text": prompt,
+                          "cache_control": {"type": "ephemeral"}}]
         try:
-            result = await agent.ainvoke({"messages": [("user", prompt)]})
+            result = await agent.ainvoke({"messages": [("user", cached_prompt)]})
         except Exception as exc:  # noqa: BLE001
             cause = failures.classify(exc)
             journal.append("error", batch=batch, decision_ref=decision_id,

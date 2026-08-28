@@ -192,17 +192,25 @@ def breakevens(legs: Iterable[Leg], *, tol: float = 0.01) -> list[float]:
 # ---------------------------------------------------------------- modelled
 
 
-def _lognormal_grid(spot: float, iv: float, days: float, *, n: int = 801, width: float = 5.0):
-    """Terminal-price grid with lognormal weights (risk-neutral, r=0).
+def _lognormal_grid(spot: float, iv: float, days: float, *, drift: float = 0.0,
+                    n: int = 801, width: float = 5.0):
+    """Terminal-price grid with lognormal weights. ONE grid, one clock.
 
-    ln(S_T/S_0) ~ N(-sigma^2*T/2, sigma^2*T). Yields (price, weight) pairs
-    with weights summing to 1. A grid rather than closed-form because it
-    handles ANY leg combination without per-structure case analysis - the
-    same code prices a spread, a condor, or something the agent invents.
+    ln(S_T/S_0) ~ N(ln(1+drift) - sigma^2*T/2, sigma^2*T). `drift` is the
+    expected TOTAL return over the horizon; 0.0 is the risk-neutral case where
+    the underlying is a martingale. Yields (price, weight) pairs with weights
+    summing to 1. A grid rather than closed-form because it handles ANY leg
+    combination without per-structure case analysis - the same code prices a
+    spread, a condor, or something the agent invents.
+
+    There used to be two copies of this loop, one here and one inside
+    `pop_given_view`, which is how the market view and the agent's view came to
+    be computed by different code. They are now the same code with a parameter,
+    so the GAP between them is attributable to the drift and to nothing else.
     """
-    t = max(days, 0.0) / 365.0
+    t = year_fraction(days)
     sig = max(iv, 1e-6) * math.sqrt(max(t, 1e-9))
-    mu = -0.5 * sig * sig
+    mu = math.log(1.0 + drift) - 0.5 * sig * sig if drift > -1 else -0.5 * sig * sig
 
     zs = [(-width + 2 * width * i / (n - 1)) for i in range(n)]
     prices = [spot * math.exp(mu + sig * z) for z in zs]
@@ -223,12 +231,25 @@ def prob_profit(legs: Iterable[Leg], spot: float, iv: float, days: float) -> flo
     return sum(w for s, w in _lognormal_grid(spot, iv, days) if pnl_at(legs, s) > 0)
 
 
-def expected_value(legs: Iterable[Leg], spot: float, iv: float, days: float) -> float | None:
-    """Probability-weighted P&L under the same lognormal assumption."""
+def expected_value(legs: Iterable[Leg], spot: float, iv: float, days: float,
+                   *, drift: float = 0.0) -> float | None:
+    """Probability-weighted P&L. `drift` = 0 is the MARKET's own distribution.
+
+    **EV at drift 0 is approximately minus the mispricing, and that is the
+    point of reporting it - not a reason to decide on it.** A fairly priced
+    structure has an expected value of roughly zero under the distribution the
+    price itself implies, so once friction is charged the number is negative by
+    construction, for every candidate, forever. The live journal shows exactly
+    that: cycle after cycle declining "on negative EV after costs", which was
+    never a finding about those trades.
+
+    Pass the thesis's own drift to get the number the agent is actually
+    claiming. See `experiments.simulate`, which now reports both.
+    """
     legs = list(legs)
     if not legs or spot <= 0:
         return None
-    return sum(w * pnl_at(legs, s) for s, w in _lognormal_grid(spot, iv, days))
+    return sum(w * pnl_at(legs, s) for s, w in _lognormal_grid(spot, iv, days, drift=drift))
 
 
 def pop_given_view(
@@ -245,19 +266,8 @@ def pop_given_view(
     legs = list(legs)
     if not legs or spot <= 0:
         return None
-    t = max(days, 0.0) / 365.0
-    sig = max(iv, 1e-6) * math.sqrt(max(t, 1e-9))
-    mu = math.log(1.0 + drift) - 0.5 * sig * sig
-
-    n, width = 801, 5.0
-    zs = [(-width + 2 * width * i / (n - 1)) for i in range(n)]
-    dens = [math.exp(-0.5 * z * z) for z in zs]
-    total = sum(dens)
-    return sum(
-        (d / total)
-        for z, d in zip(zs, dens)
-        if pnl_at(legs, spot * math.exp(mu + sig * z)) > 0
-    )
+    return sum(w for s, w in _lognormal_grid(spot, iv, days, drift=drift)
+               if pnl_at(legs, s) > 0)
 
 
 # ------------------------------------------------------------- greeks (MODELLED)
@@ -279,12 +289,6 @@ def _norm_pdf(x: float) -> float:
 #: full unit; a weekend or holiday day contributes far less, because the
 #: underlying is not trading. Weighting them gives roughly a 308-day year.
 #:
-#: At 30 DTE this is a rounding error. At OUR 2-10 DTE it dominates: Friday
-#: close to Monday open is 2.25 CALENDAR days but ~1.25 vol days - a 33% error
-#: in every greek, every cross-expiry IV comparison, and the expected move the
-#: thesis band is checked against. An unadjusted clock also manufactures a
-#: spurious IV jump every Monday morning.
-#:
 #: Corroborated independently: removing Friday->Monday positions from a 1DTE
 #: SPX put-write study (Mar 2018 - Sep 2025) cut cumulative return from 28.07%
 #: to 8.94% - about two thirds of all profit came from weekend-spanning trades,
@@ -292,9 +296,57 @@ def _norm_pdf(x: float) -> float:
 WEEKEND_VOL_WEIGHT = 0.5
 VOL_DAYS_PER_YEAR = 308.0
 
+#: Sessions in a trading year. What a realized vol computed from daily closes
+#: is annualised by (`market_stats._rolling_vol` uses sqrt(252)).
+TRADING_DAYS_PER_YEAR = 252.0
+
+#: What the model's time axis is measured in, and it is CALENDAR time on
+#: purpose - see `year_fraction`.
+CALENDAR_DAYS_PER_YEAR = 365.0
+
+
+def year_fraction(days: float) -> float:
+    """Calendar days -> years, on the same clock the quoted IV was struck on.
+
+    **ACT/365 calendar time, deliberately, and this reverses what half of this
+    module used to do.** Two clocks were live at once: `bs_greeks` and
+    `expected_move` divided volatility-weighted days by 308, while the
+    lognormal grid divided calendar days by 365. Greeks and probabilities for
+    the SAME position were therefore computed on different time axes and
+    rendered side by side in one table.
+
+    Unifying them is easy; picking which one is right is the part that matters,
+    and the weekend clock is the wrong one HERE:
+
+    **An implied vol already prices the weekend.** OPRA/Alpaca invert
+    Black-Scholes with T = calendar days / 365, so a Friday quote's IV is
+    already deflated by exactly the weekend it is about to span - that IS the
+    observed "Monday IV jump", seen from the price side. Taking that number and
+    ALSO discounting the weekend counts the same adjustment twice: on a Friday
+    with a Monday expiry it shrinks the modelled 1-sigma move to 89% of what
+    the option's own price implies. Every probability, greek and expected move
+    then disagrees with the market we are trading against, in the direction
+    that makes short premium look safer than it is.
+
+    The weekend clock was never doing damage in production only because no
+    caller ever passed `start`, so it silently fell back to a flat 6/7 average
+    - within 1.6% of ACT/365, and a landmine for the first person to "fix" the
+    missing argument.
+
+    `vol_days` survives for the one job it is genuinely right for: converting a
+    trading-time realized vol into calendar-time implied terms, so
+    implied-vs-realized is a fair comparison. See `implied_vs_realized`.
+    """
+    return max(days, 0.0) / CALENDAR_DAYS_PER_YEAR
+
 
 def vol_days(days: float, start: "date | None" = None) -> float:
     """Calendar days -> volatility-weighted days.
+
+    NOT the pricing clock (see `year_fraction`). This measures how much
+    TRADING time a calendar window contains, which is what you need to compare
+    an implied vol against a realized one - implied is annualised over 365
+    calendar days, realized over 252 sessions.
 
     Without a start date we cannot know which days are weekends, so we scale
     by the average weekday share - honest, and still better than counting
@@ -318,6 +370,26 @@ def vol_days(days: float, start: "date | None" = None) -> float:
     return total
 
 
+def implied_vs_realized(iv: float, realized_vol: float) -> float | None:
+    """Ratio of implied to realized vol, both in the SAME units. >1 = premium.
+
+    The single most useful number a short-premium book has, and it is easy to
+    get wrong by 20%: an implied vol is annualised over 365 calendar days, a
+    realized vol computed from daily closes over 252 sessions. Comparing them
+    raw understates implied by sqrt(252/365) = 0.83 - i.e. it makes selling
+    premium look like a worse deal than it is by a fifth, every single time.
+
+    Converts the realized figure onto the implied's calendar clock before
+    dividing, so 1.0 genuinely means "the market is charging what the tape has
+    been delivering".
+    """
+    if realized_vol is None or realized_vol <= 0 or iv is None or iv <= 0:
+        return None
+    realized_calendar = realized_vol * math.sqrt(
+        TRADING_DAYS_PER_YEAR / CALENDAR_DAYS_PER_YEAR)
+    return iv / realized_calendar
+
+
 def gamma_breakeven(greeks: dict[str, float] | None) -> float | None:
     """The daily underlying move at which gamma P&L exactly offsets theta.
 
@@ -337,6 +409,12 @@ def gamma_breakeven(greeks: dict[str, float] | None) -> float | None:
     donated. It is the implied-vs-realised edge test, denominated in dollars a
     day instead of vol points - which is the same test as an IV/forecast-RV
     ratio, in units the agent can check against the tape directly.
+
+    **The move it returns is per CALENDAR day**, because theta is per calendar
+    day and t is calendar time. A realised range measured from daily closes is
+    per SESSION, and there are 252 of those against 365 calendar days - so
+    comparing the two raw understates implied by sqrt(252/365) = 17%. Use
+    `implied_vs_realized` for the vol-point version, which does the conversion.
     """
     if not greeks:
         return None
@@ -358,16 +436,18 @@ def bs_greeks(right: str, strike: float, spot: float, iv: float, days: float,
     """
     if days <= 0 or iv <= 0 or spot <= 0 or strike <= 0:
         return None
-    # Vol time, not calendar time (see WEEKEND_VOL_WEIGHT).
-    t = vol_days(days, start) / VOL_DAYS_PER_YEAR
+    # ONE clock, and it is the one the quoted IV was struck on (year_fraction).
+    # `start` is accepted and ignored: threading a weekend weighting in here
+    # would double-count an adjustment the IV already carries.
+    t = year_fraction(days)
     st = iv * math.sqrt(t)
     d1 = (math.log(spot / strike) + 0.5 * iv * iv * t) / st
     delta = _norm_cdf(d1) if right == "C" else _norm_cdf(d1) - 1.0
     gamma = _norm_pdf(d1) / (spot * st)
-    # theta per DAY, r=0 (call and put theta coincide at r=0)
-    # Theta is quoted per CALENDAR day (what a holder actually experiences),
-    # even though t is measured in vol time.
-    theta = -(spot * _norm_pdf(d1) * iv) / (2.0 * math.sqrt(t)) / 365.0
+    # theta per CALENDAR day, r=0 (call and put theta coincide at r=0), which
+    # is now consistent with t: annual theta / 365 is the decay over one day of
+    # the same clock the price is on.
+    theta = -(spot * _norm_pdf(d1) * iv) / (2.0 * math.sqrt(t)) / CALENDAR_DAYS_PER_YEAR
     # vega per 1 IV POINT (0.01), the unit traders quote
     vega = spot * _norm_pdf(d1) * math.sqrt(t) / 100.0
     return {"delta": delta, "gamma": gamma, "theta": theta, "vega": vega}
@@ -418,7 +498,9 @@ def expected_move(spot: float, iv: float, days: float,
     reason the whole market lacks."""
     if spot <= 0 or iv <= 0 or days <= 0:
         return None
-    return spot * iv * math.sqrt(vol_days(days, start) / VOL_DAYS_PER_YEAR)
+    # The MARKET's forecast, so it uses the market's own clock (year_fraction).
+    # `start` accepted and ignored, same reason as bs_greeks.
+    return spot * iv * math.sqrt(year_fraction(days))
 
 
 # OCC symbol: ROOT + YYMMDD + C/P + strike*1000 zero-padded to 8.

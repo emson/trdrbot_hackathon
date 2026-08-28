@@ -32,6 +32,16 @@ from langchain_core.callbacks import BaseCallbackHandler
 from . import ids
 
 
+#: Anthropic's published cache multipliers against the base input rate: a
+#: cache WRITE costs 1.25x, a READ 0.1x. OpenAI's automatic caching discounts
+#: reads too and reports them the same way through LangChain, so the same
+#: arithmetic covers both. Wrong in the third decimal for some providers;
+#: catastrophically wrong if omitted, because a cached token billed at full
+#: rate makes caching look like it saved nothing.
+CACHE_WRITE_MULTIPLIER = 1.25
+CACHE_READ_MULTIPLIER = 0.10
+
+
 @dataclass
 class Call:
     ts: str
@@ -40,16 +50,26 @@ class Call:
     input_tokens: int
     output_tokens: int
     cost_usd: float | None  # None = model not in the pricing table
+    #: Of `input_tokens`, how many were served from / written to the prompt
+    #: cache. LangChain's `usage_metadata.input_tokens` is the TOTAL and
+    #: already includes both, so they are priced by adjusting, never by adding.
+    cache_read_tokens: int = 0
+    cache_write_tokens: int = 0
 
 
 def price(pricing: dict[str, Any], model: str,
-          input_tokens: int, output_tokens: int) -> float | None:
+          input_tokens: int, output_tokens: int,
+          cache_read: int = 0, cache_write: int = 0) -> float | None:
     """Cost in USD, or None when the model is not priced.
 
     `pricing` maps a model id to {input, output} in dollars per MILLION tokens.
     Matching is exact first, then by suffix - providers return dated ids like
     `gpt-4o-mini-2024-07-18` for a model configured as `openai:gpt-4o-mini`,
     and a table keyed on the configured name should still match.
+
+    Cached input is billed at its own rate. `input_tokens` is the total, so the
+    cached share is removed from the full-price bucket and re-added at its
+    multiplier rather than counted twice.
     """
     entry = pricing.get(model)
     if entry is None:
@@ -61,7 +81,11 @@ def price(pricing: dict[str, Any], model: str,
     if not isinstance(entry, dict):
         return None
     try:
-        return (input_tokens * float(entry["input"])
+        rate_in = float(entry["input"])
+        full = max(0, input_tokens - cache_read - cache_write)
+        return (full * rate_in
+                + cache_read * rate_in * CACHE_READ_MULTIPLIER
+                + cache_write * rate_in * CACHE_WRITE_MULTIPLIER
                 + output_tokens * float(entry["output"])) / 1_000_000.0
     except (KeyError, TypeError, ValueError):
         return None
@@ -74,10 +98,13 @@ class UsageLedger:
         self.path = path
         self.pricing = pricing or {}
 
-    def record(self, role: str, model: str, inp: int, out: int) -> Call:
+    def record(self, role: str, model: str, inp: int, out: int,
+               cache_read: int = 0, cache_write: int = 0) -> Call:
         call = Call(ts=ids.utc_now().isoformat(), role=role, model=model,
                     input_tokens=inp, output_tokens=out,
-                    cost_usd=price(self.pricing, model, inp, out))
+                    cost_usd=price(self.pricing, model, inp, out,
+                                   cache_read, cache_write),
+                    cache_read_tokens=cache_read, cache_write_tokens=cache_write)
         try:
             self.path.parent.mkdir(parents=True, exist_ok=True)
             with self.path.open("a") as fh:
@@ -134,6 +161,7 @@ class UsageLedger:
             m["calls"] += 1
             m["in"] += c.input_tokens
             m["out"] += c.output_tokens
+            m["cached"] = m.get("cached", 0) + c.cache_read_tokens
             if c.cost_usd is None:
                 m["unpriced"] += 1
             else:
@@ -147,6 +175,29 @@ class UsageLedger:
             "by_model": by_model,
             "by_role": by_role,
         }
+
+
+def _cache_split(details: dict[str, Any]) -> tuple[int, int]:
+    """(cache_read, cache_write) out of LangChain's input_token_details.
+
+    Two shapes are live at once and both must be read. The reading call reports
+    `cache_read`; the WRITING call reports 0 there and puts the same tokens
+    under `ephemeral_5m_input_tokens` / `ephemeral_1h_input_tokens` (verified
+    against a real Anthropic response: write leg 2611 ephemeral_5m with
+    cache_creation 0, read leg 2611 cache_read). Taking only `cache_creation`
+    would price every cache WRITE as ordinary input - which is nearly right,
+    since a write is 1.25x, but it would also make the ledger silent about
+    whether caching engaged at all.
+    """
+    try:
+        read = int(details.get("cache_read") or 0)
+        write = int(details.get("cache_creation") or 0)
+        if not write:
+            write = sum(int(v or 0) for k, v in details.items()
+                        if str(k).startswith("ephemeral_") and k.endswith("_input_tokens"))
+        return max(0, read), max(0, write)
+    except (TypeError, ValueError):
+        return 0, 0
 
 
 class UsageCallback(BaseCallbackHandler):
@@ -173,7 +224,8 @@ class UsageCallback(BaseCallbackHandler):
                     inp = int(usage.get("input_tokens") or 0)
                     out = int(usage.get("output_tokens") or 0)
                     if inp or out:
-                        self.ledger.record(self.role, str(model), inp, out)
+                        r, w = _cache_split(usage.get("input_token_details") or {})
+                        self.ledger.record(self.role, str(model), inp, out, r, w)
         except Exception as exc:  # noqa: BLE001 - accounting never breaks a trade
             print(f"[usage] callback error, ignored: {exc!r}")
 
@@ -187,10 +239,17 @@ def render(summary: dict[str, Any]) -> str:
         lines.append(f"  -> add these to llm.pricing in config.yaml for a true total")
     lines.append("")
     if summary["by_model"]:
-        lines.append(f"  {'model':<44}{'calls':>6}{'in':>10}{'out':>9}{'cost':>10}")
+        # `cached` is the share of `in` served from the prompt cache at a tenth
+        # of the rate. Input is ~80% of this system's bill and most of it is a
+        # prefix re-sent on every agent turn, so this column is where the money
+        # is - a zero next to a large `in` means caching is not engaging.
+        lines.append(f"  {'model':<40}{'calls':>6}{'in':>10}{'cached':>9}{'out':>9}{'cost':>10}")
         for m, d in sorted(summary["by_model"].items(), key=lambda kv: -kv[1]["cost"]):
             cost = f"${d['cost']:.4f}" if not d["unpriced"] else f"${d['cost']:.4f}*"
-            lines.append(f"  {m[:43]:<44}{d['calls']:>6}{d['in']:>10,}{d['out']:>9,}{cost:>10}")
+            cached = d.get("cached", 0)
+            share = f"{cached / d['in']:.0%}" if d["in"] and cached else "-"
+            lines.append(f"  {m[:39]:<40}{d['calls']:>6}{d['in']:>10,}{share:>9}"
+                         f"{d['out']:>9,}{cost:>10}")
     if summary["by_role"]:
         lines.append("")
         lines.append("  by role: " + ", ".join(
