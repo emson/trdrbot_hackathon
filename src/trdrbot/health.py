@@ -42,6 +42,14 @@ class Probe:
     min_runs: int
     #: what it means if it ran plenty and produced nothing
     meaning: str
+    #: How much work was actually AVAILABLE. Optional, and the difference
+    #: between "broken" and "idle" (D-070): attribution ran 36x and produced
+    #: nothing, which read as a hard FAIL - but every run recorded `pending: 0`,
+    #: so there was simply nothing due yet (theses resolve at their horizon).
+    #: A health check that cries wolf is worse than none, because it trains
+    #: the reader to skip the one line that finally matters. When this is
+    #: given and returns 0, silence is explained rather than alarming.
+    work: Callable[[list[dict[str, Any]]], int] | None = None
 
 
 PROBES: tuple[Probe, ...] = (
@@ -60,6 +68,7 @@ PROBES: tuple[Probe, ...] = (
         "attribution", ("attribution_run",),
         lambda rows: sum(int(r.get("attributed") or 0) for r in rows), 3,
         "the view-vs-structure loop is not turning - check skipped_no_price",
+        work=lambda rows: sum(int(r.get("pending") or 0) for r in rows),
     ),
     Probe(
         "research", ("research",),
@@ -110,6 +119,9 @@ def check(journal_path: Path, positions: list[Any]) -> list[tuple[str, str, str]
         if not ran:
             level = WARN if probe.min_runs > 0 else OK
             findings.append((level, probe.name, "never ran"))
+        elif made == 0 and probe.work is not None and probe.work(ran) == 0:
+            findings.append((OK, probe.name,
+                             f"ran {len(ran)}x, nothing was due - idle, not stalled"))
         elif made == 0 and len(ran) >= probe.min_runs > 0:
             findings.append((BAD, probe.name,
                              f"ran {len(ran)}x, produced nothing - {probe.meaning}"))

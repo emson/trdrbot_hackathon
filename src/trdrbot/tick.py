@@ -45,9 +45,11 @@ from . import (
     ids,
     local_tools,
     mcp_client,
+    news_extract,
     reconcile,
     sensors,
     tool_guard,
+    usage,
 )
 from .calibration import CalibrationStore
 from .config import Config
@@ -341,7 +343,7 @@ async def run_tick(
         shared: dict[str, Any] = {}
         book = ledger_mod.Ledger(config.paths.state / "ledger.jsonl")
         sim_tool = local_tools.build_simulate_experiments(shared, config.paths.state, book)
-        forecast_tool = local_tools.build_record_forecast(book)
+        forecast_tool = local_tools.build_record_forecast(book, config.paths.state)
         open_pos = store.open_positions()
         open_risk = sum(p.max_loss_usd or 0.0 for p in open_pos)
         by_underlying: dict[str, float] = {}
@@ -419,10 +421,32 @@ async def run_tick(
             )
         if ctx.text:
             prompt_parts.append(f"## What you remember\n\n{ctx.text}")
-        prompt_parts.append(
-            "## Observations this cycle\n\n"
-            + "\n".join(f"- [{i.type} | trust={i.trust}] {json.dumps(i.payload)}" for i in items)
-        )
+        # News gets enriched HERE, at the decide seam, not at ingestion (D-070).
+        # Sensors are deliberately deterministic and LLM-free (D-015), and the
+        # decide path is the one that both pays for news and acts on it. Doing
+        # it here also means the freshest article - the one that just arrived
+        # and matters most - is enriched at the moment of the decision rather
+        # than whenever research/discovery/muse next happens to run.
+        #
+        # Measured on two live articles: raw JSON payloads rendered 1,322 chars;
+        # enriched rendered 824 - 38% SMALLER while adding sentiment, event
+        # type, regime, claim horizon and entities. Extraction cost ~$0.0002.
+        # Cheaper and more informative, which is the only kind of trade worth
+        # making here.
+        news_items = [i for i in items if i.type == "news"]
+        other_items = [i for i in items if i.type != "news"]
+        obs_lines = []
+        if news_items:
+            try:
+                payloads = [dict(i.payload, id=i.payload.get("id") or i.id) for i in news_items]
+                extracts = await news_extract.enrich(payloads, config)
+                obs_lines.append(news_extract.render_block(extracts))
+            except Exception as exc:  # noqa: BLE001 - fail open to the raw payloads
+                print(f"[tick {n}] news enrichment failed, using raw payloads: {exc!r}")
+                obs_lines += [f"- [news | trust={i.trust}] {json.dumps(i.payload)}"
+                              for i in news_items]
+        obs_lines += [f"- [{i.type} | trust={i.trust}] {json.dumps(i.payload)}" for i in other_items]
+        prompt_parts.append("## Observations this cycle\n\n" + "\n".join(obs_lines))
         cal = calib.score()
         if cal.n:
             prompt_parts.append(
@@ -442,6 +466,11 @@ async def run_tick(
                 "a duplicate will be rejected."
             )
         prompt = "\n\n".join(prompt_parts)
+
+        # Marks the start of THIS cycle's LLM calls, so the served model can be
+        # read back from the usage ledger afterwards (D-070). Taken before the
+        # call, not after, or a slow cycle would pick up the next one's calls.
+        decide_started_at = ids.utc_now().isoformat()
 
         try:
             result = await agent.ainvoke({"messages": [("user", prompt)]})
@@ -467,7 +496,13 @@ async def run_tick(
             "execution" if orders else "no_op",
             batch=batch,
             decision_ref=decision_id,
+            # `model` is the configured INTENT (chain head); `model_served` is
+            # what actually answered. They differ whenever the fallback fires,
+            # and recording only the former made the journal confidently wrong
+            # about who made 19 decisions (D-070).
             model=config.model,
+            model_served=usage.UsageLedger(
+                config.paths.state / "usage.jsonl").served_since("decide", decide_started_at),
             tick=n,
             client_order_id=ids.client_order_id(batch) if orders else None,
             tool_calls=[tc.get("name") for tc in calls],

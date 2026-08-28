@@ -113,7 +113,18 @@ class ElfmemAdapter:
             ids = [b.id for b in fr.blocks if b.id not in seen]
             seen.update(ids)
             blocks[name] = ids
-            if fr.text:
+            # A frame that contributes no NEW block contributes no text (D-070).
+            # Measured live: TASK returned 5 blocks, all 5 already in SELF - 0
+            # unique, every cycle. The id dedup above already dropped them from
+            # credit assignment, but the TEXT was appended regardless, so the
+            # same five memories reached the model twice in one prompt under two
+            # different headings (~819 chars/call, resent every agent turn).
+            # That is not just wasted tokens: repeating five of the eleven
+            # principles verbatim silently doubles their weight against the six
+            # that appear once, which is a quiet distortion of the very
+            # constitution this frame exists to present faithfully. SELF is
+            # exempt - it is the identity frame and must always render.
+            if fr.text and (ids or name == "self"):
                 parts.append(fr.text)
 
         # ATTENTION is a frame again. It was hand-rolled from recall() because

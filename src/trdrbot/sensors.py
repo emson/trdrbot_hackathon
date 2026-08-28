@@ -117,6 +117,14 @@ async def _fetch_alpaca_news(tools: dict[str, Any], config: Config) -> list[dict
 
 def _news_payload(rec: dict[str, Any]) -> dict[str, Any]:
     return {
+        # The publisher's own article id. Used as this sensor's dedup key
+        # above, and CARRIED THROUGH deliberately (D-070): it is the cache key
+        # `news_extract` uses. Dropping it - as this payload originally did -
+        # meant the decide path fell back to the inbox item id, so the same
+        # article extracted from the inbox and from a direct `get_news` call
+        # landed under two different keys, was paid for twice, and stored
+        # twice. The dedup the cache exists for, silently defeated.
+        "id": rec.get("id"),
         "headline": rec.get("headline"),
         "summary": (rec.get("summary") or "")[:400],
         "source": rec.get("source"),

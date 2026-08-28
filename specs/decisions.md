@@ -2446,3 +2446,92 @@ reconciled by renaming this implementation's constant to match what they already
 (`_DEFAULT_AGENT_NAME`) rather than rewriting tests that test the right thing. specs/issues.md I-7
 updated from "fixed at our boundary" to "fixed upstream".
 **Verified:** 9 contract tests pass (real elfmem, real Alpaca, real LLM calls) + 130 default tests.
+
+## D-070: Shakedown - six defects found by reading live state, not by testing
+**Date:** 2026-08-28
+**Status:** accepted
+**Context:** A full professional-trader review of the running system. Every finding below came
+from reading LIVE state (journal, usage ledger, elfmem SQLite, position frontmatter) against what
+the code claims - the same method that produced 9 of this project's bugs, and again the method
+that worked: the 137-test suite was green throughout and caught none of these.
+
+**1. The journal lied about which model decided.** `model=config.model` recorded the configured
+FIRST CHOICE, not what answered. Live: 19 decide cycles journalled `anthropic:claude-opus-5` while
+`usage.jsonl` showed `gpt-5` served every one - the Anthropic credit exhaustion had silently
+failed over. Fallback is not an error and leaves no error record, so nothing in the system would
+ever have contradicted the wrong attribution, and D-008's whole promise ("results stay
+attributable across a mid-competition swap") was void exactly when it mattered. Fixed with
+`UsageLedger.served_since(role, since_ts)` reading the provider's own response metadata, and a new
+`model_served` field alongside the intent. A LIST, not one value: a chain that fails over mid-cycle
+genuinely was served by two models, and flattening that trades a known lie for a subtler one.
+
+**2. The decide path never received enriched news.** D-068 wired extraction into research/discovery/
+muse, and `compact_news` reads the cache - but nothing on the decide path ever WROTE it, and those
+three run daily at best. Live proof: zero production `news_extract` calls, no cache file, while the
+decide prompt rendered raw JSON payloads. So the highest-value, most-frequent consumer of news got
+the pre-D-066 behaviour. Enrichment now happens at the decide seam itself, deliberately NOT at
+ingestion: sensors are architecturally LLM-free (D-015), and enriching at decide means the freshest
+article - the one that just arrived and matters most - is enriched at the moment of the decision.
+Measured on two live articles: raw JSON 1,322 chars vs enriched 824 - **38% smaller while adding
+sentiment, event type, regime, claim horizon and entities**, for ~$0.0002. Cheaper AND better.
+
+**3. The news cache key was defeated.** `_news_payload` used the publisher's article id as the
+sensor dedup key then DROPPED it, so the decide path fell back to the inbox item id. The same
+article reached the cache under two different keys depending on which path saw it - extracted
+twice, paid for twice, and the cross-consumer dedup the cache exists for silently defeated. Fixed
+by carrying `id` through the payload.
+
+**4. Five memories were being sent to the model twice per prompt.** `assemble_context` deduped
+block IDS across frames but appended each frame's TEXT regardless. Measured live: TASK returned 5
+blocks, **all 5 already in SELF, 0 unique, every cycle** - so ~819 chars/call of the same memories
+under a second heading, resent every agent turn. The cost is minor; the distortion is not.
+Repeating five of eleven principles doubles their weight against the six that appear once, quietly
+corrupting the constitution this frame exists to present faithfully. Now: a frame contributing no
+new block contributes no text (SELF exempt - it is the identity frame).
+
+**5. `record_forecast` had no vacuity guard, and calibration gates SIZE.** The competence ladder's
+only n-gate is a COUNT (`min_n`), so "SPY between 0 and 10000 next Tuesday" was a scoreable
+forecast that resolves true, counts toward `resolved`, and walks the agent up the size ladder on
+evidence of nothing - the cheapest possible way to earn real risk budget dishonestly, and nothing
+else in the system would have noticed. Added `_vacuity_check`: bootstrap the band's base
+probability from persisted closes (no network) and refuse when history almost always holds it AND
+the model agrees. Reuses the muse's hard-won refinement (D-060) - **disagreement IS the claim**, so
+a stated 27% against a 100% base is a breakout call and passes. Fails OPEN without price history:
+an invented judgement is worse than an unguarded one. Verified on real SPY data: both gaming
+vectors refused, the tight uncertain band and the contrarian call both accepted.
+
+**6. Health cried wolf.** `attribution ran 36x, produced nothing` read as a hard FAIL, but every
+run recorded `pending: 0` - nothing was DUE, because theses resolve at their horizon. A check that
+cries wolf trains the reader to skip the one line that finally matters, which is precisely how the
+silent no-op it exists to catch would slip through. `Probe` gained an optional `work` predicate:
+ran, produced nothing, and nothing was available now reads "idle, not stalled". The real signal is
+preserved and tested - work waiting with nothing attributed still FAILS.
+
+**The strategic finding, not a bug.** Every forecast in the ledger resolved 2026-09-02/03 against a
+2026-09-04 deadline, and ESTABLISH needs 5 resolved. The system was therefore **mathematically
+locked at EXPLORE** (kelly_multiplier 0.0, fixed 2.2% allocation) for the entire competition: the
+learning loop is real, but its output arrived after the last moment it could change a decision. You
+cannot learn from a feedback loop slower than your operating window. Fixed where it belongs - in
+the `record_forecast` docstring, which now argues for 1-3 day horizons and says why ("one slow
+forecast is worth less than three fast ones"). Verified causally on the very next cycle: the agent
+recorded SPY >=768 by **09-01** and reasoned, unprompted, that it "resolves in two sessions (inside
+the deadline, with time left to act on the result)" - previous batch was 09-03 to a man.
+
+**Does elfmem have impact? Measured, and the honest answer is split.** READ side: demonstrably yes -
+11 SELF + 4-5 ATTENTION blocks recalled into every cycle, and the agent cites principles BY NAME in
+its output (`[premise]` x3, `[contradictions]` x2, `[recency]`, `[fallible-recall]`,
+`[research-notes-go-stale-by-design]`, and `[correlated-names-are-one-bet]` - the diversification
+lesson taught after the SPY/QQQ 0.92 correlation finding, now visibly steering live decisions).
+Confidence is differentiated sensibly: a missed prediction sits at 0.28, a validated lesson at 0.75,
+the constitution at 1.0, and D-059's stale SPY price block is correctly `archived`. WRITE side: **it
+has never once learned from a trade.** All 21 `block_outcomes` rows come from the mind subsystem;
+there is not a single `attribution:*` outcome, because attribution waits for a horizon no position
+has reached. elfmem is currently a well-functioning read cache for hard-won principles, and an
+untested write path - which is exactly what finding 6 was masking.
+
+**Verified:** 137 default tests (7 new, one per finding plus the contrarian-call and fail-open cases
+for the vacuity guard). Live forced decide cycle on the new code: `model_served: ['claude-opus-5']`
+recorded correctly, news cache written from the decide path, 4 structures priced and all declined on
+negative EV after costs, with the agent noting ATM IV 10.5% against 21-day realized 11.3% and
+refusing to cherry-pick the 5.9% five-day figure - "turning any of these positive would require me
+to raise my drift input until the answer I wanted appeared."

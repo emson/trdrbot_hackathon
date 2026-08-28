@@ -11,6 +11,7 @@ exit rule that exists only in prose is not an exit rule.
 
 from __future__ import annotations
 
+from datetime import date
 from typing import Any
 
 from langchain_core.tools import StructuredTool
@@ -420,7 +421,64 @@ def build_size_position(
     )
 
 
-def build_record_forecast(ledger: Any) -> StructuredTool:
+#: A forecast whose band history almost always holds is uninformative - UNLESS
+#: the model disagrees with history, which is exactly what makes it a claim.
+#: Same threshold and same reasoning as the muse's adversarial gate, which
+#: learned this the hard way: a naive ceiling rejected a stated 27% against a
+#: 99% base, i.e. the single most interesting call it generated (D-060).
+VACUITY_BASE = 0.90
+VACUITY_AGREE = 0.25
+
+
+def _vacuity_check(state_dir: "Path | None", underlying: str, probability: float,
+                   horizon: str, band_low: float | None, band_high: float | None) -> str | None:
+    """Refuse a forecast that history says is a near-certainty and the model agrees with.
+
+    Calibration gates SIZE (competence.min_n), so every recorded forecast is a
+    claim on real risk budget. Without this, "SPY between 0 and 10000 next
+    Tuesday" is a scoreable forecast that resolves true, counts toward
+    `resolved`, and walks the agent up the size ladder on evidence of nothing.
+    That is not a hypothetical: the ladder's only n-gate is a COUNT, so
+    inflating the count is the cheapest possible way to earn size dishonestly,
+    and nothing else in the system would have noticed (D-070).
+
+    Fails OPEN, deliberately: no persisted history means no anchor, and an
+    invented judgement is worse than an unguarded one - the same rule
+    `_plausible_band` follows when it has no spot to judge against.
+    """
+    if state_dir is None or (band_low is None and band_high is None):
+        return None
+    try:
+        closes = market_stats.load_closes(state_dir, underlying)
+        if not closes or len(closes) < 60:
+            return None
+        days = (date.fromisoformat(horizon) - date.today()).days
+        if days <= 0 or days > 30:
+            return None  # horizon sanity is scored elsewhere; not this gate's job
+        factors = market_stats.bootstrap_factors(closes, days, seed=f"forecast|{underlying}")
+        if not factors:
+            return None
+        spot = closes[-1]
+        held = sum(1 for f in factors
+                   if (band_low is None or spot * f >= band_low)
+                   and (band_high is None or spot * f <= band_high))
+        base = held / len(factors)
+    except Exception:  # noqa: BLE001 - a guard that crashes is worse than no guard
+        return None
+
+    if base >= VACUITY_BASE and abs(probability - base) < VACUITY_AGREE:
+        return (
+            f"REFUSED: uninformative. History says that band holds {base:.0%} of the time "
+            f"over {days}d and you said {probability:.0%} - you are agreeing with the base "
+            f"rate, so this scores as 'right' without testing any judgement, while still "
+            f"counting toward the calibration that earns size. Tighten the band until it "
+            f"is genuinely uncertain, or state a probability that actually disagrees with "
+            f"history and say why."
+        )
+    return None
+
+
+def build_record_forecast(ledger: Any, state_dir: "Path | None" = None) -> StructuredTool:
     """Tool: put a view on the record without trading it.
 
     The cheapest evidence available to this agent. Size is gated on measured
@@ -452,12 +510,27 @@ def build_record_forecast(ledger: Any) -> StructuredTool:
             probability: your honest P(0-1) that the band holds at the horizon.
                 Do not round to 0.5/0.75 - granularity matters, and rounding
                 measurably degrades forecast accuracy.
-            horizon: YYYY-MM-DD when this is judged
+            horizon: YYYY-MM-DD when this is judged. PREFER 1-3 DAYS OUT.
+                A forecast only teaches you anything once it RESOLVES, and
+                nothing you record can move your size until it has. Week-long
+                horizons on a short operating window resolve after the point
+                they could have changed a decision - one slow forecast is
+                worth less than three fast ones, even though it feels more
+                serious. Short horizons are also harder, which is the point:
+                they test judgement rather than drift.
             band_low: holds only if price >= this at the horizon
             band_high: holds only if price <= this at the horizon.
                 Give at least one, or it cannot be scored and will be refused.
+                Make the band genuinely uncertain - one history almost always
+                holds is refused as uninformative, because scoring 'right' on
+                a near-certainty earns size without testing judgement.
             why: brief reasoning, for the record
         """
+        vacuous = _vacuity_check(state_dir, underlying, probability,
+                                 horizon, band_low, band_high)
+        if vacuous:
+            return vacuous
+
         e = ledger.register(
             kind=STANDALONE, underlying=underlying, claim=claim,
             probability=probability, horizon=horizon,

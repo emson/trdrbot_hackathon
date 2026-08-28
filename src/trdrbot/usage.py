@@ -100,6 +100,28 @@ class UsageLedger:
                 continue
         return out
 
+    def served_since(self, role: str, since_ts: str) -> list[str]:
+        """Models that ACTUALLY answered `role` since `since_ts`, first-seen order.
+
+        The journal used to record `config.model` - the configured FIRST
+        CHOICE - as "the model that made this decision". When the fallback
+        chain fires, that is simply false: 19 decide cycles were journalled as
+        `anthropic:claude-opus-5` while this ledger shows `gpt-5` served every
+        one of them (D-070). Fallback firing is not an error and leaves no
+        error record, so nothing else in the system would ever have contradicted
+        the wrong attribution. This is the only place that knows the truth,
+        because it is written from the provider's own response metadata.
+
+        A list, not a single value: one decide cycle is several LLM calls, and
+        a chain that fails over mid-cycle genuinely was served by two models.
+        Flattening that to one name would trade a known lie for a subtler one.
+        """
+        seen: list[str] = []
+        for c in self.calls():
+            if c.role == role and c.ts >= since_ts and c.model not in seen:
+                seen.append(c.model)
+        return seen
+
     def summary(self) -> dict[str, Any]:
         calls = self.calls()
         priced = [c for c in calls if c.cost_usd is not None]

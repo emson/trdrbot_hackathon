@@ -1653,3 +1653,131 @@ def test_render_block_shows_number_horizon_and_citation_together():
     assert "/near_term" in out
     assert "conf=0.8" in out
     assert "<https://ex.com/a>" in out
+
+
+# ---------------------------- D-070 shakedown findings
+
+def test_served_model_is_read_from_the_ledger_not_the_config(tmp_path):
+    """The journal recorded `config.model` as "the model that made this
+    decision". When the fallback fires that is false - 19 cycles were
+    journalled as claude-opus-5 while the usage ledger showed gpt-5 served
+    every one. Fallback is not an error and leaves no error record, so
+    nothing else would ever have contradicted it."""
+    from trdrbot.usage import UsageLedger
+
+    from trdrbot import ids
+
+    led = UsageLedger(tmp_path / "u.jsonl", {})
+    led.record("decide", "claude-opus-5", 10, 10)   # an EARLIER cycle
+    # Production takes the mark fresh, before the cycle's first call - not
+    # from a prior call's timestamp (tick.py: `decide_started_at`).
+    mark = ids.utc_now().isoformat()
+    led.record("decide", "gpt-5", 10, 10)           # this cycle: fallback fired
+    led.record("news_extract", "gpt-4o-mini", 5, 5)  # another role, same window
+
+    served = led.served_since("decide", mark)
+    assert served == ["gpt-5"], f"must report what actually served, got {served}"
+    assert "gpt-4o-mini" not in served, "must not leak other roles' models"
+
+
+def test_served_since_reports_every_model_when_a_chain_fails_over_mid_cycle(tmp_path):
+    """One decide cycle is several LLM calls; a chain that fails over halfway
+    genuinely WAS served by two models. Collapsing that to one name would
+    trade a known lie for a subtler one."""
+    from trdrbot.usage import UsageLedger
+
+    from trdrbot import ids
+
+    led = UsageLedger(tmp_path / "u.jsonl", {})
+    mark = ids.utc_now().isoformat()
+    for m in ("claude-opus-5", "gpt-5", "gpt-5"):
+        led.record("decide", m, 1, 1)
+    assert led.served_since("decide", mark) == ["claude-opus-5", "gpt-5"]
+
+
+def test_news_payload_keeps_the_publisher_article_id():
+    """The article id is the news_extract cache key. Dropping it - as the
+    payload originally did - meant the same article cached under the inbox
+    item id from the decide path and the publisher id from a direct get_news
+    call: extracted twice, paid for twice, dedup silently defeated."""
+    from trdrbot.sensors import _news_payload
+
+    p = _news_payload({"id": "abc123", "headline": "H", "summary": "S",
+                       "source": "reuters", "symbols": ["SPY"],
+                       "created_at": "2026-08-28T09:00:00Z", "url": "https://x/1"})
+    assert p["id"] == "abc123", "cache key must survive into the payload"
+    assert p["url"] == "https://x/1", "citation must survive too"
+
+
+def test_record_forecast_refuses_a_band_history_almost_always_holds(tmp_path):
+    """Calibration gates SIZE, so a vacuous forecast that scores 'right'
+    walks the agent up the ladder on evidence of nothing. The ladder's only
+    n-gate is a COUNT, so inflating the count is the cheapest way to earn
+    size dishonestly and nothing else would have noticed."""
+    from datetime import date, timedelta
+    from trdrbot import market_stats
+    from trdrbot.local_tools import _vacuity_check
+
+    closes = [100.0 * (1.0005 ** i) for i in range(120)]  # calm, no big moves
+    market_stats.save_closes(tmp_path, "TEST", closes)
+    spot = closes[-1]
+    horizon = (date.today() + timedelta(days=3)).isoformat()
+
+    gamed = _vacuity_check(tmp_path, "TEST", 0.97, horizon, 1.0, 100000.0)
+    assert gamed and "uninformative" in gamed
+
+    honest = _vacuity_check(tmp_path, "TEST", 0.55, horizon, spot * 0.999, spot * 1.001)
+    assert honest is None, "a genuinely uncertain band must pass"
+
+
+def test_vacuity_guard_keeps_a_contrarian_call_against_an_extreme_base(tmp_path):
+    """The muse learned this the hard way: a naive ceiling rejected a stated
+    27% against a 99% base - the single most interesting call it produced.
+    Disagreeing with history IS the claim, so only AGREEMENT is vacuous."""
+    from datetime import date, timedelta
+    from trdrbot import market_stats
+    from trdrbot.local_tools import _vacuity_check
+
+    closes = [100.0 * (1.0005 ** i) for i in range(120)]
+    market_stats.save_closes(tmp_path, "TEST", closes)
+    spot = closes[-1]
+    horizon = (date.today() + timedelta(days=3)).isoformat()
+
+    assert _vacuity_check(tmp_path, "TEST", 0.27, horizon, spot * 0.8, spot * 1.2) is None
+
+
+def test_vacuity_guard_fails_open_without_price_history(tmp_path):
+    """No anchor means no judgement. An invented one is worse than none -
+    the same rule _plausible_band follows when it has no spot."""
+    from datetime import date, timedelta
+    from trdrbot.local_tools import _vacuity_check
+
+    horizon = (date.today() + timedelta(days=3)).isoformat()
+    assert _vacuity_check(tmp_path, "NOHIST", 0.99, horizon, 1.0, 99999.0) is None
+    assert _vacuity_check(None, "TEST", 0.99, horizon, 1.0, 99999.0) is None
+
+
+def test_health_separates_idle_attribution_from_a_stalled_one(tmp_path):
+    """attribution ran 36x and produced nothing, which health called a hard
+    FAIL - but every run recorded `pending: 0`: nothing was DUE, because
+    theses resolve at their horizon. A check that cries wolf trains the
+    reader to skip the one line that finally matters. The real signal must
+    still fire when work genuinely was waiting."""
+    import json
+    from trdrbot.health import BAD, OK, check
+
+    def journal(pending: int) -> "object":
+        p = tmp_path / f"j{pending}.jsonl"
+        p.write_text("".join(
+            json.dumps({"kind": "attribution_run", "pending": pending,
+                        "attributed": 0, "skipped_no_price": 0}) + "\n"
+            for _ in range(10)))
+        return p
+
+    idle = dict((name, (lvl, msg)) for lvl, name, msg in check(journal(0), []))
+    assert idle["attribution"][0] == OK, "nothing due must not read as broken"
+    assert "idle" in idle["attribution"][1]
+
+    stalled = dict((name, (lvl, msg)) for lvl, name, msg in check(journal(4), []))
+    assert stalled["attribution"][0] == BAD, \
+        "work waiting and nothing attributed is a REAL failure and must still fire"
