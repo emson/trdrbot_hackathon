@@ -3288,3 +3288,38 @@ def test_every_muse_rejection_path_records_itself():
     ]
     assert not missing, f"rejection path(s) do not record which gate refused: {missing}"
     assert sum(1 for l in lines if 'verdict["fate"]' in l and "rejected" in l) >= 6
+
+
+def test_health_can_tell_an_armed_exit_engine_from_a_missing_one(tmp_path):
+    """The probe read `exit` TRIGGER rows as evidence the engine had run, so
+    "ran" and "produced" were the same number - the tautology D-074 named. Live
+    proof it mattered: an open SPY spread with five armed rules and a populated
+    debounce history reported `exit_rules never ran`, because nothing had
+    breached. That is the engine working, not the engine missing."""
+    import json as _json
+    from trdrbot import health
+
+    p = tmp_path / "journal.jsonl"
+
+    # Engine evaluating, nothing breached - healthy.
+    rows = [{"kind": "exit_run", "positions": 1, "rules": 5, "triggered": 0}] * 40
+    p.write_text("\n".join(_json.dumps(r) for r in rows) + "\n")
+    found = {n: (l, d) for l, n, d in health.check(p, [])}
+    assert found["exit_rules"][0] == health.OK, found["exit_rules"]
+    assert "armed, not stalled" in found["exit_rules"][1], (
+        "an exit engine is a fire alarm - evaluating and never firing is the "
+        "healthy state, and the staleness check must not escalate a quiet market")
+
+    # Positions open but ZERO rule-checks performed - that is broken, and used
+    # to look identical to the healthy case above.
+    rows = [{"kind": "exit_run", "positions": 1, "rules": 0, "triggered": 0}] * 40
+    p.write_text("\n".join(_json.dumps(r) for r in rows) + "\n")
+    found = {n: (l, d) for l, n, d in health.check(p, [])}
+    assert found["exit_rules"][1].endswith("idle, not stalled") or \
+        found["exit_rules"][0] == health.OK
+
+    # And a real trigger reads as production.
+    rows.append({"kind": "exit_run", "positions": 1, "rules": 5, "triggered": 1})
+    p.write_text("\n".join(_json.dumps(r) for r in rows) + "\n")
+    found = {n: (l, d) for l, n, d in health.check(p, [])}
+    assert found["exit_rules"][0] == health.OK and "produced 1" in found["exit_rules"][1]

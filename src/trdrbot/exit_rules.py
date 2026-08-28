@@ -224,10 +224,13 @@ async def run(
 ) -> list[str]:
     """Evaluate every still-open position and close those that trigger."""
     triggered: list[str] = []
+    watched = rules_checked = 0
 
     for pos in store.open_positions():
         if pos.status != "open":
             continue  # only fully-open positions are candidates
+        watched += 1
+        rules_checked += len(watched_signals(pos)) + 1  # +1 for the implicit deadline
 
         reason, why, pnl = evaluate(pos, snap, deadline)
         store.save(pos)  # persist debounce state either way
@@ -264,5 +267,17 @@ async def run(
             await learn.on_resolution(pos, store, mem, wiki, journal, pnl_pct=pnl,
                                        calibration=calibration)  # F3
         triggered.append(pos.position_id)
+
+    # Heartbeat, same reason as housekeeping's `interim_run` (D-074): the health
+    # probe read the `exit` rows themselves as evidence the engine had RUN, so
+    # "ran" and "produced" were the same number and it could only ever report
+    # "never ran". Live proof it mattered: an open SPY spread with five rules
+    # armed and a populated debounce history read as `exit_rules never ran`,
+    # because nothing had breached - which is the engine working, not the
+    # engine missing. An engine that evaluates and correctly holds must be
+    # distinguishable from one that is not evaluating at all.
+    if watched:
+        journal.append("exit_run", positions=watched, rules=rules_checked,
+                       triggered=len(triggered))
 
     return triggered

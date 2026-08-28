@@ -29,12 +29,15 @@ Sorted by severity.
 - **I-5 · `history()` in elfmem raises TypeError** (upstream; found D-059 investigation:
   `'<' not supported between str and int`). Blocks per-block audit trails. Reported upstream? NO -
   add to next elfmem report. **Re-verified unchanged against elfmem 0.20.0** (D-075).
-- **I-9 · The exit-rule engine has never fired on live data** (D-071, still true at D-074). Both
-  positions to date closed externally and the book is currently flat. D-074 fixed the arithmetic
-  that made every mark-based rule on those positions *unreachable* and added a reachability
-  warning at `record_position` - but the deterministic path that protects capital when the agent
-  is not looking, and the warning itself, remain unexercised in production. **Action due:** confirm
-  on the first position opened after D-074.
+- **I-9 · The exit-rule engine is ARMED on live data but has never fired** (D-071 -> D-082).
+  Progressed 2026-08-28: a SPY 766/758 bear put spread is open, `status: open`, with five rules
+  evaluating every tick and a populated debounce history - the first time the deterministic
+  capital-protection path has run against a real position. Nothing has breached, which is the
+  engine working rather than missing. D-082 fixed the health probe that could not tell those apart
+  (it read `exit` trigger rows as evidence the engine had RUN, so it reported "never ran" while the
+  engine was evaluating). **Still unverified:** an actual trigger, and the D-074 reachability
+  warning, which this position did not need - its -65% stop and +140% target are both reachable
+  against the net-cost base.
 - **I-10 · Interim scoring is fixed but unfired** (D-074). It needs an open position moving 25% of
   its net entry cost and there is no open position. The `interim_run` heartbeat now distinguishes
   "idle" from "stalled", which is the part verifiable today.
@@ -47,17 +50,20 @@ Sorted by severity.
   essentially every payoff tested. The real step-ups are SCALE and MATURE, both gated on
   attribution, which has never run. Coherent, but the first rung currently changes nothing but the
   book cap.
-- ~~**I-21 · Nothing computes effective sample size**~~ **FIXED 2026-08-28 (D-081)** - 38 theses are 4.2 independent bets;
-  the 9 positive-Kelly claims are 2.0. Naive per-bet Kelly across them overbets by **4.6x**, and
-  only the book caps prevented it - luck, not design, and it stops being luck at SCALE/MATURE where
-  the multipliers rise. `[correlated-names-are-one-bet]` says this in prose and the per-underlying
-  cap counts NAMES rather than exposures. Surface `n_eff` (inverse-Herfindahl over underlyings)
-  next to `n` on every calibration and sizing surface.
-- ~~**I-22 · The muse places bands at prices that do not exist**~~ **FIXED 2026-08-28 (D-081)** - NVDA [650,920] against a
-  spot of 218.97; QQQ [355,385] against 716; MSTR [420,860] against 126.87 - real-world levels
-  recalled from training data. Its own gates catch most of them (13 of 15 candidates rejected), so
-  the leak was the LEDGER not the muse, and that is fixed - but the underlying prompt still invites
-  it. The nominate step is given live closes; the band step should be too, explicitly.
+- ~~**I-21 · Nothing computes effective sample size**~~ **FIXED 2026-08-28 (D-081).**
+  `Forecast.subject` carries the underlying; `Calibration.n_eff` (inverse-Herfindahl) and
+  `sample_note()` reach `verdict()`, `trdrbot calibration` and the decide prompt. Reported, never
+  gated - a test asserts `n_eff` appears in neither `sizing` nor `competence`, because calibration
+  and portfolio correlation are different questions. The measurement that motivated it: 38 theses
+  are 4.2 effective bets, the 9 positive-Kelly ones are 2.0, and naive per-bet Kelly across them
+  overbets by 4.6x.
+- ~~**I-22 · The muse places bands at prices that do not exist**~~ **FIXED 2026-08-28 (D-081).**
+  It was asked for "PRICES IN DOLLARS" with no spot anywhere in its prompt, so it answered from
+  training data (NVDA [650,920] against 218.97). The schema now takes `band_low_pct`/`band_high_pct`
+  and `_bands_from_pct` converts against live closes - a central price service could NOT have fixed
+  this, since the muse names arbitrary underlyings and nobody knows which spots to supply until it
+  has replied. Measured same-day: 13 of 15 candidates rejected -> 1 of 5, bands landing -2.1% and
+  +3.8% from spot.
 - **I-20 · 24 legacy dossiers carry no lifecycle stamp** (D-078). `is_stale()` is False without
   `stale_after`, so they are never swept until re-researched - deliberate, fail-safe migration.
   Their durable sections also still carry the old welded text (22 of 28 read "Company Inc. -

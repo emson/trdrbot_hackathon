@@ -4,24 +4,24 @@ sources:
 - id: src-1
   resource: discovery:news+polymarket+yahoo
   author: trdrbot/discovery
-  last_modified: '2026-08-28T16:07:40.197877+00:00'
+  last_modified: '2026-08-28T18:17:03.625448+00:00'
 generated:
-  at: '2026-08-28T16:07:40.198572+00:00'
-stale_after: '2026-08-29T16:07:40.198580+00:00'
+  at: '2026-08-28T18:17:03.625993+00:00'
+stale_after: '2026-08-29T18:17:03.625997+00:00'
 status: stable
 ---
 
 # What it is
-Offers point-of-sale financing and consumer credit products to merchants and shoppers (BNPL and merchant-facing payments/credit services).
+Fintech provider of buy‑now‑pay‑later and point‑of‑sale credit solutions for consumers and merchants.
 
 # Bull case
-Multiple headlines report Affirm beat Q4 revenue and adjusted EPS with GMV up ~35% and raised near-term revenue expectations — a clear earnings/growth catalyst that could re-rate consensus and compress downside skew; options to play continuation of momentum or long-dated exposure to improving fundamentals. Bullish continuation into 2026-08-31 is plausible after a clear earnings beat and raised near-term revenue expectations; technicals show positive momentum (5d +7.3%) and moderate realized vol, bootstrap P(+5% or more)=20% but two-way risk remains.
+Fundamental momentum vs macro risk: Affirm surged after beating expectations and issuing strong guidance (including expansion with Shopify), representing a near-term bullish catalyst — but prediction‑market and Fed commentary show higher odds of near-term rate hikes, which increases credit and funding risk; options strategies can express asymmetric exposure to the guidance while hedging rate sensitivity. Bullish-but-hazardous near term. Fundamentals and momentum are supportive (recent beat and strong guidance; price above SMA20/50, RSI 58), but macro risk (higher odds of Fed hikes) adds funding/credit tail risk. Bootstrap shows a modest short-term upside chance (P(+5%) 20%) but also nontrivial downside (P(-5%) 25%).
 
 # Bear case
-Reversion to mean or profit-taking (bootstrap P(-5% or worse)=25%); macro/consumer-spend news could offset firm-specific beat. Options available (PASS).
+A surprise move in Fed expectations or rate-sensitive credit headlines can quickly reprice BNPL/credit-sensitive names and widen funding spreads for the company.
 
 # People
 (not researched - discovery pass)
 
 # Environment
-Verdict: opportunity. Evidence: Affirm's Q4 adjusted EPS and revenue exceeded estimates, with GMV rising 35%. | benzinga 2026-08-28T15:09; Affirm Holdings reported strong Q4 results and expects higher revenue for the first quarter. | benzinga 2026-08-28T12:55
+Verdict: watch. Evidence: Affirm stock surged after beating expectations and issuing strong guidance. | benzinga 2026-08-28T17:16; Odds of a Fed rate hike increased to 68% following Kevin Warsh's inflation concerns. | benzinga 2026-08-28T16:09

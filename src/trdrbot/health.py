@@ -50,6 +50,12 @@ class Probe:
     #: the reader to skip the one line that finally matters. When this is
     #: given and returns 0, silence is explained rather than alarming.
     work: Callable[[list[dict[str, Any]]], int] | None = None
+    #: Some subsystems are CORRECT when they produce nothing. An exit engine is
+    #: a fire alarm: evaluating every tick and never firing is the healthy
+    #: state, not a stall, and the staleness check would otherwise escalate a
+    #: quiet market into a PROBLEM. Set only where zero output is the expected
+    #: steady state - never as a way to silence a probe that is genuinely dead.
+    silence_is_normal: bool = False
 
 
 PROBES: tuple[Probe, ...] = (
@@ -80,10 +86,20 @@ PROBES: tuple[Probe, ...] = (
         lambda rows: sum(int(r.get("opportunities") or 0) for r in rows), 2,
         "discovery nominates but nothing survives its gates",
     ),
+    # `ran` is the HEARTBEAT, not the trigger. Reading `exit` rows as evidence
+    # the engine ran made this a tautology: an open position with five armed
+    # rules and a live debounce history reported "never ran" simply because
+    # nothing had breached. `work` is the number of rule-checks actually
+    # performed, so "evaluated 40 times, nothing breached" reads as healthy and
+    # "positions open, zero rules evaluated" reads as broken - which are very
+    # different things and used to be the same line.
     Probe(
-        "exit_rules", ("exit",),
-        lambda rows: len(rows), 0,
-        "no exit has ever fired (fine early; suspicious once positions resolve)",
+        "exit_rules", ("exit_run",),
+        lambda rows: sum(int(r.get("triggered") or 0) for r in rows), 0,
+        "positions were watched and no rule ever fired - check that the "
+        "thresholds are reachable against the net-cost base",
+        work=lambda rows: sum(int(r.get("rules") or 0) for r in rows),
+        silence_is_normal=True,
     ),
     # `ran` is the HEARTBEAT, not the output. Reading the output rows as
     # evidence of running makes the probe a tautology (see the `interim_run`
@@ -152,13 +168,16 @@ def check(journal_path: Path, positions: list[Any]) -> list[tuple[str, str, str]
         elif made == 0 and probe.work is not None and probe.work(ran) == 0:
             findings.append((OK, probe.name,
                              f"ran {len(ran)}x, nothing was due - idle, not stalled"))
+        elif made == 0 and probe.silence_is_normal:
+            findings.append((OK, probe.name,
+                             f"ran {len(ran)}x, nothing breached - armed, not stalled"))
         elif made == 0 and len(ran) >= probe.min_runs > 0:
             findings.append((BAD, probe.name,
                              f"ran {len(ran)}x, produced nothing - {probe.meaning}"))
         else:
             # It has produced SOMETHING - but when? A total cannot tell a live
             # subsystem from one that worked at the start and then died.
-            since = _runs_since_last_output(ran, probe)
+            since = 0 if probe.silence_is_normal else _runs_since_last_output(ran, probe)
             if since >= STALE_AFTER_RUNS:
                 findings.append((BAD, probe.name,
                                  f"ran {len(ran)}x, produced {made} - but nothing in the "

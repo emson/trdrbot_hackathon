@@ -4,7 +4,7 @@ sources:
 - id: src-1
   resource: discovery:news+polymarket+yahoo
   author: trdrbot/discovery
-  last_modified: '2026-08-28T16:07:40.191450+00:00'
+  last_modified: '2026-08-28T18:17:03.621735+00:00'
 - id: src-2
   resource: discovery:news+polymarket+yahoo
   author: trdrbot/discovery
@@ -22,22 +22,22 @@ sources:
   author: trdrbot/discovery
   last_modified: '2026-08-28T15:31:02.123203+00:00'
 generated:
-  at: '2026-08-28T16:07:40.193194+00:00'
-stale_after: '2026-08-29T16:07:40.193218+00:00'
+  at: '2026-08-28T18:17:03.623039+00:00'
+stale_after: '2026-08-29T18:17:03.623046+00:00'
 status: stable
 ---
 
 # What it is
-Designs and sells semiconductors and systems for data infrastructure, networking and storage (AI/data-center focused).
+Designer of semiconductor components and AI/networking chips used in data centers and cloud infrastructure.
 
 # Bull case
-CEO commentary flags a material but potentially underpriced opportunity tied to Google's AI deal — suggests a near-term revenue/cycle re-rating risk if market has not fully priced Marvell as a Google AI infrastructure supplier. Options can play asymmetric upside around any contract/earnings confirmation. Near-term asymmetric upside plausible into 2026-08-31 driven by CEO commentary about a material Google AI opportunity; technicals show recent short-term weakness (5d -8.4%) but 21d strength and high realized vol, and bootstrap shows a non-trivial P(+5% or more)=22%. Expect a binary/convex move if contract/confirmation news arrives.
+Analyst-driven asymmetric upside: a published analyst note ties Marvell's Google AI chip deal to a potential $120 billion long‑term revenue opportunity — a large multi-year growth narrative that could be underappreciated by current option-implied expectations, making LEAPS or callstructured trades interesting ahead of further AI deployment updates. Bullish-tilted, event-sensitive. Analyst narrative around a large multi-year Google AI opportunity plus elevated realized vol (21d 87.6% / 5d 92.6%) supports a near-term asymmetric upside play. Bootstrap shows a meaningful chance of a >+5% move (P(+5%) 22%) over 5 days.
 
 # Bear case
-Market already priced deal exposure or disappointment on sizing/ timing; high realized volatility implies wide two-way risk (bootstrap P(-5% or worse)=25%). Options available (PASS) but implieds may be rich.
+Any analyst retraction, competitor news, or broad semiconductor sell-off could erase upside quickly; downside tail is non-trivial (bootstrap P(-5%) 25%).
 
 # People
 (not researched - discovery pass)
 
 # Environment
-Verdict: opportunity. Evidence: Marvell CEO highlights a significant opportunity in Google's AI deal, suggesting potential underestimation by Wall Street. | benzinga 2026-08-28T15:21
+Verdict: opportunity. Evidence: Marvell's Google AI chip deal could drive $120 billion in long-term revenue. | benzinga 2026-08-28T17:05
