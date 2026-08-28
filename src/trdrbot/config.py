@@ -111,6 +111,13 @@ class Config:
         return (self.raw.get("llm") or {}).get("pricing") or {}
 
     @property
+    def decide_tools(self) -> list[str]:
+        """MCP tools bound to the decide agent. Empty list = bind everything
+        (the pre-D-065 behaviour, kept as the fallback so a missing config
+        section degrades to working-but-expensive, never to broken)."""
+        return list((self.raw.get("decide") or {}).get("tools") or [])
+
+    @property
     def events(self) -> list[dict]:
         return list(self.raw.get("events") or [])
 

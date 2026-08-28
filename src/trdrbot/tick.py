@@ -32,6 +32,7 @@ from typing import Any
 from langgraph.prebuilt import create_react_agent
 
 from . import (
+    compact,
     competence,
     idle,
     ledger as ledger_mod,
@@ -310,7 +311,15 @@ async def run_tick(
 
         # The model authors every tool argument, so without this it invents its
         # own client_order_id and INV-18's idempotency guarantee silently evaporates.
-        guarded = tool_guard.enforce_order_ids(tools_list, batch)
+        # Context diet (D-065), applied BEFORE the guards so everything
+        # composes: (1) bind only the allowlisted tools - schemas for 72 cost
+        # ~21k tokens per call and the agent has ever used 17; (2) compact
+        # heavy results at the boundary so a 61k-char option chain enters
+        # context as a ~4k table instead of being re-sent in full every turn.
+        allow = set(config.decide_tools)
+        decide_mcp = [t for t in tools_list if not allow or t.name in allow]
+        decide_mcp = compact.wrap_heavy_tools(decide_mcp)
+        guarded = tool_guard.enforce_order_ids(decide_mcp, batch)
 
         query = " ".join(config.watchlist) + " options setup"
         ctx = await mem.assemble_context(query)

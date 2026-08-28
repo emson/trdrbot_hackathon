@@ -1432,3 +1432,65 @@ def test_build_model_raises_clearly_when_nothing_is_usable():
         assert False, "should have raised"
     except RuntimeError as e:
         assert "No usable model" in str(e) and "decide" in str(e)
+
+
+# ---------------------------- D-065 context diet
+
+def _chain_payload(spot=767, strikes=range(600, 940, 5)):
+    def snap(bid, ask, last):
+        return {"dailyBar": {"c": 1}, "minuteBar": {"c": 1}, "prevDailyBar": {"c": 1},
+                "latestQuote": {"ap": ask, "as": 10, "bp": bid, "bs": 25},
+                "latestTrade": {"p": last}}
+    snaps = {}
+    for k in strikes:
+        ic, ip = max(0.0, spot - k), max(0.0, k - spot)
+        snaps[f"SPY260902C{k*1000:08d}"] = snap(ic + 1.0, ic + 1.1, ic + 1.05)
+        snaps[f"SPY260902P{k*1000:08d}"] = snap(ip + 1.0, ip + 1.1, ip + 1.05)
+    return {"next_page_token": "t", "snapshots": snaps}
+
+
+def test_chain_compaction_keeps_near_atm_and_drops_far_strikes():
+    """One chain payload is ~15k tokens re-sent every agent turn - 84% of
+    decide cost was input. Compaction is 13x, and the near-ATM rows the
+    decision actually needs survive with prices verbatim."""
+    import json
+    from trdrbot.compact import compact_option_chain
+    payload = _chain_payload()
+    out = compact_option_chain(payload)
+    assert isinstance(out, str)
+    assert len(out) * 10 < len(json.dumps(payload)), "must be ~13x smaller"
+    assert "765" in out and "770" in out, "near-ATM strikes must survive"
+    assert "3.00x25" in out, "prices and sizes reproduced verbatim"
+    assert "strike_price_gte" in out, "the escape hatch must be stated"
+
+
+def test_chain_compaction_fails_open_on_any_surprise():
+    """A compactor that returns an empty string on a shape change would starve
+    the decision silently - the null-path class again. Surprises pass the
+    ORIGINAL through untouched."""
+    from trdrbot.compact import compact_option_chain
+    for weird in ({"weird": 1}, "not a dict", {"snapshots": {}},
+                  {"snapshots": {"NOTANOCC": {}}}, None, 42):
+        assert compact_option_chain(weird) == weird
+
+
+def test_news_compaction_strips_bodies_keeps_headlines():
+    from trdrbot.compact import compact_news
+    news = {"news": [{"created_at": "2026-08-28T12:00:00Z", "headline": "H",
+                      "source": "S", "symbols": ["SPY"], "content": "x" * 3000}]}
+    out = compact_news(news)
+    assert "H" in out and "x" * 50 not in out
+    assert compact_news({"nope": 1}) == {"nope": 1}
+
+
+def test_decide_tools_allowlist_empty_means_bind_everything():
+    """A missing config section must degrade to working-but-expensive (all 72
+    tools), never to broken (no tools)."""
+    from pathlib import Path
+    from trdrbot.config import Config
+
+    class P:
+        state = Path("/tmp")
+    assert Config(raw={}, paths=P()).decide_tools == []
+    cfg = Config(raw={"decide": {"tools": ["get_clock"]}}, paths=P())
+    assert cfg.decide_tools == ["get_clock"]

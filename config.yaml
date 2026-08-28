@@ -77,6 +77,34 @@ trading:
   # competition and the learning loop produces nothing.
   deadline: "2026-09-04"
 
+decide:
+  # Tools bound to the decide agent. Binding all 72 MCP tools cost ~21k tokens
+  # of schemas PER LLM CALL, ~71% of it for tools never used once - and a
+  # larger tool menu measurably worsens tool selection. This is every tool the
+  # agent has ever used plus close_position and cancel_order_by_id (used by
+  # the deterministic exit path; the agent may legitimately need them).
+  # The four local tools (simulate/size/record/forecast) are always bound.
+  tools:
+    - get_clock
+    - get_account_info
+    - get_account_config
+    - get_all_positions
+    - get_orders
+    - get_order_by_id
+    - get_news
+    - get_stock_snapshot
+    - get_stock_bars
+    - get_stock_latest_quote
+    - get_stock_latest_trade
+    - get_option_chain
+    - get_option_snapshot
+    - get_option_latest_quote
+    - place_option_order
+    - replace_order_by_id
+    - cancel_order_by_id
+    - close_position
+    - close_all_positions   # kept: the whole-book guard redirects it usefully
+
 tick:
   # Cheap deterministic work every tick; the LLM decide path every N ticks
   # (D-017). The skeleton runs decide every tick so it is easy to explore.

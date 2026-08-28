@@ -2254,3 +2254,43 @@ tokens, and the agent re-sends accumulated context every turn.
   direction is noticed.
 **README rewritten** around this, plus provider configuration, the four testing tiers, all 15 CLI
 commands (each verified to exist), and honest limitations including calibration n=1.
+
+## D-065: The context diet - 48% cheaper AND sharper, measured
+**Date:** 2026-08-28
+**Status:** accepted
+**Context:** 84% of decide-cycle cost was input tokens (D-064). Measured the composition before
+designing anything: **tool schemas were 20,875 tokens PER CALL - and 71% of that (14.8k tokens)
+described 55 tools the agent has never used once.** Across a 7-call cycle, ~104k tokens per
+decision spent listing capabilities that are pure distraction - and a larger tool menu
+measurably worsens tool selection, so the unused 55 were hurting accuracy while costing money.
+The other lever: one `get_option_chain` payload is 61k chars (~15k tokens) - five OHLC bars and
+exchange metadata per contract when the decision needs one line - re-sent in full on every
+subsequent agent turn, burying the relevant strikes mid-context in exactly the
+lost-in-the-middle regime where recall degrades.
+**The design principle: cutting fat and improving accuracy are the SAME move here**, not a
+trade-off. Less distraction in the tool menu, and the decision-relevant rows no longer buried.
+**Two mechanisms:**
+1. **Tool allowlist** (`decide.tools` in config): the 17 tools ever used plus close_position/
+   cancel_order_by_id (the deterministic exit path uses them; the agent may need them). Empty
+   config = bind everything - a missing section degrades to working-but-expensive, never broken.
+2. **Boundary compaction** (`compact.py`): a registry of result rewriters applied before results
+   enter context. Chain: 13x smaller, strikes within 12% of an ATM inferred by put-call parity
+   (no extra network call), prices and sizes VERBATIM never rounded, with the escape hatch
+   stated in the output ("call again with strike_price_gte/lte"). News: headlines only, 78x.
+   **Fails open, loudly**: any parse surprise passes the ORIGINAL through and prints - a
+   compactor returning empty on surprise would starve the decision silently (D-038's class).
+   The tool INTERFACE is untouched, so tool_guard and the whole-book redirect compose unchanged.
+**Measured live, before vs after, same forced-decide conditions:**
+
+| | baseline | after | change |
+|---|---|---|---|
+| input tokens | 553,054 | 230,097 | **-58%** |
+| cost | $0.8251 | $0.4326 | **-48%** |
+| avg input/call | 79,007 | 28,762 | -64% |
+| chain fetches | 2 | **4** | the agent explored MORE |
+
+That last row is the accuracy story: with chains cheap, the agent examined four expiry/strike
+sets instead of two, priced three candidate structures, cited `[friction-is-the-size-of-the-edge]`
+by name, and recorded a 0.74 forecast - the decision got more thorough, not less.
+**Verified:** compactor offline against the real payload shape (13x, ATM correct, six fail-open
+cases pass through untouched); 123 default tests; live cycle measured above.
