@@ -596,7 +596,7 @@ wheels = [
 [[package]]
 name = "elfmem"
 version = "0.20.0"
-source = { git = "https://github.com/emson/elfmem.git?branch=elfmem_index#9527951cac72225d379b47216944e6fb8ad4f696" }
+source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "aiosqlite" },
     { name = "alembic" },
@@ -608,6 +608,10 @@ dependencies = [
     { name = "pyyaml" },
     { name = "rank-bm25" },
     { name = "sqlalchemy" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/92/f7/2686d1e047904ccf3d2826608003585305503c73fd0c026465171c78911e/elfmem-0.20.0.tar.gz", hash = "sha256:090d2dddc4247bd2ff3d1597fd5f5b370e1a0c25a5ae84fd2916227f10071686", size = 2083586, upload-time = "2026-08-28T17:30:16.894Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/42/ea/2ea1ede0966e82b0b52ac95b0e97c6eaff01c346022d3dd5e2a65b77db3f/elfmem-0.20.0-py3-none-any.whl", hash = "sha256:ca65724774669b5775f2e3c6124721b9363b0ca9551cf636033eb9c8c0a5bcfb", size = 413453, upload-time = "2026-08-28T17:30:15.278Z" },
 ]
 
 [package.optional-dependencies]
@@ -2801,7 +2805,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "elfmem", extras = ["tools"], git = "https://github.com/emson/elfmem.git?branch=elfmem_index" },
+    { name = "elfmem", extras = ["tools"], specifier = ">=0.20.0" },
     { name = "langchain", specifier = ">=0.3" },
     { name = "langchain-anthropic", specifier = ">=0.3" },
     { name = "langchain-mcp-adapters", specifier = ">=0.1" },

@@ -280,7 +280,7 @@ Each entry: what it does, what triggers it, how it fails. IDs (C1…) are stable
 |---|---|---|---|---|
 | **C17** | Journal | `journal.jsonl` — every event, append-only; rebuild path | Never edited | Write fails mid-batch |
 | **C18** | Wiki | `positions/`, **`context/`**, `lessons.md`, `strategy.md`, `portfolio.md`, `index.md`, `AGENTS.md`; OKF frontmatter + monotonic-augmentation write guard *(D-022, D-023)* | Edited by C14/C16 | Frontmatter corruption; growth; a shrinking write silently degrading a note (guarded against by design, not yet implemented) |
-| **C19** | elfmem Adapter | `MemorySystem` (library, `elfmem_index` branch on GitHub); frames in, `remember`/`outcome` out | Evolves, can forget | Unavailable; slow; cue omitted |
+| **C19** | elfmem Adapter | `MemorySystem` (library, PyPI `elfmem[tools]>=0.20.0`); frames in, `remember`/`outcome` out | Evolves, can forget | Unavailable; slow; cue omitted |
 
 ---
 

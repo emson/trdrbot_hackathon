@@ -3602,3 +3602,21 @@ protection survives unchanged.
 plus the existing D-074 regression test re-passing unmodified in behaviour - only its exact
 message-matching updated for the shared wording). Live: `health` now reads 0 problems where it
 read 1 an hour ago, with the underlying position genuinely unchanged.
+
+## D-087: elfmem off the git branch - PyPI now that upstream merged and published
+**Date:** 2026-08-28
+**Status:** accepted
+**Context:** Upstream merged the `elfmem_index` branch to main and published `elfmem` 0.20.0 to
+PyPI. `pyproject.toml` had pinned the git branch directly (D-075's install) because that was the
+only place the code existed; the interim dependency was never the goal.
+
+**Change:** `[tool.uv.sources]`'s git override removed; `elfmem[tools]` now version-pinned
+(`>=0.20.0`) and resolved from PyPI like every other dependency. `uv lock` picked up the
+identical commit (`9527951c`) via the PyPI artifact rather than the branch tip - same code, one
+fewer moving part (no branch to track, no git fetch on every install).
+
+**Verified:** `uv lock` resolved clean, 225 default tests pass unchanged against the PyPI
+install. `specs/architecture.md` (C19) and `specs/charter.md` updated to describe the current
+source; historical branch/commit citations elsewhere (issues.md, elfmem_adapter.py,
+test_regressions.py) left as-is since they name where a past fix landed, not the current
+dependency.
