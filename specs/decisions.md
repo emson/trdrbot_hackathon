@@ -3496,3 +3496,72 @@ pricing page directly (flagged as I-24, now covering both models).
 **Verified:** 222 default tests (2 new) + 17 contract tests (16 pass; the 1 expected failure is
 the honest report of Grok-4.6's real outage, not a defect in the test). Live: `build_model`
 confirmed answering via Claude with Grok as primary and down.
+
+## D-085: GPT-5.6 Sol - the third model tried today, and the first that actually works
+**Date:** 2026-08-28
+**Status:** accepted
+**Context:** After Grok-4.6 (D-084) proved live-down on OpenCode Zen, a request to try GPT-5.6
+Sol - explicitly "on OpenAI", meaning direct, no gateway. Researched from OpenAI's own docs page
+(`developers.openai.com/api/docs/models/gpt-5.6-sol`) rather than search summaries: model id
+`gpt-5.6-sol`, OpenAI's flagship reasoning/coding tier, $4.00/M input ($0.40 cached) / $20.00/M
+output - promotional pricing, explicitly time-boxed by OpenAI through at least 2026-11-21 -
+1.05M context, 128K max output, function calling and structured outputs both listed as supported.
+
+**Going direct simplified the provider question to zero.** `openai:` is a real `init_chat_model`
+builtin and the existing `OPENAI_API_KEY` already covers it - no `llm.providers` entry, no new
+env var, unlike both prior attempts today.
+
+**A live 400 caught what documentation would not have, on the first real test.** A trivial
+prompt worked; reproducing the muse's actual ~925-token structured-JSON prompt worked too
+(`finish_reason: stop`, 2924/8000 output tokens, 1487 of them visible as tracked reasoning
+tokens, 6109 valid characters - GLM-5.2's exact failure mode, absent here). But binding a tool
+through `create_react_agent` failed outright:
+
+    openai.BadRequestError: Function tools with reasoning_effort are not supported for
+    gpt-5.6-sol in /v1/chat/completions. To use function tools, use /v1/responses or set
+    reasoning_effort to 'none'.
+
+Every role in this system needs `bind_tools` - this is not a corner case, it is the primary use,
+and an unfixed model would 400 on its first tool call every single cycle. Unlike GLM-5.2's
+silent empty-completion failure, a raised exception WOULD trigger the fallback chain - but the
+declared primary would then never once actually serve, the same wasted-call tax D-084 accepted
+for Grok while it stayed down.
+
+**Choice: `use_responses_api=True`, not `reasoning_effort="none"`.** Both were named as valid
+fixes by OpenAI's own error message. `reasoning_effort="none"` would disable extended reasoning
+entirely to satisfy an API constraint - exactly the false economy this project's own README
+argues against for `decide` ("the strongest reasoning... economising here is false thrift").
+`use_responses_api` keeps full reasoning and switches the transport. Verified live, twice: a
+bound-tool call fires correctly and its RESULT reaches the final answer, both in a standalone
+repro and through the REAL `llm.build_model()` path (not a hand-assembled approximation) via a
+new contract test. Constructor-callback usage tracking (D-062) was also verified to survive the
+Responses API's list-shaped content - 2 calls recorded, correct bare model name `gpt-5.6-sol`
+(matches the pricing table), correct costs.
+
+**The fix needed a mechanism this project didn't have until today, and D-084 already half-built
+it.** `use_responses_api` must apply to ONE spec, never globally - `ChatAnthropic` has no such
+kwarg and would break the moment Claude shared a chain with it, the identical reasoning that
+made `llm.providers` per-spec rather than global. But this is a MODEL quirk, not a PROVIDER
+one - `openai:gpt-5.6-sol` needs no base_url or key override, so `llm.providers` (keyed on
+prefix) is the wrong shape for it. `Config.resolve_model_spec` gained a second layer,
+`llm.model_options`, keyed on the exact spec string as written in `models`/`roles`, merged in
+after (and composable with) any provider-level override. One test constructs a synthetic case
+where both apply to the same spec at once, to prove they don't clobber each other now that
+nothing in the live config actually needs both simultaneously.
+
+**Placed as PRIMARY across every role**, Grok-4.6 and GLM-5.2 both fully removed from the active
+chain (not merely reordered) - Grok because it costs a wasted call every cycle for no live
+benefit (I-25 stands, low priority now), GLM-5.2 because its failure mode is silent rather than
+merely wasteful. Claude and GPT-5 remain the verified fallback.
+
+**Verified, end to end:** `uv run trdrbot doctor` - 5/5 configured models reachable, primary
+answers. 224 default tests (4 new: primary-pin, `model_options` resolution, the no-leak check
+against Claude/plain-GPT-5, and the provider+model-options composition case) + 18 contract tests
+(17 pass; the 1 expected failure is Grok's still-live Zen outage from D-084, unrelated to this
+change and left in place as the tripwire it was designed to be).
+
+**What this closes:** I-23 (GLM tool-calling) stays superseded rather than answered - moot, the
+model was pulled first. I-24 (third-party pricing) is now partially resolved: gpt-5.6-sol's
+figure is the first of three today sourced from the provider's own page directly, though still
+time-boxed and needing a re-check after November. I-25 (Grok outage) is now low-priority rather
+than urgent, since nothing live depends on it answering.

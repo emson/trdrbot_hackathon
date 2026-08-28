@@ -58,24 +58,34 @@ one is a line of config plus (usually) one package — no code changes.
 llm:
   # ORDERED FALLBACK CHAIN — first model that answers wins.
   models:
-    - "opencode_zen:grok-4.6"
+    - "openai:gpt-5.6-sol"
     - "anthropic:claude-opus-5"
     - "openai:gpt-5"
   max_tokens: 8000
 
+  # A model's own API quirk, NOT a provider-wide one — composes with
+  # `providers:` below rather than replacing it. gpt-5.6-sol refuses tool
+  # calls on the classic Chat Completions endpoint while reasoning is
+  # active; a live 400 named the fix. Applying this globally would break
+  # ChatAnthropic, which has no such kwarg, the moment Claude shares a
+  # chain with it — the same reason gateway overrides are per-spec too.
+  model_options:
+    "openai:gpt-5.6-sol":
+      use_responses_api: true
+
   # Optional per-role chains. A role not listed here uses `models` above.
   roles:
-    decide:    ["opencode_zen:grok-4.6", "anthropic:claude-opus-5", "openai:gpt-5"]
-    research:  ["opencode_zen:grok-4.6", "openai:gpt-5-mini", "anthropic:claude-opus-5"]
-    discovery: ["opencode_zen:grok-4.6", "openai:gpt-5-mini", "anthropic:claude-opus-5"]
-    muse:      ["opencode_zen:grok-4.6", "openai:gpt-5-mini", "anthropic:claude-opus-5"]
+    decide:    ["openai:gpt-5.6-sol", "anthropic:claude-opus-5", "openai:gpt-5"]
+    research:  ["openai:gpt-5.6-sol", "openai:gpt-5-mini", "anthropic:claude-opus-5"]
+    discovery: ["openai:gpt-5.6-sol", "openai:gpt-5-mini", "anthropic:claude-opus-5"]
+    muse:      ["openai:gpt-5.6-sol", "openai:gpt-5-mini", "anthropic:claude-opus-5"]
     doctor:    ["openai:gpt-4o-mini"]
 
   # USD per MILLION tokens. Operator-supplied — verify against current published
   # rates; these are not fetched and will go stale. A model missing here is
   # reported as UNPRICED, never counted as free.
   pricing:
-    "opencode_zen:grok-4.6":  {input: 2.00, output: 6.00}
+    "openai:gpt-5.6-sol":     {input: 4.00, output: 20.00}
     "anthropic:claude-opus-5": {input: 15.0, output: 75.0}
     "openai:gpt-5":            {input: 1.25, output: 10.0}
 ```
@@ -95,8 +105,10 @@ case: `init_chat_model`'s provider table is fixed, and every model behind one re
 service can't just reuse that prefix without hijacking the real `openai:gpt-5` entries in the
 same chain. So it gets a config-level provider instead — `llm.providers.<name>` names which
 builtin actually serves the traffic and supplies a per-spec `base_url`/`api_key_env`; a spec
-like `"opencode_zen:grok-4.6"` resolves to `openai:grok-4.6` plus Zen's own connection, and
-every other spec is untouched:
+like `"opencode_zen:<model-id>"` resolves to `openai:<model-id>` plus the gateway's own
+connection, and every other spec is untouched. Not currently in the active chain (see
+below), but the mechanism is exercised by both `providers:` and `model_options:` sharing the
+one resolver:
 
 ```yaml
 llm:

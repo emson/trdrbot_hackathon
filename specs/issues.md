@@ -7,27 +7,28 @@ Sorted by severity.
 
 ## Open
 
-- **I-25 · Grok-4.6 on OpenCode Zen is currently down** (D-084). Confirmed live, not assumed:
-  Zen's own `/v1/models` lists `grok-4.6` correctly and the same key serves `glm-5.2`
-  successfully, but grok-4.6 itself returns HTTP 500 (reproduced 3x) and grok-4.5 (same family)
-  returns 503 "Endpoint is unavailable". Left as the declared primary because the fallback chain
-  is verified to survive it (`test_the_decide_chain_survives_grok_being_down`, real network,
-  confirms `decide` answers via Claude with zero risk) - but every cycle currently pays one
-  wasted call. **Action due:** re-run `uv run pytest -m contract -k grok` periodically; once it
-  passes, confirm with `trdrbot doctor` and note the outage as cleared. If still down after the
-  competition window matters, drop it a rung rather than keep paying the latency.
+
+- **I-25 · Grok-4.6 on OpenCode Zen was down at time of testing, now demoted** (D-084, D-085).
+  Confirmed live: Zen's own `/v1/models` lists `grok-4.6` correctly and the same key serves
+  `glm-5.2`, but grok-4.6 itself returned HTTP 500 (reproduced 3x) and grok-4.5 (same family)
+  returned 503. No longer the primary or in the active chain - superseded by gpt-5.6-sol, which
+  works (D-085). Kept in pricing for reference. **Action due, low priority:** re-run
+  `uv run pytest -m contract -k grok` if OpenCode Zen is ever reconsidered.
+- **I-26 · gpt-5.6-sol pricing is promotional and time-boxed** (D-085). $4.00/$20.00 per M tokens
+  is confirmed from OpenAI's own docs page directly (the first of three models today with a real
+  primary source), but OpenAI states this rate is promotional through at least 2026-11-21.
+  **Action due:** re-check `developers.openai.com/api/docs/models/gpt-5.6-sol` after that date.
 
 - ~~**I-23 · GLM-5.2/OpenCode Zen tool-calling is unverified**~~ **SUPERSEDED 2026-08-28
   (D-084).** With a real key, GLM-5.2 proved reliable for simple prompts but exhausted its ENTIRE
   8000-token completion budget on invisible reasoning for the muse's actual prompt -
   finish_reason="length", zero visible characters, reproduced deterministically. Demoted out of
-  the active chain in favour of Grok-4.6 before its tool-calling belief was ever tested - the
-  question I-23 asked is moot for now, not answered.
-- **I-24 · Third-party-sourced pricing, now covering two models** (D-083, D-084). GLM-5.2
-  ($1.40/$4.40) and Grok-4.6 ($2.00/$6.00, cache $0.50) both came from pricing trackers and
-  aggregators, not Zen's own pricing page directly. Grok's figure is corroborated by two
-  independent sources agreeing exactly - stronger than GLM's had - but still not primary.
-  Re-verify against the first real invoice before this matters for live spend.
+  the active chain before its tool-calling belief was ever tested - the question I-23 asked is
+  moot for now, not answered.
+- ~~**I-24 · Third-party-sourced pricing**~~ **PARTIALLY RESOLVED 2026-08-28 (D-085).**
+  gpt-5.6-sol's figure now comes from OpenAI's own docs page directly. GLM-5.2 ($1.40/$4.40) and
+  Grok-4.6 ($2.00/$6.00) remain third-party-sourced, both now demoted from the active chain -
+  carried for reference only.
 
 - **I-1 · NVDA thesis block carries `self/goal`/`self/style` tags** (found D-059).
   Deliberately deferred: content is live until the 2026-09-03 horizon, never suffered score

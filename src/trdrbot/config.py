@@ -132,21 +132,38 @@ class Config:
         prefix, _, model = spec.partition(":")
         providers = (self.raw.get("llm") or {}).get("providers") or {}
         entry = providers.get(prefix)
-        if not entry:
-            return spec, {}
-        real_provider = entry.get("langchain_provider", "openai")
-        kwargs: dict[str, Any] = {}
-        if entry.get("base_url"):
-            kwargs["base_url"] = entry["base_url"]
-        key_env = entry.get("api_key_env")
-        if key_env:
-            key = os.environ.get(key_env)
-            if not key:
-                raise RuntimeError(
-                    f"{spec}: provider {prefix!r} needs {key_env} set (see .env.example)."
-                )
-            kwargs["api_key"] = key
-        return f"{real_provider}:{model}", kwargs
+        if entry:
+            real_provider = entry.get("langchain_provider", "openai")
+            kwargs: dict[str, Any] = {}
+            if entry.get("base_url"):
+                kwargs["base_url"] = entry["base_url"]
+            key_env = entry.get("api_key_env")
+            if key_env:
+                key = os.environ.get(key_env)
+                if not key:
+                    raise RuntimeError(
+                        f"{spec}: provider {prefix!r} needs {key_env} set (see .env.example)."
+                    )
+                kwargs["api_key"] = key
+            real_spec = f"{real_provider}:{model}"
+        else:
+            real_spec, kwargs = spec, {}
+
+        # A model-specific construction quirk, keyed on the spec AS WRITTEN in
+        # `models`/`roles` - not the resolved one - because that is the string
+        # an operator actually reads and writes in config.yaml. Composes with
+        # the provider override above rather than replacing it.
+        #
+        # The motivating case: gpt-5.6-sol refuses tool calls on the classic
+        # Chat Completions endpoint the moment reasoning is active - a live
+        # 400 named the exact fix: `use_responses_api=True`
+        # (langchain_openai's own flag) or `reasoning_effort="none"`.
+        # use_responses_api was chosen because it keeps full reasoning; NONE
+        # of this is a `providers:` concern - it is one model's own API
+        # surface, and applying it globally would break `ChatAnthropic`,
+        # which has no such kwarg, the moment Claude shared a chain with it.
+        opts = ((self.raw.get("llm") or {}).get("model_options") or {}).get(spec) or {}
+        return real_spec, {**kwargs, **opts}
 
     @property
     def pricing(self) -> dict:

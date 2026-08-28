@@ -466,3 +466,39 @@ async def test_the_decide_chain_survives_grok_being_down(cfg):
         "if this starts passing WITH grok-4.6 as the served model, Zen's "
         "outage has cleared - update the config comment and I-25, don't "
         "just let the assertion go stale")
+
+
+@pytest.mark.asyncio
+async def test_gpt_5_6_sol_calls_a_bound_tool_through_the_real_build_model_path(cfg):
+    """Not a scratch repro - this goes through `llm.build_model()` exactly as
+    `tick.py` does, so it proves the ACTUAL production path (config resolution
+    + use_responses_api + constructor-callback usage tracking, all at once)
+    rather than a hand-assembled approximation of it.
+
+    Grounds the fix a live 400 named: gpt-5.6-sol refuses function tools on
+    the classic Chat Completions endpoint while reasoning is active. Every
+    role in this system needs bind_tools, so an unfixed model_options entry
+    would 400 on the very first tool call, every single decide cycle."""
+    from langchain_core.tools import tool
+    from langgraph.prebuilt import create_react_agent
+    from trdrbot.llm import build_model
+    from trdrbot.usage import UsageLedger
+
+    @tool
+    def get_ticker_price(ticker: str) -> str:
+        """Return the current price for a ticker symbol."""
+        return f"{ticker.upper()} is trading at $123.45"
+
+    m = build_model(cfg, role="decide")
+    agent = create_react_agent(
+        m, [get_ticker_price],
+        prompt="Use the tool to answer. Always call get_ticker_price before answering.")
+    result = await agent.ainvoke(
+        {"messages": [("user", "What is SPY trading at right now?")]})
+
+    calls = [tc for msg in result["messages"]
+             for tc in (getattr(msg, "tool_calls", None) or [])]
+    assert calls, "gpt-5.6-sol answered without calling the bound tool - decide would too"
+    assert calls[0]["name"] == "get_ticker_price"
+    final = str(result["messages"][-1].content)
+    assert "123.45" in final, "the tool RESULT must reach the final answer, not just the call"

@@ -3408,22 +3408,74 @@ def test_pricing_matches_a_bare_served_model_name():
     assert price(cfg.pricing, "opencode_zen:glm-5.2", 1_000_000, 0) is not None
 
 
-def test_grok_4_6_is_the_configured_primary_not_glm():
+def test_gpt_5_6_sol_is_the_configured_primary_not_grok_or_glm():
     """Pins the actual migration decision in config.yaml, so an accidental
-    revert (or a stale copy-paste of the GLM-era chain) is caught rather than
-    silently shipping the wrong primary."""
+    revert (or a stale copy-paste of an earlier attempt's chain) is caught
+    rather than silently shipping the wrong primary. Three models were tried
+    in one day - GLM-5.2 (silently exhausted its output budget on structured
+    prompts), Grok-4.6 (Zen's endpoint was live-down), gpt-5.6-sol (works,
+    once its tool-calling quirk is handled - see the model_options test)."""
     from trdrbot import config as cm
 
     cfg = cm.load(quiet=True)
-    assert cfg.model_chain("decide")[0] == "opencode_zen:grok-4.6"
     for role in ("decide", "research", "discovery", "muse"):
         chain = cfg.model_chain(role)
-        assert chain[0] == "opencode_zen:grok-4.6"
+        assert chain[0] == "openai:gpt-5.6-sol", f"{role}: wrong primary {chain[0]!r}"
         assert "opencode_zen:glm-5.2" not in chain, (
             f"{role}: GLM-5.2 was demoted for exhausting its output budget "
             f"with zero visible text on this exact role's prompt shape - it "
             f"must not silently reappear in an active chain")
+        assert "opencode_zen:grok-4.6" not in chain, (
+            f"{role}: Grok-4.6 was demoted while Zen's endpoint was confirmed "
+            f"live-down - see I-25 before reinstating it")
         # Both real, verified-working fallbacks stay behind it.
         assert "anthropic:claude-opus-5" in chain
+
+
+def test_gpt_5_6_sol_gets_its_tool_calling_fix_via_model_options():
+    """A live 400 named the exact defect: 'Function tools with
+    reasoning_effort are not supported for gpt-5.6-sol in
+    /v1/chat/completions. To use function tools, use /v1/responses or set
+    reasoning_effort to none.' Every role here needs bind_tools, so an
+    unfixed gpt-5.6-sol would 400 on its very first tool-using call, every
+    cycle - a real exception, so the fallback WOULD catch it, but the primary
+    would never once actually serve.
+
+    `use_responses_api=True` was chosen over `reasoning_effort="none"`
+    because decide is the one role this project says should never be
+    economised on - disabling reasoning to dodge an API constraint would be
+    exactly that."""
+    from trdrbot import config as cm
+
+    cfg = cm.load(quiet=True)
+    spec, kwargs = cfg.resolve_model_spec("openai:gpt-5.6-sol")
+    assert spec == "openai:gpt-5.6-sol", "no gateway involved - this is native OpenAI"
+    assert kwargs.get("use_responses_api") is True
+
+    # And it must NOT leak onto a model with no such kwarg - ChatAnthropic
+    # would reject an unknown constructor argument outright.
+    assert cfg.resolve_model_spec("anthropic:claude-opus-5") == (
+        "anthropic:claude-opus-5", {})
+    assert cfg.resolve_model_spec("openai:gpt-5") == ("openai:gpt-5", {})
+
+
+def test_model_options_composes_with_a_provider_override(monkeypatch):
+    """The two per-spec mechanisms (gateway provider, model quirk) must be
+    able to apply to the SAME spec at once without one clobbering the other -
+    a future model on a gateway that also needs a construction kwarg is the
+    case this proves works today, synthetically, since no live spec needs
+    both yet."""
+    from trdrbot import config as cm
+
+    cfg = cm.load(quiet=True)
+    monkeypatch.setenv("ZEN_API_KEY", "sk-test-999")
+    # Borrow the real opencode_zen provider entry, add a synthetic
+    # model_options entry for one of its models, and confirm both apply.
+    cfg.raw["llm"]["model_options"]["opencode_zen:glm-5.2"] = {"temperature": 0.1}
+    spec, kwargs = cfg.resolve_model_spec("opencode_zen:glm-5.2")
+    assert spec == "openai:glm-5.2"
+    assert kwargs["base_url"] == "https://opencode.ai/zen/v1"
+    assert kwargs["api_key"] == "sk-test-999"
+    assert kwargs["temperature"] == 0.1
 
 

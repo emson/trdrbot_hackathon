@@ -10,28 +10,32 @@ llm:
   # ORDERED FALLBACK CHAIN: first model that answers wins. Verified live that
   # an exhausted-credit 400 from one provider falls through to the next.
   #
-  # Grok-4.6 via OpenCode Zen is the PRIMARY (2026-08-28, superseding the
-  # GLM-5.2 migration below): Claude and GPT-5 stay in the chain as fallback,
-  # not removed, so nothing about the verified fallback behaviour changes if
-  # Zen or xAI is unreachable. "opencode_zen:" is not a real LangChain
-  # provider prefix - it is resolved by `Config.resolve_model_spec` (below
-  # `providers:`) to OpenAI's builtin provider pointed at Zen's own base_url
-  # and key, because Zen serves every model over the identical
-  # /v1/chat/completions contract ChatOpenAI already speaks. Swapping the
-  # model was a one-line edit for exactly that reason - no code change.
+  # gpt-5.6-sol, DIRECT on OpenAI, is the PRIMARY (2026-08-28, superseding the
+  # Grok/GLM attempts below): Claude and GPT-5 stay in the chain as fallback.
+  # No gateway needed - "openai:" is a real init_chat_model provider and the
+  # existing OPENAI_API_KEY already covers it, which is the whole reason "on
+  # OpenAI" made this the simplest of the three migrations tried today.
   #
-  # STATUS AT THIS EDIT (verified live, not assumed): Zen's own /v1/models
-  # catalog confirms "grok-4.6" is the correct id, and the SAME key serves
-  # glm-5.2 successfully - but grok-4.6 itself returned a clean HTTP 500
-  # three times running, and grok-4.5 (same family) returned 503 "Endpoint
-  # is unavailable". That is Zen's/xAI's own availability, not a config
-  # mistake here. Left as the declared primary anyway because the fallback
-  # chain is proven to catch a real HTTP error (unlike GLM-5.2's silent
-  # empty-completion failure below) and falls through to Claude/GPT-5 with
-  # no risk to live decisions - but every cycle currently pays one wasted
-  # call for it. Re-run `uv run trdrbot doctor` before trusting this is
-  # actually serving; if it is still down, drop it a rung rather than pay
-  # the latency (I-25).
+  # ONE THING WAS NOT OBVIOUS AND WOULD HAVE SILENTLY BROKEN EVERY DECIDE
+  # CALL: a live 400 named it exactly - "Function tools with reasoning_effort
+  # are not supported for gpt-5.6-sol in /v1/chat/completions. To use
+  # function tools, use /v1/responses or set reasoning_effort to 'none'."
+  # Every role here needs bind_tools, so this is not a corner case, it is
+  # the primary use. Fixed via `model_options` below with
+  # `use_responses_api: true` (langchain_openai's own flag) rather than
+  # `reasoning_effort: "none"`, because decide is the one role this project
+  # says should never be economised on - disabling reasoning to satisfy an
+  # API constraint would be exactly that. Verified live: tool call fires,
+  # its RESULT reaches the final answer, and constructor-callback usage
+  # tracking (D-062) still records both turns correctly under this mode.
+  #
+  # Grok-4.6 via OpenCode Zen tried second (2026-08-28): correct model id,
+  # confirmed reachable key - but the endpoint itself returned a live HTTP
+  # 500 three times running, and grok-4.5 (same family) 503'd. Zen's own
+  # availability, not a config mistake. Demoted rather than removed
+  # (I-25); the fallback chain is proven (not assumed) to survive a REAL
+  # HTTP error, which is what makes leaving a currently-down model further
+  # down this chain harmless rather than merely hopeful.
   #
   # GLM-5.2 tried first (2026-08-28): reliable for simple prompts but proven
   # to exhaust its ENTIRE completion budget on invisible reasoning tokens for
@@ -41,10 +45,10 @@ llm:
   # error this does NOT trigger LangChain's fallback (the call "succeeds"
   # with useless content), so it was silently producing 0 candidates every
   # muse run while it sat in this chain. No documented lever was found to
-  # bound it (contrast Grok's `reasoning_effort`, tested below). Demoted
-  # out of the active chain rather than deleted from pricing/history.
+  # bound it. Demoted out of the active chain rather than deleted from
+  # pricing/history.
   models:
-    - "opencode_zen:grok-4.6"
+    - "openai:gpt-5.6-sol"
     - "anthropic:claude-opus-5"
     - "openai:gpt-5"
   max_tokens: 8000
@@ -60,14 +64,25 @@ llm:
       base_url: "https://opencode.ai/zen/v1"
       api_key_env: "ZEN_API_KEY"
 
+  # Per-EXACT-SPEC constructor kwargs, for a model's own API quirk rather
+  # than a provider-wide one - keyed on the spec AS WRITTEN above, resolved
+  # by the same `Config.resolve_model_spec` as `providers:`, and composed
+  # with it rather than replacing it. Applying this globally (in `models`'s
+  # shared kwargs) would break `ChatAnthropic`, which has no such flag, the
+  # moment Claude shares a chain with gpt-5.6-sol - the identical reason
+  # `providers:` exists as a per-spec mechanism rather than a global one.
+  model_options:
+    "openai:gpt-5.6-sol":
+      use_responses_api: true
+
   # Optional per-role chains. A role not listed uses `models` above.
   # decide wants the strongest reasoning; the rest are synthesis and can run
   # cheaper without weakening the trade decision itself.
   roles:
-    decide: ["opencode_zen:grok-4.6", "anthropic:claude-opus-5", "openai:gpt-5"]
-    research: ["opencode_zen:grok-4.6", "openai:gpt-5-mini", "anthropic:claude-opus-5"]
-    discovery: ["opencode_zen:grok-4.6", "openai:gpt-5-mini", "anthropic:claude-opus-5"]
-    muse: ["opencode_zen:grok-4.6", "openai:gpt-5-mini", "anthropic:claude-opus-5"]
+    decide: ["openai:gpt-5.6-sol", "anthropic:claude-opus-5", "openai:gpt-5"]
+    research: ["openai:gpt-5.6-sol", "openai:gpt-5-mini", "anthropic:claude-opus-5"]
+    discovery: ["openai:gpt-5.6-sol", "openai:gpt-5-mini", "anthropic:claude-opus-5"]
+    muse: ["openai:gpt-5.6-sol", "openai:gpt-5-mini", "anthropic:claude-opus-5"]
     doctor: ["openai:gpt-4o-mini"]
     # High-volume, low-difficulty (structured extraction, not judgement) - the
     # cheapest tier, with the synthesis tier as fallback (D-066).
@@ -77,19 +92,21 @@ llm:
   # current published rates; these are not fetched and will go stale. A model
   # missing here is reported as UNPRICED, never counted as free (D-062).
   #
+  # gpt-5.6-sol figures are FROM OPENAI'S OWN DOCS PAGE (developers.openai.com/
+  # api/docs/models/gpt-5.6-sol), fetched directly - the first of the three
+  # models tried today with a genuine primary source rather than third-party
+  # trackers. Promotional pricing, explicitly time-boxed by OpenAI through at
+  # least 2026-11-21; re-check after that date. Cached input ($0.40/M) has its
+  # own rate; not modelled separately here (usage.py has no cached-tier
+  # concept), so real cost on a cache-heavy workload runs below this number.
+  #
   # GLM-5.2 and Grok-4.6 figures sourced from third-party trackers (pricing
-  # calculators, model-routing aggregators), NOT Zen's own pricing page
-  # directly - its marketing page states "transparent pricing, zero markups"
-  # but did not itself list a per-token rate when checked. Grok-4.6's number
-  # is corroborated by TWO independent sources agreeing exactly ($2/$6/$0.50
-  # cache) - one describing xAI's own direct API, one describing it
-  # specifically via Zen - which is stronger evidence than GLM-5.2 had, but
-  # still not Zen's own page. Flagged rather than silently trusted;
-  # re-verify against the live invoice before this matters for real spend.
-  # Cached input has its own rate below 200K-token prompts; not modelled
-  # separately here (usage.py has no cached-tier concept), so real cost on
-  # a cache-heavy workload will run below this number, never above it.
+  # calculators, model-routing aggregators), NOT their own pricing pages
+  # directly. Kept for reference even though both are currently demoted from
+  # the active chain - re-verify before either is reinstated.
   pricing:
+    "openai:gpt-5.6-sol": {input: 4.00, output: 20.00}
+    "gpt-5.6-sol": {input: 4.00, output: 20.00}
     "opencode_zen:grok-4.6": {input: 2.00, output: 6.00}
     "grok-4.6": {input: 2.00, output: 6.00}
     "opencode_zen:glm-5.2": {input: 1.40, output: 4.40}
