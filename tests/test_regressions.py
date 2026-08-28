@@ -1295,49 +1295,29 @@ def test_muse_keeps_a_breakout_call_against_a_calm_base():
     assert "not disagrees" in src, "ceiling must only reject when the model AGREES"
 
 
-# --------------------------- D-061 rename the SELF preamble at our boundary
+# --------------------------- D-067 set agent_name at the source, not after
 
-_REAL_SELF_PREAMBLE = (
-    "## You are elf\n"
-    "The numbered principles below are your own constitution, ordered by how "
-    "load-bearing each has proven. Reason from them and answer as elf. When a "
-    "principle and the evidence point different ways, say so plainly -- an "
-    "identity that cannot disagree is decoration."
-)
-
-
-def test_self_preamble_is_renamed_to_theo():
-    from trdrbot.elfmem_adapter import _rename_self_preamble
-    fixed = _rename_self_preamble(_REAL_SELF_PREAMBLE)
-    assert "You are Theo" in fixed and "answer as Theo" in fixed
-    assert "elf" not in fixed
+def test_build_sets_agent_name_by_default():
+    """D-061's boundary rename (rewrite "You are elf" -> "You are Theo" after
+    the fact, regex, word-boundaried, fail-safe) is retired: elfmem_index @
+    c19dcc5 fixed the actual gap upstream (project.agent_name never reached
+    the SELF preamble render path), so the correct fix is setting the name
+    once, at the source, not correcting the text every time it's read."""
+    import inspect
+    from trdrbot.elfmem_adapter import ElfmemAdapter, _DEFAULT_AGENT_NAME
+    src = inspect.getsource(ElfmemAdapter.build)
+    assert "agent_name" in src, "build() must set project.agent_name"
+    assert _DEFAULT_AGENT_NAME == "Theo"
 
 
-def test_rename_does_not_mangle_a_lookalike_word():
-    """'You are elf' matches as a plain SUBSTRING of 'You are elfbot9000', which
-    a naive .replace() mangled into 'You are Theobot9000' - caught by this
-    module's own verification, not written correctly the first time."""
-    from trdrbot.elfmem_adapter import _rename_self_preamble
-    lookalike = "## You are elfbot9000\nSome new phrasing entirely."
-    out = _rename_self_preamble(lookalike)
-    assert out == lookalike, "must pass through unchanged, not mangle a similar word"
-
-
-def test_rename_leaves_unrelated_content_untouched():
-    from trdrbot.elfmem_adapter import _rename_self_preamble
-    text = "The shelf holds itself steady; this is not about elf in isolation."
-    assert _rename_self_preamble(text) == text
-
-
-def test_rename_is_a_safe_noop_if_upstream_rewords(capsys):
-    """If elfmem ever changes this wording, the patch must fail SAFE - pass the
-    text through unchanged and print evidence, never silently reintroduce
-    'elf' or emit garbled text (the null-path discipline, D-038)."""
-    from trdrbot.elfmem_adapter import _rename_self_preamble
-    changed = "## You are somebody-else\nCompletely different heading."
-    out = _rename_self_preamble(changed)
-    assert out == changed
-    assert "upstream wording may have changed" in capsys.readouterr().out
+def test_build_does_not_clobber_an_explicit_agent_name():
+    """setdefault, not overwrite - a future caller passing its own config
+    must keep the final say over its own agent_name."""
+    import inspect
+    from trdrbot.elfmem_adapter import ElfmemAdapter
+    src = inspect.getsource(ElfmemAdapter.build)
+    assert "setdefault" in src, \
+        "must not silently overwrite a caller-supplied agent_name"
 
 
 # ------------------------- D-062 provider fallback and cost accounting
@@ -1605,3 +1585,71 @@ def test_compact_news_uses_the_extract_cache_when_config_is_given(tmp_path):
 
     no_config = compact_news(news, None)
     assert "Trial halted" not in no_config, "without config it must fall back to headline-only, not crash"
+
+
+# ---------------------------- D-067 field set from research + citation URL
+
+def test_bare_extract_preserves_the_citation_url_even_on_total_outage():
+    """The URL is real Alpaca data, not model output - it must survive
+    exactly the failure mode the rest of the record does not (D-067, the
+    user's explicit ask: preserve the original reference)."""
+    from trdrbot.news_extract import bare, render_block
+
+    item = {"id": "1", "headline": "H", "url": "https://example.com/article-1"}
+    e = bare(item)
+    assert e.url == "https://example.com/article-1"
+    assert "<https://example.com/article-1>" in render_block([e])
+
+
+def test_coerce_carries_url_from_the_item_never_from_model_output():
+    """The model never sees the URL and must not be able to invent one -
+    `url` always comes from the real Alpaca item, even when every other
+    field comes from the model's JSON."""
+    from trdrbot.news_extract import _coerce
+
+    item = {"id": "1", "headline": "H", "url": "https://real.example/1"}
+    e = _coerce({"sentiment": 0.2, "url": "https://fabricated.example/evil"}, item, "m")
+    assert e.url == "https://real.example/1"
+
+
+def test_coerce_validates_the_new_research_backed_fields():
+    """time_horizon/claim_type are closed vocabularies - anything else must
+    degrade to empty, not silently pollute a supposedly-controlled field.
+    A claim_type with no key_number is meaningless and must be dropped too."""
+    from trdrbot.news_extract import _coerce
+
+    item = {"id": "1", "headline": "H"}
+    e = _coerce({"sentiment": 0.1, "time_horizon": "next tuesday", "claim_type": "forecast"}, item, "m")
+    assert e.time_horizon == "", "not in the controlled vocabulary - must not pass through"
+    assert e.claim_type == "", "claim_type without a key_number is meaningless"
+
+    e2 = _coerce({"sentiment": 0.1, "time_horizon": "near_term",
+                  "key_number": "$2.50 EPS guidance", "claim_type": "forecast"}, item, "m")
+    assert e2.time_horizon == "near_term" and e2.claim_type == "forecast"
+    assert e2.key_number == "$2.50 EPS guidance"
+
+
+def test_coerce_clamps_confidence_and_defends_quote():
+    """Confidence is a same-pass self-rating, documented as unreliable - it
+    must still be well-typed (clamped to [0,1], None when absent/malformed)
+    so a bad value can't silently propagate as a false-precision number."""
+    from trdrbot.news_extract import _coerce
+
+    item = {"id": "1", "headline": "H"}
+    assert _coerce({"sentiment": 0.0, "confidence": 5}, item, "m").confidence == 1.0
+    assert _coerce({"sentiment": 0.0, "confidence": "high"}, item, "m").confidence is None
+    e = _coerce({"sentiment": 0.0, "quote": "guidance raised to $2.50"}, item, "m")
+    assert e.quote == "guidance raised to $2.50"
+
+
+def test_render_block_shows_number_horizon_and_citation_together():
+    from trdrbot.news_extract import Extract, render_block
+
+    e = Extract(id="1", headline="H", sentiment=0.6, activity="guidance", regime="company",
+                time_horizon="near_term", key_number="$2.50 EPS", claim_type="forecast",
+                confidence=0.8, dense="Guidance raised", url="https://ex.com/a", source="Reuters")
+    out = render_block([e])
+    assert "$2.50 EPS (forecast)" in out
+    assert "/near_term" in out
+    assert "conf=0.8" in out
+    assert "<https://ex.com/a>" in out

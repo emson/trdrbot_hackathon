@@ -152,7 +152,8 @@ def compact_news(result: Any, config: Any = None) -> Any:
     else:  # no config threaded through - still compact, just headline-only
         extracts = [news_extract.bare(it) for it in items if isinstance(it, dict)]
 
-    header = f"News ({len(extracts)} items; [sentiment] activity/regime | orgs | people | symbols | fact):"
+    header = (f"News ({len(extracts)} items; [sentiment conf] activity/regime/horizon | orgs | "
+              f"people | symbols | \"fact\" number(type) | source date <url>):")
     return header + "\n" + news_extract.render_block(extracts)
 
 

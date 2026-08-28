@@ -2342,3 +2342,67 @@ model output degrades one field at a time. 127 default tests pass.
 already turns news into wiki prose, and it now reads the DENSE extracted block instead of bare
 headlines, so the wiki should already improve without a second storage schema. Revisit only if the
 wiki's own narrative synthesis is found to lose the structured signal on the way to prose.
+## D-068: News extraction field set grounded in research, plus the citation URL
+**Date:** 2026-08-28
+**Status:** accepted
+**Context:** D-066 shipped a field set (sentiment, orgs, people, activity, regime, dense) chosen by
+intuition, not evidence - the same mistake D-065's "bodies are filler" assumption made. The user
+asked for two things: research what should actually be extracted, and preserve the original
+article URL as a citation. Ran a decision-mode scout research pass (5 angles, 21 primary sources
+fetched, 105 claims extracted, 15 adversarially verified 2-vote) against academic financial-NLP
+literature and commercial-product claims. The commercial-product claims (RavenPack, Bloomberg
+Event-Driven Feed, LSEG/Refinitiv, Benzinga, AlphaSense) did NOT survive verification - zero
+vendor field-schema claims confirmed - so this decision rests on academic literature only:
+SEntFiN (Sinha et al., JASIST 2022), "Beyond Sentiment" (arXiv 2607.28496), "Trade the Event"
+(Zhou/Ma/Liu, ACL Findings 2021), "Numerical Claim Detection" (Shah et al., EMNLP FEVER 2024),
+Dolphin et al. (arXiv 2607.08346).
+**Adopted (evidence-weighted, each cheap):**
+- `url` - the citation itself. Alpaca-sourced, never model-derived, threaded through `bare()` and
+  `_coerce()` identically so it survives even when extraction fails outright - answers the user's
+  ask directly rather than treating it as one more extractable field.
+- `quote` - the model's claimed supporting sentence for `dense`. Converges across three sources as
+  a schema element (SEntFiN's entity claims, Dolphin et al.'s per-tag quote requirement, FinVet's
+  verdict/evidence/source/confidence output) but is stored HONESTLY as unverified - the specific
+  automated grounding mechanism researched (n-gram overlap validation) was refuted on our own
+  verification pass, so no claim is made that `quote` is checked against the source text.
+- `key_number` + `claim_type` (forecast|established) - "Numerical Claim Detection" formalises
+  exactly this split ("a speculative financial forecast" vs "a numerical statement about a past
+  event... a confirmed fact") because a guidance figure and a reported print carry opposite
+  information content; conflating them was the gap.
+- `time_horizon` (immediate|near_term|long_term) - named in "Beyond Sentiment" as one of six
+  extraction dimensions, medium confidence (single recent preprint) - but adopted anyway because
+  no verified source anywhere maps a claim's horizon onto OPTIONS TENOR, which is exactly this
+  agent's need, and the field is nearly free to add to an existing extraction call.
+- `confidence` - inline self-rating. Dolphin et al.'s central finding is that this specific
+  approach is markedly overconfident and collapses to a near-binary flag (~75% of tags land at the
+  top score) versus 12%->96% monotone precision from a SECOND quote-grounded grading pass. Adopted
+  the cheap version anyway, documented in the dataclass docstring as "informative when low,
+  meaningless when high" - the honest framing, not a claim of calibration we didn't build.
+- `activity` vocabulary gained dividend/buyback/split - "Trade the Event"'s 11-type taxonomy names
+  these as predictable-price-impact categories our prior 9-type list omitted.
+**Explicitly NOT adopted, and why:**
+- full per-entity sentiment decomposition - its only standalone justification (~26% of headlines
+  carry CONFLICTING per-entity sentiment) was REFUTED on verification; only multi-entity presence
+  was confirmed, not conflict. Our articles already arrive symbol-scoped via Alpaca's own
+  `symbols` field, so one sentiment per article is the right size, not under-modelling.
+- a second-pass confidence grader - the highest-leverage finding in the whole research pass
+  (12%->96% precision), deliberately deferred: it doubles this role's LLM call volume for a result
+  resting on one vendor-authored preprint. Documented in the module docstring as known-better,
+  not-built, with the explicit trigger to revisit ("if news-driven theses start showing a real
+  false-positive problem").
+- automated quote verification - the specific mechanism researched (n-gram overlap, 40% threshold,
+  auto-retry) was refuted 0-2 on our own verification. No fabricated substitute was built.
+- source credibility tiering and relevance/materiality scoring - zero surviving evidence either
+  was even attempted by name in the literature searched; not invented to fill the gap.
+- novelty/staleness detection beyond article-id dedup - confirmed as first-order for tradability
+  (an event-driven signal went from +1.74% to -0.07% average return within the same minute once
+  stale) but the mechanism was never verified as something to copy, and building an unverified
+  heuristic would be worse than the honest gap. Logged as an open item, not silently skipped.
+**Verified:** live extraction against a realistic article (Apple EPS guidance raise, explicit
+before/after figures, a stated earnings date) correctly produced `key_number="$2.50 EPS guidance,
+up from $2.30"`, `claim_type="forecast"`, `time_horizon="near_term"`, a `quote` that genuinely
+appears in the source summary, and the real Alpaca `url` carried through untouched. 9 new
+regression tests (URL survives total outage; URL never model-sourced; closed-vocabulary fields
+degrade to empty on garbage input rather than passing through; a claim_type with no key_number is
+dropped as meaningless; confidence clamps to [0,1] or None). 130 default tests pass. Test articles
+purged from the real `data/state/news_extracts.json` after both live verification passes.
