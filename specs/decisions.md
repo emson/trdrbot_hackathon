@@ -3303,3 +3303,41 @@ individually against the following lines; the missed path - "horizon resolves to
 
 **Verified:** 214 default tests (7 new) + 14 contract tests. Live muse run with 4 of 5 candidates
 surviving and every band anchored to real spot.
+
+## D-082: Checking whether the issues were fixed found two more
+**Date:** 2026-08-28
+**Status:** accepted
+**Context:** A verification pass over the open issue ledger - reading each "FIXED" claim against
+the code rather than trusting the entry. Two entries were stale and two live defects surfaced.
+
+**The exit-rule probe was the same tautology D-074 named, still present in a second place.** A SPY
+766/758 bear put spread is now open, `status: open`, with five rules evaluating every tick and a
+populated debounce history - **the first time the deterministic capital-protection path has run
+against a real position.** Health reported `exit_rules never ran`, because the probe read `exit`
+TRIGGER rows as evidence the engine had RUN. "Ran" and "produced" were the same number, so it could
+never distinguish an engine that is armed and correctly quiet from one that is not evaluating at
+all. Fixed with an `exit_run` heartbeat carrying positions watched, rule-checks performed and
+triggers fired.
+
+**Then the test written for that fix found a second defect.** The staleness check (D-074) escalated
+the newly-fixed probe to PROBLEM: 40 evaluations with zero triggers looked like a subsystem that
+had produced once and died. But **an exit engine is a fire alarm - evaluating every tick and never
+firing is the healthy state**, and `work` cannot rescue it because rule-checks are always non-zero
+while a rule being CHECKED is not a rule being DUE. Added `Probe.silence_is_normal`, set only where
+zero output is the expected steady state and explicitly not as a way to quiet a probe that is
+genuinely dead. "Evaluated 40 times, nothing breached" now reads `armed, not stalled`; "positions
+open, zero rules evaluated" still reads broken.
+
+**Two issue entries had struck-through titles over unchanged bodies.** I-21 still ended "Surface
+`n_eff`... next to `n`" and I-22 still ended "the band step should be too, explicitly" - both
+already done in D-081. A resolved issue whose text still reads as action-due is the same
+stale-record failure this ledger exists to prevent, appearing in the ledger itself. Rewritten with
+what was actually built and measured.
+
+**I-9 was re-stated rather than closed.** The engine being ARMED on live data is genuine progress
+and distinct from a trigger, which remains unverified - as does D-074's reachability warning, which
+this position did not need (its -65% stop and +140% target are both reachable against the net-cost
+base).
+
+**Verified:** 215 default tests (1 new). Live: `exit_rules  ran 1x, nothing breached - armed, not
+stalled`.
