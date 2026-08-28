@@ -2433,3 +2433,57 @@ def test_health_sees_a_subsystem_that_produced_once_and_then_died(tmp_path):
     p.write_text("\n".join(_json.dumps(r) for r in idle_rows) + "\n")
     found = {name: (lvl, detail) for lvl, name, detail in health.check(p, [])}
     assert found["interim_scoring"][0] == health.OK
+
+
+def test_the_reachability_warning_is_actually_WIRED(tmp_path):
+    """`_unreachable_rules` being correct is not the same as it running. The
+    wiring - match the traded legs against what simulate_experiments priced,
+    scale by the quantity actually traded - is the part that silently no-ops,
+    which is this whole pass's theme. So it is exercised end to end."""
+    from trdrbot import local_tools
+    from trdrbot.calibration import CalibrationStore
+    from trdrbot.positions import PositionStore
+
+    shared: dict = {}
+    sim = local_tools.build_simulate_experiments(shared, None, None)
+    sim.func(
+        thesis_claim="up", underlying="SPY", horizon="2026-09-02", drift_pct=0.5,
+        spot=771.0, iv_pct=11.0, days_to_expiry=5, band_low=765.0, band_high=782.0,
+        candidates=[
+            {"name": "debit", "legs": [
+                {"right": "C", "strike": 773, "side": "long", "qty": 1, "price": 3.10},
+                {"right": "C", "strike": 778, "side": "short", "qty": 1, "price": 1.35}]},
+            {"name": "credit", "legs": [
+                {"right": "P", "strike": 765, "side": "short", "qty": 1, "price": 1.90},
+                {"right": "P", "strike": 760, "side": "long", "qty": 1, "price": 1.10}]},
+        ])
+    assert len(shared["structures"]) == 2
+
+    store = PositionStore(tmp_path)
+    rec = local_tools.build_record_position(
+        store, "jrn_x", shared=shared,
+        calibration=CalibrationStore(tmp_path / "f.jsonl"))
+
+    # Simulated at 1 lot, traded at 3: the check must scale, not compare a
+    # 3-lot loss against a 1-lot structure.
+    def record(strategy, stop, target):
+        return rec.func(
+            underlying="SPY", strategy=strategy,
+            legs=[{"symbol": "SPY260902C00773000", "side": "buy", "qty": 3},
+                  {"symbol": "SPY260902C00778000", "side": "sell", "qty": 3}],
+            thesis="up", confidence=0.6, expiry="2026-09-02",
+            stop_loss_pct=stop, profit_target_pct=target, underlying_stop_below=765.0)
+
+    assert "cannot trigger" not in record("s1", -50.0, 60.0)
+
+    impossible = record("s2", -150.0, 400.0)
+    assert "$525" in impossible, "max loss must be the 3-lot figure, not the 1-lot one"
+    assert "$975" in impossible, "max profit must be scaled too"
+    assert "stop_loss -150%" in impossible and "profit_target 400%" in impossible
+
+    # Legs that match nothing simulated: skip silently rather than guess.
+    other = rec.func(
+        underlying="SPY", strategy="s3",
+        legs=[{"symbol": "SPY260902P00700000", "side": "sell", "qty": 1}],
+        thesis="x", confidence=0.6, expiry="2026-09-02", stop_loss_pct=-999.0)
+    assert "cannot trigger" not in other
