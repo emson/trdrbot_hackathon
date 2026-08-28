@@ -3111,3 +3111,52 @@ def test_dominant_risk_classifies_the_zoo_the_way_a_desk_would():
         assert got, f"{name}: unclassified"
         assert got[0] == want.get(name, "direction"), (
             f"{name}: classified {got[0]}, a desk would say {want.get(name, 'direction')}")
+
+
+def test_a_rejected_candidate_is_a_trial_not_a_claim(tmp_path):
+    """Registration and belief are different events. The muse pre-registers
+    every candidate because the multiple-testing correction needs the trials
+    that FAILED - but a candidate its own gates then throw out is not a claim
+    anybody made, and scoring it teaches the agent how badly its rejects
+    perform.
+
+    Measured on the live ledger: 15 muse rows, all `probability_stated=True`,
+    of which the muse's own journalled fates show 13 were REJECTED - bands 3x
+    from spot, base rates of 0% and 100%, a horizon already in the past.
+    **50% of the incoming calibration sample was material the system had
+    already refused**, and it moves real size in both directions: the
+    unreachable ones resolve FALSE and crater reliability, the vacuous
+    one-sided ones resolve TRUE and inflate it."""
+    from trdrbot.ledger import Ledger, as_forecasts
+
+    book = Ledger(tmp_path / "ledger.jsonl")
+    trial = book.register(kind="muse", underlying="NVDA", claim="band 3x from spot",
+                          probability=0.55, probability_stated=False,
+                          horizon="2026-09-03", band_low=650.0, band_high=920.0)
+    kept = book.register(kind="muse", underlying="S", claim="survived every gate",
+                         probability=0.60, probability_stated=False,
+                         horizon="2026-08-31", band_low=20.25, band_high=21.9)
+
+    assert book.trials() == 2, "both must count as trials - that is what N is for"
+    book.resolve(trial.id, 700.0, "now")
+    book.resolve(kept.id, 21.0, "now")
+    assert len(as_forecasts(book.resolved())) == 0, "a trial must not score calibration"
+
+    # ...until it earns the right, by surviving the gates.
+    assert book.mark_stated(kept.id)
+    assert not book.mark_stated(kept.id), "promotion is idempotent"
+    scored = as_forecasts(book.resolved())
+    assert len(scored) == 1 and scored[0].probability == 0.60
+
+
+def test_muse_only_promotes_candidates_that_survive_every_gate():
+    import inspect
+    from trdrbot import muse
+
+    src = inspect.getsource(muse.run)
+    assert "probability_stated=False" in src, "candidates register as TRIALS"
+    promote = src.index("ledger.mark_stated")
+    # Every rejection path must come BEFORE the promotion, or a reject is scored.
+    for fate in ("a lottery ticket", "not a plausible price", "resolves too late",
+                 "vacuous", "no usable price history"):
+        assert src.index(fate) < promote, f"rejection '{fate}' happens after promotion"

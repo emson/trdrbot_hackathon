@@ -207,10 +207,18 @@ async def run(
                    "stated": float(cand.get("probability", 0.5)),
                    "chain": cand.get("chain", [])}
 
-        # 1. register EVERY candidate before any gate can discard it
+        # 1. register EVERY candidate before any gate can discard it - the
+        # multiple-testing correction needs the trials that failed (D-052).
+        # But registered as a TRIAL, not as a claim: `probability_stated=False`
+        # until it survives every gate below, at which point `mark_stated`
+        # promotes it. Registration and belief are different events, and
+        # conflating them put 13 of this ledger's 15 muse rows into the
+        # calibration sample as claims the muse had itself rejected - bands 3x
+        # from spot, base rates of 0% and 100%, a horizon already in the past.
         entry = ledger.register(
             kind="muse", underlying=u, claim=str(cand.get("claim", "")),
             probability=float(cand.get("probability", 0.5)),
+            probability_stated=False,
             horizon=str(cand.get("horizon", "")),
             band_low=cand.get("band_low"), band_high=cand.get("band_high"),
             notes="muse: " + " -> ".join(str(c) for c in cand.get("chain", []))[:300],
@@ -291,6 +299,9 @@ async def run(
             evaluated.append(verdict)
             continue
 
+        # Survived every gate - NOW it is a claim the system stands behind,
+        # and only now may it score calibration.
+        ledger.mark_stated(entry.id)
         verdict["fate"] = "candidate"
         verdict["_cand"] = cand
         evaluated.append(verdict)

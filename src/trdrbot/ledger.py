@@ -159,6 +159,34 @@ class Ledger:
         self._append(e)
         return e
 
+    def mark_stated(self, entry_id: str) -> bool:
+        """Promote a trial to a SCOREABLE claim - it survived every gate.
+
+        Registration and belief are different events, and conflating them
+        polluted half the calibration sample. A candidate is pre-registered the
+        moment it exists, because the multiple-testing correction needs the
+        trials that FAILED (D-052) - but a trial the system then threw out is
+        not a claim anybody made about the world, and scoring it teaches the
+        agent nothing except how badly its own rejects perform.
+
+        Measured on the live ledger before this existed: the muse registered
+        15 candidates with `probability_stated=True` and its own gates rejected
+        13 of them - bands 3x away from spot, base rates of 0% or 100%, a
+        horizon in the past. **50% of the incoming calibration sample was
+        material the system had already refused.** Most would resolve FALSE,
+        cratering reliability; the vacuous one-sided ones would resolve TRUE,
+        inflating it. Both directions move real size, on evidence of nothing.
+
+        So a claim now earns the right to be scored, rather than being born
+        with it.
+        """
+        for e in self._items:
+            if e.id == entry_id and not e.probability_stated:
+                e.probability_stated = True
+                self._rewrite()
+                return True
+        return False
+
     def mark_traded(self, underlying: str, horizon: str, position_id: str) -> bool:
         """Link a registered thesis to the position it became."""
         for e in reversed(self._items):

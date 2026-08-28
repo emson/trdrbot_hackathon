@@ -3173,3 +3173,71 @@ what balance looks like.
 **Verified:** 205 default tests (8 new, one per scaffold invariant) + 14 contract tests. Live board
 after the change shows the condor at "wins if realized vol < 7.6%" with a post-cost payoff of
 0.42:1 against a max/max of 0.59.
+
+## D-080: Retrospective - half the calibration sample was material the system had rejected
+**Date:** 2026-08-28
+**Status:** accepted
+**Context:** A request to retrospectively score the theses on the ledger and derive optimal
+sizing. Only 1 of 38 had matured, so no outcome retrospective was available - but running the
+underlyings' own price history against every band surfaced something worse than a missing answer.
+
+**Bands placed at prices that do not exist.** NVDA at **[650, 920]** against a spot of 218.97.
+QQQ **[355, 385]** against 716. MSTR **[420, 860]** against 126.87. WDC **[45, 72]** against
+462.41. These are not wrong theses; they are real-world price levels recalled from model
+training data, the `[premise]`/D-032 failure class arriving in the muse's band placement.
+
+**The muse caught almost all of them. The ledger recorded them as claims anyway.** The journal
+holds the ground truth - every candidate's fate: **15 muse candidates, 13 REJECTED** by the
+muse's own gates (6 for a 0% base rate, 3 vacuous at 99-100%, 3 implausible bands, 1 horizon
+already in the past). All 15 were registered with `probability_stated=True`, so **50% of the
+incoming calibration sample was material the system had already refused.**
+
+The damage runs both ways and both directions move real size through `shrink_probability`: the
+unreachable bands resolve FALSE and crater reliability; the vacuous one-sided ones (MRVL [74,-]
+against a spot of 217.50) resolve TRUE and inflate it. It is D-070's finding 5 in mirror image -
+there, vacuous forecasts could earn size on evidence of nothing; here, rejected garbage destroys
+it just as cheaply. The whole batch was due to land 09-01 to 09-03, taking calibration from n=1
+to n=26 in one step, one day before the deadline, with half of it noise.
+
+**Cause: registration and belief were the same event.** `muse.run` pre-registers every candidate
+before any gate can discard it - correct, and deliberate: the multiple-testing correction needs
+the trials that FAILED (D-052). But `Ledger.register` defaults `probability_stated=True`, so a
+trial was born as a claim.
+
+**Choice: a claim earns the right to be scored.** The muse now registers with
+`probability_stated=False` and `Ledger.mark_stated()` promotes only after every gate has passed.
+Trial count N is unchanged - the DSR correction still sees all 15. A test pins the ordering:
+every rejection path must appear before the promotion, or a reject is scored.
+
+**The record was repaired from the journalled fates, not from recomputation.** Recomputing base
+rates today would use today's spot against a band placed against a different one, so the journal's
+own contemporaneous verdict is the only honest ground truth. 13 rows downgraded to trials with the
+rejection reason appended to their notes; nothing deleted; `ledger.jsonl.bak-before-repair` kept.
+Calibration sample: 26 -> **13 stated claims**, 38 trials unchanged.
+
+**On sizing, the answer is not the sum of the individual Kellys.** Scoring the 13 surviving claims
+against each underlying's own demeaned bootstrap (fair odds `b = (1-base)/base`, Kelly on the pure
+view, which isolates VIEW quality from expression quality):
+
+    9 of 13 carry a positive Kelly
+    naive sum of individual Kelly fractions      321.7% of bankroll
+    effective independent bets (inv-Herfindahl)    2.0 of 9   <- five of the nine are SPY
+    mean single-bet Kelly                          35.7%
+    correlation-aware aggregate (mean x n_eff)     70.6%
+    -> naive sizing overbets by 4.6x
+
+**Correlated Kelly bets must be scaled to the EFFECTIVE number of bets, not the raw count.** That
+is the professional answer to "what should optimal sizing have been", and it is the one thing no
+current mechanism computes: the per-underlying cap counts NAMES, and `[correlated-names-are-one-bet]`
+says in prose what `n_eff` says as a number.
+
+The house rules then bind well below any of it - quarter-Kelly, then EXPLORE's fixed 2.2% seed,
+then the 15% book cap ($15,187 on $101,250 against a correlation-aware full-Kelly $71,506). So the
+caps were doing the work the correlation adjustment should have been doing explicitly, which is
+luck rather than design, and it will stop being luck at SCALE and MATURE where the multipliers rise.
+
+**Recorded, not fixed:** `n_eff` is computed here in analysis and nowhere in the system. Surfacing
+it next to `n` on every calibration and sizing surface is the natural follow-on (I-21).
+
+**Verified:** 207 default tests (2 new). Live calibration now reads 1 resolved of 13 pending
+claims rather than 26.
