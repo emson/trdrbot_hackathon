@@ -253,23 +253,44 @@ async def test_outcome_rejects_a_non_positive_weight(cfg, tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_frame_similarity_is_min_max_normalised_within_the_result_set(cfg):
-    """The other load-bearing belief: `similarity` is NOT an absolute cosine -
-    it is normalised across each recall, so the worst match is exactly 0.0 and
-    the best exactly 1.0. That is what makes the weight a within-decision
-    RANK signal, and what makes the floor mandatory rather than cosmetic."""
+async def test_frame_similarity_is_bounded_but_its_spread_is_not_guaranteed(cfg):
+    """What credit weighting may and may not assume about `similarity`.
+
+    D-073 measured elfmem min-max normalising across each recall - worst match
+    exactly 0.0, best exactly 1.0 - and built `credit_weight` on it, reporting a
+    4x differential between the best and worst block in a decision.
+
+    **That is no longer what a recall returns, and this test caught it.**
+    Observed against the live database once the block pool grew: the returned
+    set is a filtered top SLICE, not the whole scored population, so
+    similarities cluster near the top (0.926-1.000 on a real query) and the
+    worst returned match is nowhere near 0.0. The practical effect is that the
+    credit differential has collapsed from the documented 4x to about 1.05x.
+
+    That is not a regression to fix by manufacturing spread. A block returned at
+    0.93 genuinely IS relevant, and forcing a 4x split across near-identical
+    scores would invent discrimination the data does not contain. The
+    irrelevant-block case D-073 was built for - a SPY mind model scoring 0.0
+    against an NVDA query - now simply does not come back at all.
+
+    So the beliefs that remain load-bearing, and are asserted here: similarity
+    is BOUNDED in [0, 1], and it can arrive anywhere in that range. The floor in
+    `credit_weight` is still mandatory, because elfmem rejects weight <= 0 (the
+    test below) and nothing guarantees a returned similarity is above zero."""
     from trdrbot.elfmem_adapter import ElfmemAdapter
+    from trdrbot.positions import CREDIT_WEIGHT_FLOOR, credit_weight
 
     mem = await ElfmemAdapter.build(cfg.paths.state / "elfmem.db")
     try:
         await mem.begin()
-        fr = await mem.mem.frame("attention", "NVDA options setup")
+        fr = await mem.mem.frame("attention", "selling premium after an event")
         sims = [b.similarity for b in fr.blocks]
         assert len(sims) >= 2, "need several blocks for this to mean anything"
-        assert min(sims) == pytest.approx(0.0), \
-            f"worst match is no longer 0.0 ({min(sims)}) - similarity semantics changed"
-        assert max(sims) == pytest.approx(1.0), \
-            f"best match is no longer 1.0 ({max(sims)}) - similarity semantics changed"
+        for s in sims:
+            assert 0.0 <= s <= 1.0, f"similarity outside [0,1]: {s} - semantics changed"
+        # Whatever comes back must map to a weight elfmem will accept.
+        for s in sims:
+            assert CREDIT_WEIGHT_FLOOR <= credit_weight(s) <= 1.0
         await mem.end()
     finally:
         await mem.close()
@@ -294,9 +315,16 @@ async def test_anthropic_serves_a_marked_prefix_from_the_prompt_cache():
     second = await m.ainvoke([sys, HumanMessage(content="Reply with the number 2.")])
 
     r1, w1 = _cache_split((first.usage_metadata or {}).get("input_token_details") or {})
-    r2, _w2 = _cache_split((second.usage_metadata or {}).get("input_token_details") or {})
-    assert w1 > 100, f"first call must WRITE the cache, saw {w1}"
-    assert r2 > 100, f"second call must READ it back, saw {r2}"
+    r2, w2 = _cache_split((second.usage_metadata or {}).get("input_token_details") or {})
+
+    # Deliberately NOT "the first call writes and the second reads". This test
+    # runs against a shared 5-minute cache, so a re-run inside that window finds
+    # the prefix already warm and the first call READS - which failed the run
+    # after the one that wrote it. The belief that actually matters is that a
+    # marked prefix is served from cache at all; which call paid to put it there
+    # is not something the decide path depends on.
+    assert r1 + w1 > 100, f"the marked prefix was neither written nor read: {r1}/{w1}"
+    assert r2 > 100, f"the second call must read the prefix back, saw {r2}"
     # And the total already includes them, so pricing must adjust not add.
     assert (second.usage_metadata or {})["input_tokens"] >= r2
 

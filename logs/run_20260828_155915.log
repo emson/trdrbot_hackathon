@@ -1,0 +1,130 @@
+[config] .env overrode a different shell value for ANTHROPIC_API_KEY
+[config] .env overrode a different shell value for OPENAI_API_KEY
+[run] stale lock from pid 53122, taking over
+[run] pid 20959 looping until 2026-09-04; open=300s closed=1800s
+
+
+╭──────────────────────────────────────────────────────────────────────────────╮
+│                                                                              │
+│                                                                              │
+│                         ▄▀▀ ▄▀█ █▀▀ ▀█▀ █▀▄▀█ █▀▀ █▀█                        │
+│                         █▀  █▀█ ▄▄█  █  █ ▀ █ █▄▄ █▀▀                        │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                FastMCP 3.4.7                                 │
+│                            https://gofastmcp.com                             │
+│                                                                              │
+│                  🖥  Server:      Alpaca MCP Server, 3.4.7                    │
+│                  🚀 Deploy free: https://horizon.prefect.io                  │
+│                                                                              │
+╰──────────────────────────────────────────────────────────────────────────────╯
+
+
+[08/28/26 15:59:19] INFO     Starting MCP server 'Alpaca MCP    transport.py:241
+                             Server' with transport 'stdio'                     
+
+
+╭──────────────────────────────────────────────────────────────────────────────╮
+│                                                                              │
+│                                                                              │
+│                         ▄▀▀ ▄▀█ █▀▀ ▀█▀ █▀▄▀█ █▀▀ █▀█                        │
+│                         █▀  █▀█ ▄▄█  █  █ ▀ █ █▄▄ █▀▀                        │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                FastMCP 3.4.7                                 │
+│                            https://gofastmcp.com                             │
+│                                                                              │
+│                  🖥  Server:      Alpaca MCP Server, 3.4.7                    │
+│                  🚀 Deploy free: https://horizon.prefect.io                  │
+│                                                                              │
+╰──────────────────────────────────────────────────────────────────────────────╯
+
+
+[08/28/26 16:04:23] INFO     Starting MCP server 'Alpaca MCP    transport.py:241
+                             Server' with transport 'stdio'                     
+
+
+╭──────────────────────────────────────────────────────────────────────────────╮
+│                                                                              │
+│                                                                              │
+│                         ▄▀▀ ▄▀█ █▀▀ ▀█▀ █▀▄▀█ █▀▀ █▀█                        │
+│                         █▀  █▀█ ▄▄█  █  █ ▀ █ █▄▄ █▀▀                        │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                FastMCP 3.4.7                                 │
+│                            https://gofastmcp.com                             │
+│                                                                              │
+│                  🖥  Server:      Alpaca MCP Server, 3.4.7                    │
+│                  🚀 Deploy free: https://horizon.prefect.io                  │
+│                                                                              │
+╰──────────────────────────────────────────────────────────────────────────────╯
+
+
+[08/28/26 16:09:28] INFO     Starting MCP server 'Alpaca MCP    transport.py:241
+                             Server' with transport 'stdio'                     
+
+
+╭──────────────────────────────────────────────────────────────────────────────╮
+│                                                                              │
+│                                                                              │
+│                         ▄▀▀ ▄▀█ █▀▀ ▀█▀ █▀▄▀█ █▀▀ █▀█                        │
+│                         █▀  █▀█ ▄▄█  █  █ ▀ █ █▄▄ █▀▀                        │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                FastMCP 3.4.7                                 │
+│                            https://gofastmcp.com                             │
+│                                                                              │
+│                  🖥  Server:      Alpaca MCP Server, 3.4.7                    │
+│                  🚀 Deploy free: https://horizon.prefect.io                  │
+│                                                                              │
+╰──────────────────────────────────────────────────────────────────────────────╯
+
+
+[08/28/26 16:14:31] INFO     Starting MCP server 'Alpaca MCP    transport.py:241
+                             Server' with transport 'stdio'                     
+
+
+╭──────────────────────────────────────────────────────────────────────────────╮
+│                                                                              │
+│                                                                              │
+│                         ▄▀▀ ▄▀█ █▀▀ ▀█▀ █▀▄▀█ █▀▀ █▀█                        │
+│                         █▀  █▀█ ▄▄█  █  █ ▀ █ █▄▄ █▀▀                        │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                FastMCP 3.4.7                                 │
+│                            https://gofastmcp.com                             │
+│                                                                              │
+│                  🖥  Server:      Alpaca MCP Server, 3.4.7                    │
+│                  🚀 Deploy free: https://horizon.prefect.io                  │
+│                                                                              │
+╰──────────────────────────────────────────────────────────────────────────────╯
+
+
+[08/28/26 16:19:35] INFO     Starting MCP server 'Alpaca MCP    transport.py:241
+                             Server' with transport 'stdio'                     
+
+
+╭──────────────────────────────────────────────────────────────────────────────╮
+│                                                                              │
+│                                                                              │
+│                         ▄▀▀ ▄▀█ █▀▀ ▀█▀ █▀▄▀█ █▀▀ █▀█                        │
+│                         █▀  █▀█ ▄▄█  █  █ ▀ █ █▄▄ █▀▀                        │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                FastMCP 3.4.7                                 │
+│                            https://gofastmcp.com                             │
+│                                                                              │
+│                  🖥  Server:      Alpaca MCP Server, 3.4.7                    │
+│                  🚀 Deploy free: https://horizon.prefect.io                  │
+│                                                                              │
+╰──────────────────────────────────────────────────────────────────────────────╯
+
+
+[08/28/26 16:24:38] INFO     Starting MCP server 'Alpaca MCP    transport.py:241
+                             Server' with transport 'stdio'                     

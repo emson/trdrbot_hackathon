@@ -252,6 +252,63 @@ def expected_value(legs: Iterable[Leg], spot: float, iv: float, days: float,
     return sum(w * pnl_at(legs, s) for s, w in _lognormal_grid(spot, iv, days, drift=drift))
 
 
+#: A conditional expectation needs something to condition ON. When the model
+#: says a structure essentially never wins (or never loses) over the searched
+#: grid, the mean of that empty side is not a small number, it is not a number
+#: - and dividing by it manufactures an enormous payoff ratio out of a corner
+#: of the distribution. Below this probability on either side the ratio is
+#: refused and the caller falls back to max/max, which is at least a bound.
+MIN_CONDITIONAL_MASS = 0.01
+
+
+def payoff_ratio(legs: Iterable[Leg], spot: float, iv: float, days: float,
+                 *, drift: float = 0.0) -> tuple[float, float, float] | None:
+    """(E[win | win], E[loss | loss], ratio) - the payoff the bet ACTUALLY offers.
+
+    Kelly's `b` is "how much do I win per unit staked when I win". Sizing has
+    been passing `max_profit / max_loss` for it while passing P(profit > 0) for
+    `p` - and those are two different events. A vertical spread reaches its max
+    profit only in part of the region where it profits at all, and loses its max
+    only in part of the region where it loses; pairing the tail-to-tail ratio
+    with a whole-region probability is not a conservative approximation, it is a
+    DIRECTIONAL one.
+
+    Measured on real structures at live quotes (SPY, 5 days, 10% vol):
+
+        bull put 765/760     max/max 0.19  ->  conditional 0.26   (understated 35%)
+        iron condor          max/max 0.59  ->  conditional 0.66   (understated 11%)
+        call debit 775/785   max/max 5.17  ->  conditional 2.94   (OVERstated 43%)
+
+    Credit structures win nearly their whole max when they win and lose well
+    short of it when they lose, so the tail ratio understates them; debit
+    structures are the reverse. The formula was therefore biasing the book
+    toward BUYING premium and away from selling it, structurally, at every
+    sample size - a preference nobody chose and nothing recorded.
+
+    The agent's own probability is deliberately NOT replaced here. It supplies
+    `p`, calibration shrinks it, and this supplies the payoff shape - the same
+    facts-and-models split the rest of the module keeps.
+    """
+    legs = list(legs)
+    if not legs or spot <= 0:
+        return None
+    p_win = e_win = p_loss = e_loss = 0.0
+    for s, w in _lognormal_grid(spot, iv, days, drift=drift):
+        pnl = pnl_at(legs, s)
+        if pnl > 0:
+            p_win += w
+            e_win += w * pnl
+        else:
+            p_loss += w
+            e_loss += w * -pnl
+    if p_win < MIN_CONDITIONAL_MASS or p_loss < MIN_CONDITIONAL_MASS:
+        return None
+    mean_win, mean_loss = e_win / p_win, e_loss / p_loss
+    if mean_loss <= 0:
+        return None
+    return (mean_win, mean_loss, mean_win / mean_loss)
+
+
 # ------------------------------------------------ what has to be true (MODELLED)
 #
 # A desk does not ask "what is the EV" first. It asks **what am I betting on,

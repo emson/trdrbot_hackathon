@@ -94,14 +94,27 @@ def shrink_probability(stated: float, cal: Calibration) -> float:
     return 0.5 + (stated - 0.5) * (0.5 + 0.5 * trust)
 
 
-def kelly_fraction(prob: float, max_profit: float, max_loss: float) -> float | None:
+def kelly_fraction(prob: float, max_profit: float, max_loss: float,
+                   *, payoff_ratio: float | None = None) -> float | None:
     """Full-Kelly fraction for a bounded bet. None if it is not computable.
 
     f* = p - (1-p)/b  where b = win/loss payoff ratio.
+
+    `payoff_ratio` overrides b with the CONDITIONAL one - E[win|win] over
+    E[loss|loss] from the same lognormal grid the probabilities come off. The
+    default, max_profit/max_loss, pairs a tail-to-tail ratio with a
+    whole-region probability, and the two describe different events: a vertical
+    reaches its max profit in only part of the region where it profits, and its
+    max loss in only part of the region where it loses.
+
+    That mismatch is directional, not conservative. Measured on live
+    structures: credit spreads understated by 11-35%, debit spreads overstated
+    by 43% - so the formula quietly preferred buying premium to selling it, at
+    every sample size (see `optmath.payoff_ratio`).
     """
     if max_loss >= 0 or max_profit <= 0:
         return None
-    b = max_profit / abs(max_loss)
+    b = payoff_ratio if payoff_ratio is not None else max_profit / abs(max_loss)
     if b <= 0:
         return None
     return prob - (1 - prob) / b
@@ -118,8 +131,17 @@ def size_position(
     underlying: str = "",
     open_risk_usd: float = 0.0,
     open_risk_by_underlying: dict[str, float] | None = None,
+    payoff_ratio: float | None = None,
 ) -> SizingDecision:
-    """How many contracts to trade. Returns 0 when there is no defensible size."""
+    """How many contracts to trade. Returns 0 when there is no defensible size.
+
+    `payoff_ratio` is the CONDITIONAL win/loss ratio from the simulated
+    structure. Absent, Kelly falls back to max_profit/max_loss, which is a
+    tail-to-tail ratio paired with a whole-region probability - see
+    `kelly_fraction`. The fallback is stated in `explain()` rather than applied
+    silently, because the two answers differ by tens of percent and in opposite
+    directions for credit and debit structures.
+    """
     adj = shrink_probability(stated_confidence, calibration)
 
     # An unbounded loss has no Kelly fraction - the formula divides by a
@@ -131,7 +153,7 @@ def size_position(
             "bounded worst case. Use a defined-risk structure.",
         )
 
-    full = kelly_fraction(adj, max_profit, max_loss)
+    full = kelly_fraction(adj, max_profit, max_loss, payoff_ratio=payoff_ratio)
     # Below MIN_SAMPLE the shrinkage is a blunt 'halve the claimed edge'
     # heuristic, not a measurement - so it must not VETO a trade, only size
     # it down. Letting it veto inverted the ladder a second time: promotion
@@ -162,7 +184,8 @@ def size_position(
     #
     # The shrunk view is not discarded - it is REPORTED (D-009: surface, do not
     # gate) and it still sets the size below.
-    gate = kelly_fraction(stated_confidence, max_profit, max_loss)
+    gate = kelly_fraction(stated_confidence, max_profit, max_loss,
+                          payoff_ratio=payoff_ratio)
     if gate is None or gate <= 0:
         return SizingDecision(
             0, 0.0, full, 0.0, adj,
@@ -268,10 +291,15 @@ def size_position(
             f"(Kelly {full:+.3f}), so the size is the exploration allocation, not an "
             f"earned one. If you take it, take it as a test of the view"
         )
+    payoff = (f"payoff {payoff_ratio:.2f} (conditional E[win]/E[loss])"
+              if payoff_ratio is not None
+              else f"payoff {max_profit / abs(max_loss):.2f} (max/max - no simulated "
+                   f"structure matched, so this pairs a tail ratio with a "
+                   f"whole-region probability)")
     return SizingDecision(
         contracts, actual, full, frac, adj,
         f"stated {stated_confidence:.0%} -> calibration-adjusted {adj:.0%}; "
-        f"full Kelly {full:.3f}; {track}{warn}"
+        f"{payoff}; full Kelly {full:.3f}; {track}{warn}"
         + (f"; ${open_risk_usd:,.0f} already at risk in the book"
            f" (${same_name:,.0f} on {underlying.upper()})" if open_risk_usd else ""),
     )

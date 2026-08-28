@@ -2583,3 +2583,169 @@ def test_the_needs_line_leads_with_the_dominant_risk():
     mc = simulate(Experiment("condor", CONDOR()), th, 770.61, 0.10, 5)
     lc = _needs_line(mc)
     assert "VOL bet" in lc and lc.index("realized vol") < lc.index("drift")
+
+
+# ============================================ D-077 Kelly's payoff ratio
+
+
+def test_kelly_b_was_a_different_event_from_kelly_p():
+    """Sizing passed max_profit/max_loss for `b` while passing P(profit>0) for
+    `p`. A vertical reaches its max profit in only PART of the region where it
+    profits, and its max loss in only part of the region where it loses - so
+    the pair described two different events, and the mismatch is directional,
+    not conservative."""
+    from trdrbot.optmath import max_profit_loss, payoff_ratio
+
+    credit = [_L("P", 765, "short", 1, 1.61), _L("P", 760, "long", 1, 0.80)]
+    debit = [_L("C", 775, "long", 1, 1.77), _L("C", 785, "short", 1, 0.15)]
+
+    def ratios(legs):
+        mp, ml = max_profit_loss(legs)
+        _w, _l, cond = payoff_ratio(legs, 770.61, 0.10, 5)
+        return mp / abs(ml), cond
+
+    max_max, cond = ratios(credit)
+    assert cond > max_max, "a credit structure wins near its max and loses well short of it"
+
+    max_max_d, cond_d = ratios(debit)
+    assert cond_d < max_max_d, "a debit structure is the other way round"
+
+    # The consequence: the old formula preferred BUYING premium to selling it.
+    assert cond / max_max > 1.2 and cond_d / max_max_d < 0.8
+
+
+def test_payoff_ratio_refuses_a_side_with_no_mass():
+    """A conditional expectation needs something to condition on. Dividing by
+    the mean of an essentially empty side manufactures an enormous ratio out of
+    a corner of the distribution - and an enormous `b` sends Kelly to `p`."""
+    from trdrbot.optmath import payoff_ratio
+
+    # Deep ITM: the grid finds no losing region worth the name.
+    riskless = [_L("C", 100, "long", 1, 0.01)]
+    assert payoff_ratio(riskless, 770.61, 0.10, 5) is None
+    assert payoff_ratio([], 770.61, 0.10, 5) is None
+
+
+def test_sizing_uses_the_conditional_ratio_and_says_when_it_cannot():
+    from trdrbot import sizing
+    from trdrbot.calibration import Calibration
+
+    cal = Calibration(n=20, brier=0.2, reliability=0.02, resolution=0.05,
+                      uncertainty=0.24, base_rate=0.6)
+    common = dict(equity=100_000.0, stated_confidence=0.70, max_profit=186.0,
+                  max_loss=-314.0, calibration=cal, underlying="SPY")
+
+    with_cond = sizing.size_position(**common, payoff_ratio=0.67)
+    without = sizing.size_position(**common)
+    assert with_cond.kelly_full > without.kelly_full, "the true payoff is better here"
+    assert "conditional" in with_cond.reason
+    assert "max/max" in without.reason, "a silent fallback is the thing to avoid"
+
+
+def test_the_payoff_ratio_is_matched_scale_invariantly():
+    """The model quotes PER-CONTRACT figures; simulate priced whatever quantity
+    the legs carried. Matching on dollars fails on every multi-lot candidate,
+    so the match is on risk/reward, which is scale-free."""
+    from trdrbot.local_tools import _matching_payoff_ratio
+
+    shared = {"structures": [
+        {"rr": 0.59, "payoff_ratio": 0.67},
+        {"rr": 5.17, "payoff_ratio": 3.09},
+    ]}
+    # 10 lots of the condor: same R:R, ten times the dollars.
+    assert _matching_payoff_ratio(shared, 1860.0, -3140.0) == 0.67
+    assert _matching_payoff_ratio(shared, 186.0, -314.0) == 0.67
+    assert _matching_payoff_ratio(shared, 838.0, -162.0) == 3.09
+    # Never simulated -> no guess.
+    assert _matching_payoff_ratio(shared, 999.0, -1000.0) is None
+    # Ambiguous -> no guess either.
+    ambiguous = {"structures": [{"rr": 1.0, "payoff_ratio": 1.1},
+                                {"rr": 1.0, "payoff_ratio": 2.2}]}
+    assert _matching_payoff_ratio(ambiguous, 100.0, -100.0) is None
+    assert _matching_payoff_ratio(None, 100.0, -100.0) is None
+
+
+# ==================================== D-077 horizons that resolve in time
+
+
+def test_forecast_window_leaves_room_to_act():
+    """A thesis resolving ON the deadline can never inform a decision - that is
+    the day everything is force-closed."""
+    import datetime
+    from trdrbot import competence
+
+    today, deadline = datetime.date(2026, 8, 28), "2026-09-04"
+    earliest, preferred, latest = competence.forecast_window(deadline, today)
+    assert latest == "2026-09-03", "the deadline itself is not a useful horizon"
+    assert preferred == "2026-08-31", "prefer short: one slow forecast < three fast ones"
+    assert earliest == "2026-08-29", "TODAY resolves in zero days - a window has two sides"
+    assert earliest <= preferred <= latest
+
+    # Late in the window, everything clamps to what is still possible.
+    e2, p2, l2 = competence.forecast_window(deadline, datetime.date(2026, 9, 2))
+    assert e2 == p2 == l2 == "2026-09-03"
+
+    assert competence.forecast_window(None) is None
+    assert competence.forecast_window("not-a-date") is None
+
+
+def test_every_thesis_source_asks_the_same_question():
+    """They had each carried their own day-count and drifted apart: muse
+    allowed 1-10 days with NO deadline check at all, discovery allowed anything
+    up to and INCLUDING the deadline, and record_forecast argued for 1-3 days
+    in prose only. The muse's output then clustered at the far end - all five
+    of its live forecasts landed on the last useful day."""
+    import inspect
+    from trdrbot import discovery, muse
+
+    for mod in (muse, discovery):
+        src = inspect.getsource(mod)
+        assert "competence.forecast_window" in src, f"{mod.__name__} derives its own window"
+
+    # And the prompts carry the derived dates rather than a hardcoded count.
+    for token in ("{earliest}", "{preferred}", "{latest}"):
+        assert token in muse.MUSE_PROMPT, f"muse prompt lost {token}"
+    assert "{earliest}" in discovery.SYNTH_PROMPT, "a one-sided rule invites today"
+    assert "7 calendar" not in muse.MUSE_PROMPT, "the hardcoded range is gone"
+    assert "{latest}" in discovery.SYNTH_PROMPT
+
+
+def test_muse_rejects_a_horizon_that_resolves_too_late():
+    """The muse had no deadline check: it could emit a thesis resolving AFTER
+    the competition ends, which can never inform anything."""
+    import inspect
+    from trdrbot import muse
+
+    src = inspect.getsource(muse.run)
+    assert "resolves too late" in src
+    assert "horizon_too_late" in inspect.getsource(__import__(
+        "trdrbot.discovery", fromlist=["run"]).run)
+
+
+def test_a_truncated_json_array_still_yields_its_complete_elements():
+    """One LLM call spent for zero candidates: a 6,745-char muse reply opened
+    with a perfectly good `[{"underlying":"S"...` and parsed to nothing,
+    because the outer-bracket salvage found an INNER `]` from a nested list.
+    gpt-5 reasoning tokens share the completion budget, so a long generation
+    can be cut off after several good elements."""
+    from trdrbot.research import _parse_json_block
+
+    truncated = ('[{"underlying":"S","chain":["a","b"],"probability":0.4},'
+                 '{"underlying":"MU","chain":["c"],"probability":0.6},'
+                 '{"underlying":"BURL","cha')
+    got = _parse_json_block(truncated)
+    assert isinstance(got, list) and len(got) == 2
+    assert [g["underlying"] for g in got] == ["S", "MU"]
+
+    # A brace inside a string must not fool it.
+    # ...and a single complete element must still come back as a LIST. With
+    # one element written, `rfind("}")` lands on its own closer, so the object
+    # salvage succeeds and silently returns a dict where a list was expected.
+    tricky = '[{"claim":"a ] and a } inside","p":1},{"claim":"broke'
+    got2 = _parse_json_block(tricky)
+    assert isinstance(got2, list) and len(got2) == 1, f"got {got2!r}"
+
+    # Intact input is untouched, and genuine garbage still returns None.
+    assert _parse_json_block('[{"a":1}]') == [{"a": 1}]
+    assert _parse_json_block("not json at all") is None
+    assert _parse_json_block("[") is None

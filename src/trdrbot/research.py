@@ -83,12 +83,58 @@ def _section(text: str, name: str, next_names: list[str]) -> str:
     return m.group(1).strip() if m else ""
 
 
+def _salvage_truncated_array(raw: str, start: int) -> list[Any]:
+    """Complete elements from a JSON array that was cut off mid-flight.
+
+    The outer-bracket salvage below cannot help here: a truncated array has no
+    closing `]`, so `rfind` lands on an INNER one (a `suggested_structures`
+    list, say) and the fragment fails to parse - discarding four good
+    candidates because a fifth was half-written.
+
+    That is not hypothetical. The muse asks for five candidates each carrying a
+    causal chain and structure list, and gpt-5's reasoning tokens count against
+    the same completion budget as its output, so a run can spend most of an
+    8,000-token ceiling before it starts writing. Observed live: a 6,745-char
+    reply that opened with a perfectly good `[{"underlying":"S"...` and parsed
+    to nothing, one LLM call spent for zero candidates.
+
+    Uses the stdlib decoder's own incremental mode rather than counting
+    brackets, so a brace inside a string cannot fool it.
+    """
+    decoder = json.JSONDecoder()
+    out: list[Any] = []
+    i = start + 1
+    while i < len(raw):
+        while i < len(raw) and raw[i] in ", \t\r\n":
+            i += 1
+        if i >= len(raw) or raw[i] == "]":
+            break
+        try:
+            obj, i = decoder.raw_decode(raw, i)
+        except json.JSONDecodeError:
+            break  # the incomplete tail - everything before it is still good
+        out.append(obj)
+    return out
+
+
 def _parse_json_block(raw: str) -> Any:
     raw = raw.strip()
     raw = re.sub(r"^```(?:json)?\s*|\s*```$", "", raw, flags=re.MULTILINE).strip()
     try:
         return json.loads(raw)
     except json.JSONDecodeError:
+        # An unterminated ARRAY is salvaged before the outer-bracket attempt
+        # when the reply opens with one. Order matters: with exactly one
+        # complete element written, `rfind("}")` lands on that element's own
+        # closer, so the object salvage succeeds and returns a DICT where the
+        # caller is unpacking a list - a truncated array quietly becoming a
+        # single candidate is worse than returning nothing.
+        if raw.startswith("["):
+            partial = _salvage_truncated_array(raw, 0)
+            if partial:
+                print(f"[parse] reply was truncated; salvaged {len(partial)} complete "
+                      f"element(s) from an unterminated array")
+                return partial
         # Salvage the outermost JSON value if the model wrapped it in prose.
         for opener, closer in (("{", "}"), ("[", "]")):
             start, end = raw.find(opener), raw.rfind(closer)
@@ -97,6 +143,14 @@ def _parse_json_block(raw: str) -> Any:
                     return json.loads(raw[start : end + 1])
                 except json.JSONDecodeError:
                     continue
+        # ...or an array that was wrapped in prose AND truncated.
+        start = raw.find("[")
+        if start != -1:
+            partial = _salvage_truncated_array(raw, start)
+            if partial:
+                print(f"[parse] reply was truncated; salvaged {len(partial)} complete "
+                      f"element(s) from an unterminated array")
+                return partial
     return None
 
 

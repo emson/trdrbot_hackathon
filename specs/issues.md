@@ -38,16 +38,32 @@ Sorted by severity.
 - **I-10 · Interim scoring is fixed but unfired** (D-074). It needs an open position moving 25% of
   its net entry cost and there is no open position. The `interim_run` heartbeat now distinguishes
   "idle" from "stalled", which is the part verifiable today.
-- **I-11 · The muse dates every forecast at the far horizon.** All five of its ledger entries
-  resolve 2026-09-03, one day before the deadline. D-070 argued for 1-3 day horizons in
-  `record_forecast`'s docstring only; `muse.py` allows anything inside 7 days and its output
-  clusters at the far end, which is D-070's strategic finding surviving in a second producer.
-  **Action due:** a prompt change with its own before/after.
+- ~~**I-11 · The muse dates every forecast at the far horizon**~~ **FIXED 2026-08-28 (D-077).**
+  All three thesis sources now derive their horizon window from one place
+  (`competence.forecast_window`), and the muse gained the deadline check it never had. Before:
+  five forecasts, all on 2026-09-03. After: 2026-08-30, 08-31, 08-31, 09-02, 09-03.
 - **I-12 · ESTABLISH is barely a promotion.** With D-074's exploration floor in place, the tier's
   Kelly ceiling (0.10, ramping from 0.05) leaves size at the 2.2% exploration allocation for
   essentially every payoff tested. The real step-ups are SCALE and MATURE, both gated on
   attribution, which has never run. Coherent, but the first rung currently changes nothing but the
   book cap.
+- **I-18 · D-073's credit weighting has gone nearly inert** (found D-077 by its own contract
+  test failing). `credit_weight` was built on elfmem min-max normalising each recall - worst match
+  exactly 0.0, best exactly 1.0 - giving a documented 4x credit differential. Measured against the
+  live database now that the block pool has grown: a recall returns a filtered top SLICE, so
+  similarities cluster (0.926-1.000 on a real query) and **the differential is ~1.05x, not 4x.**
+  Deliberately NOT "fixed" by renormalising: a block returned at 0.93 genuinely is relevant, and
+  forcing a 4x split across near-identical scores would invent discrimination the data does not
+  contain. The irrelevant-block case it was built for (a SPY mind model at 0.0 against an NVDA
+  query) no longer comes back at all. The floor stays mandatory - elfmem still rejects weight <= 0.
+  **Watch:** if elfmem's retrieval changes again, the contract test is what will say so.
+- **I-19 · The muse runs close to its output ceiling.** A live run produced a 6,745-char reply that
+  parsed to nothing - one LLM call spent for zero candidates. gpt-5's reasoning tokens share the
+  8,000-token completion budget with its output, and the muse asks for five candidates each
+  carrying a causal chain and structure list. D-077 made `_parse_json_block` salvage complete
+  elements from a truncated array, so a cut-off reply now yields four candidates instead of none -
+  but the truncation itself is unaddressed. **Options:** a per-role max_tokens, or fewer candidates
+  per run at the cost of the diversity that is the muse's whole point.
 - **I-14 · The stated vol forecast is not scored** (D-076). The agent now states a realized-vol
   forecast and compares it to each structure's breakeven vol ("I forecast 8.5%, the condors needed
   sub-7.5%") - but nothing resolves that claim against realized vol at the horizon, so it moves no
@@ -68,10 +84,12 @@ Sorted by severity.
 - **I-17 · The constitution is full** (D-076). 427 of a 430-token ceiling, live SELF frame ~580 of
   elfmem's 600. The next principle requires RETIRING one; raising the ceiling past the frame's own
   budget buys a silent drop, not room (the D-041 failure mode).
-- **I-13 · Kelly uses `max_profit / max_loss` against `p = P(profitable)`.** Those are two
-  different events for any structure that can finish partially in the money. The same lognormal
-  grid that produces `pop_thesis` could produce a conditional `E[win] / E[loss]` instead. Deferred
-  at D-074: it changes what `size_position` means, and that pass had already changed the gate.
+- ~~**I-13 · Kelly uses `max_profit / max_loss` against `p = P(profitable)`**~~
+  **FIXED 2026-08-28 (D-077).** Measured: the mismatch was directional, not conservative - credit
+  structures understated 11-35%, debit structures overstated 43%, so the formula quietly preferred
+  buying premium to selling it. `optmath.payoff_ratio` supplies the conditional E[win]/E[loss] and
+  sizing matches it to the traded structure scale-invariantly on R:R, falling back to max/max with
+  the fallback STATED rather than applied silently.
 - ~~**I-7 · elfmem's SELF template header hardcodes "You are elf"**~~ **FIXED UPSTREAM (D-068)** -
   D-061 patched it at our boundary; `elfmem_index` @ cebc242e fixed the actual gap
   (`project.agent_name` now threads through `frame()` itself), verified directly against the

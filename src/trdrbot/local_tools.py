@@ -218,6 +218,12 @@ def build_simulate_experiments(shared: dict[str, Any], state_dir: "Path | None" 
                 "entry_cost": m.get("entry_cost"),
                 "max_profit": m.get("max_profit"),
                 "max_loss": m.get("max_loss"),
+                # Kelly's real `b` for this structure. Carried so size_position
+                # can use it without the model re-declaring a number it was
+                # just shown (D-037's derive-don't-declare).
+                "payoff_ratio": m.get("payoff_ratio"),
+                "rr": (abs(m["max_profit"] / m["max_loss"])
+                       if m.get("max_profit") is not None and m.get("max_loss") else None),
             }
             for e, m in results if m.get("usable")
         ]
@@ -455,6 +461,33 @@ def build_record_position(
     )
 
 
+#: How close two risk/reward ratios must be to be the same structure. Loose
+#: enough for the model's rounding of the figures it read off the comparison,
+#: tight enough that two genuinely different candidates on one board do not
+#: collide - a condor at 0.59 and a put spread at 0.19 are nowhere near this.
+RR_MATCH_TOLERANCE = 0.02
+
+
+def _matching_payoff_ratio(shared: dict[str, Any] | None,
+                           max_profit: float, max_loss: float) -> float | None:
+    """The conditional payoff ratio of the simulated structure being sized.
+
+    Matched on risk/reward, which is SCALE-INVARIANT: the model quotes
+    per-contract max profit and loss while `simulate` priced whatever quantity
+    the legs carried, so matching on dollars would fail on every multi-lot
+    candidate. Ambiguity (two candidates at the same R:R) returns None rather
+    than guessing - a wrong `b` is worse than the honest fallback.
+    """
+    structures = (shared or {}).get("structures") or []
+    if not structures or not max_loss:
+        return None
+    want = abs(max_profit / max_loss)
+    hits = [s for s in structures
+            if s.get("rr") is not None and s.get("payoff_ratio") is not None
+            and abs(s["rr"] - want) <= RR_MATCH_TOLERANCE]
+    return hits[0]["payoff_ratio"] if len(hits) == 1 else None
+
+
 def build_size_position(
     calibration: "CalibrationStore", equity: float, open_count: int,
     open_risk_usd: float = 0.0,
@@ -494,6 +527,12 @@ def build_size_position(
         d = sizing.size_position(
             equity=equity,
             underlying=underlying,
+            # Matched on the RISK/REWARD RATIO, which is scale-invariant - the
+            # model quotes per-contract figures while simulate priced whatever
+            # quantity the legs carried, so absolute dollars would not line up.
+            # No match (a structure never simulated) falls back to max/max and
+            # `explain()` says so, rather than silently using a different `b`.
+            payoff_ratio=_matching_payoff_ratio(shared, max_profit, max_loss),
             open_risk_usd=open_risk_usd,
             open_risk_by_underlying=open_risk_by_underlying,
             stated_confidence=stated_confidence,

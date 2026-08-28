@@ -120,6 +120,11 @@ def simulate(
     # decorative. This is the number it moves.
     ev_thesis = optmath.expected_value(legs, spot, iv, days, drift=thesis.drift)
 
+    # The payoff this bet actually offers, conditional on winning and on
+    # losing. `size_position` uses it as Kelly's `b` in place of max/max, which
+    # pairs a tail-to-tail ratio with a whole-region probability.
+    payoff = optmath.payoff_ratio(legs, spot, iv, days, drift=thesis.drift)
+
     # WHAT HAS TO BE TRUE. An EV is one number resting on one volatility
     # assumption, and choosing that assumption is where a whole board of
     # candidates silently becomes a single undefended input. These say what the
@@ -178,6 +183,9 @@ def simulate(
         # implied and never was.
         "ev_after_costs": (ev_thesis - friction) if ev_thesis is not None else None,
         "est_friction": friction,
+        "payoff_ratio": (payoff[2] if payoff else None),
+        "expected_win": (payoff[0] if payoff else None),
+        "expected_loss": (payoff[1] if payoff else None),
         "breakeven_vol": be_vol,
         "breakeven_drift": be_drift,
         "dominant_risk": dominant,
@@ -292,6 +300,25 @@ def _greeks_line(g: dict[str, Any] | None, days: float) -> str:
     )
 
 
+def _payoff_line(m: dict[str, Any]) -> str:
+    """What you win when you win, against what you lose when you lose.
+
+    R:R above is max-to-max: a vertical reaches its max profit in only part of
+    the region where it profits at all, and its max loss in only part of the
+    region where it loses. Sizing needs the CONDITIONAL pair, because Kelly's
+    `b` asks "how much per unit staked when I win" - and pairing a tail ratio
+    with a whole-region probability biased this book toward buying premium
+    (measured: credit understated 11-35%, debit overstated 43%).
+    """
+    r, w, l = m.get("payoff_ratio"), m.get("expected_win"), m.get("expected_loss")
+    if r is None or w is None or l is None:
+        return ""
+    rr = m.get("risk_reward")
+    drift = f" (max/max says {rr:.2f})" if rr is not None else ""
+    return (f"\n   PAYOFF   when it wins ${w:,.0f}, when it loses ${l:,.0f}"
+            f" -> {r:.2f}:1{drift}. Sizing uses this, not max/max")
+
+
 def _needs_line(m: dict[str, Any]) -> str:
     """What has to be true, and which variable the structure is really betting on.
 
@@ -358,6 +385,7 @@ def render_comparison(
             f"\n   FACTS    max profit {mp} | max loss {ml} | R:R {rr}"
             f" | breakevens {m['breakevens']}"
             f"\n   MODELLED P(profit) market {pm} -> your view {pt} | thesis edge {edge}"
+            f"{_payoff_line(m)}"
             f"{_greeks_line(m.get('greeks'), m.get('days') or 0)}"
             f"{boot}"
             f"\n   COSTS    est. round-trip friction ${m['est_friction']:,.0f}"

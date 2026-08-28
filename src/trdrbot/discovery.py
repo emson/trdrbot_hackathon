@@ -27,7 +27,7 @@ import json
 from datetime import date, datetime, timezone
 from typing import Any
 
-from . import ids, market_stats, mcp_client, news_extract
+from . import competence, ids, market_stats, mcp_client, news_extract
 from .config import Config
 from .inbox import Inbox
 from .journal import Journal
@@ -65,8 +65,11 @@ options-chain check. Do not contradict computed numbers.
 
 Task: forecast each candidate's potential over the next 5 trading days, then propose 0-3 \
 OPPORTUNITIES total (across all candidates - only where evidence, technicals and the forecast \
-line up; an empty array is a valid answer). All positions must close by {deadline}, so the \
-horizon must be on or before it. Candidates that failed the options gate cannot be opportunities.
+line up; an empty array is a valid answer). All positions are force-closed on {deadline}. \
+**Every horizon must fall between {earliest} and {latest} inclusive; outside that is rejected.** \
+Aim the bulk at {preferred} or sooner. A thesis resolving on the deadline itself can never inform \
+a decision - it needs room after it to be worth forming - and one dated today resolves in zero \
+days. Candidates that failed the options gate cannot be opportunities.
 
 Respond with EXACTLY this structure:
 
@@ -231,8 +234,14 @@ async def run(
         blocks.append("\n".join(section))
 
     # ---- LLM call 2: synthesise after the numbers ----
+    # Derived, not recalled, and shared with muse and record_forecast so the
+    # three thesis sources cannot drift apart on what "in time" means.
+    _window = competence.forecast_window(deadline, ids.utc_now().date())
+    _earliest, _preferred, _latest = _window or ("", "", "")
     reply2 = await model.ainvoke(SYNTH_PROMPT.format(
-        candidates_block="\n\n".join(blocks), deadline=deadline))
+        candidates_block="\n\n".join(blocks), deadline=deadline,
+        earliest=_earliest or "tomorrow", preferred=_preferred or "3 days out",
+        latest=_latest or deadline))
     text2 = reply2.content if isinstance(reply2.content, str) else "\n".join(
         b.get("text", "") for b in reply2.content if isinstance(b, dict) and b.get("type") == "text")
 
@@ -275,8 +284,12 @@ async def run(
         if o["underlying"].upper() not in ok_tickers:
             journal.append("research_rejected", reason="failed_options_gate", raw=str(o)[:300])
             continue
-        if date.fromisoformat(str(o["horizon"])) > date.fromisoformat(config.deadline):
-            journal.append("research_rejected", reason="horizon_past_deadline", raw=str(o)[:300])
+        # Was `> deadline`, which admitted a thesis resolving ON the deadline -
+        # the day everything is force-closed, so its answer arrives after the
+        # last decision it could inform. `forecast_window` is the one rule all
+        # three thesis sources now share; they had each carried their own.
+        if _latest and str(o["horizon"]) > _latest:
+            journal.append("research_rejected", reason="horizon_too_late", raw=str(o)[:300])
             continue
         # Bands must be PRICES. Found live on the first run: the LLM emitted
         # percentage moves ([-6.0, 8.0] on a $87 stock), which would make

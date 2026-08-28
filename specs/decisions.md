@@ -2930,3 +2930,88 @@ decline ledger with regret scoring.
 
 **Verified:** 179 default tests (5 new) + 14 contract tests. Constitution renders 11/11 principles
 at 580 tokens; 8/8 lessons recall by their cue.
+
+## D-077: Kelly's payoff ratio, horizons that resolve in time, and a contract that caught itself
+**Date:** 2026-08-28
+**Status:** accepted
+**Context:** Closing I-13 and I-11 from D-076's deferral list. Both turned out to be bigger than
+their one-line descriptions, and the work surfaced two further findings - one of them by a
+contract test failing exactly as designed.
+
+**1. Kelly's `b` and Kelly's `p` were different events (I-13).** Sizing passed
+`max_profit / max_loss` for the payoff ratio while passing P(profit > 0) for the probability. A
+vertical reaches its max profit in only PART of the region where it profits at all, and its max
+loss in only part of the region where it loses - so the pair described two different events. That
+is not a conservative approximation, it is a DIRECTIONAL one, and measuring it on real structures
+at live quotes shows which way:
+
+    bull put 765/760     max/max 0.19  ->  conditional 0.26   (understated 35%)
+    iron condor          max/max 0.59  ->  conditional 0.66   (understated 11%)
+    call debit 775/785   max/max 5.17  ->  conditional 2.94   (OVERstated 43%)
+
+Credit structures win near their max and lose well short of it; debit structures are the reverse.
+**So the formula was biasing the book toward BUYING premium and away from selling it, structurally,
+at every sample size** - a preference nobody chose and nothing recorded. `optmath.payoff_ratio`
+returns (E[win|win], E[loss|loss], ratio) off the same lognormal grid the probabilities come from,
+and `kelly_fraction` takes it as `b`. The agent's own probability is deliberately NOT replaced:
+it supplies `p`, calibration shrinks it, the model supplies the payoff shape - the same
+facts-and-models split the rest of the module keeps.
+
+**Guarded against its own degenerate case:** a conditional expectation needs something to condition
+on, and dividing by the mean of an essentially empty side manufactures an enormous ratio out of a
+corner of the distribution - which sends Kelly to `p`. Below 1% mass on either side the ratio is
+refused and the caller falls back. **Matched scale-invariantly on RISK/REWARD**, because the model
+quotes per-contract figures while `simulate` priced whatever quantity the legs carried, so matching
+on dollars fails on every multi-lot candidate. Ambiguity returns None rather than guessing, and the
+fallback is stated in `explain()` - a silent switch between two `b` values that differ by tens of
+percent is exactly the invisible change this project keeps finding.
+
+**2. Horizons: three sources, three different rules, none of them right (I-11).**
+`record_forecast` argued for 1-3 days in prose, `discovery` allowed anything up to and INCLUDING
+the deadline, and `muse` allowed 1-10 days with **no deadline check at all** - it could emit a
+thesis resolving after the competition ended. `competence.forecast_window` is now the one rule all
+three ask, deriving (earliest, preferred, latest) from the deadline rather than each carrying its
+own day-count. A thesis resolving ON the deadline can never inform a decision; that is the day
+everything is force-closed.
+
+**The first version of this made the mistake it was fixing.** It returned only a preferred date and
+the prompt said "prefer {preferred} or earlier" - and the muse read that exactly as written and
+dated a candidate TODAY, which resolves in zero days and was thrown out by the very next gate. A
+one-sided instruction invites the degenerate end of it. Hence `earliest`, and a prompt that states
+a window with two sides and asks for candidates SPREAD across it - plus an explicit "do not crush a
+multi-step thesis into one session just to be early", because the muse's mandate is domino chains
+and those need room to fall. Live before: five forecasts, every one on 2026-09-03. After:
+2026-08-30, 08-31, 08-31, 09-02, 09-03, and one emitted where the previous run emitted none.
+
+**3. A truncated JSON array threw away four good candidates for a fifth half-written one.** Found
+running the muse: a 6,745-char reply opening with a perfectly good `[{"underlying":"S"...` parsed
+to NOTHING - one LLM call spent for zero output. The outer-bracket salvage cannot help an
+unterminated array, because `rfind("]")` lands on an INNER bracket. `_parse_json_block` now
+salvages complete elements using the stdlib decoder's incremental mode (so a brace inside a string
+cannot fool it), and says loudly that it did. **Ordering matters and is tested:** with exactly one
+complete element written, `rfind("}")` finds that element's own closer, so the object salvage
+succeeds and returns a DICT where the caller unpacks a list - a truncated array quietly becoming a
+single candidate is worse than returning nothing. Array salvage therefore runs first when the reply
+opens with `[`.
+
+**4. A contract test caught its own premise going stale, which is the whole point of the file.**
+`test_frame_similarity_is_min_max_normalised_within_the_result_set` failed - not from any change
+here. D-073 built `credit_weight` on elfmem min-max normalising each recall (worst match exactly
+0.0, best exactly 1.0) and reported a 4x credit differential. Measured now that the block pool has
+grown: a recall returns a filtered top SLICE, similarities cluster at 0.926-1.000, and **the
+differential is about 1.05x**. Deliberately NOT "fixed" by renormalising ourselves: a block
+returned at 0.93 genuinely is relevant, and forcing a 4x split across near-identical scores would
+invent discrimination the data does not contain. The irrelevant-block case D-073 was built for - a
+SPY mind model scoring 0.0 against an NVDA query - simply does not come back any more. The test now
+asserts what remains load-bearing and true (similarity is bounded in [0,1] and can arrive anywhere
+in it, so the floor stays mandatory), and I-18 records the collapsed differential.
+
+**Also fixed, self-inflicted:** the new prompt-cache contract test assumed the first call always
+WRITES the cache. It runs against a shared 5-minute TTL, so a re-run inside that window finds the
+prefix warm and the first call reads - the test passed once and failed on the very next run. It now
+asserts the belief that actually matters (a marked prefix is served from cache at all), not which
+call paid to put it there.
+
+**Verified:** 187 default tests (8 new) + 14 contract tests. Live muse run with spread horizons and
+a candidate emitted; live simulate showing the PAYOFF line and sizing picking the conditional ratio
+up through a 10x quantity change.

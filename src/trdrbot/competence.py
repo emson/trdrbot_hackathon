@@ -215,6 +215,51 @@ def assess(
     )
 
 
+#: A forecast only teaches once it RESOLVES, and nothing it teaches can move a
+#: decision that has already been made. So a horizon needs room after it: this
+#: many days between resolution and the hard stop, or the answer arrives too
+#: late to act on and the forecast was a diary entry.
+MIN_DAYS_TO_ACT_ON = 1
+#: Preferred horizon, in days from today. D-070's argument, now arithmetic
+#: instead of prose: one slow forecast is worth less than three fast ones, and
+#: short horizons are harder, which is the point - they test judgement rather
+#: than drift.
+PREFERRED_HORIZON_DAYS = 3
+
+
+def forecast_window(deadline: str | None, today: date | None = None
+                    ) -> tuple[str, str, str] | None:
+    """(earliest, preferred, latest) as ISO dates, or None with no deadline.
+
+    Derived, never recalled - the same date discipline D-032 imposed after the
+    agent dated horizons from memory. Every thesis source asks this rather than
+    carrying its own day-count, because they had drifted apart: `record_forecast`
+    argued for 1-3 days in prose, `discovery` allowed anything up to and
+    including the deadline, and `muse` allowed 1-10 days with no deadline check
+    at all. The muse's output clustered at the far end and every one of its five
+    live forecasts landed on the last useful day but one.
+
+    **`earliest` exists because the first version of this returned only a
+    preferred date and the prompt said "prefer X or earlier".** The muse read
+    that exactly as written and dated a candidate TODAY, which resolves in zero
+    days and was thrown out by the very next gate. A one-sided instruction
+    invites the degenerate end of it; a window has two sides.
+    """
+    if not deadline:
+        return None
+    today = today or date.today()
+    try:
+        stop = date.fromisoformat(deadline)
+    except (ValueError, TypeError):
+        return None
+    from datetime import timedelta
+
+    latest = stop - timedelta(days=MIN_DAYS_TO_ACT_ON)
+    earliest = min(today + timedelta(days=1), latest)
+    preferred = min(today + timedelta(days=PREFERRED_HORIZON_DAYS), latest)
+    return (earliest.isoformat(), preferred.isoformat(), latest.isoformat())
+
+
 def can_open(deadline: str | None, expiry: str | None, today: date | None = None) -> tuple[bool, str]:
     """Position-level horizon check, separate from the size ladder.
 

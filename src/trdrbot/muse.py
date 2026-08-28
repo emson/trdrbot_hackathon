@@ -34,7 +34,7 @@ import random
 import re
 from typing import Any
 
-from . import ids, market_stats, mcp_client, news_extract
+from . import competence, ids, market_stats, mcp_client, news_extract
 from .config import Config
 from .discovery import _options_gate, _plausible_band
 from .inbox import Inbox
@@ -75,8 +75,19 @@ steps, not one.
 {odds}
 
 Produce {k} CANDIDATE THESES. For each, the causal chain must be explicit and each step \
-arguable. Rules: liquid US-listed optionable underlyings only; horizon within 7 calendar \
-days OF TODAY ({today} - date your horizons from this, not from memory); band_low/band_high are PRICES IN DOLLARS between which the claim HOLDS at the horizon \
+arguable. Rules: liquid US-listed optionable underlyings only.
+
+HORIZONS. Date every horizon from TODAY ({today}), never from memory. \
+**Every horizon must fall between {earliest} and {latest} inclusive; anything outside is \
+rejected.** Aim the bulk at {preferred} or sooner. A forecast teaches nothing until it \
+RESOLVES, and nothing it teaches can move a decision already made - so one slow forecast is \
+worth less than three fast ones, and short horizons are harder, which is the point: they test \
+judgement rather than drift. But a domino chain needs room to fall: do NOT crush a \
+multi-step thesis into one session just to be early. SPREAD your candidates across the \
+window rather than clustering on one date, and place each horizon where its own chain \
+actually resolves.
+
+band_low/band_high are PRICES IN DOLLARS between which the claim HOLDS at the horizon \
 (at least one non-null); probability is your honest P(band holds), not rounded to \
 0.5/0.75. Bands must be TIGHT enough to be informative - a band the underlying almost \
 always stays inside says nothing; place the band edges where your causal chain actually \
@@ -142,8 +153,14 @@ async def run(
     except Exception:  # noqa: BLE001
         pass
 
+    # Derived, not recalled (D-032's date discipline), and shared with every
+    # other thesis source so the three cannot drift apart again.
+    window = competence.forecast_window(config.deadline, ids.utc_now().date())
+    earliest, preferred, latest = window or ("", "", "")
     prompt = MUSE_PROMPT.format(
         today=ids.utc_now().date().isoformat(),
+        earliest=earliest or "tomorrow", preferred=preferred or "3 days out",
+        latest=latest or "10 days out",
         n=len(concepts), k=CANDIDATES, concepts=concept_block,
         news="\n".join(news_lines) or "(none)", odds="\n".join(odds_lines) or "(none)",
     )
@@ -212,8 +229,17 @@ async def run(
             days = (date.fromisoformat(str(cand["horizon"])) - date.today()).days
         except (ValueError, TypeError, KeyError):
             days = 0
+        # The muse had NO deadline check at all - it could emit a thesis that
+        # resolves after the competition ends, which can never inform anything.
+        # And its output clustered at the far end of whatever range it was
+        # given: all five live forecasts landed on the last useful day but one.
         if days <= 0 or days > 10:
             verdict["fate"] = f"rejected: horizon {cand.get('horizon')} outside 1-10 days"
+            evaluated.append(verdict)
+            continue
+        if latest and str(cand.get("horizon", "")) > latest:
+            verdict["fate"] = (f"rejected: horizon {cand.get('horizon')} resolves too late "
+                               f"to act on before {config.deadline} (latest useful {latest})")
             evaluated.append(verdict)
             continue
 
