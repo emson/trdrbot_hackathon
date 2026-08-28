@@ -48,6 +48,26 @@ Sorted by severity.
   essentially every payoff tested. The real step-ups are SCALE and MATURE, both gated on
   attribution, which has never run. Coherent, but the first rung currently changes nothing but the
   book cap.
+- **I-14 · The stated vol forecast is not scored** (D-076). The agent now states a realized-vol
+  forecast and compares it to each structure's breakeven vol ("I forecast 8.5%, the condors needed
+  sub-7.5%") - but nothing resolves that claim against realized vol at the horizon, so it moves no
+  calibration and earns no size, which is most of the point of making it explicit. Resolution needs
+  `market_stats._rolling_vol` over stored closes (no network, no LLM) plus one `metric` field on a
+  ledger Entry. **Highest-value next step.**
+- **I-15 · Entry commitments do not survive the cycle** (D-076). The agent committed at 07:15 to
+  "775/785 at <= ~$2.10 -> act"; it traded at $1.62 six hours later with spot unchanged, and no
+  cycle re-checked it. Every cycle is a cold start that states fresh act-conditions and discards
+  the previous one's. The system has a mechanism for commitments about POSITIONS (exit rules) and
+  none for commitments about ENTRIES. Proposed shape: expiring, wake-only triggers on the existing
+  exit-rule signal registry - they schedule a decide cycle, never place an order.
+- **I-16 · Declines are never scored** (D-076). 18 theses simulated, 0 traded, and no record of
+  what any decline would have made. A decline that was right about vol and one that was right about
+  direction are indistinguishable, and `friction-is-the-size-of-the-edge` was asserting "and I was
+  right to" off no measurement at all (amended). Proposed: journal the declined STRUCTURE with its
+  legs, resolve at its horizon like a traded one.
+- **I-17 · The constitution is full** (D-076). 427 of a 430-token ceiling, live SELF frame ~580 of
+  elfmem's 600. The next principle requires RETIRING one; raising the ceiling past the frame's own
+  budget buys a silent drop, not room (the D-041 failure mode).
 - **I-13 · Kelly uses `max_profit / max_loss` against `p = P(profitable)`.** Those are two
   different events for any structure that can finish partially in the money. The same lognormal
   grid that produces `pop_thesis` could produce a conditional `E[win] / E[loss]` instead. Deferred

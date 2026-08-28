@@ -59,6 +59,12 @@ PRINCIPLES: tuple[Principle, ...] = (
         cue="when research or a remembered figure disagrees with the live quote",
         traces_to="D-032 stale-bars incident - 'the note assumes NVDA at 224.11; the tape says 209.37'",
     ),
+    Principle(
+        "assumptions",
+        "An input I chose is a judgement, not an observation. Caution compounds - haircuts stack into a verdict nobody chose. I test my answer against the alternative input.",
+        cue="when a conclusion rests on a number I selected - a vol window, a haircut, a friction charge",
+        traces_to="D-076 - four defensible haircuts and a 21d-vs-5d vol window choice, each right alone, together made a whole regime untradeable: 18 theses simulated, 0 traded",
+    ),
     # ---- how to remember ----------------------------------------------
     Principle(
         "earned-confidence",
@@ -121,6 +127,14 @@ MAX_INBOX_PER_RUN = 5
 #: Raised from 380 when principles gained their `[name]` prefix (D-049): ~32
 #: tokens buys the only stable handle the agent can cite. The guard caught
 #: the overrun on the first test run, which is what it is for.
+#:
+#: **The constitution is now FULL: 427 of 430 with [assumptions] (D-076), and
+#: the live SELF frame renders ~578 of its 600.** The next principle requires
+#: RETIRING one, not raising this number - the budget is elfmem's and the
+#: renderer is greedy, so raising the ceiling past the frame's does not buy
+#: room, it buys a silent drop. Measure `mem.self_frame()` before assuming
+#: otherwise; the 600 here is a mirror of elfmem's setting, not a constraint we
+#: control.
 CONSTITUTION_TOKEN_CEILING = 430
 
 

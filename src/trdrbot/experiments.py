@@ -120,6 +120,16 @@ def simulate(
     # decorative. This is the number it moves.
     ev_thesis = optmath.expected_value(legs, spot, iv, days, drift=thesis.drift)
 
+    # WHAT HAS TO BE TRUE. An EV is one number resting on one volatility
+    # assumption, and choosing that assumption is where a whole board of
+    # candidates silently becomes a single undefended input. These say what the
+    # structure actually needs the world to do, and which of the two it is
+    # betting on - a desk's first question, and one this comparison could not
+    # previously answer.
+    be_vol = optmath.breakeven_vol(legs, spot, days, friction=friction, drift=thesis.drift)
+    be_drift = optmath.breakeven_drift(legs, spot, days, friction=friction, iv=iv)
+    dominant = optmath.dominant_risk(greeks)
+
     # Risk/reward only means something when both ends are bounded. An
     # unbounded loss has no ratio - reporting one would imply a cap that
     # does not exist.
@@ -168,6 +178,9 @@ def simulate(
         # implied and never was.
         "ev_after_costs": (ev_thesis - friction) if ev_thesis is not None else None,
         "est_friction": friction,
+        "breakeven_vol": be_vol,
+        "breakeven_drift": be_drift,
+        "dominant_risk": dominant,
         "thesis_edge": edge,
         "pop_bootstrap": pop_bootstrap,
         "tail_gap": tail_gap,
@@ -279,6 +292,28 @@ def _greeks_line(g: dict[str, Any] | None, days: float) -> str:
     )
 
 
+def _needs_line(m: dict[str, Any]) -> str:
+    """What has to be true, and which variable the structure is really betting on.
+
+    Ordered so the DOMINANT risk reads first: a call spread that moves $199 per
+    1% of spot against $22 a vol point is a direction bet, and leading with its
+    breakeven vol would put the least relevant number in the most prominent
+    place. The other is still shown - a bet you are not primarily taking can
+    still be the one that kills you.
+    """
+    dom, bv, bd = m.get("dominant_risk"), m.get("breakeven_vol"), m.get("breakeven_drift")
+    parts: list[str] = []
+    if dom:
+        label, ratio = dom
+        r = "" if ratio == float("inf") else f" ({ratio:.0f}x)"
+        parts.append({"direction": f"a DIRECTION bet{r}",
+                      "volatility": f"a VOL bet{r}",
+                      "balanced": "riding direction and vol about equally"}[label])
+    order = [bd, bv] if (dom and dom[0] == "direction") else [bv, bd]
+    parts += [b.describe() for b in order if b is not None]
+    return "\n   NEEDS    " + " | ".join(parts) if parts else ""
+
+
 def render_comparison(
     thesis: Thesis, ranked: list[tuple[Experiment, dict[str, Any]]]
 ) -> str:
@@ -327,6 +362,7 @@ def render_comparison(
             f"{boot}"
             f"\n   COSTS    est. round-trip friction ${m['est_friction']:,.0f}"
             f" | EV after costs, YOUR VIEW {eac} | at market's own drift {evm}"
+            f"{_needs_line(m)}"
             f"\n   {exp.rationale}"
         )
     lines.append(

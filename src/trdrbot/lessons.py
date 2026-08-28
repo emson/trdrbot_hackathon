@@ -65,7 +65,10 @@ LESSONS: tuple[Lesson, ...] = (
         "+$9 once real round-trip friction was charged - a 65% haircut. Four "
         "legs of a condor cross four spreads. Price the exit at a STRESSED "
         "spread too, because losing exits happen when markets are widest. "
-        "I have declined roughly ten cycles on this basis and been right to.",
+        "But note what the charge assumes: a full round trip on a spread I "
+        "intend to hold to expiry is an exit I never pay. Not one of the "
+        "declines I made on this basis has ever been scored, so 'and I was "
+        "right to' is a story, not a record.",
         cue="when a structure's premium or expected value looks attractive",
         tags=("costs", "edge"),
     ),
@@ -105,9 +108,41 @@ LESSONS: tuple[Lesson, ...] = (
         "a data point, is not calibration - it is a donation with a story "
         "attached. When nothing prices positively the right output is a recorded "
         "FORECAST on the setup I declined, which scores my judgement at zero "
-        "cost and moves the same calibration number.",
+        "cost and moves the same calibration number. The bar cuts both ways, "
+        "though, and I have been reading it as one-sided: a structure I price "
+        "at MINUS zero or PLUS four dollars is inside 'roughly neutral', not "
+        "outside it. Declining that is not this rule, it is a different and "
+        "unstated one.",
         cue="when tempted to trade because the risk budget is sitting unused",
         tags=("sizing", "discipline"),
+    ),
+    Lesson(
+        "the-window-i-quote-is-a-forecast",
+        "Realized vol is not one number and I have been picking which one "
+        "without saying so. Same tape, same day: SPY realized 11.3% over 21 "
+        "sessions and 5.9% over 5. Quoting the 21-day figure against a 5-day "
+        "horizon is not an observation, it is a forecast I made silently - and "
+        "it decided a whole board, because every candidate's EV rests on it. "
+        "So state which vol I am forecasting for THIS horizon and why, then "
+        "read the BREAKEVEN VOL the simulator now prints per structure: "
+        "'wins if realized comes in under 7.5%' is a claim the tape can settle, "
+        "where 'EV is minus twenty dollars' just hides the input that produced it.",
+        cue="when judging whether implied vol is rich or cheap, or picking a vol to simulate at",
+        tags=("volatility", "calibration", "assumptions"),
+    ),
+    Lesson(
+        "abstention-has-a-price",
+        "Declining is a decision that can be wrong, and mine have never been "
+        "scored. Measured over the whole ledger era: 18 theses simulated, ZERO "
+        "traded, while all five price forecasts I recorded instead were holding "
+        "at review. My views were right and I expressed none of them. The cost "
+        "is not only forgone P&L - a thesis that never becomes a position "
+        "leaves my exit rules unfired, my attribution empty, and my size ladder "
+        "stuck, so the learning loop stops for want of anything to learn from. "
+        "'No trade' is the right answer often; it is not free, and a run of "
+        "them is evidence about ME, not about the market.",
+        cue="when about to decline, or when several cycles in a row have produced no position",
+        tags=("discipline", "expectancy", "calibration"),
     ),
     Lesson(
         "a-38-percent-trade-can-be-the-right-trade",

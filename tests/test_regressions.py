@@ -2487,3 +2487,99 @@ def test_the_reachability_warning_is_actually_WIRED(tmp_path):
         legs=[{"symbol": "SPY260902P00700000", "side": "sell", "qty": 1}],
         thesis="x", confidence=0.6, expiry="2026-09-02", stop_loss_pct=-999.0)
     assert "cannot trigger" not in other
+
+
+# ============================================== D-076 what has to be true
+
+
+def _L(r, k, s, q, p):
+    from trdrbot.optmath import Leg
+    return Leg.parse({"right": r, "strike": k, "side": s, "qty": q, "price": p})
+
+
+CONDOR = lambda: [_L("P", 766, "short", 1, 1.87), _L("P", 761, "long", 1, 0.95),
+                  _L("C", 776, "short", 1, 1.22), _L("C", 781, "long", 1, 0.28)]
+CALL_SPREAD = lambda: [_L("C", 775, "long", 1, 1.77), _L("C", 785, "short", 1, 0.15)]
+
+
+def test_breakeven_vol_states_the_trade_the_way_a_desk_states_it():
+    """An EV is one number resting on one volatility assumption, and choosing
+    that assumption is where a whole board silently becomes one undefended
+    input - the live journal declined four candidates on a 21-day realized
+    figure where the 5-day figure reversed three of them."""
+    from trdrbot.optmath import breakeven_vol
+
+    be = breakeven_vol(CONDOR(), 770.61, 5)
+    assert be.crossings, "a short-premium structure must have a vol it stops working at"
+    assert be.positive_at_low, "selling premium wins when realized comes in LOW"
+    assert "wins if realized vol <" in be.describe()
+
+    long_vol = breakeven_vol(CALL_SPREAD(), 770.61, 5)
+    assert not long_vol.positive_at_low, "a long-vol structure is the other way round"
+    assert "wins if realized vol >" in long_vol.describe()
+
+
+def test_breakeven_drift_returns_a_BAND_for_a_range_structure():
+    """EV is monotone in vol for one-signed vega but NOT in drift: a condor
+    peaks at zero drift and falls away both sides. Bisecting from the endpoints
+    would have reported a confident single crossing for every range structure
+    the agent trades."""
+    from trdrbot.optmath import breakeven_drift
+
+    be = breakeven_drift(CONDOR(), 770.61, 5, iv=0.07)
+    assert len(be.crossings) == 2, f"a range trade wins BETWEEN two drifts, got {be.crossings}"
+    assert be.crossings[0] < 0 < be.crossings[1]
+    assert "between" in be.describe()
+
+    directional = breakeven_drift(CALL_SPREAD(), 770.61, 5, iv=0.10, friction=15.0)
+    assert len(directional.crossings) == 1, "a directional structure crosses once"
+    assert "wins if drift >" in directional.describe()
+
+
+def test_no_crossing_is_reported_not_hidden():
+    """'positive at every vol I can model' is an answer, and a useful one."""
+    from trdrbot.optmath import Breakeven, breakeven_vol
+
+    # Free money: a debit spread bought for less than nothing.
+    free = breakeven_vol([_L("C", 775, "long", 1, 0.0), _L("C", 785, "short", 1, 0.50)],
+                         770.61, 5)
+    assert not free.crossings and free.positive_at_low
+    assert "every" in free.describe()
+    assert Breakeven("x", (), False).describe().startswith("EV negative")
+
+
+def test_dominant_risk_separates_a_direction_bet_from_a_vol_bet():
+    """Measured on two live candidates from one board, one expiry: the condor
+    moved $9 per 1% of spot against $23 a vol point; the call spread $199
+    against $22. The decide cycle priced both off one volatility assumption
+    without noticing only one of them cared."""
+    from trdrbot.optmath import dominant_risk, net_greeks
+
+    condor = dominant_risk(net_greeks(CONDOR(), 770.61, 0.10, 5))
+    spread = dominant_risk(net_greeks(CALL_SPREAD(), 770.61, 0.10, 5))
+    assert condor[0] == "volatility"
+    assert spread[0] == "direction" and spread[1] > 5
+
+    # The one that matters for this book: a far-OTM credit spread is a
+    # LEVERAGED DIRECTION bet wearing a premium-selling costume.
+    far_put = dominant_risk(net_greeks(
+        [_L("P", 765, "short", 1, 1.61), _L("P", 760, "long", 1, 0.80)], 770.61, 0.10, 5))
+    assert far_put[0] == "direction", "a far OTM put spread is not a vol trade"
+
+    assert dominant_risk(None) is None
+
+
+def test_the_needs_line_leads_with_the_dominant_risk():
+    """A call spread's breakeven vol is nearly irrelevant; leading with it puts
+    the least relevant number in the most prominent place."""
+    from trdrbot.experiments import Experiment, Thesis, simulate, _needs_line
+
+    th = Thesis("up", "SPY", "2026-09-02", drift=0.002)
+    m = simulate(Experiment("call spread", CALL_SPREAD()), th, 770.61, 0.10, 5)
+    line = _needs_line(m)
+    assert "DIRECTION bet" in line
+    assert line.index("drift") < line.index("realized vol"), "dominant risk reads first"
+
+    mc = simulate(Experiment("condor", CONDOR()), th, 770.61, 0.10, 5)
+    lc = _needs_line(mc)
+    assert "VOL bet" in lc and lc.index("realized vol") < lc.index("drift")

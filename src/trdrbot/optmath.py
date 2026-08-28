@@ -252,6 +252,170 @@ def expected_value(legs: Iterable[Leg], spot: float, iv: float, days: float,
     return sum(w * pnl_at(legs, s) for s, w in _lognormal_grid(spot, iv, days, drift=drift))
 
 
+# ------------------------------------------------ what has to be true (MODELLED)
+#
+# A desk does not ask "what is the EV" first. It asks **what am I betting on,
+# and what has to be true for this to pay** - and then whether it believes that.
+# EV at one chosen vol answers neither, and choosing that vol is where a whole
+# board of candidates quietly becomes a single unexamined assumption.
+
+#: Search grids for the breakeven scan. Wide enough to bracket any short-dated
+#: structure, fine enough not to step over a sign change. Deliberately a scan
+#: rather than a bisection from the endpoints: EV is monotone in vol for a
+#: structure with one-signed vega, but NOT in drift - a condor peaks at zero
+#: drift and falls away both sides, so its breakeven is a BAND. Assuming a
+#: single crossing would have reported a confident wrong number for every
+#: range structure the agent trades.
+_VOL_GRID = tuple(0.005 * i for i in range(1, 241))        # 0.5% .. 120%
+_DRIFT_GRID = tuple(-0.20 + 0.002 * i for i in range(201))  # -20% .. +20%
+
+
+@dataclass(frozen=True)
+class Breakeven:
+    """Where a structure's EV crosses zero in one variable, and which side wins.
+
+    `crossings` is empty when EV never changes sign across the searched range,
+    which is itself the answer ("this is positive at any vol I can model") and
+    is reported rather than hidden.
+    """
+
+    variable: str
+    crossings: tuple[float, ...]
+    positive_at_low: bool
+    unit: str = "%"
+
+    def describe(self) -> str:
+        f = (lambda v: f"{v:.1%}") if self.unit == "%" else (lambda v: f"{v:g}")
+        if not self.crossings:
+            side = "positive" if self.positive_at_low else "negative"
+            return f"EV {side} at every {self.variable} tested"
+        if len(self.crossings) == 1:
+            c = f(self.crossings[0])
+            return (f"wins if {self.variable} < {c}" if self.positive_at_low
+                    else f"wins if {self.variable} > {c}")
+        lo, hi = f(self.crossings[0]), f(self.crossings[-1])
+        return (f"wins if {self.variable} outside {lo}..{hi}" if self.positive_at_low
+                else f"wins if {self.variable} between {lo} and {hi}")
+
+
+def _crossings(f, grid: "tuple[float, ...]", *, tol: float = 1e-4) -> tuple[float, ...]:
+    """Zeros of `f` over `grid`, by scan then bisection. Same shape as `breakevens`."""
+    out: list[float] = []
+    for a, b in zip(grid, grid[1:]):
+        fa, fb = f(a), f(b)
+        if fa is None or fb is None:
+            continue
+        if fa == 0:
+            out.append(a)
+        elif fa * fb < 0:
+            lo, hi = a, b
+            for _ in range(60):
+                mid = (lo + hi) / 2
+                fm = f(mid)
+                if fm is None:
+                    break
+                if f(lo) * fm <= 0:
+                    hi = mid
+                else:
+                    lo = mid
+                if hi - lo < tol:
+                    break
+            out.append((lo + hi) / 2)
+    return tuple(sorted(set(out)))
+
+
+def breakeven_vol(legs: Iterable[Leg], spot: float, days: float, *,
+                  friction: float = 0.0, drift: float = 0.0) -> Breakeven | None:
+    """The REALIZED VOL at which this structure's EV after costs crosses zero.
+
+    The honest statement of a premium trade. "EV is -$20" depends entirely on
+    which volatility you fed it, and the live journal shows a whole board of
+    candidates declined on a 21-day realized figure where the 5-day figure
+    would have reversed three of them - the number that decided everything was
+    the one input nobody had to defend.
+
+    "Wins if realized comes in under 9.2%" cannot be fudged the same way. It is
+    a claim about the world, it resolves against the tape, and it is the form a
+    vol desk states a trade in.
+
+    Caveat worth keeping: for a structure held to expiry and not delta-hedged,
+    P&L is driven by the TERMINAL price, not by the realized-vol path - two
+    paths with identical realized vol can settle in different places. This is
+    the terminal-distribution width that breaks even, expressed in vol units.
+    That is the right unit for the decision and the wrong unit for a variance
+    swap, and the difference matters at the tails.
+    """
+    legs = list(legs)
+    if not legs or spot <= 0:
+        return None
+
+    def f(iv: float) -> float | None:
+        ev = expected_value(legs, spot, iv, days, drift=drift)
+        return None if ev is None else ev - friction
+
+    lo = f(_VOL_GRID[0])
+    if lo is None:
+        return None
+    return Breakeven("realized vol", _crossings(f, _VOL_GRID), lo > 0)
+
+
+def breakeven_drift(legs: Iterable[Leg], spot: float, days: float, *,
+                    friction: float = 0.0, iv: float = 0.20) -> Breakeven | None:
+    """The TOTAL RETURN over the horizon at which EV after costs crosses zero.
+
+    The same question for a directional structure, where vol is not the bet.
+    Returns a BAND for a range structure - a condor wins between two drifts and
+    loses outside them, and reporting a single crossing there would be a
+    confident wrong number.
+    """
+    legs = list(legs)
+    if not legs or spot <= 0:
+        return None
+
+    def f(d: float) -> float | None:
+        ev = expected_value(legs, spot, iv, days, drift=d)
+        return None if ev is None else ev - friction
+
+    lo = f(_DRIFT_GRID[0])
+    if lo is None:
+        return None
+    return Breakeven("drift", _crossings(f, _DRIFT_GRID), lo > 0)
+
+
+#: How much one sensitivity must exceed the other before the structure is
+#: called a bet on it. Below this the position genuinely rides both and saying
+#: so is more useful than forcing a label.
+DOMINANCE_RATIO = 2.0
+
+
+def dominant_risk(greeks: dict[str, float] | None) -> tuple[str, float] | None:
+    """Is this a DIRECTION bet or a VOL bet? Returns (label, ratio).
+
+    Compared in the only units that make them commensurable: dollars per 1%
+    move in the underlying (delta) against dollars per 1 point of implied vol
+    (vega). Measured on two live candidates - an iron condor moved $9 per 1%
+    of spot against $23 a vol point, a call spread $199 against $22. Same
+    board, same expiry, opposite bets, and the decide cycle priced both off one
+    volatility assumption without ever noticing that only one of them cared.
+    """
+    if not greeks:
+        return None
+    per_pct_move = abs(greeks.get("delta_dollars", 0.0)) * 0.01
+    per_vol_point = abs(greeks.get("vega_dollars", 0.0))
+    if per_pct_move <= 0 and per_vol_point <= 0:
+        return None
+    if per_vol_point <= 0:
+        return ("direction", float("inf"))
+    if per_pct_move <= 0:
+        return ("volatility", float("inf"))
+    ratio = per_pct_move / per_vol_point
+    if ratio >= DOMINANCE_RATIO:
+        return ("direction", ratio)
+    if ratio <= 1.0 / DOMINANCE_RATIO:
+        return ("volatility", 1.0 / ratio)
+    return ("balanced", max(ratio, 1.0 / ratio))
+
+
 def pop_given_view(
     legs: Iterable[Leg], spot: float, iv: float, days: float, *, drift: float
 ) -> float | None:

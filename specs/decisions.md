@@ -2833,3 +2833,100 @@ pass unchanged.
 **Still open upstream:** I-5, `history()` raises `TypeError: '<' not supported between instances of
 'str' and 'int'`. Re-checked directly against 0.20.0 on the live database - unchanged. Per-block
 audit trails remain blocked. Carry to the next elfmem report.
+
+## D-076: What has to be true - breakeven vol, dominant risk, and a memory that was one-sided
+**Date:** 2026-08-28
+**Status:** accepted
+**Context:** A professional options-trader review of the live decision log, an optimize simulation
+of the response, then implementation. Traced in
+[notes/014](notes/014_trader_critique_and_response.md). D-074 asked whether the code did what it
+claimed; this asks whether the DECISIONS were good.
+
+**The measured problem: 18 theses simulated since the ledger began, ZERO traded, while all five
+price forecasts recorded instead were holding at review.** The views were right and none was
+expressed - the signature of a miscalibrated gate, not of bad judgement. The individual refusals
+were mostly correct (the 765/760 credit spread needs an 84% win rate against its own 72-83% models;
+resisting the pull to repeat its one prior winner was genuinely good discipline). The AGGREGATE was
+not: four defensible haircuts - a 21-day vol anchor, the bootstrap fat-tail correction, full
+round-trip friction, a drift haircut - multiply into a structural no, so the system can only trade
+in high-vol regimes, which is where its edge claims are weakest.
+
+The vol anchor did most of the work. Same tape, same day: **SPY realized 11.3% over 21 sessions and
+5.9% over 5**. The agent quoted the 21-day figure against a 5-day horizon and dismissed the 5-day
+as "one quiet week, not a forecast" - true, and 11.3% is not a forecast either, it is a different
+backward window chosen because it is the cautious one. Nothing in the system made that a choice it
+had to defend.
+
+**Choice: report what has to be TRUE, not what the EV is at one assumed vol.**
+`optmath.breakeven_vol` and `breakeven_drift` return the value at which EV after costs crosses
+zero; `dominant_risk` says which of the two the structure actually lives on. Every candidate now
+carries a `NEEDS` line: "a VOL bet (3x) | wins if realized vol < 7.5%" or "a DIRECTION bet (9x) |
+wins if drift > 0.1%". "EV is -$20" hides the input that produced it; "wins if realized comes in
+under 7.5%" is a claim the tape can settle.
+
+**Two candidate mechanisms were killed by the grounding lever before any code was written.** EV
+across a 6-14% vol band does NOT discriminate (condor -$92..+$95, the bad put spread -$71..+$24 -
+both straddle zero), and neither does the margin over a structure's breakeven win rate (both come
+back "vol-dependent"). Only the breakeven vol ranks them and names the bet. Recorded because a
+plausible mechanism that fails a five-line computation is worth more as a rejected candidate than
+as a shipped feature.
+
+**The simulation then forced a correction that changes the shape.** Breakeven vol alone would have
+been wrong: measured on ONE board and ONE expiry, an iron condor moves $9 per 1% of spot against
+$23 a vol point, while a call spread moves $199 against $22 - opposite bets priced off one
+volatility assumption, and only one of them cared. So the `NEEDS` line leads with the dominant
+risk. And EV is NON-MONOTONE in drift for a range structure (a condor peaks at zero drift and falls
+away both sides), so the breakeven there is a BAND - bisecting from the endpoints would have
+reported a confident wrong number for every range structure this book trades. Hence a generic
+scan-then-bisect over a grid, the same shape as the existing `breakevens()`, with no crossing at
+all reported ("EV positive at every vol tested") rather than hidden.
+
+**The finding a desk would care about most, which fell out of `dominant_risk`: a far-OTM credit
+spread is not a premium-selling trade.** The 765/760 put spread classifies as a DIRECTION bet at
+10x. It has the shape people associate with theta harvesting - high win rate, small credit, short
+vega - while its P&L is dominated by where the underlying goes. That is why it looks like the safe
+choice and is the riskiest thing on the board. Written to the wiki as
+`technique/what-am-i-actually-betting-on`.
+
+**Memory: the amendments matter as much as the additions.** Routed per the constitution's own
+`[routing]` principle. New SELF principle `[assumptions]` - "An input I chose is a judgement, not an
+observation. Caution compounds - haircuts stack into a verdict nobody chose. I test my answer
+against the alternative input" - because that residue is not enforceable by any check. **Rejected: a
+principle saying "abstention is a position".** The agent had already WRITTEN that policy itself, in
+three separate cycles, and declined anyway; a principle it already believes is how a constitution
+becomes decorative.
+
+The lesson set turned out to be **asymmetric - five of six lessons pushed toward "no"** - and the
+worst offender was `friction-is-the-size-of-the-edge`, which ended "I have declined roughly ten
+cycles on this basis and been right to": a claim never scored, sitting in the block most likely to
+be recalled when a structure looks attractive. Amended to say so. `exploration-budget-is-not-a-
+mandate` amended too: the agent quoted its "roughly neutral EV" bar accurately while declining
+structures it had itself priced at -$0 and +$4, which are INSIDE that bar. Two new lessons:
+`the-window-i-quote-is-a-forecast` (the 11.3%-vs-5.9% incident, pointing at the new breakeven line)
+and `abstention-has-a-price` (the 18-and-0 record, and that a decline leaves exit rules unfired,
+attribution empty and the ladder stuck). **Stacked conservatism was not only in the arithmetic; it
+was in the memory.**
+
+`[assumptions]` takes the constitution to **427 of its 430-token ceiling** and the live SELF frame
+to ~580 of elfmem's 600, verified by rendering it. It is FULL: the next principle requires retiring
+one, and raising the ceiling past the frame's own budget buys a silent drop rather than room.
+
+**Verified live**, unprompted, on the first forced cycle after the change: *"I forecast 8.5%
+realized and the condors needed sub-7.5%"* - a stated vol number against a breakeven, where before
+there was a selected backward window presented as an observation. And, citing the amended lesson by
+name against itself: *"My memory warns me that declining a +$4 to +$7 structure is an unstated
+over-cautious rule, and I did just decline a +$7 structure... If I pass on a similar structure next
+cycle with similar reasoning, that's a pattern worth challenging, not a principle worth
+congratulating myself on."* It still declined, which is a legitimate answer - but on grounds the
+tape can settle rather than on a hidden input.
+
+**Deliberately NOT built, and the reason matters:** the vol forecast is now STATED but not SCORED,
+so it moves no calibration and buys no size - which is most of the point. Resolving it needs
+`market_stats._rolling_vol` over stored closes (no network, no LLM) and one `metric` field on a
+ledger Entry. That is the highest-value next step. Also unbuilt: armed entry triggers (the agent
+committed to "775/785 at <= $2.10 -> act", it hit $1.62 six hours later, and no cycle ever
+re-checked - every cycle is a cold start that discards the previous one's commitments), and the
+decline ledger with regret scoring.
+
+**Verified:** 179 default tests (5 new) + 14 contract tests. Constitution renders 11/11 principles
+at 580 tokens; 8/8 lessons recall by their cue.
