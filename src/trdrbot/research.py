@@ -100,22 +100,40 @@ def _parse_json_block(raw: str) -> Any:
     return None
 
 
-def _valid_opportunity(o: Any) -> bool:
-    """An unscoreable opportunity is worse than none - it would occupy a slot
-    in the decide context while being immune to ever being judged wrong."""
+def opportunity_defect(o: Any) -> str | None:
+    """Why this opportunity cannot be scored, or None if it can.
+
+    Returns the SPECIFIC missing field rather than a bare bool (D-071).
+    "unscoreable_opportunity" was journalled for every rejection, so a
+    fully-reasoned CRM thesis - correct bands, correct drift, the date stated
+    in its own claim text - was indistinguishable in the log from genuine
+    garbage. It was dropped for one absent `horizon` field, and the rejection
+    could not say so. A repeating defect is a fixable prompt problem; an
+    opaque one is just attrition.
+    """
     if not isinstance(o, dict):
-        return False
-    if not o.get("underlying") or not o.get("claim") or not o.get("horizon"):
-        return False
+        return "not_an_object"
+    for field in ("underlying", "claim", "horizon"):
+        if not o.get(field):
+            return f"missing_{field}"
     if o.get("band_low") is None and o.get("band_high") is None:
-        return False
+        return "missing_band"
     try:
         float(o.get("drift_pct", 0))
+    except (TypeError, ValueError):
+        return "bad_drift_pct"
+    try:
         from datetime import date
         date.fromisoformat(str(o["horizon"]))
     except (TypeError, ValueError):
-        return False
-    return True
+        return "bad_horizon_format"
+    return None
+
+
+def _valid_opportunity(o: Any) -> bool:
+    """An unscoreable opportunity is worse than none - it would occupy a slot
+    in the decide context while being immune to ever being judged wrong."""
+    return opportunity_defect(o) is None
 
 
 async def run(
@@ -223,8 +241,9 @@ async def run(
     # ---- emit opportunities through the existing seam ----
     emitted = 0
     for o in raw_opps if isinstance(raw_opps, list) else []:
-        if not _valid_opportunity(o):
-            journal.append("research_rejected", reason="unscoreable_opportunity", raw=str(o)[:300])
+        defect = opportunity_defect(o)
+        if defect:
+            journal.append("research_rejected", reason=f"unscoreable:{defect}", raw=str(o)[:300])
             continue
         inbox.write("opportunity", o, source="research", trust="primary")
         emitted += 1

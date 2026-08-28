@@ -147,7 +147,7 @@ class Inbox:
         if not item.path or not item.path.exists():
             return
 
-        if cause is Cause.CONFIG:
+        if cause in (Cause.CONFIG, Cause.BUG):
             return  # blameless - leave it pending, untouched
 
         if cause is Cause.PERMANENT:

@@ -2535,3 +2535,47 @@ recorded correctly, news cache written from the decide path, 4 structures priced
 negative EV after costs, with the agent noting ATM IV 10.5% against 21-day realized 11.3% and
 refusing to cherry-pick the 5.9% five-day figure - "turning any of these positive would require me
 to raise my drift input until the answer I wanted appeared."
+
+## D-071: The three health warnings, closed out
+**Date:** 2026-08-28
+**Status:** accepted
+**Context:** D-070 fixed six defects and left three health *warnings* uninvestigated. All three
+turned out to be real, and one was a silent data-loss path.
+
+**1. Our own code bugs were classified TRANSIENT.** Live record: `ValueError: unsupported format
+character ','` - a broken format string in our own logic - classified `transient`, which queues
+the blameless observation that happened to be in flight to burn three retries and then
+dead-letter itself for a defect it had nothing to do with. That is precisely the loss the CONFIG
+category was created to prevent ("an invalid Anthropic key bumped a perfectly good observation's
+retry count"), arriving through the one door CONFIG did not cover. The transient default is right
+for UNKNOWN failures - "retrying costs a tick, discarding costs the signal" - but a deterministic
+exception from our own code will fail identically next tick, so retrying costs three ticks AND
+discards the signal anyway. Added `Cause.BUG` (TypeError/ValueError/AttributeError/NameError/
+IndexError/ZeroDivisionError/NotImplementedError) sharing CONFIG's blameless policy with its own
+advice. **Ordering matters and is tested:** `ConnectionError` and `TimeoutError` subclass
+OSError/RuntimeError, so the name-marker checks must stay ahead of the isinstance check, and a
+provider SDK error subclassing ValueError must still be read by name.
+
+**2. Rejected opportunities did not say why.** Every rejection journalled the same opaque
+`unscoreable_opportunity`, so a fully-reasoned CRM thesis - correct bands, correct drift, its
+horizon stated in its own claim text but absent from the `horizon` FIELD - was indistinguishable
+in the log from genuine garbage. 2 of 10 opportunities were being dropped this way, ~20% of
+research LLM spend, with no way to tell whether the cause was fixable. `opportunity_defect()` now
+returns the specific defect (`missing_horizon`, `missing_band`, `bad_horizon_format`, ...) and the
+journal records it. The rejection itself was CORRECT and is unchanged - an opportunity with no
+machine-readable horizon genuinely cannot be scored, and salvaging a date out of free claim text
+would be an LLM-supplied value validating an LLM-supplied value, which `_plausible_band` exists to
+forbid. What changed is that a repeating defect is now visible as a fixable prompt problem rather
+than as attrition.
+
+**3. The 401 with `cause=None` is historical.** Dated 2026-08-26T18:30, it is the very run that
+motivated the CONFIG category; the record predates the fix. `AnthropicAuthenticationError` now
+classifies as CONFIG, verified directly.
+
+**Not fixed, and honestly not fixable from here:** the exit-rule evaluator has still never fired
+in production (0 `exit` journal entries) because both positions to date closed externally. The
+deterministic path that protects capital when the agent is not looking remains unexercised on
+live data. Logged rather than papered over.
+
+**Verified:** 141 default tests (4 new), including that a `Cause.BUG` failure leaves the inbox
+item's retry counter untouched on disk - the actual data-loss this fixes.

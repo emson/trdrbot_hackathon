@@ -1781,3 +1781,67 @@ def test_health_separates_idle_attribution_from_a_stalled_one(tmp_path):
     stalled = dict((name, (lvl, msg)) for lvl, name, msg in check(journal(4), []))
     assert stalled["attribution"][0] == BAD, \
         "work waiting and nothing attributed is a REAL failure and must still fire"
+
+
+# ---------------------------- D-071 remaining shakedown fixes
+
+def test_our_own_code_bugs_are_not_classified_as_transient():
+    """Live: `ValueError: unsupported format character ','` - a broken format
+    string in OUR code - was classified TRANSIENT, queueing a blameless
+    observation to burn three retries and then dead-letter itself for a
+    defect it had nothing to do with. Exactly the loss CONFIG was created to
+    prevent, arriving through the one door CONFIG did not cover."""
+    from trdrbot.failures import Cause, classify
+
+    for exc in (ValueError("unsupported format character ','"),
+                AttributeError("'NoneType' has no attribute 'x'"),
+                TypeError("unsupported operand type(s)")):
+        assert classify(exc) is Cause.BUG, f"{type(exc).__name__} is our bug, not a blip"
+
+
+def test_network_failures_still_classify_as_transient_despite_being_oserrors():
+    """ConnectionError and TimeoutError subclass OSError, so the name-marker
+    checks MUST stay ahead of the isinstance check that spots our own bugs."""
+    from trdrbot.failures import Cause, classify
+
+    assert classify(ConnectionError("reset")) is Cause.TRANSIENT
+    assert classify(TimeoutError("timed out")) is Cause.TRANSIENT
+
+
+def test_a_code_bug_leaves_the_inbox_item_untouched(tmp_path):
+    """The whole point: our bug must not consume the item's retries."""
+    import json
+    from trdrbot.failures import Cause
+    from trdrbot.inbox import Inbox, Item
+
+    class P:
+        inbox_pending = tmp_path / "pending"
+        inbox_failed = tmp_path / "failed"
+    P.inbox_pending.mkdir(parents=True)
+    item_path = P.inbox_pending / "i.json"
+    item = Item(id="i", ts="2026-08-28T00:00:00Z", type="news", source="alpaca_news",
+                payload={}, trust="primary", path=item_path)
+    item_path.write_text(json.dumps(item.to_dict()))
+
+    Inbox(P(), max_retries=3).record_failure(item, "our bug", cause=Cause.BUG)
+
+    assert item_path.exists(), "a bug in our code must not dead-letter the item"
+    assert json.loads(item_path.read_text()).get("retry_count", 0) == 0, \
+        "a blameless item must not lose a retry to our defect"
+
+
+def test_rejected_opportunity_names_the_field_that_was_missing():
+    """Every rejection journalled the same opaque 'unscoreable_opportunity',
+    so a fully-reasoned CRM thesis dropped for one absent `horizon` looked
+    identical to genuine garbage. A repeating defect is a fixable prompt
+    problem; an opaque one is just attrition."""
+    from trdrbot.research import opportunity_defect
+
+    crm = {"underlying": "CRM", "claim": "CRM holds above 232",
+           "drift_pct": 1.0, "band_low": 232.0, "band_high": None}
+    assert opportunity_defect(crm) == "missing_horizon"
+    assert opportunity_defect(dict(crm, horizon="2026-09-03")) is None
+    assert opportunity_defect({"underlying": "X", "claim": "c",
+                               "horizon": "2026-09-03"}) == "missing_band"
+    assert opportunity_defect({"underlying": "X", "claim": "c", "band_low": 1.0,
+                               "horizon": "next tuesday"}) == "bad_horizon_format"

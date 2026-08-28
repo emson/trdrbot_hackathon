@@ -32,7 +32,7 @@ from .config import Config
 from .inbox import Inbox
 from .journal import Journal
 from .llm import build_model
-from .research import _parse_json_block, _valid_opportunity
+from .research import _parse_json_block, opportunity_defect
 from .wiki import Concept, Wiki
 
 NOMINATE_PROMPT = """You are scouting for an options trading agent (paper account, all positions \
@@ -268,8 +268,9 @@ async def run(
     ok_tickers = {n["ticker"].upper() for n in nominees if n.get("_options_ok")}
     emitted = 0
     for o in raw_opps if isinstance(raw_opps, list) else []:
-        if not _valid_opportunity(o):
-            journal.append("research_rejected", reason="unscoreable_opportunity", raw=str(o)[:300])
+        defect = opportunity_defect(o)
+        if defect:
+            journal.append("research_rejected", reason=f"unscoreable:{defect}", raw=str(o)[:300])
             continue
         if o["underlying"].upper() not in ok_tickers:
             journal.append("research_rejected", reason="failed_options_gate", raw=str(o)[:300])
