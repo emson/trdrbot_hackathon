@@ -375,7 +375,7 @@ async def run_tick(
             guarded, lambda: len([p for p in store.open_positions() if p.status == "open"])
         )
         agent_tools = guarded + [sim_tool, size_tool, record_tool, forecast_tool]
-        agent = create_react_agent(build_model(config), agent_tools, prompt=SYSTEM_PROMPT)
+        agent = create_react_agent(build_model(config, role="decide"), agent_tools, prompt=SYSTEM_PROMPT)
 
         prompt_parts = [snap.render(), _render_positions(store, snap, config.paths.state, snap.equity or 0.0)]
         _ok, _why = competence.can_open(config.deadline, None)

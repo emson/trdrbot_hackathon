@@ -176,7 +176,7 @@ async def run(
         odds_block="\n".join(odds_lines) or "(none)",
         prior_regime=prior_text,
     )
-    reply = await build_model(config).ainvoke(prompt)
+    reply = await build_model(config, role="research").ainvoke(prompt)
     text = reply.content if isinstance(reply.content, str) else "\n".join(
         b.get("text", "") for b in reply.content if isinstance(b, dict) and b.get("type") == "text"
     )

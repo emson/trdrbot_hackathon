@@ -48,9 +48,38 @@ async def _doctor() -> int:
 
     print(f"\n[doctor] checking LLM gateway ({cfg.model})...")
     try:
+        from langchain.chat_models import init_chat_model
+
         from .llm import build_model
 
-        reply = await build_model(cfg).ainvoke("Reply with the single word: ok")
+        reply = await build_model(cfg, role="doctor").ainvoke("Reply with the single word: ok")
+        print(f"  doctor model replied: {str(reply.content)[:40]!r}")
+
+        # Probe EVERY model in every configured chain. A fallback that has
+        # never been exercised is a promise, not a capability - and the whole
+        # point of the chain is that it works on the day the primary stops
+        # (D-062). Reports each independently; one dead provider is a warning,
+        # not a failure, because the chain is what must survive.
+        print("\n[doctor] probing every configured model...")
+        seen: set[str] = set()
+        reachable = 0
+        for role in ("decide", "research", "discovery", "muse", "doctor"):
+            for spec in cfg.model_chain(role):
+                if spec in seen:
+                    continue
+                seen.add(spec)
+                try:
+                    m = init_chat_model(spec, max_tokens=16, max_retries=0)
+                    r = await m.ainvoke("Say: ok")
+                    served = (r.response_metadata or {}).get("model_name", "?")
+                    print(f"  OK   {spec:<34} -> {served}")
+                    reachable += 1
+                except Exception as exc:  # noqa: BLE001
+                    print(f"  DEAD {spec:<34} {type(exc).__name__}: {str(exc)[:80]}")
+        print(f"  {reachable}/{len(seen)} configured models reachable")
+        if reachable == 0:
+            print("  NO MODEL IS REACHABLE - the system cannot make a decision.")
+            return 1
         print(f"  reachable - replied {str(reply.content)[:40]!r}")
     except Exception as exc:  # noqa: BLE001
         from . import failures
@@ -287,6 +316,15 @@ async def _lessons(action: str) -> int:
         await mem.close()
 
 
+def _usage() -> int:
+    from . import usage
+
+    cfg = config_mod.load(quiet=True)
+    led = usage.UsageLedger(cfg.paths.state / "usage.jsonl", cfg.pricing)
+    print(usage.render(led.summary()))
+    return 0
+
+
 def _ledger() -> int:
     from . import ledger as ledger_mod
 
@@ -429,6 +467,7 @@ def main() -> None:
     sub.add_parser("muse", help="creative theses by random concept collision")
     sub.add_parser("health", help="detect subsystems that run but never produce")
     sub.add_parser("prompts", help="inventory every prompt the models read")
+    sub.add_parser("usage", help="LLM token usage and cost, by model and role")
     sub.add_parser("ledger", help="every thesis ever formed, traded or declined")
     les = sub.add_parser("lessons", help="measured lessons in evolving memory")
     les.add_argument("action", choices=["show", "seed", "verify"], default="show", nargs="?")
@@ -468,6 +507,8 @@ def main() -> None:
         sys.exit(_health())
     elif args.cmd == "prompts":
         sys.exit(asyncio.run(_prompts()))
+    elif args.cmd == "usage":
+        sys.exit(_usage())
     elif args.cmd == "ledger":
         sys.exit(_ledger())
     elif args.cmd == "lessons":

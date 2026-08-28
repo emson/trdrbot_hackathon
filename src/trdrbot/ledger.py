@@ -59,6 +59,9 @@ class Entry:
     horizon: str              # YYYY-MM-DD
     band_low: float | None
     band_high: float | None
+    #: Did the AGENT state this probability, or is it a pre-registration
+    #: placeholder? Only stated forecasts may score calibration (D-062).
+    probability_stated: bool = True
     traded: bool = False      # did this thesis become a position?
     position_id: str | None = None
     #: resolution
@@ -112,7 +115,7 @@ class Ledger:
     def register(
         self, *, kind: str, underlying: str, claim: str, probability: float,
         horizon: str, band_low: float | None, band_high: float | None,
-        notes: str = "",
+        notes: str = "", probability_stated: bool = True,
     ) -> Entry | None:
         """Record a forecast. Returns None if it could never be scored.
 
@@ -129,6 +132,7 @@ class Ledger:
             id=ids.journal_id("fc"), kind=kind, created=ids.utc_now().isoformat(),
             underlying=underlying.upper(), claim=claim[:400],
             probability=max(0.0, min(1.0, probability)), horizon=horizon,
+            probability_stated=probability_stated,
             band_low=band_low, band_high=band_high, notes=notes[:400],
         )
         # Do not double-register the same thesis on repeated simulate calls in
@@ -204,5 +208,13 @@ def as_forecasts(entries: list[Entry]) -> list[Any]:
     return [
         Forecast(position_id=e.position_id or e.id, probability=e.probability,
                  outcome=bool(e.outcome), resolved_at=e.resolved_at)
-        for e in entries if e.outcome is not None
+        # Only forecasts the agent actually STATED. A pre-registered thesis
+        # carries a 0.5 placeholder so the trial can be counted for
+        # multiple-testing purposes - feeding that into calibration would score
+        # the agent on a prediction it never made, and 0.5 is the most
+        # corrosive possible value: maximally uninformative, and it drags every
+        # real forecast toward the base rate. The agent caught this itself,
+        # writing "if the system log shows 50% instead of 67%, the intent is
+        # 0.67" (D-062).
+        for e in entries if e.outcome is not None and e.probability_stated
     ]

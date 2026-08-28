@@ -1338,3 +1338,97 @@ def test_rename_is_a_safe_noop_if_upstream_rewords(capsys):
     out = _rename_self_preamble(changed)
     assert out == changed
     assert "upstream wording may have changed" in capsys.readouterr().out
+
+
+# ------------------------- D-062 provider fallback and cost accounting
+
+def test_model_chain_resolves_role_then_default_then_legacy():
+    """A pre-existing config with only `llm.model` must keep working untouched."""
+    from trdrbot.config import Config
+    from pathlib import Path
+
+    class P:  # minimal paths stub
+        state = Path("/tmp")
+    legacy = Config(raw={"llm": {"model": "anthropic:claude-opus-5"}}, paths=P())
+    assert legacy.model_chain("decide") == ["anthropic:claude-opus-5"]
+    assert legacy.model == "anthropic:claude-opus-5"
+
+    modern = Config(raw={"llm": {"models": ["a:1", "b:2"],
+                                 "roles": {"research": ["c:3"]}}}, paths=P())
+    assert modern.model_chain("decide") == ["a:1", "b:2"]      # falls to default
+    assert modern.model_chain("research") == ["c:3"]           # role override
+    assert modern.model_chain("unknown") == ["a:1", "b:2"]     # unknown role -> default
+    assert modern.model == "a:1"                               # legacy accessor still works
+
+
+def test_unpriced_model_is_reported_not_counted_as_free():
+    """A cost report that silently understates spend is the absence-as-zero
+    failure class in its most expensive form."""
+    import tempfile
+    from pathlib import Path
+    from trdrbot.usage import UsageLedger
+
+    led = UsageLedger(Path(tempfile.mkdtemp()) / "u.jsonl",
+                      {"openai:gpt-4o-mini": {"input": 0.15, "output": 0.60}})
+    led.record("decide", "gpt-4o-mini-2024-07-18", 1_000_000, 1_000_000)
+    led.record("decide", "some-model-nobody-priced", 1_000_000, 1_000_000)
+    s = led.summary()
+    assert s["calls"] == 2
+    assert s["unpriced_calls"] == 1
+    assert "some-model-nobody-priced" in s["unpriced_models"]
+    assert abs(s["total_cost_usd"] - 0.75) < 1e-9, "priced call only, unpriced NOT added as 0"
+    assert "UNPRICED" in __import__("trdrbot.usage", fromlist=["render"]).render(s)
+
+
+def test_pricing_matches_a_dated_provider_model_id():
+    """Providers answer with dated ids (gpt-4o-mini-2024-07-18) for a model
+    configured as openai:gpt-4o-mini - the table must still match, or every
+    real call would be unpriced."""
+    from trdrbot.usage import price
+    table = {"openai:gpt-4o-mini": {"input": 0.15, "output": 0.60}}
+    assert price(table, "gpt-4o-mini-2024-07-18", 1_000_000, 0) == 0.15
+    assert price(table, "totally-different", 1_000_000, 0) is None
+
+
+def test_usage_callback_never_raises_on_a_malformed_response():
+    """Accounting that can halt trading is worse than no accounting."""
+    import tempfile
+    from pathlib import Path
+    from trdrbot.usage import UsageCallback, UsageLedger
+
+    cb = UsageCallback(UsageLedger(Path(tempfile.mkdtemp()) / "u.jsonl", {}), "decide")
+    cb.on_llm_end(object())          # no .generations at all
+    cb.on_llm_end(None)              # None
+    class Weird:
+        generations = [[object()]]   # generation with no .message
+    cb.on_llm_end(Weird())
+
+
+def test_build_model_skips_unbuildable_models_rather_than_dying(capsys):
+    """One uninstalled optional provider package must not stop all trading."""
+    from pathlib import Path
+    from trdrbot.config import Config
+    from trdrbot.llm import build_model
+
+    class P:
+        state = Path("/tmp")
+    cfg = Config(raw={"llm": {"models": ["notaprovider:nope", "openai:gpt-4o-mini"],
+                             "max_tokens": 16}}, paths=P())
+    model = build_model(cfg, role="decide")
+    assert model is not None
+    assert "skipping notaprovider:nope" in capsys.readouterr().out
+
+
+def test_build_model_raises_clearly_when_nothing_is_usable():
+    from pathlib import Path
+    from trdrbot.config import Config
+    from trdrbot.llm import build_model
+
+    class P:
+        state = Path("/tmp")
+    cfg = Config(raw={"llm": {"models": ["notaprovider:nope"], "max_tokens": 16}}, paths=P())
+    try:
+        build_model(cfg, role="decide")
+        assert False, "should have raised"
+    except RuntimeError as e:
+        assert "No usable model" in str(e) and "decide" in str(e)

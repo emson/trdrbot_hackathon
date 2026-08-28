@@ -2139,3 +2139,55 @@ of "elf" outside the word "elfmem" itself.
 override for the SELF preamble - is still worth reporting, just no longer blocking.
 **Verified:** 4 new tests (real text renames; lookalike name not mangled; unrelated content
 untouched; safe no-op with a printed warning on a genuine rewording). 108 pass.
+
+## D-062: Provider-agnostic model chains, with cost accounting
+**Date:** 2026-08-28
+**Status:** accepted
+**Context:** Anthropic credits ran out. The system had ONE model string and no fallback, so the
+next decide cycle would simply have failed.
+**The foundation was already right, and that shaped the design.** `build_model()` was a single
+entry point over LangChain's `init_chat_model`, which IS a provider registry. So this is not a
+new abstraction layer - adding a provider stays "a line in config plus, usually, one package".
+What was missing were the three things the registry does not do:
+1. **Fallback chains.** `llm.models` is an ordered list; first that answers wins. Verified live
+   against the genuinely exhausted key: the credit error arrives as
+   `AnthropicInvalidRequestError` (a **400**, not a rate-limit or auth class - a fallback keyed
+   on the wrong exception would never have fired), and `.with_fallbacks()` recovers from it.
+   `bind_tools()` and `create_react_agent` both accept the wrapped runnable, so the decide path
+   works too - checked before building anything on it.
+2. **Per-role chains.** `llm.roles.<role>` overrides the default. decide keeps the strongest
+   model; research/discovery/muse run on a cheaper one; doctor uses the cheapest. A role with no
+   entry falls back to the default list, so this is opt-in.
+3. **Cost accounting** (`usage.py`, `trdrbot usage`): every call's role, the model that ACTUALLY
+   served, tokens, and price, appended to `state/usage.jsonl` from a callback - so all five call
+   sites are covered without knowing it exists.
+**Two bugs found by verifying rather than assuming, both in my own new code:**
+- **The decide cycle was being silently under-metered.** `.with_config(callbacks=[...])`
+  recorded **ZERO** of a LangGraph agent's LLM calls; constructor `callbacks=[...]` recorded all
+  of them. Measured side by side. The config route would have reported a comfortable near-zero
+  spend while the real bill accrued unseen - the most expensive path in the system, invisible.
+  After the fix, one decide cycle measures **7 calls, 553k input tokens, $0.83**.
+- **THE AGENT CAUGHT A BUG I HAD WRITTEN.** It recorded a 0.67 SPY forecast and noted in its own
+  reasoning: *"If the system log shows 50% instead of 67%, the intent is 0.67."* It was right.
+  `simulate_experiments`' auto-registration writes `probability=0.5` as a pre-registration
+  placeholder, and that placeholder was flowing into calibration via `as_forecasts()` - scoring
+  the agent on a prediction it never made, at the most corrosive possible value (0.5 is
+  maximally uninformative and drags every real forecast toward the base rate). Entries now carry
+  `probability_stated`; only stated forecasts score calibration, while placeholders still count
+  as TRIALS for the multiple-testing correction, which is what they were for. Live ledger
+  backfilled: 6 stated, 1 placeholder correctly excluded.
+**Unpriced models are reported, never counted as free** - `render()` prints a WARNING naming
+them and excludes them from the total, rather than silently adding $0.00. Pricing is
+operator-supplied config with an explicit "verify against current published rates" comment: not
+fetched, and it will go stale.
+**Also fixed, unrelated and latent since D-043:** `journal.append("inbox_expired", ..., kind=...)`
+collided with `append`'s own positional `kind` and raised `TypeError`. It only fires once an
+opportunity actually ages past the 180-minute stale window - which took three days - and would
+have crashed a live tick.
+**`doctor` now probes EVERY configured model**, not just the first: a fallback that has never
+been exercised is a promise, not a capability. Live: 3/4 reachable, the exhausted Anthropic key
+correctly reported DEAD.
+**Verified:** 6 new tests (role/default/legacy resolution, unpriced reporting, dated-model-id
+price matching, callback never raising on malformed payloads, unbuildable models skipped not
+fatal, clear error when nothing is usable); 114 pass; a full decide cycle ran end to end on the
+fallback provider.

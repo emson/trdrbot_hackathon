@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from langchain.chat_models import init_chat_model
 
+from . import usage
 from .config import Config
 
 
@@ -22,10 +23,60 @@ from .config import Config
 LLM_MAX_RETRIES = 5
 
 
-def build_model(config: Config):
-    return init_chat_model(
-        config.model, max_tokens=config.max_tokens, max_retries=LLM_MAX_RETRIES
-    )
+def build_model(config: Config, role: str = "decide"):
+    """A model for this role, with the configured fallback chain behind it.
+
+    Provider-agnostic by construction: `init_chat_model` IS LangChain's
+    provider registry, so adding a provider is a config string plus (usually)
+    one package - no code here changes. What this adds on top is the three
+    things the registry does not do:
+
+    **Fallback.** Verified live against a genuinely exhausted Anthropic key:
+    the credit error surfaces as `AnthropicInvalidRequestError` (a 400, NOT a
+    rate-limit or auth class), and `.with_fallbacks()` recovers from it and
+    answers from the next provider. `bind_tools()` and `create_react_agent`
+    both accept the wrapped runnable, so the decide path keeps working too.
+
+    **Per-role chains.** The decide cycle wants the strongest reasoning
+    available; research, discovery and muse are synthesis and can run cheaper.
+    A role with no entry falls back to the default chain, so this is opt-in.
+
+    **A model that cannot be BUILT is skipped, loudly, not fatally.** A
+    missing provider package or absent API key raises at construction; letting
+    that kill the whole chain would mean one uninstalled optional dependency
+    stops all trading. The survivors still form a chain, and the skip is
+    printed with its reason.
+    """
+    specs = config.model_chain(role)
+    ledger = usage.UsageLedger(config.paths.state / "usage.jsonl", config.pricing)
+    callback = usage.UsageCallback(ledger, role)
+
+    built, skipped = [], []
+    for spec in specs:
+        try:
+            # Callbacks are attached at CONSTRUCTION, deliberately, not via
+            # `.with_config(callbacks=...)`. Measured through a real LangGraph
+            # agent: with_config recorded ZERO of an agent's LLM calls while
+            # constructor callbacks recorded all of them - so the config route
+            # would have silently under-metered the single most expensive path
+            # in the system (the decide cycle), reporting a comfortable near-
+            # zero spend while the actual bill accrued unseen (D-062).
+            built.append(init_chat_model(
+                spec, max_tokens=config.max_tokens, max_retries=LLM_MAX_RETRIES,
+                callbacks=[callback]))
+        except Exception as exc:  # noqa: BLE001
+            skipped.append((spec, f"{type(exc).__name__}: {exc}"[:120]))
+    if skipped:
+        for spec, why in skipped:
+            print(f"[llm] skipping {spec}: {why}")
+    if not built:
+        raise RuntimeError(
+            f"No usable model for role {role!r}. Tried {specs}. "
+            f"Check llm.models in config.yaml, the provider package is installed, "
+            f"and the API key is set."
+        )
+
+    return built[0] if len(built) == 1 else built[0].with_fallbacks(built[1:])
 
 
 SYSTEM_PROMPT = """You are Theo (system name trdrbot) - an autonomous options trading agent named for theta, the greek your short-dated book lives on. You operate a \

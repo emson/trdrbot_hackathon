@@ -4,9 +4,34 @@
 
 llm:
   # LangChain "provider:model" form. Model IDs are complete as-is; never append
-  # a date suffix.
-  model: "anthropic:claude-opus-5"
+  # a date suffix. `init_chat_model` IS the provider registry, so adding a
+  # provider is a line here plus (usually) one package - no code changes.
+  #
+  # ORDERED FALLBACK CHAIN: first model that answers wins. Verified live that
+  # an exhausted-credit 400 from one provider falls through to the next.
+  models:
+    - "anthropic:claude-opus-5"
+    - "openai:gpt-5"
   max_tokens: 8000
+
+  # Optional per-role chains. A role not listed uses `models` above.
+  # decide wants the strongest reasoning; the rest are synthesis and can run
+  # cheaper without weakening the trade decision itself.
+  roles:
+    decide: ["anthropic:claude-opus-5", "openai:gpt-5"]
+    research: ["openai:gpt-5-mini", "anthropic:claude-opus-5"]
+    discovery: ["openai:gpt-5-mini", "anthropic:claude-opus-5"]
+    muse: ["openai:gpt-5-mini", "anthropic:claude-opus-5"]
+    doctor: ["openai:gpt-4o-mini"]
+
+  # USD per MILLION tokens. OPERATOR-SUPPLIED - verify against your provider's
+  # current published rates; these are not fetched and will go stale. A model
+  # missing here is reported as UNPRICED, never counted as free (D-062).
+  pricing:
+    "anthropic:claude-opus-5": {input: 15.0, output: 75.0}
+    "openai:gpt-5": {input: 1.25, output: 10.0}
+    "openai:gpt-5-mini": {input: 0.25, output: 2.0}
+    "openai:gpt-4o-mini": {input: 0.15, output: 0.60}
 
 alpaca:
   # The MCP server runs as a local stdio subprocess (verified: Alpaca's hosted

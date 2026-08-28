@@ -142,7 +142,9 @@ def build_simulate_experiments(shared: dict[str, Any], state_dir: "Path | None" 
             try:
                 ledger.register(
                     kind="thesis", underlying=underlying, claim=thesis_claim,
-                    probability=0.5, horizon=horizon,
+                    # Placeholder: this records the TRIAL, not a forecast.
+                    # probability_stated=False keeps it out of calibration.
+                    probability=0.5, probability_stated=False, horizon=horizon,
                     band_low=band_low, band_high=band_high,
                     notes=f"{len(built)} structures simulated",
                 )

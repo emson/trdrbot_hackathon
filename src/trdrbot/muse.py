@@ -147,7 +147,7 @@ async def run(
         n=len(concepts), k=CANDIDATES, concepts=concept_block,
         news="\n".join(news_lines) or "(none)", odds="\n".join(odds_lines) or "(none)",
     )
-    reply = await build_model(config).ainvoke(prompt)
+    reply = await build_model(config, role="muse").ainvoke(prompt)
     text = reply.content if isinstance(reply.content, str) else "\n".join(
         b.get("text", "") for b in reply.content
         if isinstance(b, dict) and b.get("type") == "text")

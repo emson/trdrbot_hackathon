@@ -13,6 +13,7 @@ dependencies = [
     "python-dotenv>=1",
     "elfmem[tools]",
     "yfinance>=1.7.0",
+    "langchain-openai>=1.6.0",
 ]
 
 [project.scripts]

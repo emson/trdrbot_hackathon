@@ -58,7 +58,15 @@ class Config:
 
     @property
     def model(self) -> str:
-        return self.raw["llm"]["model"]
+        # The primary of the default chain. Kept because it is journalled on
+        # every decision as the model that made it - but note the chain may
+        # fall through, so `usage.jsonl` records the model that ACTUALLY
+        # served, which is the billing-accurate one (D-062).
+        llm = self.raw.get("llm") or {}
+        if llm.get("model"):
+            return str(llm["model"])
+        chain = self.model_chain("decide")
+        return chain[0] if chain else ""
 
     @property
     def max_tokens(self) -> int:
@@ -79,6 +87,28 @@ class Config:
     @property
     def watchdog_seconds(self) -> int:
         return int(self.raw["tick"]["watchdog_seconds"])
+
+    def model_chain(self, role: str = "decide") -> list[str]:
+        """Ordered fallback chain for a role (D-062).
+
+        Resolution order: `llm.roles.<role>` -> `llm.models` -> the legacy
+        single `llm.model`. The legacy key still works untouched, so an
+        existing config keeps running with no edit and picks up fallback only
+        when it opts in.
+        """
+        llm = self.raw.get("llm") or {}
+        roles = llm.get("roles") or {}
+        chain = roles.get(role) or llm.get("models") or []
+        if isinstance(chain, str):
+            chain = [chain]
+        if not chain and llm.get("model"):
+            chain = [llm["model"]]
+        return [str(m) for m in chain if m]
+
+    @property
+    def pricing(self) -> dict:
+        """{model: {input, output}} in USD per MILLION tokens. Operator-supplied."""
+        return (self.raw.get("llm") or {}).get("pricing") or {}
 
     @property
     def events(self) -> list[dict]:

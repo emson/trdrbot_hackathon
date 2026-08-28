@@ -17,10 +17,12 @@ Sorted by severity.
 - **I-3 · `betas_for` assumes beta 1.0 for names with no stored closes** (D-055). Reported
   in the render, but an assumed 1.0 on a genuinely high-beta name UNDERSTATES book exposure.
   Mitigation available: fetch closes at position open for any name entering the book.
-- **I-4 · The agent has not yet used `record_forecast` unprompted** (D-052). Ledger n=1.
-  The prompt instructs it; no decide cycle has exercised it since. Watch the next few
-  declines - if still unused by 2026-08-29, strengthen the prompt or auto-extract forecasts
-  from declines.
+- ~~**I-4 · `record_forecast` unused**~~ **RESOLVED 2026-08-28** - the agent used it
+  unprompted on its first decide cycle after the D-052 prompt change, recording a 0.67 SPY
+  forecast, and CAUGHT A BUG doing so (see D-062: the ledger showed 50%).
+- **I-8 · One decide cycle costs ~$0.83** (measured D-062: 7 LLM calls, 553k input tokens).
+  Not a bug, but now visible and worth watching: context accumulates across agent turns, so
+  cost scales with how much the decide prompt carries. Candidate lever if spend matters.
 - **I-5 · `history()` in elfmem raises TypeError** (upstream; found D-059 investigation:
   `'<' not supported between str and int`). Blocks per-block audit trails. Reported upstream? NO -
   add to next elfmem report.

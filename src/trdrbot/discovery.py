@@ -148,7 +148,7 @@ async def run(
 ) -> dict[str, Any]:
     deadline = config.deadline
     exclude = sorted(set(config.research_universe) | set(config.watchlist))
-    model = build_model(config)
+    model = build_model(config, role="discovery")
 
     # ---- broad sweep: market-wide news (no symbol filter) + odds ----
     news_lines: list[str] = []

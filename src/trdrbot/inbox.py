@@ -93,8 +93,14 @@ class Inbox:
             if age > max_age_min:
                 self.archive([item])
                 if journal is not None:
+                    # `item_kind`, not `kind` - Journal.append's own first
+                    # positional IS `kind`, so passing it as a keyword raises
+                    # TypeError. Latent since D-043: it only fires once an
+                    # opportunity actually ages past the stale window, which
+                    # took three days to happen and would have crashed a live
+                    # tick (D-062).
                     journal.append("inbox_expired", item_id=item.id,
-                                   age_min=round(age, 1), kind=item.type,
+                                   age_min=round(age, 1), item_kind=item.type,
                                    reason="stale_opportunity")
                 n += 1
         return n
