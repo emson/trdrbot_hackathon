@@ -117,11 +117,25 @@ def _sample_concepts(wiki: Wiki, rng: random.Random, k: int) -> list[tuple[str, 
     picks = rng.sample(market, min(k - 1, len(market)))
     if rules and len(picks) < k:
         picks.append(rng.choice(rules))
+    # Read the DURABLE half of each concept, not its first 400 characters.
+    # Those two used to be the same thing and it poisoned the collisions: the
+    # 400-char window ran past "# What it is" into "# Bull case", so the muse
+    # was handed "Closed 228.17, +5.2% on the week" as raw material 15.8 hours
+    # after it stopped being true (measured - that exact NVDA dossier was one
+    # of this date's three picks, against a live tape of 223.90, -1.8%).
+    #
+    # A concept does not go stale because a price did. Reading the durable
+    # section means an old dossier stays USEFUL rather than needing to be
+    # excluded, which is what keeps the pool from starving on a day with no
+    # research run - and colliding a month-old company concept with today's
+    # news is the muse's whole mandate, not a defect.
     out = []
     for p in picks:
-        body = p.read_text()
-        body = re.sub(r"^---.*?---\s*", "", body, flags=re.DOTALL)  # strip frontmatter
-        out.append((str(p.relative_to(root)).removesuffix(".md"), body[:400]))
+        cid = str(p.relative_to(root)).removesuffix(".md")
+        c = wiki.read(cid)
+        text = c.durable_text() if c else re.sub(
+            r"^---.*?---\s*", "", p.read_text(), flags=re.DOTALL).strip()
+        out.append((cid, text[:400]))
     return out
 
 

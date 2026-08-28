@@ -2749,3 +2749,209 @@ def test_a_truncated_json_array_still_yields_its_complete_elements():
     assert _parse_json_block('[{"a":1}]') == [{"a": 1}]
     assert _parse_json_block("not json at all") is None
     assert _parse_json_block("[") is None
+
+
+# ================================= D-078 wiki lifecycle
+
+
+def _wiki(tmp_path):
+    from trdrbot.wiki import Wiki
+    return Wiki(tmp_path)
+
+
+DOSSIER = ("# What it is\nNvidia designs the GPUs that underpin frontier AI.\n\n"
+           "# Bull case\nClosed 228.17, +5.2% on the week.\n\n"
+           "# Bear case\nRealized vol 42.4%.\n")
+
+
+def test_a_new_document_type_cannot_be_written_without_a_lifecycle(tmp_path):
+    """The consistency mechanism. A type with no declared lifecycle is exactly
+    how 28 dossiers came to exist with no freshness marker, no sweep and no
+    policy - so the write path refuses one, the same way it already refuses a
+    write that drops a heading."""
+    import pytest
+    from trdrbot.wiki import Concept, LifecycleError
+
+    w = _wiki(tmp_path)
+    c = Concept(concept_id="x/thing", frontmatter={}, body="# H\nbody\n")
+    with pytest.raises(LifecycleError) as e:
+        w.write_concept(c, type_="SomethingNew")
+    assert "LIFECYCLE" in str(e.value) and "SomethingNew" in str(e.value)
+    # ...and every type actually in use is registered.
+    from trdrbot.wiki import LIFECYCLE
+    for t in ("CompanyDossier", "MarketContext", "Technique", "Lesson"):
+        assert t in LIFECYCLE, f"{t} is written in production and must have a policy"
+
+
+def test_freshness_is_stamped_by_policy_not_by_the_caller(tmp_path):
+    """Two writers share research/*.md. When each set `stale_after` by hand they
+    could disagree about when the same file expires."""
+    from trdrbot.wiki import Concept
+
+    w = _wiki(tmp_path)
+    c = Concept(concept_id="research/NVDA", frontmatter={}, body=DOSSIER)
+    w.write_concept(c, type_="CompanyDossier")
+    assert c.frontmatter["stale_after"], "a perishable type must be stamped"
+    assert c.frontmatter["status"] == "stable"
+    assert not c.is_stale()
+
+    # A timeless type gets no expiry at all.
+    t = Concept(concept_id="technique/x", frontmatter={}, body="# Rule\nalways true\n")
+    w.write_concept(t, type_="Technique")
+    assert "stale_after" not in t.frontmatter
+    assert not t.is_stale()
+
+
+def test_the_durable_half_survives_expiry(tmp_path):
+    """The reframe: a concept does not go stale because a price did. The muse's
+    400-char window used to run past '# What it is' into '# Bull case', handing
+    it 'Closed 228.17, +5.2%' as collision material 15.8h after that stopped
+    being true - measured, on this date's actual NVDA pick."""
+    import datetime
+    from trdrbot.wiki import Concept
+
+    w = _wiki(tmp_path)
+    c = Concept(concept_id="research/NVDA", frontmatter={}, body=DOSSIER)
+    w.write_concept(c, type_="CompanyDossier")
+
+    durable = c.durable_text()
+    assert "Nvidia designs the GPUs" in durable
+    assert "228.17" not in durable, "the perishable half must not ride along"
+
+    # Long past expiry, the concept is still exactly as usable.
+    later = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(days=30)
+    assert c.is_stale(later)
+    assert c.durable_text() == durable, "staleness must not change the durable text"
+
+
+def test_durable_text_degrades_to_everything_never_to_nothing(tmp_path):
+    """A half-written page must lose its freshness, not lose the page."""
+    from trdrbot.wiki import Concept
+
+    w = _wiki(tmp_path)
+    # A dossier missing the durable heading entirely.
+    c = Concept(concept_id="research/ODD", frontmatter={}, body="# Bull case\nonly this\n")
+    w.write_concept(c, type_="CompanyDossier")
+    assert "only this" in c.durable_text()
+
+    # A type that declares no durable section returns the whole body.
+    t = Concept(concept_id="technique/y", frontmatter={}, body="# Rule\neverything\n")
+    w.write_concept(t, type_="Technique")
+    assert "everything" in t.durable_text()
+
+
+def test_sweep_tombstones_in_place_and_never_deletes(tmp_path):
+    """Deletion is refused on principle, archive-by-move on mechanics: a file
+    that moves can be missed mid-read, a frontmatter flag cannot."""
+    import datetime
+    from trdrbot.wiki import Concept
+
+    w = _wiki(tmp_path)
+    c = Concept(concept_id="research/WEN", frontmatter={}, body=DOSSIER)
+    path = w.write_concept(c, type_="CompanyDossier")
+    generated_before = c.frontmatter["generated"]["at"]
+
+    later = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(days=2)
+    out = w.sweep(now=later)
+    assert out["deprecated"] == ["research/WEN"]
+
+    back = w.read("research/WEN")
+    assert path.exists(), "sweep must never delete"
+    assert back.frontmatter["status"] == "deprecated"
+    assert back.frontmatter["generated"]["at"] == generated_before, \
+        "a tombstone is not a regeneration - the page must not look freshly researched"
+    assert "Nvidia designs the GPUs" in back.durable_text(), "content survives"
+
+    # Idempotent: a second sweep does not re-stamp.
+    assert w.sweep(now=later)["deprecated"] == []
+
+
+def test_sweep_never_retires_a_ticker_we_are_holding(tmp_path):
+    """A position outlives the research cadence, and retiring the page that
+    explains why we are in a trade is the worst possible moment to do it."""
+    import datetime
+    from trdrbot.wiki import Concept
+
+    w = _wiki(tmp_path)
+    for t in ("HELD", "NOTHELD"):
+        w.write_concept(Concept(concept_id=f"research/{t}", frontmatter={}, body=DOSSIER),
+                        type_="CompanyDossier")
+    later = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(days=2)
+    out = w.sweep(protected={"research/HELD"}, now=later)
+    assert out["deprecated"] == ["research/NOTHELD"]
+    assert out["protected"] == ["research/HELD"]
+    assert w.read("research/HELD").frontmatter.get("status") != "deprecated"
+
+
+def test_re_researching_a_tombstoned_dossier_revives_it(tmp_path):
+    """Reversible by construction - no separate un-archive path to forget."""
+    import datetime
+    from trdrbot.wiki import Concept
+
+    w = _wiki(tmp_path)
+    w.write_concept(Concept(concept_id="research/BURL", frontmatter={}, body=DOSSIER),
+                    type_="CompanyDossier")
+    later = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(days=2)
+    w.sweep(now=later)
+    assert w.read("research/BURL").frontmatter["status"] == "deprecated"
+
+    fresh = w.read("research/BURL")
+    fresh.body = DOSSIER.replace("228.17", "231.00")
+    w.write_concept(fresh, type_="CompanyDossier")
+    assert w.read("research/BURL").frontmatter["status"] == "stable"
+    assert not w.read("research/BURL").is_stale()
+
+
+def test_sources_stop_growing_without_bound(tmp_path):
+    """research/NVDA.md carries FOUR identical `computed:market_stats` rows, one
+    per research pass. Four copies of one source are not four credibility
+    signals - OKF's signal is `last_modified`, refreshed in place."""
+    from trdrbot.wiki import Concept
+
+    w = _wiki(tmp_path)
+    c = Concept(concept_id="research/X", frontmatter={}, body=DOSSIER)
+    for _ in range(5):
+        c.add_source("computed:market_stats", author="trdrbot/research")
+    assert len(c.frontmatter["sources"]) == 1
+    c.add_source("discovery:news", author="trdrbot/discovery")
+    assert len(c.frontmatter["sources"]) == 2
+
+    # And the augmentation guard is still satisfied on a re-write.
+    w.write_concept(c, type_="CompanyDossier")
+    again = w.read("research/X")
+    again.add_source("computed:market_stats", author="trdrbot/research")
+    w.write_concept(again, type_="CompanyDossier")  # must not raise
+
+
+def test_discovery_no_longer_welds_perishable_text_into_the_durable_heading():
+    """22 of 28 live dossiers read 'Affirm Holdings, Inc. - Strong Q4 results
+    with...beats' because the template concatenated a durable field and a
+    perishable one into one sentence."""
+    import inspect
+    from trdrbot import discovery
+
+    src = inspect.getsource(discovery.run)
+    assert "{n.get('what_it_is') or n.get('company','')}" in src
+    assert "# What it is\\n{n.get('company','')} - {n.get('why_interesting','')}" not in src
+    assert "what_it_is" in discovery.NOMINATE_PROMPT, "the schema must ask for it"
+
+
+def test_both_dossier_writers_keep_identical_headings():
+    """discovery and research write the SAME file. The augmentation guard
+    refuses a write that drops a heading, so if their templates diverge the
+    second writer is refused and the dossier silently stops updating."""
+    import inspect, re
+    from trdrbot import discovery, research
+
+    DOSSIER_HEADINGS = {"What it is", "Bull case", "Bear case", "People", "Environment"}
+
+    def headings(fn):
+        return set(re.findall(r'"# ([A-Za-z][^\\"]*)', inspect.getsource(fn)))
+
+    d, r = headings(discovery.run), headings(research.run)
+    assert DOSSIER_HEADINGS <= d, f"discovery lost dossier heading(s) {DOSSIER_HEADINGS - d}"
+    assert DOSSIER_HEADINGS <= r, f"research lost dossier heading(s) {DOSSIER_HEADINGS - r}"
+    # And the durable one is exactly what the policy names, so the split the
+    # muse relies on cannot drift away from the template that produces it.
+    from trdrbot.wiki import LIFECYCLE
+    assert LIFECYCLE["CompanyDossier"].durable_section in DOSSIER_HEADINGS

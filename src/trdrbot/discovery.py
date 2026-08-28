@@ -52,8 +52,12 @@ general knowledge alone - if the material does not support a name, do not nomina
 {odds_block}
 
 Respond with ONLY a JSON array:
-[{{"ticker": str, "company": str, "why_interesting": str, "evidence": [str, ...],
-   "direction_hint": "bullish"|"bearish"|"unclear"}}]
+[{{"ticker": str, "company": str, "what_it_is": str, "why_interesting": str,
+   "evidence": [str, ...], "direction_hint": "bullish"|"bearish"|"unclear"}}]
+
+`what_it_is` is a DURABLE one-liner: what the business does, in terms that stay true next \
+month. No prices, no earnings dates, no "just beat" - those belong in why_interesting. It is \
+the only part of the dossier later cycles read as a standing fact.
 """
 
 SYNTH_PROMPT = """You are the research desk. For each candidate below you have: the nomination \
@@ -258,9 +262,17 @@ async def run(
         fc = (forecasts or {}).get(t, {})
         cid = f"research/{t}"
         c = wiki.read(cid) or Concept(concept_id=cid, frontmatter={"type": "CompanyDossier"}, body="")
+        # DURABLE above, perishable below. These two used to be welded into one
+        # sentence - "Affirm Holdings, Inc. - Strong Q4 results with...beats" -
+        # so 22 of 28 dossiers had today's earnings news sitting in the one
+        # heading later cycles read as a standing fact. Same five headings as
+        # research.py's template, deliberately: two writers share this file and
+        # the augmentation guard refuses a write that drops a heading, so their
+        # heading sets have to stay identical.
         c.body = (
-            f"# What it is\n{n.get('company','')} - {n.get('why_interesting','')}\n\n"
-            f"# Bull case\n{fc.get('outlook','(no forecast)')}\n\n"
+            f"# What it is\n{n.get('what_it_is') or n.get('company','')}\n\n"
+            f"# Bull case\n{n.get('why_interesting','')} "
+            f"{fc.get('outlook','(no forecast)')}\n\n"
             f"# Bear case\n{fc.get('key_risk','(no forecast)')}\n\n"
             f"# People\n(not researched - discovery pass)\n\n"
             f"# Environment\nVerdict: {fc.get('verdict','?')}. Evidence: "

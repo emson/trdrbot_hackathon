@@ -262,10 +262,9 @@ async def run(
             concept_id="context/regime", frontmatter={"type": "MarketContext"}, body=""
         )
         c.body = regime_md + "\n"
-        c.frontmatter["status"] = "stable"
-        c.frontmatter["stale_after"] = (
-            ids.utc_now().date().isoformat() + "T23:59:59Z"
-        )
+        # `status` and `stale_after` are stamped by wiki.LIFECYCLE now. They
+        # were set here by hand, which is exactly how one file ends up with two
+        # writers disagreeing about when it expires.
         c.add_source("computed:market_stats", author="trdrbot/research")
         try:
             wiki.write_concept(c, type_="MarketContext")

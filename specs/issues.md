@@ -47,6 +47,11 @@ Sorted by severity.
   essentially every payoff tested. The real step-ups are SCALE and MATURE, both gated on
   attribution, which has never run. Coherent, but the first rung currently changes nothing but the
   book cap.
+- **I-20 · 24 legacy dossiers carry no lifecycle stamp** (D-078). `is_stale()` is False without
+  `stale_after`, so they are never swept until re-researched - deliberate, fail-safe migration.
+  Their durable sections also still carry the old welded text (22 of 28 read "Company Inc. -
+  Strong Q4 results..."), corrected only on the next write of that ticker. No action needed; they
+  self-heal as tickers are re-nominated.
 - **I-18 · D-073's credit weighting has gone nearly inert** (found D-077 by its own contract
   test failing). `credit_weight` was built on elfmem min-max normalising each recall - worst match
   exactly 0.0, best exactly 1.0 - giving a documented 4x credit differential. Measured against the

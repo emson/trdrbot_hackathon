@@ -3015,3 +3015,93 @@ call paid to put it there.
 **Verified:** 187 default tests (8 new) + 14 contract tests. Live muse run with spread horizons and
 a candidate emitted; live simulate showing the PAYOFF line and sizing picking the conditional ratio
 up through a 10x quantity change.
+
+## D-078: The wiki ages by policy - durable concepts, tombstoned snapshots, no deletions
+**Date:** 2026-08-28
+**Status:** accepted
+**Context:** A worry that the wiki would fill with stale documents nobody updates, removes or
+references. Investigating it corrected a claim I had made one answer earlier - that
+`research/*.md` was write-only - which was wrong and made the problem worse than described.
+
+**The dossiers ARE read back, at random, by the muse.** `_sample_concepts` draws uniformly from
+every non-position markdown file and hands the first 400 characters to the collision prompt. That
+window runs straight past `# What it is` into `# Bull case`, so on 2026-08-28 the muse's actual
+seeded pick included `research/NVDA.md` at 15.8 hours old and read **"Closed 228.17, +5.2% on the
+week"** as raw material - against a live tape of 223.90, **-1.8%**. Stale wiki content was not
+inert clutter; it was an unlabelled input to thesis generation.
+
+**Measured scale of the defect:** 22 of 28 dossiers had a contaminated durable section, because
+`discovery.py`'s template welded a durable field to a perishable one in one sentence -
+`f"# What it is\n{company} - {why_interesting}"` - producing "Affirm Holdings, Inc. - Strong Q4
+results with revenue and adjusted EPS beats". `research.py`'s template was clean, so the two
+writers of the same file disagreed about what the heading meant.
+
+**The reframe, and it is the whole decision: the files were never the problem.** An optimize
+simulation over ten frozen scenarios first tried expiring stale dossiers out of the muse's pool -
+which fixed freshness and BROKE the muse, because on a day with no research run every dossier
+expires and the pool collapses to two files. Labelling instead of excluding scored better but
+still handed the model a dead number to argue from. What actually dissolves it is reading the
+**durable half**: a company dossier's "what it is" is true next month, its "bull case" is a
+snapshot of a tape that has already moved. Read the durable section and a stale document stays
+useful, so nothing needs excluding, so nothing can starve - and colliding a month-old concept with
+today's news is the muse's MANDATE, not a defect. It is also the constitution's own `[routing]`
+principle applied one level down: **today's prices are an event, and events belong in the journal,
+not in a standing note.**
+
+**Choice, four parts:**
+
+1. **`wiki.LIFECYCLE`, a per-type policy table, enforced at the write path.** A type absent from it
+   **cannot be written** - `LifecycleError`, naming the fix. This is the consistency mechanism: a
+   new document type must declare how it ages before it can exist, the same way the augmentation
+   guard already refuses a write that drops a heading. OKF leaves `stale_after` to the implementer
+   and says so plainly - *"who sets it, and to what, is the one decision that determines whether a
+   wiki decays gracefully or noisily"* - and D-022 had adopted it for `context/*` only, before
+   discovery existed and before dossiers reached 28. `research.py`'s hand-set `stale_after` is
+   deleted: policy is the single source, because a per-caller stamp is how two writers of one file
+   come to disagree about when it expires.
+
+2. **`Concept.durable_text()`, and the muse reads it** instead of the first 400 characters. Falls
+   back to the whole body when a type declares no durable section or the section is missing - a
+   half-written page must lose its freshness, never lose the page.
+
+3. **`discovery.py` stops welding.** Its nominate schema gained a `what_it_is` field asked for as
+   a durable one-liner, with a fallback to `company`. Both dossier writers keep the SAME five
+   headings, deliberately and now under test: they share the file, and the augmentation guard
+   refuses a write that drops a heading, so divergent templates would make the second writer's
+   updates silently fail. Verified live - AFRM now reads *"Offers point-of-sale financing and
+   consumer credit products to merchants and shoppers (BNPL...)"* where it read *"Affirm Holdings,
+   Inc. - Strong Q4 results with...beats"* an hour earlier.
+
+4. **A housekeeping sweep that tombstones and never deletes.** `status: deprecated`, in place.
+   **Deletion is refused on principle** - OKF's own answer to a dead concept is tombstone-in-place,
+   and every other store here is append-only (journal, ledger, position pages). **Archiving by
+   moving files is refused on mechanics** - a file that moves can be missed mid-read by a
+   concurrent consumer; a frontmatter flag cannot, and the page stays where anyone looking for it
+   will look. The sweep is position-aware: a ticker we hold is never retired, because a position
+   outlives the research cadence and the page explaining why we are in a trade is the worst
+   possible thing to retire mid-trade. `touch_generated=False` so a tombstone does not leave the
+   page looking freshly researched. Revival needs no separate path - re-researching rewrites the
+   page and `write_concept` restores `status: stable`.
+
+**Also fixed: `sources[]` grew without bound.** `add_source` minted `src-{len+1}` every call, so
+the id was always new and the entry always appended - `research/NVDA.md` carries four identical
+`computed:market_stats` rows, one per research pass. Four copies of one source are not four
+credibility signals; OKF's signal is `last_modified`, and it is now refreshed in place, keyed on
+(resource, author). Existing duplicates are left alone rather than compacted, because the
+augmentation guard would refuse a write that shrinks `sources` - our own rule, correctly applied
+to us. The bloat stops growing, which was the part that mattered.
+
+**Migration is fail-safe by construction.** `is_stale()` returns False with no `stale_after`, so
+the 24 legacy dossiers are never swept until they pass through the new write path. Nothing is
+retired on the strength of a policy it was never written under.
+
+**Rejected:** automatic deletion (contradicts OKF, contradicts append-only, unrecoverable); moving
+to `research/archive/` (race-prone for no benefit over a flag); expiring stale dossiers out of the
+muse's pool (starves it on any day without a research run); a background re-verification cadence
+(OKF explicitly declines to specify one, and there is nothing to re-verify - the durable half does
+not decay).
+
+**Verified:** 197 default tests (10 new, one per frozen scenario including starvation, the
+held-position exemption, revival, and template divergence) + 14 contract tests. Live discovery run
+writing a clean split, and the exact NVDA collision that was poisoned this morning now reads
+"Nvidia designs the GPUs and accelerated-computing platforms..." with no price in it.

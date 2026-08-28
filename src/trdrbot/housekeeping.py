@@ -169,15 +169,32 @@ async def run(
         attributed = (await attribution.run(store, tools, mem, wiki, journal,
                                             verbose=verbose))["attributed"]
 
+    # Wiki lifecycle sweep. Tombstones expired dossiers in place - never
+    # deletes, never moves - and never touches a ticker we are actually holding,
+    # because a position outlives the research cadence and the page explaining
+    # why we are in a trade is the worst possible thing to retire mid-trade.
+    swept: dict[str, list[str]] = {"deprecated": [], "protected": []}
+    try:
+        held = {f"research/{p.underlying.upper()}"
+                for p in store.open_positions() if p.underlying}
+        swept = wiki.sweep(protected=held)
+        if swept["deprecated"]:
+            journal.append("wiki_sweep", deprecated=swept["deprecated"],
+                           protected=swept["protected"])
+    except Exception as exc:  # noqa: BLE001 - housekeeping is advisory (INV-8)
+        print(f"[housekeeping] wiki sweep failed, continuing: {exc!r}")
+
     dreamed = await mem.housekeeping_dream()
 
     wiki.append_log(
         f"housekeeping: {interim_scored} interim score(s), "
         f"consolidation {'ok' if dreamed else 'skipped (see log)'}, "
-        f"{attributed} attribution(s)"
+        f"{attributed} attribution(s), "
+        f"{len(swept['deprecated'])} concept(s) tombstoned"
     )
     if verbose:
         print(f"[housekeeping] interim_scored={interim_scored} dream_ok={dreamed}")
 
     return {"interim_scored": interim_scored, "dream_ok": dreamed, "attributed": attributed,
-            "forecasts_resolved": forecasts_resolved}
+            "forecasts_resolved": forecasts_resolved,
+            "wiki_deprecated": len(swept["deprecated"])}
