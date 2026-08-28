@@ -223,12 +223,23 @@ def attribute(thesis_held: bool | None, profited: bool) -> tuple[str, str]:
 #: Signal fed to elfmem at resolution. Deliberately NOT proportional to P&L.
 #: A lucky win must not reinforce, and a right-view-wrong-structure loss must
 #: not punish the view - so the signal follows the ATTRIBUTION, not the money.
-ATTRIBUTION_SIGNAL = {
+#:
+#: **None means APPLY NOTHING, and that is not the same as 0.5** (D-072).
+#: elfmem's update is a Beta posterior mean: `new_conf = (a + s*w) / (a + b + w)`.
+#: A signal only leaves a block unchanged if the block is ALREADY at that
+#: confidence - so the 0.5 that used to encode "learn nothing from luck" was
+#: in fact a force pulling every block toward 0.5 from wherever it sat.
+#: Measured against the live database with elfmem's own function: a lucky win
+#: moved the constitution -0.250 and moved a prediction that had already MISSED
+#: +0.018. It punished what was right and rewarded what was wrong - the exact
+#: inversion of the comment's intent. "Learn nothing" has to mean no Beta
+#: update at all, so these two carry None and the caller skips.
+ATTRIBUTION_SIGNAL: dict[str, float | None] = {
     THESIS_RIGHT_EXPRESSION_RIGHT: 0.9,
     THESIS_RIGHT_EXPRESSION_WRONG: 0.65,  # view held up; keep most of the credit
     THESIS_WRONG_EXPRESSION_FAITHFUL: 0.1,
-    THESIS_WRONG_PROFITED_ANYWAY: 0.5,  # neutral: learn nothing from luck
-    UNSCOREABLE: 0.5,
+    THESIS_WRONG_PROFITED_ANYWAY: None,   # luck teaches nothing - apply nothing
+    UNSCOREABLE: None,                    # we could not judge it - assert nothing
 }
 
 

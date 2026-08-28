@@ -2579,3 +2579,61 @@ live data. Logged rather than papered over.
 
 **Verified:** 141 default tests (4 new), including that a `Cause.BUG` failure leaves the inbox
 item's retry counter untouched on disk - the actual data-loss this fixes.
+
+## D-072: Credit assignment, phase 1 - what happened vs what it applied to
+**Date:** 2026-08-28
+**Status:** accepted
+**Context:** An optimize simulation of the elfmem learning loop, grounded against the live SQLite
+and elfmem's own update function rather than reasoned about. It first CORRECTED a claim made in
+D-070's review: the constitution is NOT eroding - `positions.CREDITED_FRAMES = ("task",
+"attention")` already excludes the SELF frame from credit (D-033/D-041). What the grounding did
+find is three real defects, all in the one path that has never yet run.
+
+**1. The "neutral" luck signal was not neutral.** elfmem's update is a Beta posterior mean:
+`new_conf = (a + s*w) / (a + b + w)`. A signal leaves a block unchanged only if the block already
+sits at that confidence - so the 0.5 encoding "learn nothing from luck" was a force pulling every
+block toward 0.5 from wherever it was. Measured with elfmem's own function against live blocks: a
+lucky win moved the constitution **-0.250** and moved a prediction that had already MISSED
+**+0.018**. It punished what was right and rewarded what was wrong, the exact inversion of the
+comment's stated intent. `ATTRIBUTION_SIGNAL` now carries `None` for
+`THESIS_WRONG_PROFITED_ANYWAY` and `UNSCOREABLE`, and the caller skips: teaching nothing means
+applying nothing.
+
+**2. Attribution bypassed the consolidate-and-retry fix.** `attribution.run()` called
+`mem.mem.outcome()` directly while `learn.py` went through `ElfmemAdapter.resolve()` - so the MAIN
+trading credit path was the single path missing D-057's protection against elfmem silently
+returning `updated=0` on unconsolidated blocks. Same shape as the SELF-preamble rename living in
+only one caller (D-063), same fix: `credit_blocks()` is now THE door, both callers use it, and it
+returns `(requested, applied)` because a caller that cannot see `applied` cannot tell
+credit-applied from credit-silently-dropped. A short count journals `attribution_credit_short` -
+which will fire, since the SPY position's only creditable block is archived and elfmem skips
+non-active blocks.
+
+**3. The ATTENTION query was a constant.** `" ".join(config.watchlist) + " options setup"` - with
+watchlist `["SPY"]`, every recall asked about SPY regardless of what was being decided. That is
+why the NVDA position was decided with SPY memories in context and would then have CREDITED them:
+**2 of its 3 creditable blocks were about the wrong underlying.** Retrieval was answering a
+question nobody asked and the learning loop was about to score the answer. `_attention_query()`
+now ranks by how directly a name bears on the decision - open positions, then opportunities, then
+news - capped at 6.
+
+**The news filter was forced by the first live run, before shipping.** The unfiltered version, run
+against the real pending inbox, produced `"AGG BND GLD SPY options setup"` from one broad-market
+article tagging twelve ETFs - asking memory about bond and gold noise and pushing SPY, the only
+name in the book, to fourth. That was WORSE than the constant it replaced. News symbols are now
+filtered to names we could actually trade (watchlist + research universe); opportunities are never
+filtered, because nominating off-universe is exactly discovery's job. An article's ticker list is
+what it mentions, not what we are deciding about.
+
+**Rejected in the simulation:** LLM-scored block relevance. Plausible, but it is an LLM-asserted
+value validating an LLM-asserted decision - what `_plausible_band` exists to forbid - and
+non-deterministic credit makes the loop unauditable. Deferred to phase 2: similarity-weighted
+credit (`ScoredBlock.similarity`, deliberately NOT `.score`, which folds in confidence and
+reinforcement and would make trusted blocks accrue trust faster - rich-get-richer, the pathology
+D-059 already caught once).
+
+**Verified:** 148 default tests. Four existing tests asserted the old `0.5` contract and were
+updated deliberately as their own step, with the arithmetic that disproved them pinned in a new
+test. Live forced cycle: `model_served: ['claude-opus-5']`, task frame contributing 0 blocks with
+no duplicate text, and a forecast recorded at a 09-01 horizon with the agent noting unprompted
+that it "resolves Sep 1, which is early enough to still inform a decision before the deadline."

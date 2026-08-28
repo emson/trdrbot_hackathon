@@ -92,6 +92,62 @@ def _text_of(message: Any) -> str:
 #: variance, not ruin, and defined-risk legs already bound the worst case.
 BETA_DELTA_FLAG_PCT = 1.5
 
+#: Underlyings named in the ATTENTION query. Enough to cover a decision's real
+#: subject matter; small enough that one market-wrap article tagging eight
+#: tickers cannot drown out the name actually being traded.
+ATTENTION_MAX_NAMES = 6
+
+
+def _attention_query(items: "list[Item]", open_pos: list[Any], config: Config) -> str:
+    """What to ask MEMORY about, given what this cycle is actually deciding.
+
+    Was `" ".join(config.watchlist) + " options setup"` - a constant. With
+    watchlist ["SPY"], every ATTENTION recall asked about SPY no matter what
+    the agent was looking at, so the NVDA position was decided with SPY
+    memories in context and then, at attribution, CREDITED them: 2 of its 3
+    creditable blocks were about the wrong underlying (D-072). Retrieval was
+    answering a question nobody asked, and the learning loop was scoring the
+    answer.
+
+    Ordered by how directly a name bears on the decision - open positions
+    (money at risk now), then proposed opportunities (what we may act on),
+    then news symbols - and capped, because relevance is the point and a
+    longer query is a vaguer one. The watchlist stays as the floor so an empty
+    cycle still recalls something rather than querying the empty string.
+
+    News symbols are filtered to names we could actually trade, which the
+    first live run showed is not optional: one broad-market article tagged
+    twelve ETFs, and the unfiltered version asked memory about "AGG BND GLD"
+    - bond and gold noise - pushing SPY, the only name in the book, to fourth.
+    That was WORSE than the constant it replaced. An article's ticker list is
+    what it mentions, not what we are deciding about.
+    """
+    tradeable = {s.upper() for s in config.watchlist} | {
+        s.upper() for s in config.research_universe}
+    names: list[str] = []
+
+    def add(raw: Any) -> None:
+        s = str(raw or "").upper().strip()
+        if s and s.isalnum() and s not in names:
+            names.append(s)
+
+    for p in open_pos:
+        add(p.underlying)
+    for i in items:
+        # An opportunity names its own candidate, which discovery may well
+        # have nominated from outside the universe - that is the point of it,
+        # so it is never filtered.
+        if i.type == "opportunity":
+            add(i.payload.get("underlying"))
+    for i in items:
+        if i.type == "news":
+            for s in (i.payload.get("symbols") or []):
+                if str(s).upper() in tradeable:
+                    add(s)
+    for s in config.watchlist:
+        add(s)
+    return " ".join(names[:ATTENTION_MAX_NAMES]) + " options setup"
+
 
 def _render_positions(store: PositionStore, snap: "analytics.Snapshot | None" = None,
                       state_dir: "Path | None" = None, equity: float = 0.0) -> str:
@@ -323,7 +379,8 @@ async def run_tick(
         decide_mcp = compact.wrap_heavy_tools(decide_mcp, config)
         guarded = tool_guard.enforce_order_ids(decide_mcp, batch)
 
-        query = " ".join(config.watchlist) + " options setup"
+        open_pos = store.open_positions()
+        query = _attention_query(items, open_pos, config)
         ctx = await mem.assemble_context(query)
 
         decision_id = journal.append(  # write-ahead (INV-18)
@@ -344,7 +401,6 @@ async def run_tick(
         book = ledger_mod.Ledger(config.paths.state / "ledger.jsonl")
         sim_tool = local_tools.build_simulate_experiments(shared, config.paths.state, book)
         forecast_tool = local_tools.build_record_forecast(book, config.paths.state)
-        open_pos = store.open_positions()
         open_risk = sum(p.max_loss_usd or 0.0 for p in open_pos)
         by_underlying: dict[str, float] = {}
         for op in open_pos:

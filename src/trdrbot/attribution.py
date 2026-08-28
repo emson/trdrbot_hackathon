@@ -139,15 +139,31 @@ async def run(
         store.save(pos)
 
         # The signal follows the attribution, NOT the P&L - so a lucky win on a
-        # wrong view stays neutral and a right view that lost keeps its credit.
-        if pos.all_elfmem_block_ids:
-            await mem.mem.outcome(
+        # wrong view teaches nothing and a right view that lost keeps its credit.
+        # `signal is None` means exactly that: apply NOTHING, rather than the
+        # 0.5 that used to drag every block toward the midpoint (D-072).
+        requested = applied = 0
+        if signal is not None:
+            requested, applied = await mem.credit_blocks(
                 pos.all_elfmem_block_ids, signal, weight=1.0,
                 source=f"attribution:{pos.position_id}",
             )
+            if requested and applied < requested:
+                # Credit that reaches zero blocks is indistinguishable from
+                # credit that was never attempted, unless it says so. The SPY
+                # position's only creditable block is archived, and elfmem
+                # skips non-active blocks - so this path really does fire.
+                journal.append("attribution_credit_short",
+                               position_id=pos.position_id,
+                               requested=requested, applied=applied)
+                if verbose:
+                    print(f"[attribution] {pos.position_id}: credit applied to "
+                          f"{applied}/{requested} blocks")
 
         journal.append(
             "attribution",
+            blocks_credited=requested,
+            blocks_applied=applied,
             position_id=pos.position_id,
             thesis=pos.thesis_claim,
             horizon=pos.thesis_horizon,

@@ -293,8 +293,28 @@ def test_thesis_without_a_band_is_unscoreable_not_assumed_true():
 
 
 def test_lucky_win_teaches_nothing():
+    """Updated deliberately (D-072): this asserted `== 0.5`, which was the bug.
+    elfmem's update is a Beta posterior mean, so a 0.5 signal is not neutral -
+    it drags a block toward 0.5 from wherever it sits. Measured with elfmem's
+    own function against the live database: it moved the constitution -0.250
+    and moved a prediction that had ALREADY MISSED +0.018, punishing what was
+    right and rewarding what was wrong. Teaching nothing means applying
+    nothing."""
     verdict, _ = experiments.attribute(thesis_held=False, profited=True)
-    assert experiments.ATTRIBUTION_SIGNAL[verdict] == 0.5, "a lucky win must not reinforce"
+    assert experiments.ATTRIBUTION_SIGNAL[verdict] is None, \
+        "a lucky win must apply NO update, not an update toward 0.5"
+
+
+def test_a_neutral_signal_is_not_neutral_which_is_why_luck_applies_none():
+    """The arithmetic that forced the change above, pinned so it cannot be
+    argued away: the same 0.5 'neutral' signal moves two blocks in OPPOSITE
+    directions depending only on where they already sit."""
+    from elfmem.operations.outcome import compute_bayesian_update_ab as upd
+
+    _, _, high = upd(1.0, 0.0, 0.5, 1.0)    # a block at confidence 1.0
+    _, _, low = upd(3.1, 7.9, 0.5, 1.0)     # a block at confidence ~0.28
+    assert high < 1.0, "0.5 PUNISHES a high-confidence block"
+    assert low > 3.1 / 11.0, "0.5 REWARDS a discredited block"
 
 
 # ------------------------------------------------------- position storage
@@ -1171,7 +1191,9 @@ def test_attribution_scores_measured_profit_not_the_close_label():
     # the two verdicts must differ on a profitable trade whose thesis failed
     right, _ = experiments.attribute(True, True)
     lucky, _ = experiments.attribute(False, True)
-    assert experiments.ATTRIBUTION_SIGNAL[right] > experiments.ATTRIBUTION_SIGNAL[lucky]
+    assert experiments.ATTRIBUTION_SIGNAL[right] > 0.5, "a right view must reinforce"
+    assert experiments.ATTRIBUTION_SIGNAL[lucky] is None, \
+        "a lucky win must apply nothing at all (D-072)"
 
 
 def test_last_pnl_survives_a_position_leaving_the_broker():
@@ -1224,10 +1246,20 @@ def test_resolve_self_heals_when_outcomes_hit_unconsolidated_blocks():
     profitable NVDA trade - lost its memory credit invisibly. Measured:
     updated=0 before consolidation, updated=1 after."""
     import inspect
+    from trdrbot import attribution
     from trdrbot.elfmem_adapter import ElfmemAdapter
-    src = inspect.getsource(ElfmemAdapter.resolve)
+    # The retry lives in `credit_blocks` now - THE single door both resolve()
+    # and attribution.run() come through (D-072). It had to move: attribution
+    # called `mem.outcome()` directly, so the MAIN trading credit path was the
+    # one path missing this protection.
+    src = inspect.getsource(ElfmemAdapter.credit_blocks)
     assert "blocks_updated" in src and "consolidate" in src, \
-        "resolve must detect a short-count and consolidate-then-retry"
+        "credit_blocks must detect a short-count and consolidate-then-retry"
+    assert "credit_blocks" in inspect.getsource(ElfmemAdapter.resolve), \
+        "resolve must go through the single credit door, not call outcome itself"
+    assert "credit_blocks" in inspect.getsource(attribution.run), \
+        "attribution must go through the single credit door - it did not, and "\
+        "that is exactly how it missed the consolidate-and-retry fix"
 
 
 def test_resolution_falls_back_to_the_positions_own_last_pnl():
@@ -1845,3 +1877,91 @@ def test_rejected_opportunity_names_the_field_that_was_missing():
                                "horizon": "2026-09-03"}) == "missing_band"
     assert opportunity_defect({"underlying": "X", "claim": "c", "band_low": 1.0,
                                "horizon": "next tuesday"}) == "bad_horizon_format"
+
+
+# ---------------------------- D-072 credit assignment phase 1
+
+def _item(kind, payload, iid="i1"):
+    from trdrbot.inbox import Item
+    return Item(id=iid, ts="2026-08-28T00:00:00Z", type=kind,
+                source="test", payload=payload, trust="primary")
+
+
+def _cfg(watchlist):
+    from pathlib import Path
+    from trdrbot.config import Config
+
+    class P:
+        state = Path("/tmp")
+    return Config(raw={"trading": {"watchlist": watchlist},
+                       "research": {"universe": ["SPY", "NVDA"]}}, paths=P())
+
+
+def test_attention_query_names_what_is_actually_being_traded():
+    """Was a constant: `" ".join(watchlist) + " options setup"`. With watchlist
+    ["SPY"], the NVDA position was decided with SPY memories in context and
+    then CREDITED them - 2 of its 3 creditable blocks were about the wrong
+    underlying. Retrieval was answering a question nobody asked."""
+    from trdrbot.tick import _attention_query
+
+    q = _attention_query([_item("opportunity", {"underlying": "NVDA"})], [], _cfg(["SPY"]))
+    assert "NVDA" in q, "the name under consideration must reach memory"
+    assert q.index("NVDA") < q.index("SPY"), "what we may act on outranks the static watchlist"
+
+
+def test_attention_query_prefers_open_positions_over_everything():
+    """Money already at risk is the most decision-relevant thing there is."""
+    from trdrbot.tick import _attention_query
+
+    class Pos:
+        underlying = "XLE"
+    q = _attention_query([_item("opportunity", {"underlying": "NVDA"})], [Pos()], _cfg(["SPY"]))
+    assert q.startswith("XLE"), f"open position must lead the query, got {q!r}"
+
+
+def test_attention_query_cannot_be_drowned_by_a_market_wrap_article():
+    """Caught on the FIRST live run, before shipping: a real article tagged
+    twelve ETFs and the unfiltered query asked memory about "AGG BND GLD",
+    pushing SPY - the only name in the book - to fourth. That was worse than
+    the constant it replaced. An article's ticker list is what it mentions,
+    not what we are deciding about, so news names are filtered to ones we
+    could actually trade."""
+    from trdrbot.tick import _attention_query
+
+    wrap = _item("news", {"symbols": ["AGG", "BND", "GLD", "IAU", "IEF",
+                                      "ITOT", "OUNZ", "SPY", "VTI"]})
+    q = _attention_query([wrap], [], _cfg(["SPY"]))
+    assert q == "SPY options setup", f"untradeable news names must not enter: {q!r}"
+
+    both = _attention_query([_item("opportunity", {"underlying": "NVDA"}), wrap], [], _cfg(["SPY"]))
+    assert both.startswith("NVDA"), "the opportunity must still lead"
+    assert "GLD" not in both and "AGG" not in both
+
+
+def test_attention_query_keeps_an_opportunity_outside_the_universe():
+    """Discovery nominates names off-universe on purpose - that is its job -
+    so an opportunity is never filtered, only news is."""
+    from trdrbot.tick import _attention_query
+
+    q = _attention_query([_item("opportunity", {"underlying": "BURL"})], [], _cfg(["SPY"]))
+    assert q.startswith("BURL"), f"a nominated candidate must reach memory: {q!r}"
+
+
+def test_attention_query_falls_back_to_the_watchlist_when_nothing_is_in_play():
+    """An empty cycle must still recall something, not query the empty string."""
+    from trdrbot.tick import _attention_query
+
+    assert _attention_query([], [], _cfg(["SPY"])) == "SPY options setup"
+
+
+def test_attribution_skips_the_outcome_call_entirely_on_a_none_signal():
+    """`signal is None` must mean no Beta update reaches elfmem at all - not
+    an update with a neutral-looking number."""
+    import inspect
+    from trdrbot import attribution
+
+    src = inspect.getsource(attribution.run)
+    assert "signal is not None" in src, \
+        "a None signal must gate the credit call, not be passed through"
+    assert "attribution_credit_short" in src, \
+        "credit reaching fewer blocks than requested must leave evidence"

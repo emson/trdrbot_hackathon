@@ -95,6 +95,13 @@ def test_every_attribution_quadrant_produces_its_own_verdict():
             for held in (True, False) for profited in (True, False)}
     assert len(seen) == 4, f"quadrants collapsed: {seen}"
     signal = experiments.ATTRIBUTION_SIGNAL
-    assert signal[experiments.THESIS_WRONG_PROFITED_ANYWAY] == 0.5, "luck must teach nothing"
-    assert (signal[experiments.THESIS_RIGHT_EXPRESSION_RIGHT]
-            > signal[experiments.THESIS_WRONG_PROFITED_ANYWAY])
+    # "Teaches nothing" means NO Beta update, not an update toward 0.5 (D-072).
+    # Measured with elfmem's own function: applying 0.5 moved the constitution
+    # -0.250 and moved a prediction that had already MISSED +0.018. A signal
+    # is only neutral for a block already sitting at that confidence.
+    assert signal[experiments.THESIS_WRONG_PROFITED_ANYWAY] is None, \
+        "luck must apply nothing at all - 0.5 is a force toward 0.5, not neutrality"
+    assert signal[experiments.UNSCOREABLE] is None, \
+        "an unjudgeable outcome must assert nothing about the blocks"
+    assert signal[experiments.THESIS_RIGHT_EXPRESSION_RIGHT] > 0.5
+    assert signal[experiments.THESIS_WRONG_EXPRESSION_FAITHFUL] < 0.5

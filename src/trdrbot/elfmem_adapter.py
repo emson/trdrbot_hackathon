@@ -238,27 +238,46 @@ class ElfmemAdapter:
             await self.mem.mind_outcome(
                 pos.mind_decision_block_id, hit=hit, reason=pos.close_reason or "resolved"
             )
-        block_ids = pos.all_elfmem_block_ids
-        if block_ids:
-            out = await self.mem.outcome(block_ids, signal, weight=weight,
-                                         source=pos.position_id)
-            applied = out.blocks_updated + out.blocks_penalized
-            if applied < len(block_ids):
-                # outcome() on a block still in elfmem's inbox returns
-                # updated=0 SILENTLY - the credit vanishes. This is not an
-                # edge case here: theses are remembered at FILL time and
-                # consolidation runs only at market-closed housekeeping, so
-                # any position that resolves the same day it was opened -
-                # like our first profitable NVDA trade - loses its memory
-                # credit invisibly (D-057). Found by the learning-loop
-                # simulation, confirmed by direct measurement: updated=0
-                # before consolidation, updated=1 after. Consolidate the
-                # stragglers and retry once.
-                print(f"[elfmem] {applied}/{len(block_ids)} outcomes applied - "
-                      f"consolidating inbox and retrying")
-                await self.mem.consolidate()
-                await self.mem.outcome(block_ids, signal, weight=weight,
-                                       source=pos.position_id)
+        await self.credit_blocks(pos.all_elfmem_block_ids, signal,
+                                 weight=weight, source=pos.position_id)
+
+    async def credit_blocks(self, block_ids: list[str], signal: float, *,
+                            weight: float = 1.0, source: str) -> tuple[int, int]:
+        """Apply an outcome to blocks. Returns (requested, applied).
+
+        THE single door for credit assignment - `resolve()` above and
+        `attribution.run()` both come through here (D-072). They did not:
+        attribution called `mem.outcome()` directly and so never had the
+        consolidate-and-retry below, meaning the MAIN trading credit path was
+        the one path missing the protection D-057 added. Same class of bug as
+        the SELF-preamble rename living in only one caller (D-063), and the
+        same fix: one door, no exceptions.
+
+        Returning the counts rather than None is the other half - a caller
+        that cannot see `applied` cannot tell credit-applied from
+        credit-silently-dropped, which is exactly how D-057 hid.
+        """
+        if not block_ids:
+            return (0, 0)
+        out = await self.mem.outcome(block_ids, signal, weight=weight, source=source)
+        applied = out.blocks_updated + out.blocks_penalized
+        if applied < len(block_ids):
+            # outcome() on a block still in elfmem's inbox returns
+            # updated=0 SILENTLY - the credit vanishes. This is not an
+            # edge case here: theses are remembered at FILL time and
+            # consolidation runs only at market-closed housekeeping, so
+            # any position that resolves the same day it was opened -
+            # like our first profitable NVDA trade - loses its memory
+            # credit invisibly (D-057). Found by the learning-loop
+            # simulation, confirmed by direct measurement: updated=0
+            # before consolidation, updated=1 after. Consolidate the
+            # stragglers and retry once.
+            print(f"[elfmem] {applied}/{len(block_ids)} outcomes applied - "
+                  f"consolidating inbox and retrying")
+            await self.mem.consolidate()
+            retry = await self.mem.outcome(block_ids, signal, weight=weight, source=source)
+            applied = retry.blocks_updated + retry.blocks_penalized
+        return (len(block_ids), applied)
 
     # -- housekeeping only (INV-10/23: dream() lives here and nowhere else) --
 
