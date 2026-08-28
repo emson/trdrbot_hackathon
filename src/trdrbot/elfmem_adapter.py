@@ -45,8 +45,13 @@ ATTENTION_KEEP = 5
 
 @dataclass
 class ContextResult:
+    #: frame name -> {block id: retrieval similarity} (INV-22).
+    #: Similarity is carried through to the position so credit can be weighted
+    #: by how well each block matched the query that produced the decision
+    #: (D-073). Iterating a frame still yields ids, so id-only readers are
+    #: unaffected by the shape.
     text: str
-    blocks: dict[str, list[str]]  # frame name -> block ids (INV-22)
+    blocks: dict[str, dict[str, float]]
 
 
 class ElfmemAdapter:
@@ -97,8 +102,17 @@ class ElfmemAdapter:
         return await self.mem.frame("self", None, top_k=top_k or len(PRINCIPLES) + 4)
 
     async def assemble_context(self, query: str) -> ContextResult:
-        """self + task + attention frames, captured per-frame (INV-22)."""
-        blocks: dict[str, list[str]] = {}
+        """self + task + attention frames, captured per-frame (INV-22).
+
+        Similarity is only MEANINGFUL for ATTENTION. SELF and TASK are framed
+        with `query=None`, so elfmem has nothing to score them against and
+        returns 0.0 for every block - correct, since neither frame is credited
+        (`CREDITED_FRAMES`), but a trap for anyone who later adds one to that
+        tuple and finds every principle pinned at the weight floor. Credit is
+        weighted by relevance to the query that drove the decision, so only
+        the query-driven frame can carry a weight that means anything (D-073).
+        """
+        blocks: dict[str, dict[str, float]] = {}
         parts: list[str] = []
         # SELF needs top_k >= the constitution size. elfmem defaults top_k to 5
         # (memory.top_k), so the default call renders FIVE of ten principles and
@@ -110,9 +124,11 @@ class ElfmemAdapter:
         for name in ("self", "task"):
             fr = (await self.self_frame(self_k) if name == "self"
                   else await self.mem.frame(name, None))
-            ids = [b.id for b in fr.blocks if b.id not in seen]
+            fresh = {b.id: float(getattr(b, "similarity", 1.0) or 0.0)
+                     for b in fr.blocks if b.id not in seen}
+            ids = list(fresh)
             seen.update(ids)
-            blocks[name] = ids
+            blocks[name] = fresh
             # A frame that contributes no NEW block contributes no text (D-070).
             # Measured live: TASK returned 5 blocks, all 5 already in SELF - 0
             # unique, every cycle. The id dedup above already dropped them from
@@ -134,9 +150,9 @@ class ElfmemAdapter:
         # (`exclude_tag_patterns`), verified live: 0 leaked. Reverting restores
         # the frame template and its TTL cache.
         fr = await self.mem.frame("attention", query)
-        ids = [b.id for b in fr.blocks if b.id not in seen]
-        seen.update(ids)
-        blocks["attention"] = ids
+        blocks["attention"] = {b.id: float(getattr(b, "similarity", 1.0) or 0.0)
+                               for b in fr.blocks if b.id not in seen}
+        seen.update(blocks["attention"])
         if fr.text:
             parts.append(fr.text)
 

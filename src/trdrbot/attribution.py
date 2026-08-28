@@ -144,10 +144,21 @@ async def run(
         # 0.5 that used to drag every block toward the midpoint (D-072).
         requested = applied = 0
         if signal is not None:
-            requested, applied = await mem.credit_blocks(
-                pos.all_elfmem_block_ids, signal, weight=1.0,
-                source=f"attribution:{pos.position_id}",
-            )
+            # Weight by how well each block matched the query that produced
+            # this decision (D-073). Grouped by rounded weight so a 3-block
+            # position costs one or two calls, not three - and so the grouping
+            # is deterministic, which matters for a path we want to be able to
+            # replay from the journal.
+            groups: dict[float, list[str]] = {}
+            for bid, w in pos.credit_weights().items():
+                groups.setdefault(round(w, 2), []).append(bid)
+            for weight, bids in sorted(groups.items()):
+                req, app = await mem.credit_blocks(
+                    bids, signal, weight=weight,
+                    source=f"attribution:{pos.position_id}",
+                )
+                requested += req
+                applied += app
             if requested and applied < requested:
                 # Credit that reaches zero blocks is indistinguishable from
                 # credit that was never attempted, unless it says so. The SPY

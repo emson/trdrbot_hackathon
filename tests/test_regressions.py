@@ -1965,3 +1965,103 @@ def test_attribution_skips_the_outcome_call_entirely_on_a_none_signal():
         "a None signal must gate the credit call, not be passed through"
     assert "attribution_credit_short" in src, \
         "credit reaching fewer blocks than requested must leave evidence"
+
+
+# ---------------------------- D-073 similarity-weighted credit (phase 2)
+
+def test_credit_weight_never_returns_zero_because_elfmem_rejects_it():
+    """THE edge case that would have crashed attribution on its first weighted
+    credit. `similarity` is MIN-MAX NORMALISED within each result set, so the
+    worst-matching block of every recall carries exactly 0.0 - and elfmem's
+    `_validate_weight` raises ValueError on weight <= 0. Measured live: the
+    SPY mind model came back at similarity 0.0 on both a SPY and an NVDA
+    query."""
+    from trdrbot.positions import CREDIT_WEIGHT_FLOOR, credit_weight
+
+    assert credit_weight(0.0) == CREDIT_WEIGHT_FLOOR > 0.0
+    assert all(credit_weight(s) > 0.0 for s in (0.0, -1.0, 0.5, 1.0, 2.0))
+
+
+def test_credit_weight_maps_similarity_monotonically_and_clamps():
+    from trdrbot.positions import credit_weight
+
+    assert credit_weight(1.0) == 1.0
+    assert credit_weight(0.0) < credit_weight(0.5) < credit_weight(1.0)
+    assert credit_weight(2.0) == 1.0, "out-of-range similarity must clamp, not extrapolate"
+    assert credit_weight(-1.0) == credit_weight(0.0)
+
+
+def test_credit_weight_defaults_to_full_when_no_similarity_was_recorded():
+    """A pre-v2 position credits exactly as it did when it was written -
+    never silently re-weighted by a rule that did not exist then. Unreadable
+    input must not silently zero a block's credit either."""
+    from trdrbot.positions import credit_weight
+
+    assert credit_weight(None) == 1.0
+    assert credit_weight("not a number") == 1.0
+
+
+def test_old_list_shaped_positions_still_credit_at_full_weight():
+    """Backward compatibility, on the real stored shape."""
+    from trdrbot.positions import Position
+
+    p = Position(position_id="p", underlying="NVDA", strategy="s",
+                 elfmem_blocks={"attention": ["a", "b"], "self": ["c"]})
+    assert p.credit_weights() == {"a": 1.0, "b": 1.0}
+    assert p.all_elfmem_block_ids == ["a", "b"], "id readers must be shape-agnostic"
+
+
+def test_weighted_position_credits_by_similarity_and_still_excludes_self():
+    """The dilution fix: on an NVDA trade the SPY mind model (similarity 0.0)
+    must earn a fraction of what the NVDA-relevant block earns, not the same."""
+    from trdrbot.positions import Position
+
+    p = Position(position_id="p", underlying="NVDA", strategy="s",
+                 elfmem_blocks={"attention": {"nvda_fact": 1.0, "spy_mind": 0.0},
+                                "self": {"principle": 0.9}})
+    w = p.credit_weights()
+    assert w["nvda_fact"] == 1.0
+    assert w["spy_mind"] == 0.25
+    assert "principle" not in w, "SELF is never credited (D-033/D-041)"
+    assert sorted(p.recalled_block_ids()) == ["nvda_fact", "principle", "spy_mind"]
+
+
+def test_add_recalled_block_preserves_whichever_shape_is_in_use():
+    from trdrbot.positions import Position
+
+    old = Position(position_id="p", underlying="X", strategy="s",
+                   elfmem_blocks={"attention": ["a"]})
+    old.add_recalled_block("attention", "b")
+    assert old.elfmem_blocks["attention"] == ["a", "b"]
+
+    new = Position(position_id="p", underlying="X", strategy="s",
+                   elfmem_blocks={"attention": {"a": 0.5}})
+    new.add_recalled_block("attention", "b", similarity=1.0)
+    assert new.elfmem_blocks["attention"] == {"a": 0.5, "b": 1.0}
+
+    fresh = Position(position_id="p", underlying="X", strategy="s")
+    fresh.add_recalled_block("attention", "a")
+    assert fresh.credit_weights() == {"a": 1.0}
+
+
+def test_weighted_position_round_trips_through_yaml(tmp_path):
+    """Position files are YAML frontmatter; a float-valued dict must survive."""
+    from trdrbot.positions import Position, PositionStore
+
+    store = PositionStore(tmp_path)
+    store.save(Position(position_id="pos_x", underlying="NVDA", strategy="s",
+                        elfmem_blocks={"attention": {"aaa": 1.0, "bbb": 0.0}}))
+    back = store.load("pos_x")
+    assert back.credit_weights() == {"aaa": 1.0, "bbb": 0.25}
+
+
+def test_attribution_groups_credit_by_weight():
+    """Blocks sharing a weight go in one call - a 3-block position costs one
+    or two calls, not three, and the grouping is deterministic so the path can
+    be replayed from the journal."""
+    import inspect
+    from trdrbot import attribution
+
+    src = inspect.getsource(attribution.run)
+    assert "credit_weights()" in src, "credit must be weighted, not uniform"
+    assert "sorted(groups.items())" in src, "grouping must be deterministic"

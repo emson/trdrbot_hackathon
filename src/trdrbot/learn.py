@@ -28,7 +28,9 @@ async def on_fill(pos: Position, store: PositionStore, mem: ElfmemAdapter, journ
     reconciliation independently verified this, which is a real trust
     upgrade over the original unverified write."""
     block_id = await mem.remember_thesis(pos)
-    pos.elfmem_blocks.setdefault("attention", []).append(block_id)
+    # The thesis block IS the decision's subject matter, so it carries full
+    # credit weight regardless of what retrieval scored (D-073).
+    pos.add_recalled_block("attention", block_id, similarity=1.0)
     pos.mind_decision_block_id = await mem.predict(pos)
     pos.mark_verified(by="trdrbot/reconcile")
     store.save(pos)

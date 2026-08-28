@@ -30,6 +30,36 @@ from . import ids
 TERMINAL = {"closed", "expired", "assigned", "abandoned"}
 ACTIVE = {"proposed", "opening", "open", "adjusting", "closing"}
 
+#: Floor on credit weight. Two independent reasons, both measured (D-073):
+#:
+#: 1. elfmem REJECTS `weight <= 0.0` outright (`_validate_weight` raises
+#:    ValueError), and `similarity` is MIN-MAX NORMALISED within each result
+#:    set - so the worst-matching block of every single recall carries exactly
+#:    0.0. Passing similarity through raw would crash attribution on its first
+#:    weighted credit, in the path that has never yet run.
+#: 2. A block that matched least still sat in the context that produced the
+#:    decision. It earns less credit, not none - a floor says "contributed
+#:    little", zero would claim "was not there", and only one of those is true.
+#:
+#: The best-matching block therefore carries 4x the worst. That ratio is the
+#: mechanism; the exact number is not load-bearing.
+CREDIT_WEIGHT_FLOOR = 0.25
+
+
+def credit_weight(similarity: float | None) -> float:
+    """Retrieval similarity -> credit weight in [FLOOR, 1.0].
+
+    `None` means no similarity was recorded (a pre-v2 position), which credits
+    at 1.0 - the behaviour those positions were written under.
+    """
+    if similarity is None:
+        return 1.0
+    try:
+        s = min(1.0, max(0.0, float(similarity)))
+    except (TypeError, ValueError):
+        return 1.0  # an unreadable weight must not silently zero a block's credit
+    return CREDIT_WEIGHT_FLOOR + (1.0 - CREDIT_WEIGHT_FLOOR) * s
+
 
 @dataclass
 class Position:
@@ -51,8 +81,16 @@ class Position:
     generated_by: str = ""
     verified: list[dict[str, Any]] = field(default_factory=list)
     # elfmem bridge (D-011): captured PER FRAME at decide time (INV-22 fix -
-    # never rely on last_recall_block_ids, which reflects only the last call)
-    elfmem_blocks: dict[str, list[str]] = field(default_factory=dict)
+    # never rely on last_recall_block_ids, which reflects only the last call).
+    #
+    # Two shapes, both valid (D-073). Since v2 a frame maps id -> retrieval
+    # similarity, so credit can be weighted by how well each block actually
+    # matched the decision's query. Positions written before that carry a
+    # plain list, which reads as "no weights recorded" and credits at 1.0 -
+    # the old behaviour exactly. Nothing rewrites old files. Every accessor
+    # below iterates the frame, and iterating a dict yields its keys, so the
+    # id-only readers are shape-agnostic for free.
+    elfmem_blocks: dict[str, list[str] | dict[str, float]] = field(default_factory=dict)
     mind_decision_block_id: str | None = None
     # Thesis carried from simulate_experiments, so resolution can attribute
     # the outcome to the view or the structure (experiments.attribute).
@@ -109,6 +147,38 @@ class Position:
         """Every block that informed the decision, including identity. For
         provenance and audit - never for credit assignment."""
         return [b for blocks in self.elfmem_blocks.values() for b in blocks]
+
+    def credit_weights(self) -> dict[str, float]:
+        """Creditable block id -> credit weight, derived from retrieval similarity.
+
+        The weight answers "how much did this block have to do with THIS
+        decision", which is a different question from the signal's "what
+        happened" - collapsing them was the flaw (D-073). Measured live: the
+        SPY mind model came back at similarity 0.0 on BOTH a SPY and an NVDA
+        query while being credited at full weight, so uniform credit was
+        paying full price for a block that matched nothing.
+
+        A pre-v2 position stores a plain list and gets 1.0 throughout, which
+        is exactly what it received before, so old positions attribute
+        identically rather than being silently re-weighted by a rule that did
+        not exist when they were written.
+        """
+        out: dict[str, float] = {}
+        for frame, blocks in self.elfmem_blocks.items():
+            if frame not in self.CREDITED_FRAMES:
+                continue
+            for bid in blocks:
+                sim = blocks.get(bid) if isinstance(blocks, dict) else None
+                out[bid] = credit_weight(sim)
+        return out
+
+    def add_recalled_block(self, frame: str, block_id: str, similarity: float = 1.0) -> None:
+        """Record a block against a frame, preserving whichever shape is in use."""
+        blocks = self.elfmem_blocks.setdefault(frame, {})
+        if isinstance(blocks, dict):
+            blocks[block_id] = similarity
+        elif block_id not in blocks:
+            blocks.append(block_id)
 
     def trust_tier(self) -> str:
         """OKF trust tiers (D-022): unverified / machine-confirmed / human-reviewed."""

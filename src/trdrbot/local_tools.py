@@ -169,7 +169,7 @@ def build_record_position(
     store: PositionStore,
     decision_ref: str,
     *,
-    elfmem_blocks: dict[str, list[str]] | None = None,
+    elfmem_blocks: "dict[str, list[str] | dict[str, float]] | None" = None,
     generated_by: str = "",
     calibration: "CalibrationStore | None" = None,
     sources: list[dict[str, Any]] | None = None,

@@ -229,3 +229,47 @@ async def test_langgraph_agent_records_usage_only_via_constructor_callbacks(cfg,
     await agent.ainvoke({"messages": [("user", "call ping with x=hi")]})
 
     assert led.calls(), "constructor callbacks no longer capture agent LLM calls"
+
+
+@pytest.mark.asyncio
+async def test_outcome_rejects_a_non_positive_weight(cfg, tmp_path):
+    """Phase-2 credit weighting depends on this: elfmem raises on weight <= 0,
+    which is why `credit_weight` has a floor. If elfmem ever starts ACCEPTING
+    0, the floor becomes a choice rather than a hard requirement - still
+    correct, but the reason changes and this test should say so (D-073)."""
+    from trdrbot.elfmem_adapter import ElfmemAdapter
+
+    mem = await ElfmemAdapter.build(tmp_path / "e.db")
+    try:
+        await mem.begin()
+        r = await mem.mem.remember("weight probe", tags=["contract"], category="knowledge",
+                                   source="t", cue="when probing")
+        await mem.mem.consolidate()
+        with pytest.raises(ValueError, match="weight"):
+            await mem.mem.outcome([r.block_id], 0.9, weight=0.0, source="t")
+        await mem.end()
+    finally:
+        await mem.close()
+
+
+@pytest.mark.asyncio
+async def test_frame_similarity_is_min_max_normalised_within_the_result_set(cfg):
+    """The other load-bearing belief: `similarity` is NOT an absolute cosine -
+    it is normalised across each recall, so the worst match is exactly 0.0 and
+    the best exactly 1.0. That is what makes the weight a within-decision
+    RANK signal, and what makes the floor mandatory rather than cosmetic."""
+    from trdrbot.elfmem_adapter import ElfmemAdapter
+
+    mem = await ElfmemAdapter.build(cfg.paths.state / "elfmem.db")
+    try:
+        await mem.begin()
+        fr = await mem.mem.frame("attention", "NVDA options setup")
+        sims = [b.similarity for b in fr.blocks]
+        assert len(sims) >= 2, "need several blocks for this to mean anything"
+        assert min(sims) == pytest.approx(0.0), \
+            f"worst match is no longer 0.0 ({min(sims)}) - similarity semantics changed"
+        assert max(sims) == pytest.approx(1.0), \
+            f"best match is no longer 1.0 ({max(sims)}) - similarity semantics changed"
+        await mem.end()
+    finally:
+        await mem.close()

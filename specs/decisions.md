@@ -2637,3 +2637,53 @@ updated deliberately as their own step, with the arithmetic that disproved them 
 test. Live forced cycle: `model_served: ['claude-opus-5']`, task frame contributing 0 blocks with
 no duplicate text, and a forecast recorded at a 09-01 horizon with the agent noting unprompted
 that it "resolves Sep 1, which is early enough to still inform a decision before the deadline."
+
+## D-073: Credit assignment, phase 2 - weight by how well the block matched
+**Date:** 2026-08-28
+**Status:** accepted
+**Context:** D-072 fixed WHAT credit says (`signal`) and WHERE it goes (the query). This fixes HOW
+MUCH each block gets. Credit was uniform across every creditable block, so on the NVDA position
+the SPY mind model - which retrieval scored at similarity **0.0** against both a SPY and an NVDA
+query - was set to receive exactly as much credit as the one block genuinely about NVDA.
+
+**The weight is `ScoredBlock.similarity`, deliberately NOT `.score`.** `score` is the composite
+and folds in `confidence` and `reinforcement`, so weighting by it would make already-trusted
+blocks accrue trust faster - rich-get-richer, the exact pathology D-059 caught once already.
+`similarity` measures only "how well did this block match the query this decision was made on",
+which is the question a credit weight should answer, and it is computed by elfmem rather than
+asserted by a model.
+
+**The edge case that would have crashed it.** `similarity` is MIN-MAX NORMALISED within each
+result set - the worst match in every recall is exactly 0.0 and the best exactly 1.0 - and
+elfmem's `_validate_weight` raises `ValueError` on `weight <= 0`. Passing similarity through raw
+would therefore have crashed attribution on its first weighted credit, in the path that has still
+never run. Hence `CREDIT_WEIGHT_FLOOR = 0.25` and `credit_weight()` mapping into [0.25, 1.0]. The
+floor has a second, independent justification: a block that matched least was still in the context
+that produced the decision, so it earns LESS credit, not none - a floor says "contributed little",
+zero would claim "was not there", and only one of those is true. Both beliefs are now pinned as
+contract tests, because if elfmem changes either the design breaks silently.
+
+**Because similarity is min-max normalised, the weight is a WITHIN-DECISION RANK, not an absolute
+relevance.** It says this block matched better than that one on this query; it does not say either
+matched well. That is the honest reading and it is enough for the job - the best-matching block
+carries 4x the worst, which is the mechanism. The exact ratio is not load-bearing.
+
+**Backward compatible by construction, not by migration.** `elfmem_blocks` accepts both a plain
+list (pre-v2) and `{id: similarity}`. Iterating a dict yields its keys, so `all_elfmem_block_ids`
+and `recalled_block_ids()` needed no change at all. A list-shaped position credits at 1.0 -
+exactly the behaviour it was written under - rather than being retroactively re-weighted by a rule
+that did not exist when it was created. No file is rewritten. `add_recalled_block()` preserves
+whichever shape it finds, so `learn.py`'s fill-time write works on either.
+
+**Only ATTENTION carries a meaningful weight.** SELF and TASK are framed with `query=None`, so
+elfmem returns 0.0 for every block in them - harmless, since neither is credited, but documented
+in `assemble_context` because it is a trap for anyone who later adds one to `CREDITED_FRAMES` and
+finds every principle pinned at the floor.
+
+**Verified:** 156 default + 11 contract tests. Live: `assemble_context` on an NVDA query returns
+the NVDA fact at similarity 1.000 -> weight 1.000 and the SPY mind model at 0.000 -> weight 0.250,
+a 4x differential where there was none; both stored positions (list-shaped) still credit at 1.0;
+a dict-shaped position round-trips through YAML frontmatter intact. A forced decide cycle wrote
+the weighted shape into the journal for all three frames, and the agent declined four structures
+on negative post-friction EV, noting it could have made them print positive "by feeding the
+simulator 9% vol instead of 11% - that is tuning the input until it agrees with me, not analysis."
