@@ -11,12 +11,21 @@ Per-frame block capture (INV-22, a bug simulation found in the original
 design): `FrameResult.blocks` is read immediately after each `frame()` call.
 `last_recall_block_ids` is never used - it only reflects the most recent call,
 which silently drops the self/task frames' contribution to credit assignment.
+
+**Naming (D-068).** elfmem's SELF preamble used to hardcode "elf" with no
+config knob (filed upstream as issues.md I-7, `docs/self_preamble_naming_report.md`)
+- worked around at our boundary by rewriting the rendered text after the
+fact. `elfmem_index` @ cebc242e fixed it properly: `project.agent_name`
+now threads through `frame()` itself (`api.py`: `host_name = proj.agent_name
+or "elf"`, into `render_blocks()`/`_render_self_template`). We set it once,
+at construction, in `build()` below - the boundary rewrite is retired along
+with the fix it worked around, verified directly against the upgraded
+package rather than trusted from the changelog (see the D-068 verification).
 """
 
 from __future__ import annotations
 
 import json
-import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -25,35 +34,10 @@ from elfmem import MemorySystem
 
 from .positions import Position
 
-#: elfmem's SELF template hardcodes a preamble naming the host "elf"
-#: (`context/rendering.py::_SELF_PREAMBLE`) - a module-level constant with no
-#: config knob or name parameter anywhere in the library (checked directly;
-#: filed upstream as issues.md I-7). Renaming it means either monkey-patching
-#: a third-party module's private state, or rewriting the two exact phrases
-#: at OUR boundary, downstream of frame("self"), where we already post-process
-#: text for other reasons (ATTENTION dedupe). The latter is the smaller, more
-#: reversible surface, and it fails SAFE: if upstream ever changes the wording,
-#: neither phrase matches, the text passes through unchanged, and the mismatch
-#: is printed rather than silently reintroducing "elf" - the same null-path
-#: discipline as everything else in this project (D-038).
-_SELF_NAME_FROM, _SELF_NAME_TO = "elf", "Theo"
-
-
-#: Word-boundaried, not a plain substring replace - "You are elf" as a plain
-#: substring also matches inside "You are elfbot9000", which a naive
-#: .replace() would silently mangle into "You are Theobot9000" instead of
-#: leaving alone (caught by this module's own regression test). \b anchors
-#: each phrase to whole words only.
-_SELF_PATTERN = re.compile(rf"\b(You are|answer as) {_SELF_NAME_FROM}\b")
-
-
-def _rename_self_preamble(text: str) -> str:
-    heading = text.split("\n", 1)[0]  # "## You are elf"
-    fixed, n = _SELF_PATTERN.subn(rf"\1 {_SELF_NAME_TO}", text)
-    if n == 0 and "You are" in heading:
-        print(f"[elfmem_adapter] SELF preamble rename did not match ({heading!r}) - "
-              f"upstream wording may have changed (see issues.md I-7)")
-    return fixed
+#: This project's name for itself (`llm.SYSTEM_PROMPT`: "You are Theo").
+#: Passed as `project.agent_name` so elfmem's own SELF preamble says it too -
+#: a DEFAULT, not an override (see `build()`'s setdefault).
+_DEFAULT_AGENT_NAME = "Theo"
 
 #: How many learned blocks ATTENTION contributes to a decide cycle.
 ATTENTION_KEEP = 5
@@ -74,7 +58,12 @@ class ElfmemAdapter:
     async def build(
         cls, db_path: Path, config: dict[str, Any] | None = None, *, minds_path: Path | None = None
     ) -> "ElfmemAdapter":
-        mem = await MemorySystem.from_config(str(db_path), config)
+        # setdefault, not overwrite: a caller passing its own project.agent_name
+        # keeps the final say. Every trdrbot call site passes config=None today,
+        # so this is where _DEFAULT_AGENT_NAME actually reaches elfmem in practice.
+        cfg = dict(config or {})
+        cfg.setdefault("project", {}).setdefault("agent_name", _DEFAULT_AGENT_NAME)
+        mem = await MemorySystem.from_config(str(db_path), cfg)
         return cls(mem, minds_path=minds_path or db_path.parent / "minds.json")
 
     async def close(self) -> None:
@@ -93,24 +82,19 @@ class ElfmemAdapter:
     # -- context assembly --
 
     async def self_frame(self, top_k: int | None = None):
-        """The SELF frame as THIS system renders it - name applied.
+        """The SELF frame, sized for the whole constitution.
 
-        Every caller must come through here rather than `mem.frame("self")`.
-        The rename originally lived inside `assemble_context` only, so the
-        decide path said "You are Theo" while `constitution verify` and any
-        future caller still said "You are elf" - a fix that was correct where
-        it was applied and absent everywhere else. A contract test caught it
-        by asserting on the system's own output rather than one code path
-        (D-063).
+        Single entry point (rather than every caller invoking `mem.frame
+        ("self")` directly) so the top_k default below - not elfmem's own
+        default of 5, which silently renders half our ten principles (D-041)
+        - is applied everywhere, not just wherever someone remembered to set
+        it. Used to also carry the "elf"->"Theo" boundary rename; that patch
+        is retired now that `build()` sets `project.agent_name` and elfmem
+        itself renders the right name (D-068).
         """
         from .constitution import PRINCIPLES
 
-        fr = await self.mem.frame("self", None, top_k=top_k or len(PRINCIPLES) + 4)
-        try:
-            object.__setattr__(fr, "text", _rename_self_preamble(fr.text or ""))
-        except Exception:  # noqa: BLE001 - frozen result: fall back to a copy
-            pass
-        return fr
+        return await self.mem.frame("self", None, top_k=top_k or len(PRINCIPLES) + 4)
 
     async def assemble_context(self, query: str) -> ContextResult:
         """self + task + attention frames, captured per-frame (INV-22)."""

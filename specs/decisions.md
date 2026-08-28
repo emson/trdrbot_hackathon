@@ -2406,3 +2406,43 @@ regression tests (URL survives total outage; URL never model-sourced; closed-voc
 degrade to empty on garbage input rather than passing through; a claim_type with no key_number is
 dropped as meaningless; confidence clamps to [0,1] or None). 130 default tests pass. Test articles
 purged from the real `data/state/news_extracts.json` after both live verification passes.
+
+## D-069: Retire the SELF-preamble boundary rename - elfmem fixed it upstream (redone)
+**Date:** 2026-08-28
+**Status:** accepted
+**Context:** A separate session working directly on the elfmem library accidentally wrote to
+*this* repository while landing the upstream fix - an uncommitted D-067 draft (elfmem_adapter.py,
+uv.lock, decisions.md, specs/issues.md, test_contracts.py) sitting in the working tree, discovered
+mid-task and left untouched (this project's own D-068 was numbered around it to avoid collision).
+The user has since confirmed that session backed its own accidental writes out and instead landed
+the real fix on the `elfmem_index` branch. This entry supersedes the numbering gap left at D-067
+and redoes the integration from scratch against the actual shipped fix, not the reverted draft's
+description of it - `uv lock --upgrade-package elfmem` (`d86e6d62` -> `cebc242e`), then read the
+installed package directly: `api.py` line ~1907, `host_name = proj.agent_name if proj and
+proj.agent_name else "elf"`, threaded into `render_blocks()`/`_render_self_template()` - confirms
+`project.agent_name` now reaches the SELF preamble, closing the exact 4-hop gap
+`docs/self_preamble_naming_report.md` traced (and which elfmem's own `config.py` now cites by
+name, crediting that report).
+**Choice: set `project.agent_name` once, at `ElfmemAdapter.build()`, delete the boundary patch.**
+`cfg.setdefault("project", {}).setdefault("agent_name", _DEFAULT_AGENT_NAME)` before
+`MemorySystem.from_config()` - setdefault, not overwrite, so a future caller passing its own
+config keeps the final say. `_rename_self_preamble`, `_SELF_PATTERN` and the `_SELF_NAME_FROM/TO`
+constants are deleted; `self_frame()` keeps existing (it still owns the top_k default that renders
+the WHOLE constitution, D-041) but no longer post-processes the text - elfmem renders the right
+name itself now.
+**Not run: elfmem's own `elfmem migrate apply`.** `elfmem migrate status` reports two pending
+steps, but both target the shared `~/.elfmem/` global config/db used across this user's other
+projects (`movemyth`, etc.), not trdrbot's own store - trdrbot never uses elfmem's CLI-managed
+project scaffolding, it calls `MemorySystem.from_config(db_path, config_dict)` directly with an
+inline dict. Running the CLI migration would touch state outside this project's scope for no
+benefit here; the actual migration this project needed was the code change above.
+**Verified live, not just re-pointed:** `test_self_frame_still_says_you_are_and_renders_the_constitution`
+(real `MemorySystem`, real `data/state/elfmem.db`, no mocks) passes with zero rename code running -
+confirms `mem.self_frame()` itself now reads "You are Theo", not that a patch still papers over an
+unfixed upstream. Two tests already sitting in `test_regressions.py` from the reverted draft
+(`test_build_sets_agent_name_by_default`, `test_build_does_not_clobber_an_explicit_agent_name`)
+had been swept into this project's own D-068 commit by an imprecise `git add` - caught here,
+reconciled by renaming this implementation's constant to match what they already asserted
+(`_DEFAULT_AGENT_NAME`) rather than rewriting tests that test the right thing. specs/issues.md I-7
+updated from "fixed at our boundary" to "fixed upstream".
+**Verified:** 9 contract tests pass (real elfmem, real Alpaca, real LLM calls) + 130 default tests.

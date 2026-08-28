@@ -26,11 +26,11 @@ Sorted by severity.
 - **I-5 · `history()` in elfmem raises TypeError** (upstream; found D-059 investigation:
   `'<' not supported between str and int`). Blocks per-block audit trails. Reported upstream? NO -
   add to next elfmem report.
-- ~~**I-7 · elfmem's SELF template header hardcodes "You are elf"**~~ **FIXED (D-061)** -
-  patched at our boundary (`elfmem_adapter._rename_self_preamble`), word-boundaried so a
-  future lookalike name is never mangled, fails safe (passthrough + printed warning) if
-  upstream ever changes the wording. Still worth reporting upstream as a genuine gap (no
-  config knob exists for the SELF preamble's host name), but no longer blocking us.
+- ~~**I-7 · elfmem's SELF template header hardcodes "You are elf"**~~ **FIXED UPSTREAM (D-068)** -
+  D-061 patched it at our boundary; `elfmem_index` @ cebc242e fixed the actual gap
+  (`project.agent_name` now threads through `frame()` itself), verified directly against the
+  installed package. Boundary patch retired, `build()` now sets `project.agent_name` at
+  construction instead of rewriting the rendered text after the fact.
 - **I-6 · Weekend/holiday calendar is weekday-based only** (D-051 vol clock, D-060 research
   gate). US market holidays (Labor Day 2026-09-07 is INSIDE the competition window... after
   deadline, irrelevant this run, real for continued operation) count as full trading days.
