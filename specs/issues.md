@@ -7,6 +7,19 @@ Sorted by severity.
 
 ## Open
 
+- **I-23 · GLM-5.2/OpenCode Zen tool-calling is unverified** (D-083). Wired as the primary model
+  across every role, config resolves and falls back correctly, `doctor` reports it honestly (DEAD,
+  no ZEN_API_KEY) - but nobody has confirmed GLM-5.2 reliably drives a LangGraph
+  create_react_agent tool call through Zen's endpoint. A model that mishandles tool schemas would
+  make `decide` look healthy while never calling `simulate_experiments`. A real contract test
+  exists and skips cleanly with no key. **Action due:** add `ZEN_API_KEY`, run
+  `uv run pytest -m contract -k glm`; if it fails, move GLM-5.2 behind Claude/GPT-5 in the chain
+  rather than leaving an unverified model primary.
+- **I-24 · GLM-5.2 pricing is third-party-sourced** (D-083). $1.40/$4.40 per M tokens came from a
+  pricing-calculator site and a model-routing aggregator, not Zen's own pricing page directly (it
+  states "zero markups" but did not itself list a rate when checked). Cheap to be wrong about now
+  (paper account); re-verify against the first real invoice before this matters for live spend.
+
 - **I-1 · NVDA thesis block carries `self/goal`/`self/style` tags** (found D-059).
   Deliberately deferred: content is live until the 2026-09-03 horizon, never suffered score
   pollution, and the SELF frame currently drops nothing - zero present cost. **Action due:**

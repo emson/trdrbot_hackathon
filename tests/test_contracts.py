@@ -356,3 +356,45 @@ async def test_one_mcp_session_serves_many_tool_calls(cfg):
         for _ in range(3):
             clock = await mcp_client.call(tools, "get_clock")
             assert isinstance(clock, dict) and "is_open" in clock
+
+
+@pytest.mark.asyncio
+async def test_glm_5_2_via_opencode_zen_actually_calls_a_bound_tool(cfg):
+    """The one belief this whole migration rests on, and the one thing no
+    amount of reading Zen's or Zhipu's docs can establish: does GLM-5.2,
+    served over Zen's OpenAI-compatible endpoint, drive a LangGraph
+    create_react_agent tool call reliably? Every role in this system - decide
+    above all - is built on `bind_tools`/`create_react_agent`, and a model
+    that answers fine in plain chat but silently ignores or mishandles tool
+    schemas would make `decide` look healthy while never calling
+    simulate_experiments or record_position. Skips (not fails) with no
+    ZEN_API_KEY set, exactly like the project's own doctor probe."""
+    import os
+
+    if not os.environ.get("ZEN_API_KEY"):
+        pytest.skip("ZEN_API_KEY not set - see .env.example")
+
+    from langchain.chat_models import init_chat_model
+    from langchain_core.tools import tool
+    from langgraph.prebuilt import create_react_agent
+
+    @tool
+    def get_ticker_price(ticker: str) -> str:
+        """Return the current price for a ticker symbol."""
+        return f"{ticker.upper()} is trading at $123.45"
+
+    real_spec, conn_kwargs = cfg.resolve_model_spec("opencode_zen:glm-5.2")
+    m = init_chat_model(real_spec, max_tokens=500, max_retries=1, **conn_kwargs)
+    agent = create_react_agent(
+        m, [get_ticker_price],
+        prompt="Use the tool to answer. Always call get_ticker_price before answering.")
+    result = await agent.ainvoke(
+        {"messages": [("user", "What is SPY trading at right now?")]})
+
+    calls = [tc for msg in result["messages"]
+             for tc in (getattr(msg, "tool_calls", None) or [])]
+    assert calls, "GLM-5.2 answered without calling the bound tool - decide would too"
+    assert calls[0]["name"] == "get_ticker_price"
+    assert str(calls[0]["args"].get("ticker", "")).upper() == "SPY"
+    final = str(result["messages"][-1].content)
+    assert "123.45" in final, "the tool RESULT must reach the final answer, not just the call"

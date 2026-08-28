@@ -3341,3 +3341,78 @@ base).
 
 **Verified:** 215 default tests (1 new). Live: `exit_rules  ran 1x, nothing breached - armed, not
 stalled`.
+
+## D-083: OpenCode Zen / GLM-5.2 - a config-level provider, not a code branch
+**Date:** 2026-08-28
+**Status:** accepted
+**Context:** A request to migrate the model chain to GLM-5.2 via OpenCode Zen. Neither the
+provider nor the model existed in training data with confidence, and this system's whole
+architecture depends on reliable tool-calling - so this needed real research before any config
+edit, not a guess dressed as a decision.
+
+**What research established, from primary sources (opencode.ai's own docs, verified against a
+live curl example) rather than search-summary boxes:** Zen serves GLM-5.2 over a standard
+OpenAI-compatible `/v1/chat/completions` endpoint at `https://opencode.ai/zen/v1`, auth via
+`Authorization: Bearer <key>`, key obtained at opencode.ai/auth. GLM-5.2 is documented as
+"agent-oriented" with function-calling support. **Pricing (~$1.40/$4.40 per M input/output) is
+sourced from third-party trackers, not Zen's own pricing page directly** - flagged in both
+config.yaml and this record rather than trusted silently, per this project's own convention that
+pricing is operator-supplied and goes stale.
+
+**A central-provider question first: does `init_chat_model` support this out of the box?**
+Inspected the installed package directly rather than trust docs. `provider="openai"` resolves to
+a bare `ChatOpenAI(**kwargs)` call (`_BUILTIN_PROVIDERS["openai"] = (..., "ChatOpenAI", _call)`),
+so `base_url`/`api_key` kwargs pass straight through - confirming D-008's "a package plus a line
+of config" promise holds for THIS layer. It does not fully hold at the next layer up: this
+project's config (`model_chain`) hands every model in a role's chain the SAME global kwargs, and
+Zen needs a DIFFERENT `base_url` and a DIFFERENT key than the `openai:gpt-5` entry already sharing
+that chain, using the identical `openai:` prefix. Threading `base_url` globally would silently
+redirect the real OpenAI fallback to Zen too.
+
+**Choice: `llm.providers`, a config-level indirection resolved by one function, `Config.
+resolve_model_spec`.** A spec prefixed with a declared provider name (`"opencode_zen:glm-5.2"`)
+resolves to the real `init_chat_model` spec (`"openai:glm-5.2"`) plus per-spec connection kwargs;
+any other spec passes through unchanged - verified directly: `resolve_model_spec("openai:gpt-5")
+== ("openai:gpt-5", {})`. **Both call sites that build a model from a spec string share this one
+resolver** - `llm.build_model()` and `cli.py`'s independent `doctor` probe loop, which calls
+`init_chat_model` directly and would otherwise raise "unsupported provider" on the new spec the
+moment it landed. A second, undiscovered call site silently disagreeing with the first is exactly
+the class of bug this project keeps finding (the SELF-preamble rename living in one caller, D-063;
+attribution bypassing the consolidate-retry fix, D-072) - so this is a one-function fix on
+purpose, not a helper duplicated per caller.
+
+**A missing key fails LOUD, at resolution time, naming the fix - and the chain survives it.**
+Verified live: with no `ZEN_API_KEY` set, `resolve_model_spec` raises `RuntimeError` naming the
+env var; `build_model()` catches it in the same skip-and-continue path every other unbuildable
+model already goes through, so `decide` builds successfully off Claude/GPT-5 with GLM-5.2 simply
+absent from the chain. **A config edit adding a new primary must never be able to take the agent
+offline by itself**, and the existing fallback machinery (verified in D-008 against a real
+Anthropic 400) covers a gateway outage or absent key with zero new code.
+
+**Placed as the new PRIMARY across every role, existing models kept as fallback, not removed** -
+the literal reading of "migrate," made safe by the fact that nothing is lost if it never answers.
+`doctor`'s existing "probe every configured model" loop picks up GLM-5.2 automatically once it is
+in the chain, so `uv run trdrbot doctor` is now the operator's verification step once a real key
+is added - live-run right now, honestly: `DEAD opencode_zen:glm-5.2  RuntimeError: ... needs
+ZEN_API_KEY set`, `4/5 configured models reachable`, and `decide` still builds. That is the
+correct state for code that is wired but not yet keyed - not a failure.
+
+**What documentation cannot establish, and was not asserted as fact: whether GLM-5.2 reliably
+drives a LangGraph `create_react_agent` tool call through Zen's endpoint.** Every role in this
+system needs `bind_tools`, and a model that answers plain chat fine while mishandling tool schemas
+would make `decide` look healthy while never calling `simulate_experiments` or `record_position` -
+silently, exactly the failure class this project's contract-test file exists to catch externally.
+A real contract test was written - real network, a bound tool, asserting the tool call actually
+fires AND that the tool's result reaches the final answer - and it SKIPS (not fails, not asserts
+success) with no key present, the same discipline `doctor`'s own probe uses. It has not been run
+against a real key and its result is not claimed here.
+
+**Verified:** 221 default tests (6 new) + a 15th contract test collected and confirmed to skip
+cleanly without a key. Live `doctor` run: config loads, Alpaca connects, GLM-5.2 correctly reports
+DEAD and named, the surviving 4/5-model chain answers. `.env.example` and README updated with the
+reusable pattern - config-level gateway providers, not a one-off branch - for the next one.
+
+**Action due, before this serves live decisions unattended:** add `ZEN_API_KEY` to `.env`, run
+`uv run trdrbot doctor` to confirm GLM-5.2 answers, then `uv run pytest -m contract -k glm` to
+confirm tool-calling specifically - that result determines whether GLM-5.2 stays primary or moves
+behind Claude/GPT-5 in the chain.

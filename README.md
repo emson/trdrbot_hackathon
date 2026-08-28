@@ -58,33 +58,70 @@ one is a line of config plus (usually) one package — no code changes.
 llm:
   # ORDERED FALLBACK CHAIN — first model that answers wins.
   models:
+    - "opencode_zen:glm-5.2"
     - "anthropic:claude-opus-5"
     - "openai:gpt-5"
   max_tokens: 8000
 
   # Optional per-role chains. A role not listed here uses `models` above.
   roles:
-    decide:    ["anthropic:claude-opus-5", "openai:gpt-5"]
-    research:  ["openai:gpt-5-mini", "anthropic:claude-opus-5"]
-    discovery: ["openai:gpt-5-mini", "anthropic:claude-opus-5"]
-    muse:      ["openai:gpt-5-mini", "anthropic:claude-opus-5"]
+    decide:    ["opencode_zen:glm-5.2", "anthropic:claude-opus-5", "openai:gpt-5"]
+    research:  ["opencode_zen:glm-5.2", "openai:gpt-5-mini", "anthropic:claude-opus-5"]
+    discovery: ["opencode_zen:glm-5.2", "openai:gpt-5-mini", "anthropic:claude-opus-5"]
+    muse:      ["opencode_zen:glm-5.2", "openai:gpt-5-mini", "anthropic:claude-opus-5"]
     doctor:    ["openai:gpt-4o-mini"]
 
   # USD per MILLION tokens. Operator-supplied — verify against current published
   # rates; these are not fetched and will go stale. A model missing here is
   # reported as UNPRICED, never counted as free.
   pricing:
+    "opencode_zen:glm-5.2":   {input: 1.40, output: 4.40}
     "anthropic:claude-opus-5": {input: 15.0, output: 75.0}
     "openai:gpt-5":            {input: 1.25, output: 10.0}
 ```
 
-Adding a provider:
+Adding a provider LangChain has a builtin for:
 
 ```bash
 uv add langchain-google-genai          # 1. the package
 export GOOGLE_API_KEY=...              # 2. the key, in .env
 # 3. add "google_genai:gemini-2.5-pro" to llm.models — done
 ```
+
+**Adding an OpenAI-compatible gateway** (a third-party router that serves several models
+behind one endpoint — OpenCode Zen, OpenRouter, a company's internal proxy) is a different
+case: `init_chat_model`'s provider table is fixed, and every model behind one real prefix
+(`openai:`) shares one endpoint and one key by construction. A second OpenAI-compatible
+service can't just reuse that prefix without hijacking the real `openai:gpt-5` entries in the
+same chain. So it gets a config-level provider instead — `llm.providers.<name>` names which
+builtin actually serves the traffic and supplies a per-spec `base_url`/`api_key_env`; a spec
+like `"opencode_zen:glm-5.2"` resolves to `openai:glm-5.2` plus Zen's own connection, and
+every other spec is untouched:
+
+```yaml
+llm:
+  providers:
+    opencode_zen:
+      langchain_provider: "openai"
+      base_url: "https://opencode.ai/zen/v1"
+      api_key_env: "ZEN_API_KEY"
+```
+
+```bash
+export ZEN_API_KEY=...                       # 1. the key, in .env — get one at opencode.ai/auth
+# 2. add "opencode_zen:<model-id>" anywhere a spec goes — done, no new package
+```
+
+`uv run trdrbot doctor` probes it exactly like a builtin provider (both share one resolver —
+`Config.resolve_model_spec` — so they cannot silently disagree about what a spec means), and a
+missing key skips that one entry with a logged reason rather than taking the chain down: the
+fallback machinery this section already describes covers a gateway outage the same as a
+builtin-provider one. **Tool-calling reliability through a new gateway is a belief, not a
+given** — `bind_tools`/`create_react_agent` is what every role here actually needs, and a
+model that answers plain chat fine but mishandles tool schemas would make `decide` look
+healthy while never calling `simulate_experiments`. Verify it with a real contract test
+before trusting it unattended (`uv run pytest -m contract -k <gateway>`), the same discipline
+this project already applies to every other external belief (see Testing, below).
 
 The fallback is verified against the real failure, not a guess: an exhausted Anthropic key
 raises `AnthropicInvalidRequestError` — a **400**, not a rate-limit or auth class — and a

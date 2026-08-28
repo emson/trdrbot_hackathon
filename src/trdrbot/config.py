@@ -105,6 +105,49 @@ class Config:
             chain = [llm["model"]]
         return [str(m) for m in chain if m]
 
+    def resolve_model_spec(self, spec: str) -> tuple[str, dict[str, Any]]:
+        """A configured `"prefix:model"` -> the spec `init_chat_model` accepts,
+        plus any connection kwargs (`base_url`, `api_key`) to pass alongside it.
+
+        `init_chat_model`'s provider table (`_BUILTIN_PROVIDERS`) is a fixed
+        set baked into langchain-core - `"openai"`, `"anthropic"`, etc. - and
+        every model behind one prefix shares one endpoint and one API key by
+        construction. That breaks the moment a SECOND OpenAI-COMPATIBLE
+        service needs to sit in the same chain as real OpenAI: OpenCode Zen
+        serves GLM-5.2 over the identical `/v1/chat/completions` contract
+        `ChatOpenAI` already speaks, but at its own base_url and its own key,
+        and `openai:gpt-5` in the same `llm.models` list must keep hitting
+        OpenAI's real endpoint unchanged.
+
+        `llm.providers.<name>` names the langchain provider that actually
+        SERVES the traffic (`openai` for any OpenAI-compatible gateway) plus
+        `base_url` and `api_key_env`. A spec prefixed with a declared provider
+        name - `"opencode_zen:glm-5.2"` - resolves to `("openai:glm-5.2",
+        {"base_url": ..., "api_key": <env value>})`; every other spec passes
+        through untouched, so `"anthropic:claude-opus-5"` and `"openai:gpt-5"`
+        are unaffected. This is the ONE place that resolution happens - both
+        `build_model()` and `doctor`'s independent probe loop call it, so they
+        cannot silently diverge on what a spec means.
+        """
+        prefix, _, model = spec.partition(":")
+        providers = (self.raw.get("llm") or {}).get("providers") or {}
+        entry = providers.get(prefix)
+        if not entry:
+            return spec, {}
+        real_provider = entry.get("langchain_provider", "openai")
+        kwargs: dict[str, Any] = {}
+        if entry.get("base_url"):
+            kwargs["base_url"] = entry["base_url"]
+        key_env = entry.get("api_key_env")
+        if key_env:
+            key = os.environ.get(key_env)
+            if not key:
+                raise RuntimeError(
+                    f"{spec}: provider {prefix!r} needs {key_env} set (see .env.example)."
+                )
+            kwargs["api_key"] = key
+        return f"{real_provider}:{model}", kwargs
+
     @property
     def pricing(self) -> dict:
         """{model: {input, output}} in USD per MILLION tokens. Operator-supplied."""

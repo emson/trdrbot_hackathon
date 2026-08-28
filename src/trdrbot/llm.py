@@ -54,6 +54,11 @@ def build_model(config: Config, role: str = "decide"):
     built, skipped = [], []
     for spec in specs:
         try:
+            # Resolve a config-level provider (an OpenAI-compatible gateway
+            # like OpenCode Zen) to what init_chat_model actually accepts,
+            # plus its own base_url/api_key - see resolve_model_spec. A spec
+            # with no such override passes through unchanged.
+            real_spec, conn_kwargs = config.resolve_model_spec(spec)
             # Callbacks are attached at CONSTRUCTION, deliberately, not via
             # `.with_config(callbacks=...)`. Measured through a real LangGraph
             # agent: with_config recorded ZERO of an agent's LLM calls while
@@ -62,8 +67,8 @@ def build_model(config: Config, role: str = "decide"):
             # in the system (the decide cycle), reporting a comfortable near-
             # zero spend while the actual bill accrued unseen (D-062).
             built.append(init_chat_model(
-                spec, max_tokens=config.max_tokens, max_retries=LLM_MAX_RETRIES,
-                callbacks=[callback]))
+                real_spec, max_tokens=config.max_tokens, max_retries=LLM_MAX_RETRIES,
+                callbacks=[callback], **conn_kwargs))
         except Exception as exc:  # noqa: BLE001
             skipped.append((spec, f"{type(exc).__name__}: {exc}"[:120]))
     if skipped:

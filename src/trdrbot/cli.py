@@ -69,7 +69,8 @@ async def _doctor() -> int:
                     continue
                 seen.add(spec)
                 try:
-                    m = init_chat_model(spec, max_tokens=16, max_retries=0)
+                    real_spec, conn_kwargs = cfg.resolve_model_spec(spec)
+                    m = init_chat_model(real_spec, max_tokens=16, max_retries=0, **conn_kwargs)
                     r = await m.ainvoke("Say: ok")
                     served = (r.response_metadata or {}).get("model_name", "?")
                     print(f"  OK   {spec:<34} -> {served}")

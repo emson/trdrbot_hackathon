@@ -3323,3 +3323,86 @@ def test_health_can_tell_an_armed_exit_engine_from_a_missing_one(tmp_path):
     p.write_text("\n".join(_json.dumps(r) for r in rows) + "\n")
     found = {n: (l, d) for l, n, d in health.check(p, [])}
     assert found["exit_rules"][0] == health.OK and "produced 1" in found["exit_rules"][1]
+
+
+# =================================== D-083 OpenCode Zen / GLM-5.2 migration
+
+
+def test_resolve_model_spec_passes_through_unregistered_providers():
+    """Every existing spec must be byte-for-byte unaffected by adding Zen -
+    that is the whole point of resolving PER SPEC rather than threading
+    base_url/api_key globally into build_model's shared kwargs."""
+    from trdrbot import config as cm
+
+    cfg = cm.load(quiet=True)
+    for spec in ("anthropic:claude-opus-5", "openai:gpt-5", "openai:gpt-5-mini",
+                "openai:gpt-4o-mini"):
+        assert cfg.resolve_model_spec(spec) == (spec, {})
+
+
+def test_resolve_model_spec_resolves_a_gateway_provider(monkeypatch):
+    """opencode_zen: is not a real init_chat_model provider - it must resolve
+    to the langchain provider that actually serves it (openai), carrying its
+    OWN base_url and key so the real openai:gpt-5 entry in the same chain is
+    untouched."""
+    from trdrbot import config as cm
+
+    cfg = cm.load(quiet=True)
+    monkeypatch.setenv("ZEN_API_KEY", "sk-test-123")
+    spec, kwargs = cfg.resolve_model_spec("opencode_zen:glm-5.2")
+    assert spec == "openai:glm-5.2"
+    assert kwargs == {"base_url": "https://opencode.ai/zen/v1", "api_key": "sk-test-123"}
+
+
+def test_resolve_model_spec_fails_loudly_without_the_key(monkeypatch):
+    """A missing gateway key must raise with the fix named, not silently
+    fall through to hitting the real openai.com with the wrong model id."""
+    import pytest
+    from trdrbot import config as cm
+
+    cfg = cm.load(quiet=True)
+    monkeypatch.delenv("ZEN_API_KEY", raising=False)
+    with pytest.raises(RuntimeError, match="ZEN_API_KEY"):
+        cfg.resolve_model_spec("opencode_zen:glm-5.2")
+
+
+def test_build_model_skips_zen_without_a_key_and_keeps_the_fallback_chain(monkeypatch):
+    """The whole point of adding Zen as index 0 rather than replacing the
+    chain: with no ZEN_API_KEY set (the state right after this migration
+    lands, before an operator adds the key), decide must still work off
+    Claude/GPT-5 - a config edit must never be able to take the agent
+    offline by itself."""
+    from trdrbot import config as cm
+    from trdrbot.llm import build_model
+
+    cfg = cm.load(quiet=True)
+    monkeypatch.delenv("ZEN_API_KEY", raising=False)
+    m = build_model(cfg, role="decide")
+    assert m is not None  # built from the surviving chain, not raised
+
+
+def test_doctor_and_build_model_share_one_resolver():
+    """doctor's probe loop calls init_chat_model directly, bypassing
+    build_model - so it must resolve specs through the SAME function or the
+    two can silently disagree about what a spec means (doctor reports a
+    gateway model reachable while the real decide path can't build it, or the
+    reverse)."""
+    import inspect
+    from trdrbot import cli
+
+    src = inspect.getsource(cli._doctor)
+    assert "resolve_model_spec" in src
+
+
+def test_pricing_matches_a_bare_served_model_name():
+    """The usage ledger records response_metadata.model_name, which for a
+    gateway is whatever the UNDERLYING model reports - likely the bare
+    "glm-5.2", not the configured "opencode_zen:glm-5.2". price()'s existing
+    suffix match handles the configured key; a bare key is pinned too so a
+    served name that doesn't happen to suffix-match still prices correctly."""
+    from trdrbot import config as cm
+    from trdrbot.usage import price
+
+    cfg = cm.load(quiet=True)
+    assert price(cfg.pricing, "glm-5.2", 1_000_000, 1_000_000) == pytest.approx(5.80)
+    assert price(cfg.pricing, "opencode_zen:glm-5.2", 1_000_000, 0) is not None
