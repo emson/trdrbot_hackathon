@@ -92,6 +92,26 @@ class ElfmemAdapter:
 
     # -- context assembly --
 
+    async def self_frame(self, top_k: int | None = None):
+        """The SELF frame as THIS system renders it - name applied.
+
+        Every caller must come through here rather than `mem.frame("self")`.
+        The rename originally lived inside `assemble_context` only, so the
+        decide path said "You are Theo" while `constitution verify` and any
+        future caller still said "You are elf" - a fix that was correct where
+        it was applied and absent everywhere else. A contract test caught it
+        by asserting on the system's own output rather than one code path
+        (D-063).
+        """
+        from .constitution import PRINCIPLES
+
+        fr = await self.mem.frame("self", None, top_k=top_k or len(PRINCIPLES) + 4)
+        try:
+            object.__setattr__(fr, "text", _rename_self_preamble(fr.text or ""))
+        except Exception:  # noqa: BLE001 - frozen result: fall back to a copy
+            pass
+        return fr
+
     async def assemble_context(self, query: str) -> ContextResult:
         """self + task + attention frames, captured per-frame (INV-22)."""
         blocks: dict[str, list[str]] = {}
@@ -104,15 +124,13 @@ class ElfmemAdapter:
         self_k = len(PRINCIPLES) + 4  # principles + identity + learned self
         seen: set[str] = set()
         for name in ("self", "task"):
-            fr = await self.mem.frame(name, None, top_k=self_k if name == "self" else None)
+            fr = (await self.self_frame(self_k) if name == "self"
+                  else await self.mem.frame(name, None))
             ids = [b.id for b in fr.blocks if b.id not in seen]
             seen.update(ids)
             blocks[name] = ids
-            text = fr.text
-            if text and name == "self":
-                text = _rename_self_preamble(text)
-            if text:
-                parts.append(text)
+            if fr.text:
+                parts.append(fr.text)
 
         # ATTENTION is a frame again. It was hand-rolled from recall() because
         # constitutional blocks - semantically close to any reasoning query and

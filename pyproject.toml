@@ -32,4 +32,19 @@ elfmem = { git = "https://github.com/emson/elfmem.git", branch = "elfmem_index" 
 [dependency-groups]
 dev = [
     "pytest>=9.1.1",
+    "pytest-asyncio>=1.4.0",
+    "pytest-socket>=0.8.1",
+]
+
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# Network is DISABLED by default. Our bugs live at integration seams, so a test
+# that quietly reaches a real API is both slow and a lie about what it proves;
+# contract tests re-enable it explicitly per test.
+addopts = "-m 'not contract' --disable-socket --allow-unix-socket"
+asyncio_mode = "auto"
+markers = [
+    "contract: verifies a belief about an EXTERNAL service (real network, real keys). Opt-in: `-m contract`.",
+    "slow: takes more than a second or two.",
 ]

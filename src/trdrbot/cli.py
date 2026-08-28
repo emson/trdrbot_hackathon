@@ -390,7 +390,7 @@ async def _constitution(action: str) -> int:
             # The check that matters: does the frame ACTUALLY render all ten?
             # Greedy budget rendering drops overflow silently, so counting
             # stored blocks proves nothing about what the agent will see.
-            fr = await mem.mem.frame("self", top_k=len(constitution.PRINCIPLES) + 4)
+            fr = await mem.self_frame()
             text = fr.text or ""
             missing = [p.key for p in constitution.PRINCIPLES
                        if p.text.split(".")[0][:40] not in text]

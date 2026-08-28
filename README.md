@@ -1,13 +1,15 @@
-# trdrbot
+# trdrbot — an options trading agent called Theo
 
-An options-trading agent that learns *why* it was right, not just *whether* it made money.
+Theo learns *why* it was right, not just whether it made money.
 
 Built for the Alpaca AI Trading Agents Hackathon. Paper trading only.
 
 ```
-sensors ─▶ inbox ─▶ [ thesis ─▶ simulate N structures ─▶ size ─▶ execute ] ─▶ attribute ─▶ memory
-                                        ▲                                                    │
-                                        └──────────────── what it learned ───────────────────┘
+news ─┐
+odds ─┼─▶ research ─┐
+wiki ─┘   discovery ─┼─▶ thesis ─▶ simulate ─▶ size ─▶ execute ─▶ attribute ─┐
+          muse ──────┘      ▲                                                │
+                            └──────────── what it learned ───────────────────┘
 ```
 
 ---
@@ -17,11 +19,10 @@ sensors ─▶ inbox ─▶ [ thesis ─▶ simulate N structures ─▶ size �
 Most trading agents score themselves on profit and loss. Over a one-week window that is close to
 meaningless, and we measured it rather than assuming: a genuinely skilled agent with a 60% edge
 out-scores a coin flip only **69% of the time over 20 trades**, and a zero-skill agent lands
-anywhere between **−7.8% and +8.2%**. A good week proves nothing. Worse, an agent that learns
-from P&L alone reinforces whatever story happened to correlate with money — which is how a
-system acquires a superstition.
+anywhere between **−7.8% and +8.2%**. Worse, an agent that learns from P&L alone reinforces
+whatever story happened to correlate with money — which is how a system acquires a superstition.
 
-So trdrbot separates two questions that P&L conflates:
+So Theo separates two questions that P&L conflates:
 
 **Was the view right?** and **was the way I expressed it right?**
 
@@ -32,109 +33,204 @@ So trdrbot separates two questions that P&L conflates:
 | failed | loss | correct the view; the structure was faithful |
 | failed | profit | **learn nothing** — this was luck |
 
-That bottom row is the important one. P&L-based scoring would treat a lucky win as strong
-confirmation. Here it moves nothing.
+That bottom row is the important one. P&L-based scoring treats a lucky win as strong
+confirmation. Here it moves nothing — and it actively blocks promotion up the size ladder.
 
-## What makes it work
-
-**Position size is earned, not chosen.** Sizing is the largest lever on long-run profit, and it
-runs on Kelly — scaled fractionally, because full Kelly is acutely fragile to estimation error,
-and gated on the agent's *measured* calibration. Stated confidence is shrunk toward the base rate
-in proportion to how well the agent's probabilities have actually held up. With no track record,
-a stated 70% confidence buys **zero contracts**. With a proven 30-sample record, the same 70%
-buys **16**.
-
-That is the self-improving loop made concrete: better calibration is not a number on a
-dashboard, it is permission to bet more.
-
-**Facts and models are never mixed.** Payoff at expiry, max loss and breakevens are arithmetic on
-the contract — they cannot be wrong. Probability of profit and expected value need a distribution
-and use lognormal-at-current-IV, which is standard and still an assumption with wrong tails. The
-agent sees them under separate headings, because one deserves far more weight than the other.
-
-**Costs are charged before the decision, not after.** Options spreads are wide; simulating at mid
-overstates every edge, most for the cheap far-OTM options that look best on a payoff diagram. On
-a real candidate this run: expected value **+$25 before friction, +$9 after**. Friction is
-routinely the same size as the edge, and the agent has declined trades on exactly that basis.
-
-**Exit rules are the agent's own commitments, executed deterministically.** It states a stop and
-a target at entry; a no-LLM evaluator checks them every tick and closes the position without
-asking. Rules fire on the position's net mark and close *all* legs — closing one leg of a spread
-can leave an unbounded naked short.
-
-**Every position traces back to its reasoning.** Alpaca knows what we hold and nothing about why.
-One `position_id` threads each position through an append-only journal, a markdown knowledge base
-following Google's Open Knowledge Format, the agent's evolving memory, and back through the
-broker via `client_order_id`.
-
-## A real decision
-
-From a live run, deciding against a trade:
-
-> Both negative after costs, so I stopped before `size_position`. The call credit spread is
-> exactly the trap: collect $51 to risk $449 needs ~90% accuracy to break even […] Call-side IV
-> is 7.4% vs put-side 16.5% — selling upside calls here means selling the cheap wing of a heavily
-> skewed surface into an earnings print. And any call spread I sold would be stacked on top of an
-> existing short-vol position, doubling the same factor exposure rather than diversifying it.
-
-Not trading is a valid output, and the system is built so that it is frequently the correct one.
-
-## Running it
+## Quick start
 
 ```bash
-cp .env.example .env      # Alpaca paper keys + an LLM key
+cp .env.example .env          # Alpaca paper keys + at least one LLM key
 uv sync
-uv run trdrbot doctor     # verifies MCP connection, credentials and the model
+uv run trdrbot doctor         # verifies MCP, credentials, and EVERY configured model
 ```
 
 ```bash
-uv run trdrbot tick             # one cycle
-uv run trdrbot tick --force     # run the decide path outside market hours
-uv run trdrbot journal          # what happened
-uv run trdrbot calibration      # Brier score + Murphy decomposition
+uv run trdrbot tick           # one cycle
+uv run trdrbot run            # loop until the deadline (see Running unattended)
 ```
 
-The inbox is the seam: drop a JSON file into `data/inbox/pending/` and the pipeline picks it up.
-That is how you test the whole system without waiting for a market event.
+## Configuring models
+
+Any provider LangChain supports works. `init_chat_model` **is** the provider registry, so adding
+one is a line of config plus (usually) one package — no code changes.
+
+```yaml
+llm:
+  # ORDERED FALLBACK CHAIN — first model that answers wins.
+  models:
+    - "anthropic:claude-opus-5"
+    - "openai:gpt-5"
+  max_tokens: 8000
+
+  # Optional per-role chains. A role not listed here uses `models` above.
+  roles:
+    decide:    ["anthropic:claude-opus-5", "openai:gpt-5"]
+    research:  ["openai:gpt-5-mini", "anthropic:claude-opus-5"]
+    discovery: ["openai:gpt-5-mini", "anthropic:claude-opus-5"]
+    muse:      ["openai:gpt-5-mini", "anthropic:claude-opus-5"]
+    doctor:    ["openai:gpt-4o-mini"]
+
+  # USD per MILLION tokens. Operator-supplied — verify against current published
+  # rates; these are not fetched and will go stale. A model missing here is
+  # reported as UNPRICED, never counted as free.
+  pricing:
+    "anthropic:claude-opus-5": {input: 15.0, output: 75.0}
+    "openai:gpt-5":            {input: 1.25, output: 10.0}
+```
+
+Adding a provider:
 
 ```bash
-uv run trdrbot inject --payload '{"note":"SPY looks range-bound into Friday"}'
+uv add langchain-google-genai          # 1. the package
+export GOOGLE_API_KEY=...              # 2. the key, in .env
+# 3. add "google_genai:gemini-2.5-pro" to llm.models — done
 ```
 
-## How it is put together
+The fallback is verified against the real failure, not a guess: an exhausted Anthropic key
+raises `AnthropicInvalidRequestError` — a **400**, not a rate-limit or auth class — and a
+fallback keyed on the wrong exception would never fire. `uv run trdrbot doctor` probes **every**
+configured model, because a fallback that has never been exercised is a promise, not a capability.
 
-The tick splits by cost. Cheap deterministic work — collect, analytics, reconcile against the
-broker, evaluate exit rules — runs every cycle with no model involved. The expensive reasoning
-path runs on a slower cadence. That shortens the exposure window *and* cuts LLM spend, because
-noticing a breached stop needs arithmetic, not intelligence.
+### Which role needs which model — and where the money actually goes
+
+Measured on a real decide cycle: **7 LLM calls, 553k input tokens, $0.83** — of which **84% is
+input, not output**, at ~79k tokens *per call*. The single largest component is the options
+chain: one `get_option_chain` payload is **~15,000 tokens**, and an agent re-sends its
+accumulated context on every turn.
+
+Two conclusions follow, and the second is the counterintuitive one:
+
+- **`decide` should keep the strongest model.** It is multi-step tool use under uncertainty, and
+  it is the only role where a bad judgment costs real money. Economising here is false thrift.
+- **Routing the other roles to cheap models saves very little.** `research`, `discovery` and
+  `muse` are one call each with small context — a few cents. The reason to route them is
+  **resilience** (they keep working when the primary provider is down or out of credit) and
+  tidiness, not cost.
+
+**The real cost lever is context size, not model tier.** Trimming option chains to a strike
+window near spot before they enter context would cut far more than any model downgrade. That is
+the next optimisation, not a cheaper `decide`.
+
+```bash
+uv run trdrbot usage          # spend by model and role, from the live ledger
+```
+
+## Commands
 
 | | |
 |---|---|
-| `sensors.py` | declarative sources — Alpaca news, Polymarket odds. Adding one is a registry entry |
-| `optmath.py` | payoff and probability maths, split by how much each deserves trust |
-| `experiments.py` | thesis, candidate structures, ranking, and the attribution verdicts |
-| `sizing.py` | Kelly, fractional, gated on measured calibration |
-| `calibration.py` | Brier score with Murphy's reliability/resolution/uncertainty decomposition |
-| `exit_rules.py` | deterministic evaluation of the agent's own stated exits |
-| `attribution.py` | view-vs-structure verdict, at the thesis horizon |
-| `elfmem_adapter.py` | evolving memory — what it recalled is what gets credited |
+| `doctor` | verify MCP, credentials, and every configured model |
+| `tick` / `tick --force` | one cycle; `--force` runs the decide path outside market hours |
+| `run` | loop until the deadline, two cadences |
+| `health` | which subsystems ran but produced nothing |
+| `journal` / `ledger` / `usage` | what happened / every thesis ever formed / LLM spend |
+| `calibration` | Brier score with Murphy decomposition |
+| `research` / `discover` / `muse` | the three thesis sources, on demand |
+| `constitution show\|seed\|verify` | the epistemic principles in memory |
+| `lessons show\|seed\|verify` | measured lessons, and whether they still recall |
+| `prompts` | every prompt the models read, with fingerprints |
 
-Design decisions and their reasoning live in [`specs/decisions.md`](specs/decisions.md) (D-001
-through D-031); the architecture, invariants and failure modes are in
-[`specs/architecture.md`](specs/architecture.md). The design was stress-simulated twice before
-any code was written, and both passes are recorded in [`specs/notes/`](specs/notes/).
+## How a thesis is formed
+
+Three independent sources, all landing in the same inbox seam:
+
+- **research** — daily, top-down. Computed technicals + news + prediction-market odds → a regime
+  page and company dossiers in the wiki → falsifiable opportunities.
+- **discovery** — the *news nominates the companies*. Nominations must cite their evidence, then
+  every nominee passes a deterministic gauntlet (technicals, bootstrap forecast, Yahoo
+  fundamentals, options-liquidity gate) before a second LLM call writes opportunities.
+- **muse** — creative collision. Random wiki concepts × news × odds → argue the domino chains →
+  every candidate pre-registered → adversarial evaluation → the top 2 graduate.
+
+The decide cycle then owns the trade: it validates against live quotes, simulates competing
+structures, sizes by earned calibration, and very often declines.
+
+## What makes it work
+
+**Position size is earned, not chosen.** A competence ladder — EXPLORE → ESTABLISH → SCALE →
+MATURE — gated on resolved theses, calibration reliability, and *attribution rate*. That last one
+is the distinctive part: **a profit on a wrong thesis is luck, and a book of luck is not
+competence however good the P&L looks.** Promotion past ESTABLISH requires that most resolved
+theses were actually explicable. Drawdown demotes immediately; recovery restores.
+
+**Facts and models are never mixed.** Payoff at expiry, max loss and breakevens are arithmetic on
+the contract. Probability and expected value need a distribution and are labelled MODELLED. The
+agent sees them under separate headings, because one deserves far more weight.
+
+**Real returns, not just lognormal.** A bootstrap Monte Carlo resamples the underlying's *own*
+history — demeaned, so a year that happened to rally isn't projected forward as structural. The
+*gap* between the two estimates is itself the signal: when they disagree, the edge depends on the
+tail assumption.
+
+**Risk shape is first-class.** Black-Scholes greeks per candidate, per-leg IV so measured skew is
+priced, and **beta-weighted book delta** — because names are not exposures. Measured live: SPY and
+QQQ correlate at 0.92, and one NVDA position showed $63,987 of raw delta but **$118,261**
+beta-weighted.
+
+**Costs are charged before the decision.** Real bid/ask when quotes are available, and a
+volatility clock that doesn't count weekends as full trading days (three calendar days from a
+Friday is 2.0 vol days — a 50% error at our tenor).
+
+**Exit rules are the agent's own commitments, executed deterministically.** One signal registry:
+every rule reads a signal, compares to a threshold, debounces. Thesis-level stops watch the
+*underlying*, not the noisy option mark.
+
+**Every position traces back to its reasoning** — one `position_id` through an append-only
+journal, an OKF wiki, evolving memory, and back to the broker via `client_order_id`.
+
+## Running unattended
+
+```bash
+uv run trdrbot run --interval 300 --closed-interval 1800
+```
+
+Two cadences, because the work differs. **Open:** decide, market-pulse and exit-rule evaluation
+every 5 minutes — stops checked hourly are worthless. **Closed:** housekeeping, research,
+attribution and memory consolidation every 30 minutes. A failing tick never stops the loop, and a
+singleton lock plus a 30s interval floor prevent the runaway loops we actually caused once.
+
+When the inbox is empty the system climbs an **idle ladder** rather than either spinning or
+sleeping blindly: *sleep* (nothing at risk, nothing moved), *review* (a material move or too long
+without looking), *hunt* (capital idle and deployable). The asymmetry that sets it: the cost of
+not looking scales with what is at risk; the cost of looking scales with LLM spend. And idle
+capital is a position too — 100% cash at 0% expected return.
+
+## Testing
+
+```bash
+uv run pytest                 # fast, offline, network blocked — run habitually
+uv run pytest -m contract     # real APIs; before a deploy or after a dependency bump
+uv run trdrbot health         # runtime: what ran but produced nothing
+```
+
+Four tiers, weighted by where our bugs actually came from — we categorised all ~24 of them, and
+**9 were found by measuring, 5 by running, 4 by verifying output; essentially none by a unit test
+catching a logic error.** They were wrong beliefs about a seam, and silent no-ops. So:
+
+- **unit + invariant** — a monotonicity check over the whole ladder caught two shipped size
+  inversions; a convergence check caught a 16pp drift bug. One invariant beats ten examples.
+- **loop smoke** — the whole learning ladder offline with known inputs. Found two
+  credit-assignment bugs every unit test passed straight over.
+- **contract** — one file, one belief per test, checked against the real service, written so the
+  failure names the belief: *"price is no longer nested under `trades`"*.
+- **health** — not a test. Catches what tests structurally cannot: a path that runs, returns,
+  logs healthily, and does nothing.
+
+Rationale and rules: [`docs/principles_testing.md`](docs/principles_testing.md).
 
 ## Honest limitations
 
-- **Calendar and diagonal spreads are refused**, not approximated. Pricing the far leg at the
-  near expiry needs a model this deliberately does not have, and a confident wrong payoff is
-  worse than a clear refusal.
-- **The probability model is lognormal at current IV.** Real returns have fatter tails. The
-  calibration record is what would expose this, and it needs more resolved trades than one week
-  provides.
-- **No guardrails, by choice.** This is a paper account and iteration speed mattered more. What
-  exists instead is the agent's own exit rules plus sizing that refuses unbounded-loss
-  structures outright.
-- **Attribution needs the thesis horizon to arrive.** A stop on day two of a ten-day thesis is
-  recorded but not yet judged — scoring it early would be the exact mis-attribution the system
-  exists to avoid.
+- **Calendar and diagonal spreads are refused**, not approximated. Pricing the far leg needs a
+  model this deliberately does not have, and a confident wrong payoff is worse than a refusal.
+- **Calibration is n=1.** Every threshold that matters needs ~50 resolved forecasts. Unconditional
+  forecast logging exists to get there faster, but the record is young and the size ladder
+  correctly reflects that.
+- **The first position can never be attributed** — no thesis was recorded at entry. Fabricating
+  one retroactively would be worse than the gap.
+- **No guardrails, by choice.** Paper account, iteration speed mattered. What exists instead is
+  the agent's own exit rules, sizing that refuses unbounded-loss structures, and book-level caps.
+- **Known issues are tracked openly** in [`specs/issues.md`](specs/issues.md) — recorded the
+  moment they are found, removed only by the commit that fixes them.
+
+Design decisions and their reasoning: [`specs/decisions.md`](specs/decisions.md) (D-001…D-063).
+Architecture and invariants: [`specs/architecture.md`](specs/architecture.md).

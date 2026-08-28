@@ -2191,3 +2191,66 @@ correctly reported DEAD.
 price matching, callback never raising on malformed payloads, unbuildable models skipped not
 fatal, clear error when nothing is usable); 114 pass; a full decide cycle ran end to end on the
 fallback provider.
+
+## D-063: A testing strategy derived from where our bugs actually came from
+**Date:** 2026-08-28
+**Status:** accepted
+**Context:** "We seem to be uncovering bugs all the time." Rather than answer with "write more
+unit tests", categorised every bug this project has had (~24, all in this file). The finding
+reframes the whole question: **9 were found by MEASURING, 5 by RUNNING, 4 by VERIFYING output -
+and essentially none by a unit test catching a logic error in a pure function.** Our bugs are not
+miscalculations. They are wrong beliefs about a seam (`symbols` vs `symbol_or_symbols`, bars
+truncating from the wrong end, prices nested under `trades`, `outcome()` silently no-oping on an
+inbox block, `.with_config(callbacks=)` metering nothing) and silent no-ops. More unit tests
+would not have caught one of them.
+**Choice: four tiers, weighted at the seams, and mechanical enforcement so the default stays
+honest.**
+1. **Unit + INVARIANT** (`test_regressions.py`, always run). The invariants earn their keep: a
+   monotonicity check across the whole competence ladder caught two size inversions that had
+   already SHIPPED, and a convergence check caught the 16pp bootstrap-drift bug. Both found
+   design errors, not typos. One invariant beats ten enumerated examples.
+2. **Loop smoke** (`test_loop_smoke.py`, offline, always run). The whole learning ladder with
+   known inputs. Its scratch ancestor found two credit-assignment bugs every unit test passed
+   over, because they were only visible when the stages ran together.
+3. **Contract** (`test_contracts.py`, `-m contract`, ~25s). One belief per test, checked against
+   the real service, written so the failure NAMES the belief rather than saying "assertion
+   failed". Assert shape and the discriminating property, never a live value.
+4. **Runtime** (`trdrbot health`) - not a test, and the only thing that catches a path which
+   runs, returns, logs healthily and does nothing.
+**Mechanical:** `pytest-socket` blocks the network in the default run; only the contract file
+re-enables it, per-file and explicitly. A unit test that reaches the network is both slow and a
+lie about what it proves.
+**The contract tier immediately caught a real, shipped bug.** Our "You are elf" -> "You are Theo"
+rename lived inside `assemble_context()`, so the decide path said Theo while `constitution
+verify` and every future caller still said elf - a fix correct where applied and absent
+everywhere else. The test caught it by asserting on the SYSTEM's output rather than one code
+path. Fixed by routing every caller through one door, `ElfmemAdapter.self_frame()`.
+**Contract tests also watch for good news:** the elfmem inbox-outcome test asserts the silent
+zero still happens. When upstream fixes it, that test fails, and the correct response is to
+delete our consolidate-and-retry workaround.
+**Recorded in the Project Overlay** of `docs/principles_testing.md`, which is where that document
+says project rules belong, including an explicit "what we deliberately do NOT test" list (LLM
+wording, market outcomes, unreachable states).
+**Verified:** 118 default tests pass offline in 2.5s; 9 contract tests pass against real
+services in 22s.
+
+## D-064: Model routing - the cost lever is context, not model tier
+**Date:** 2026-08-28
+**Status:** accepted
+**Context:** Asked to reason about the optimum cost-to-intelligence ratio per LLM call: should
+research use a small model?
+**Measured first.** One real decide cycle: 7 calls, 553,054 input tokens, 13,380 output, $0.83.
+**84% of that cost is INPUT**, at ~79k tokens per call. One `get_option_chain` payload is ~15,000
+tokens, and the agent re-sends accumulated context every turn.
+**Conclusion, and the second half is counterintuitive:**
+- `decide` keeps the strongest model. Multi-step tool use under uncertainty, and the only role
+  where bad judgment costs real money. Economising there is false thrift.
+- **Routing research/discovery/muse to cheap models saves very little** - they are one call each
+  with small context, a few cents. Worth doing for RESILIENCE (they keep working when the primary
+  is down or out of credit) and tidiness, not for cost.
+- **The real lever is context size.** Trimming option chains to a strike window near spot before
+  they enter context would cut far more than any model downgrade. Logged as the next
+  optimisation; a contract test now watches the chain payload size so a change in either
+  direction is noticed.
+**README rewritten** around this, plus provider configuration, the four testing tiers, all 15 CLI
+commands (each verified to exist), and honest limitations including calibration n=1.
