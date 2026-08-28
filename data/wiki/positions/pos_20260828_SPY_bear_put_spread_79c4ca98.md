@@ -4,7 +4,7 @@ position_id: pos_20260828_SPY_bear_put_spread_79c4ca98
 status: open
 interim_band: 0
 max_loss_usd: 2171.0
-last_pnl_pct: -0.10126582278481013
+last_pnl_pct: -0.12658227848101267
 greeks_at_entry:
   delta_shares: -322.04
   delta_dollars: -247666.38
@@ -65,7 +65,7 @@ sources:
   author: alpaca_news
 generated:
   by: anthropic:claude-opus-5
-  at: '2026-08-28T19:39:12.711883+00:00'
+  at: '2026-08-28T21:30:36.354384+00:00'
 verified:
 - by: trdrbot/reconcile
   at: '2026-08-28T17:39:23.192346+00:00'

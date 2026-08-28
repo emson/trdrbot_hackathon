@@ -7,18 +7,27 @@ Sorted by severity.
 
 ## Open
 
-- **I-23 · GLM-5.2/OpenCode Zen tool-calling is unverified** (D-083). Wired as the primary model
-  across every role, config resolves and falls back correctly, `doctor` reports it honestly (DEAD,
-  no ZEN_API_KEY) - but nobody has confirmed GLM-5.2 reliably drives a LangGraph
-  create_react_agent tool call through Zen's endpoint. A model that mishandles tool schemas would
-  make `decide` look healthy while never calling `simulate_experiments`. A real contract test
-  exists and skips cleanly with no key. **Action due:** add `ZEN_API_KEY`, run
-  `uv run pytest -m contract -k glm`; if it fails, move GLM-5.2 behind Claude/GPT-5 in the chain
-  rather than leaving an unverified model primary.
-- **I-24 · GLM-5.2 pricing is third-party-sourced** (D-083). $1.40/$4.40 per M tokens came from a
-  pricing-calculator site and a model-routing aggregator, not Zen's own pricing page directly (it
-  states "zero markups" but did not itself list a rate when checked). Cheap to be wrong about now
-  (paper account); re-verify against the first real invoice before this matters for live spend.
+- **I-25 · Grok-4.6 on OpenCode Zen is currently down** (D-084). Confirmed live, not assumed:
+  Zen's own `/v1/models` lists `grok-4.6` correctly and the same key serves `glm-5.2`
+  successfully, but grok-4.6 itself returns HTTP 500 (reproduced 3x) and grok-4.5 (same family)
+  returns 503 "Endpoint is unavailable". Left as the declared primary because the fallback chain
+  is verified to survive it (`test_the_decide_chain_survives_grok_being_down`, real network,
+  confirms `decide` answers via Claude with zero risk) - but every cycle currently pays one
+  wasted call. **Action due:** re-run `uv run pytest -m contract -k grok` periodically; once it
+  passes, confirm with `trdrbot doctor` and note the outage as cleared. If still down after the
+  competition window matters, drop it a rung rather than keep paying the latency.
+
+- ~~**I-23 · GLM-5.2/OpenCode Zen tool-calling is unverified**~~ **SUPERSEDED 2026-08-28
+  (D-084).** With a real key, GLM-5.2 proved reliable for simple prompts but exhausted its ENTIRE
+  8000-token completion budget on invisible reasoning for the muse's actual prompt -
+  finish_reason="length", zero visible characters, reproduced deterministically. Demoted out of
+  the active chain in favour of Grok-4.6 before its tool-calling belief was ever tested - the
+  question I-23 asked is moot for now, not answered.
+- **I-24 · Third-party-sourced pricing, now covering two models** (D-083, D-084). GLM-5.2
+  ($1.40/$4.40) and Grok-4.6 ($2.00/$6.00, cache $0.50) both came from pricing trackers and
+  aggregators, not Zen's own pricing page directly. Grok's figure is corroborated by two
+  independent sources agreeing exactly - stronger than GLM's had - but still not primary.
+  Re-verify against the first real invoice before this matters for live spend.
 
 - **I-1 · NVDA thesis block carries `self/goal`/`self/style` tags** (found D-059).
   Deliberately deferred: content is live until the 2026-09-03 horizon, never suffered score

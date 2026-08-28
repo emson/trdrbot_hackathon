@@ -3406,3 +3406,24 @@ def test_pricing_matches_a_bare_served_model_name():
     cfg = cm.load(quiet=True)
     assert price(cfg.pricing, "glm-5.2", 1_000_000, 1_000_000) == pytest.approx(5.80)
     assert price(cfg.pricing, "opencode_zen:glm-5.2", 1_000_000, 0) is not None
+
+
+def test_grok_4_6_is_the_configured_primary_not_glm():
+    """Pins the actual migration decision in config.yaml, so an accidental
+    revert (or a stale copy-paste of the GLM-era chain) is caught rather than
+    silently shipping the wrong primary."""
+    from trdrbot import config as cm
+
+    cfg = cm.load(quiet=True)
+    assert cfg.model_chain("decide")[0] == "opencode_zen:grok-4.6"
+    for role in ("decide", "research", "discovery", "muse"):
+        chain = cfg.model_chain(role)
+        assert chain[0] == "opencode_zen:grok-4.6"
+        assert "opencode_zen:glm-5.2" not in chain, (
+            f"{role}: GLM-5.2 was demoted for exhausting its output budget "
+            f"with zero visible text on this exact role's prompt shape - it "
+            f"must not silently reappear in an active chain")
+        # Both real, verified-working fallbacks stay behind it.
+        assert "anthropic:claude-opus-5" in chain
+
+

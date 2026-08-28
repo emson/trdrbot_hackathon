@@ -3416,3 +3416,83 @@ reusable pattern - config-level gateway providers, not a one-off branch - for th
 `uv run trdrbot doctor` to confirm GLM-5.2 answers, then `uv run pytest -m contract -k glm` to
 confirm tool-calling specifically - that result determines whether GLM-5.2 stays primary or moves
 behind Claude/GPT-5 in the chain.
+
+## D-084: GLM-5.2 proved unsafe for structured output; Grok-4.6 is primary, but Zen has it down
+**Date:** 2026-08-28
+**Status:** accepted
+**Context:** Verifying I-23 with a real `ZEN_API_KEY` (added between D-083 and this record), then
+a request to try Grok-4.6 instead. Both findings came from actually running the real workload
+against the real endpoint, not from reading documentation - the same discipline this project's
+whole contract-test file exists to enforce, applied here to two brand-new external dependencies
+in succession.
+
+**GLM-5.2's real defect, reproduced deterministically.** The first live muse run under GLM-5.2
+returned a 0-character reply. The usage ledger showed `out=8000` - exactly `max_tokens` - meaning
+the model spent its ENTIRE completion budget and surfaced nothing. Isolated with a direct repro:
+a trivial "reply ok" prompt worked fine (110 output tokens, visible content); the muse's actual
+~925-token prompt (5 structured candidates, each with a causal chain, under a strict JSON schema)
+returned `finish_reason="length"`, 8000/8000 tokens spent, zero visible characters, on every
+attempt. A follow-up probe (500/2000/8000-token budgets on a "write a two-sentence story" prompt)
+showed the pattern generally: GLM-5.2 burns a substantial, task-scaling reasoning overhead before
+any visible output, and for a moderately complex generation task that overhead can consume the
+entire budget with nothing to show. **No documented lever was found to bound it** - unlike GPT-5,
+whose reasoning-token overrun at least leaves partial JSON to salvage (D-077's
+`_salvage_truncated_array`), this returns nothing at all, and unlike Grok-4.6 (below) there is no
+`reasoning_effort`-equivalent parameter in what was found.
+
+**This failure mode does not trigger LangChain's fallback.** A real HTTP error raises an
+exception, which `.with_fallbacks()` catches; a "successful" call with useless content does not.
+GLM-5.2 sitting in the chain was therefore silently producing zero muse candidates every run it
+served - the exact class of quiet failure this project's `health.py` exists to catch, arriving
+through the one door that machinery cannot see (a subsystem reporting `candidates: 0` looks
+identical whether the market genuinely offered nothing or the model choked on its own budget).
+GLM-5.2 is demoted out of every active chain. Its pricing entry stays for reference; I-23 (its
+unverified tool-calling belief) is marked superseded rather than resolved, because the question
+was never actually answered - the model was pulled before that test mattered.
+
+**Grok-4.6 was chosen to replace it, staying on the SAME `opencode_zen` gateway** rather than
+adding a native `xai:` provider (which does exist as a real LangChain builtin,
+`langchain_xai.ChatXAI`, confirmed by inspecting `_BUILTIN_PROVIDERS`). Reused the config-level
+resolver built in D-083 for exactly this: swapping the model was a pure config.yaml edit, zero
+code changes, because `resolve_model_spec` is generic over any model string under a declared
+provider. This also preserves the original migration intent (one gateway, one key, one billing
+surface) rather than fragmenting across two.
+
+**A real, documented, controllable lever exists for Grok-4.6 that GLM-5.2 lacked:**
+`reasoning_effort` (low/medium/high/xhigh, default high) - directly relevant given what had just
+been proven about invisible-reasoning-budget exhaustion. It was never tested, because Grok itself
+turned out to be unavailable.
+
+**Verified live, not assumed, before wiring anything as primary this time:** Zen's own
+`/v1/models` catalog confirms `grok-4.6` is the correct id. The identical key that serves
+`glm-5.2` successfully returned a clean **HTTP 500, three times running**, on the plainest
+possible prompt ("reply ok", 500-token budget) - ruling out prompt complexity as the cause.
+`grok-4.5` (same family, same gateway) returned **503 "Endpoint is unavailable"** - a second,
+independent signal that this is Zen's/xAI's own availability right now, not a request-shape
+problem on our side.
+
+**Choice: leave Grok-4.6 as the declared primary anyway, because the fallback chain is proven -
+empirically, not inferred - to survive a real failure the way it cannot survive GLM-5.2's silent
+one.** `build_model(cfg, role="decide")` was invoked directly, live: it answered via
+`claude-opus-5` despite `grok-4.6` erroring first. A real HTTP 500 raises an exception, which
+`.with_fallbacks()` catches - this is the exact mechanism D-008 verified once against a real
+Anthropic 400, now re-verified against a real Zen 500. Every cycle currently pays one wasted call
+for it, which is a cost, not a risk. Recorded as I-25 with an explicit retry instruction.
+
+**Two new contract tests, and one of them is EXPECTED to fail right now, on purpose.**
+`test_grok_4_6_via_opencode_zen_actually_calls_a_bound_tool` mirrors the GLM belief-test and does
+NOT skip on a live provider error, only on a missing key - it fails loudly with the real 500,
+which is the correct behaviour for a file whose whole job is naming a false belief rather than
+hiding it. `test_the_decide_chain_survives_grok_being_down` is the adversarial case this outage
+handed for free: it calls the real `build_model()` chain, not just the pure resolver logic, and
+asserts an answer arrives from something OTHER than grok-4.6 - so it will start failing the
+moment the outage clears, which is the intended tripwire to catch the config comment going stale.
+
+**Pricing added with real, corroborated figures**: $2.00/M input, $6.00/M output, $0.50/M cached
+input (below 200K-token prompts) - two independent sources converged on the identical number,
+stronger evidence than GLM-5.2's single-tracker figure, though still not fetched from Zen's own
+pricing page directly (flagged as I-24, now covering both models).
+
+**Verified:** 222 default tests (2 new) + 17 contract tests (16 pass; the 1 expected failure is
+the honest report of Grok-4.6's real outage, not a defect in the test). Live: `build_model`
+confirmed answering via Claude with Grok as primary and down.

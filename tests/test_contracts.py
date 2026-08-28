@@ -398,3 +398,71 @@ async def test_glm_5_2_via_opencode_zen_actually_calls_a_bound_tool(cfg):
     assert str(calls[0]["args"].get("ticker", "")).upper() == "SPY"
     final = str(result["messages"][-1].content)
     assert "123.45" in final, "the tool RESULT must reach the final answer, not just the call"
+
+
+@pytest.mark.asyncio
+async def test_grok_4_6_via_opencode_zen_actually_calls_a_bound_tool(cfg):
+    """The Grok mirror of the GLM belief above, and the more consequential one
+    right now: Grok-4.6 is the CONFIGURED PRIMARY for decide. Deliberately
+    does NOT skip on a live provider error - only on a missing key, the same
+    as doctor's own probe. As of this migration Zen's grok-4.6 endpoint
+    returns a reproducible HTTP 500 (verified three times, independent of
+    this test), so this test is EXPECTED TO FAIL until that clears - which is
+    the correct, honest behaviour for a contract test: it names the belief
+    that is currently false rather than hiding it behind a skip."""
+    import os
+
+    if not os.environ.get("ZEN_API_KEY"):
+        pytest.skip("ZEN_API_KEY not set - see .env.example")
+
+    from langchain.chat_models import init_chat_model
+    from langchain_core.tools import tool
+    from langgraph.prebuilt import create_react_agent
+
+    @tool
+    def get_ticker_price(ticker: str) -> str:
+        """Return the current price for a ticker symbol."""
+        return f"{ticker.upper()} is trading at $123.45"
+
+    real_spec, conn_kwargs = cfg.resolve_model_spec("opencode_zen:grok-4.6")
+    m = init_chat_model(real_spec, max_tokens=500, max_retries=1, **conn_kwargs)
+    agent = create_react_agent(
+        m, [get_ticker_price],
+        prompt="Use the tool to answer. Always call get_ticker_price before answering.")
+    result = await agent.ainvoke(
+        {"messages": [("user", "What is SPY trading at right now?")]})
+
+    calls = [tc for msg in result["messages"]
+             for tc in (getattr(msg, "tool_calls", None) or [])]
+    assert calls, "Grok-4.6 answered without calling the bound tool - decide would too"
+    assert calls[0]["name"] == "get_ticker_price"
+    final = str(result["messages"][-1].content)
+    assert "123.45" in final, "the tool RESULT must reach the final answer, not just the call"
+
+
+@pytest.mark.asyncio
+async def test_the_decide_chain_survives_grok_being_down(cfg):
+    """D-008 verified once, live, that a real Anthropic 400 falls through the
+    chain. Grok-4.6 being confirmed live-down as of this migration makes this
+    the same test for free, against a REAL failure rather than an injected
+    one: does build_model's whole chain - not just resolve_model_spec's pure
+    logic - still answer with the primary erroring? If Zen ever starts
+    returning success-with-empty-content instead of a real HTTP error (the
+    GLM-5.2 failure mode), this test would keep passing while decide quietly
+    stopped reasoning - the gap D-076's `[assumptions]` principle exists to
+    keep in view, not one this single test can close."""
+    import os
+
+    if not os.environ.get("ZEN_API_KEY"):
+        pytest.skip("ZEN_API_KEY not set - see .env.example")
+
+    from trdrbot.llm import build_model
+
+    m = build_model(cfg, role="decide")
+    r = await m.ainvoke("Reply with exactly the word: ok")
+    served = (r.response_metadata or {}).get("model_name", "")
+    assert r.content, "the chain must produce SOME answer despite the primary"
+    assert served != "grok-4.6", (
+        "if this starts passing WITH grok-4.6 as the served model, Zen's "
+        "outage has cleared - update the config comment and I-25, don't "
+        "just let the assertion go stale")
