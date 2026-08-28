@@ -318,7 +318,7 @@ async def run_tick(
         # context as a ~4k table instead of being re-sent in full every turn.
         allow = set(config.decide_tools)
         decide_mcp = [t for t in tools_list if not allow or t.name in allow]
-        decide_mcp = compact.wrap_heavy_tools(decide_mcp)
+        decide_mcp = compact.wrap_heavy_tools(decide_mcp, config)
         guarded = tool_guard.enforce_order_ids(decide_mcp, batch)
 
         query = " ".join(config.watchlist) + " options setup"

@@ -56,7 +56,7 @@ def _mid(q: dict[str, Any]) -> float | None:
     return None
 
 
-def compact_option_chain(result: Any) -> Any:
+def compact_option_chain(result: Any, config: Any = None) -> Any:
     """61k chars of snapshots -> a table the decision actually reads."""
     if not isinstance(result, dict) or "snapshots" not in result:
         return result  # fail open: shape changed, pass the original through
@@ -132,21 +132,28 @@ def compact_option_chain(result: Any) -> Any:
     return "\n".join(lines)
 
 
-def compact_news(result: Any) -> Any:
-    """Full articles -> headline, source, symbols, time. The agent reasons from
-    headlines; article bodies at ~2k chars each are summary-resistant filler."""
+def compact_news(result: Any, config: Any = None) -> Any:
+    """Full articles -> dense structured lines, from the news_extract cache
+    (D-066). Falls back to headline-only for any article not yet extracted -
+    identical to the pre-D-066 output - so a cold cache or a disabled/failing
+    extraction role degrades gracefully rather than breaking the tool."""
     if not isinstance(result, dict) or "news" not in result:
         return result
     items = result.get("news")
     if not isinstance(items, list) or not items:
         return result
-    lines = [f"News ({len(items)} items, headlines only):"]
-    for it in items:
-        if not isinstance(it, dict):
-            continue
-        lines.append(f"- [{str(it.get('created_at',''))[:16]}] {it.get('headline')} "
-                     f"| {it.get('source')} | {it.get('symbols')}")
-    return "\n".join(lines)
+
+    from . import news_extract
+
+    if config is not None:
+        cache = news_extract.ExtractCache(config.paths.state / "news_extracts.json")
+        extracts = [cache.get(str(it.get("id"))) or news_extract.bare(it)
+                    for it in items if isinstance(it, dict)]
+    else:  # no config threaded through - still compact, just headline-only
+        extracts = [news_extract.bare(it) for it in items if isinstance(it, dict)]
+
+    header = f"News ({len(extracts)} items; [sentiment] activity/regime | orgs | people | symbols | fact):"
+    return header + "\n" + news_extract.render_block(extracts)
 
 
 #: tool name -> result rewriter. Adding one is one entry; anything not listed
@@ -157,7 +164,7 @@ COMPACTORS = {
 }
 
 
-def wrap_heavy_tools(tools: list[Any]) -> list[Any]:
+def wrap_heavy_tools(tools: list[Any], config: Any = None) -> list[Any]:
     """Attach result compaction to the tools that need it. Interface unchanged."""
     for t in tools:
         fn = COMPACTORS.get(getattr(t, "name", ""))
@@ -165,11 +172,12 @@ def wrap_heavy_tools(tools: list[Any]) -> list[Any]:
             continue
         original = t.coroutine
 
-        async def _compacted(*args: Any, __orig=original, __fn=fn, __name=t.name, **kw: Any) -> Any:
+        async def _compacted(*args: Any, __orig=original, __fn=fn, __name=t.name,
+                              __config=config, **kw: Any) -> Any:
             result = await __orig(*args, **kw)
             try:
                 before = len(result if isinstance(result, str) else json.dumps(result, default=str))
-                out = __fn(result)
+                out = __fn(result, __config)
                 after = len(out if isinstance(out, str) else json.dumps(out, default=str))
                 if after < before:
                     print(f"[compact] {__name}: {before:,} -> {after:,} chars")

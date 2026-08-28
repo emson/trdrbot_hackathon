@@ -34,7 +34,7 @@ import random
 import re
 from typing import Any
 
-from . import ids, market_stats, mcp_client
+from . import ids, market_stats, mcp_client, news_extract
 from .config import Config
 from .discovery import _options_gate, _plausible_band
 from .inbox import Inbox
@@ -128,8 +128,8 @@ async def run(
     try:
         r = await mcp_client.call(tools, "get_news", limit=30,
                                   exclude_contentless=True, sort="desc")
-        for item in (r.get("news") or []) if isinstance(r, dict) else []:
-            news_lines.append(f"- {item.get('headline')} | {item.get('symbols')}")
+        items = (r.get("news") or []) if isinstance(r, dict) else []
+        news_lines.append(news_extract.render_block(await news_extract.enrich(items, config)))
     except Exception as exc:  # noqa: BLE001
         news_lines.append(f"(news unavailable: {type(exc).__name__})")
 

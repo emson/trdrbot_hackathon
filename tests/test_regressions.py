@@ -1502,3 +1502,106 @@ def test_decide_tools_allowlist_empty_means_bind_everything():
     assert Config(raw={}, paths=P()).decide_tools == []
     cfg = Config(raw={"decide": {"tools": ["get_clock"]}}, paths=P())
     assert cfg.decide_tools == ["get_clock"]
+
+
+# ---------------------------- D-066 news extraction + structured store
+
+def _cfg_for_news_extract(tmp_path, models):
+    from trdrbot.config import Config
+
+    class P:
+        state = tmp_path
+    return Config(raw={"llm": {"roles": {"news_extract": models}, "max_tokens": 200}}, paths=P())
+
+
+def test_bare_extract_renders_identically_to_pre_extraction_headlines():
+    """A total extraction outage must degrade to EXACTLY the pre-D-066 output,
+    not to something worse - the same fail-open guarantee compact.py already
+    gives the option chain."""
+    from trdrbot.news_extract import bare, render_block
+
+    item = {"id": "1", "headline": "Fed holds rates steady", "source": "Reuters",
+            "symbols": ["SPY"], "created_at": "2026-08-28T12:00:00Z"}
+    e = bare(item)
+    assert e.is_bare()
+    assert e.dense == "Fed holds rates steady"
+    out = render_block([e])
+    assert "Fed holds rates steady" in out and "SPY" in out and "Reuters" in out
+    assert "[" not in out.split("|")[0]  # no sentiment tag on a bare line
+
+
+async def test_enrich_returns_cached_extracts_without_calling_the_model(tmp_path):
+    """A cache hit must skip the LLM entirely - the whole point of keying by
+    article id. Proven by pointing news_extract at an unbuildable model: if
+    enrich() tried to call it, this would raise."""
+    from trdrbot.news_extract import Extract, ExtractCache, enrich
+
+    cache = ExtractCache(tmp_path / "news_extracts.json")
+    cache.put_many([Extract(id="42", headline="H", sentiment=0.5, dense="Guidance raised",
+                             activity="guidance", regime="company")])
+
+    cfg = _cfg_for_news_extract(tmp_path, ["notaprovider:nope"])
+    out = await enrich([{"id": "42", "headline": "H"}], cfg)
+    assert len(out) == 1 and not out[0].is_bare()
+    assert out[0].dense == "Guidance raised"
+
+
+async def test_enrich_fails_open_to_bare_and_does_not_freeze_the_failure(tmp_path, capsys):
+    """An unusable model must not lose the articles - they arrive bare (same
+    as the old headline-only behaviour) and are NOT written to the cache, so
+    the next cycle (a working model, or the same one recovered) retries them
+    instead of being stuck on a permanent 'unknown'."""
+    from trdrbot.news_extract import ExtractCache, enrich
+
+    cfg = _cfg_for_news_extract(tmp_path, ["notaprovider:nope"])
+    items = [{"id": "7", "headline": "Company X misses on guidance", "symbols": ["X"]}]
+    out = await enrich(items, cfg)
+
+    assert len(out) == 1
+    assert out[0].is_bare()
+    assert out[0].dense == "Company X misses on guidance"
+    assert "falling back to headlines" in capsys.readouterr().out
+
+    reloaded = ExtractCache(tmp_path / "news_extracts.json")
+    assert reloaded.get("7") is None, "a bare fallback must not be frozen into the cache"
+
+
+def test_coerce_defends_every_field_against_malformed_model_output():
+    """One malformed field must not crash the batch - the model returning a
+    string where a list was asked for, or an out-of-range sentiment, degrades
+    that ONE record rather than the whole call."""
+    from trdrbot.news_extract import _coerce
+
+    item = {"id": "9", "headline": "H"}
+    # missing sentiment entirely -> bare, not a crash
+    assert _coerce({"organizations": "not a list"}, item, "m").is_bare()
+    # sentiment out of [-1, 1] must clamp, not propagate
+    e = _coerce({"sentiment": 5, "organizations": ["Apple", 3, "Google"]}, item, "m")
+    assert e.sentiment == 1.0
+    assert e.organizations == ["Apple", "Google"], "non-string entries must be dropped, not crash"
+
+
+def test_compact_news_uses_the_extract_cache_when_config_is_given(tmp_path):
+    """The decide-facing compactor must surface the richer signal once an
+    article has been extracted by research/discovery/muse - not just the
+    headline it would fall back to."""
+    from pathlib import Path
+
+    from trdrbot.compact import compact_news
+    from trdrbot.config import Config
+    from trdrbot.news_extract import Extract, ExtractCache
+
+    cache = ExtractCache(tmp_path / "news_extracts.json")
+    cache.put_many([Extract(id="1", headline="H", sentiment=-0.6, activity="regulatory",
+                             regime="sector", organizations=["FDA"], dense="Trial halted")])
+
+    class P:
+        state = tmp_path
+    cfg = Config(raw={}, paths=P())
+    news = {"news": [{"id": "1", "headline": "H", "symbols": ["XYZ"], "created_at": "2026-08-28T09:00"}]}
+
+    with_cache = compact_news(news, cfg)
+    assert "Trial halted" in with_cache and "-0.6" in with_cache
+
+    no_config = compact_news(news, None)
+    assert "Trial halted" not in no_config, "without config it must fall back to headline-only, not crash"

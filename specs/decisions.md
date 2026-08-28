@@ -2294,3 +2294,51 @@ sets instead of two, priced three candidate structures, cited `[friction-is-the-
 by name, and recorded a 0.74 forecast - the decision got more thorough, not less.
 **Verified:** compactor offline against the real payload shape (13x, ATM correct, six fail-open
 cases pass through untouched); 123 default tests; live cycle measured above.
+
+## D-066: News extraction - a cheap model reads bodies once, so nobody has to reread them
+**Date:** 2026-08-28
+**Status:** accepted
+**Context:** D-065's headline-only news compaction was an ASSUMPTION ("bodies are summary-resistant
+filler"), not a measurement, and the user correctly pushed back: sentiment, named
+organisations/people, the kind of event, and which regime it speaks to (macro/sector/company) are
+often exactly what separates a real thesis from noise - a bare headline throws that away. The fix
+is not "send bodies back" (that reintroduces the ~2k chars/article D-065 removed); it is reading
+each article's body ONCE with a cheap model and distilling it to structured fields plus one dense
+sentence, then reusing that distillation everywhere instead of re-deriving it four times a cycle.
+**The standardised store the user asked for:** `state/news_extracts.json`, one JSON record per
+article id (`Extract`: sentiment, organizations, people, activity, regime, dense summary, model,
+extracted_at) - same flat-file shape as `sensors.SensorState`, deliberately not a database at this
+volume. Keyed by article id, so the SAME article recurring across research/discovery/muse/sensors
+within a day is extracted exactly once and every consumer since reads the cache. `news_extract.py`
+owns the schema; every writer and reader goes through it, so the shape cannot drift per call site.
+**One batched call per cycle, never per article** - all uncached articles in one prompt, one model
+reply parsed as a JSON array matched back by id (reuses `research._parse_json_block`, the same
+JSON-in-prose parser every other synthesis call in this project already relies on).
+**Fails open PER RECORD, and never freezes a failure.** A malformed field degrades that one
+record (`_coerce`); a failed call degrades the whole batch to bare extracts (`dense`=headline,
+`sentiment`=None) - identical in information content to the pre-D-066 output, so a cold cache or an
+extraction-role outage degrades to exactly the old behaviour, never to something worse. Bare
+extracts are deliberately NOT written to the cache, so a transient failure is retried next cycle
+rather than being permanently recorded as "unknown".
+**Wired through four call sites**, replacing each one's ad hoc `headline | source | symbols`
+reduction with `news_extract.render_block(await news_extract.enrich(items, config))`:
+research.py, discovery.py, muse.py (all prompt-facing), and `compact.compact_news` (decide's
+tool-result compactor, cache-read-only - no LLM call inside the hot tool-wrapping path; it renders
+whatever is already cached and falls back to bare for anything not yet extracted).
+**Role, not a code path:** `news_extract` in `llm.roles`, cheapest tier
+(`gpt-4o-mini` → `gpt-5-mini`) - this is bulk structured extraction, not judgement, the same
+reasoning as D-064's cost-tiering.
+**Verified live** (not mocked): two synthetic-but-realistic articles through the real model -
+correctly gave the Apple guidance beat +0.8 sentiment (Apple Inc / Tim Cook / guidance / company)
+and the Fed-patience story 0.0 (Federal Reserve / Christopher Waller / macro_data / macro), and a
+second `enrich()` call on the same ids took 0.000s - proof the cache hit skipped the LLM, not just
+an assertion about it. Test articles were removed from the real `data/state/news_extracts.json`
+after verification. Offline: 5 new regression tests exercise the real fail-open path (an
+unbuildable model, exactly like `test_build_model_skips_unbuildable_models_rather_than_dying`) -
+cache-hit skips the model, cache-miss-on-failure returns bare and is never persisted, malformed
+model output degrades one field at a time. 127 default tests pass.
+**Left for later, not built:** rolling the day's extracts into the wiki's `context/regime` /
+`CompanyDossier` concepts as structured frontmatter. Not needed yet - research.py's synthesis call
+already turns news into wiki prose, and it now reads the DENSE extracted block instead of bare
+headlines, so the wiki should already improve without a second storage schema. Revisit only if the
+wiki's own narrative synthesis is found to lose the structured signal on the way to prose.
