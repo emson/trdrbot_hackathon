@@ -456,7 +456,7 @@ async def _run_tick(
             elfmem_blocks=ctx.blocks,
         )
 
-        shared: dict[str, Any] = {}
+        shared = local_tools.SharedContext()
         book = ledger_mod.Ledger(config.paths.state / "ledger.jsonl")
         sim_tool = local_tools.build_simulate_experiments(shared, config.paths.state, book)
         forecast_tool = local_tools.build_record_forecast(book, config.paths.state)

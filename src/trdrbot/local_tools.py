@@ -11,6 +11,7 @@ exit rule that exists only in prose is not an exit rule.
 
 from __future__ import annotations
 
+from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
 from typing import Any
@@ -21,6 +22,63 @@ from . import experiments, ids, market_stats, optmath, sizing
 from .calibration import CalibrationStore
 from .ledger import STANDALONE
 from .positions import Position, PositionStore
+
+
+@dataclass(frozen=True)
+class MarketParams:
+    """The market this cycle simulated against. `record_position` re-prices the
+    executed legs from exactly these, so entry greeks are DERIVED rather than
+    re-declared by the model (D-037/D-040)."""
+
+    spot: float
+    iv: float          # FRACTION (0.165 = 16.5%)
+    days: int
+
+
+@dataclass(frozen=True)
+class SimStructure:
+    """One priced candidate, keyed by its legs so the traded one can be found
+    again without the model re-declaring anything."""
+
+    key: tuple
+    name: str
+    qty: int
+    entry_cost: float | None
+    max_profit: float | None
+    max_loss: float | None
+    payoff_ratio: float | None
+    rr: float | None
+
+
+@dataclass(frozen=True)
+class SizingStash:
+    """What `size_position` computed, so `record_position` can fill
+    `max_loss_usd` itself. A forgotten field would silently count the position
+    as zero risk and quietly loosen the book caps (D-037)."""
+
+    underlying: str
+    contracts: int
+    max_loss_usd: float
+
+
+@dataclass
+class SharedContext:
+    """What one decide cycle's tools know about each other.
+
+    This was a bare `dict[str, Any]` - the system's real domain model, and
+    invisible: `simulate_experiments` wrote four keys, `size_position` read one
+    and wrote another, `record_position` read four, and the schema existed only
+    as `.get()` chains spread across four closures. Every "derive, don't
+    declare" fix in the codebase (D-037, D-040) was implemented by adding a key
+    to it, and nothing could check that the reader and the writer agreed.
+    """
+
+    thesis: experiments.Thesis | None = None
+    market: MarketParams | None = None
+    ranked: list[tuple[str, dict[str, Any]]] = field(default_factory=list)
+    structures: list[SimStructure] = field(default_factory=list)
+    sizing: SizingStash | None = None
+
 
 
 def _legs_key(legs: list[tuple[str, float, str]]) -> tuple:
@@ -74,7 +132,7 @@ def _unreachable_rules(
     return out
 
 
-def build_simulate_experiments(shared: dict[str, Any], state_dir: Path | None = None,
+def build_simulate_experiments(shared: SharedContext, state_dir: Path | None = None,
                                ledger: Any = None) -> StructuredTool:
     """Tool: score several expressions of one thesis before risking anything.
 
@@ -201,29 +259,30 @@ def build_simulate_experiments(shared: dict[str, Any], state_dir: Path | None = 
                 )
             except Exception as exc:  # noqa: BLE001 - never block a decision
                 print(f"[ledger] register failed: {exc!r}")
-        shared["thesis"] = thesis
+        shared.thesis = thesis
         # Market params of this simulation - record_position derives the
         # entry greeks from these, same derive-not-declare pattern as sizing.
-        shared["market"] = {"spot": spot, "iv": iv_pct / 100.0, "days": days_to_expiry}
-        shared["ranked"] = [(e.name, m) for e, m in ranked]
+        shared.market = MarketParams(spot=spot, iv=iv_pct / 100.0, days=days_to_expiry)
+        shared.ranked = [(e.name, m) for e, m in ranked]
         # Every simulated structure, keyed by its LEGS, so record_position can
         # find the one actually traded without the model re-declaring anything
         # (D-037's derive-not-declare). Used to tell the agent when an exit
         # rule it just wrote can never fire.
-        shared["structures"] = [
-            {
-                "key": _legs_key([(l.right, l.strike, l.side) for l in e.legs]),
-                "qty": sum(l.qty for l in e.legs),
-                "entry_cost": m.get("entry_cost"),
-                "max_profit": m.get("max_profit"),
-                "max_loss": m.get("max_loss"),
-                # Kelly's real `b` for this structure. Carried so size_position
+        shared.structures = [
+            SimStructure(
+                key=_legs_key([(l.right, l.strike, l.side) for l in e.legs]),
+                name=e.name,
+                qty=sum(l.qty for l in e.legs),
+                entry_cost=m.get("entry_cost"),
+                max_profit=m.get("max_profit"),
+                max_loss=m.get("max_loss"),
+                # Kelly's real `b` for this structure, carried so size_position
                 # can use it without the model re-declaring a number it was
                 # just shown (D-037's derive-don't-declare).
-                "payoff_ratio": m.get("payoff_ratio"),
-                "rr": (abs(m["max_profit"] / m["max_loss"])
-                       if m.get("max_profit") is not None and m.get("max_loss") else None),
-            }
+                payoff_ratio=m.get("payoff_ratio"),
+                rr=(abs(m["max_profit"] / m["max_loss"])
+                    if m.get("max_profit") is not None and m.get("max_loss") else None),
+            )
             for e, m in results if m.get("usable")
         ]
         return experiments.render_comparison(thesis, ranked)
@@ -243,7 +302,7 @@ def build_record_position(
     generated_by: str = "",
     calibration: CalibrationStore | None = None,
     sources: list[dict[str, Any]] | None = None,
-    shared: dict[str, Any] | None = None,
+    shared: SharedContext | None = None,
     ledger: Any = None,
 ) -> StructuredTool:
     def record_position(
@@ -341,11 +400,9 @@ def build_record_position(
         # computed this cycle, falling back to the model's own figure only if
         # sizing was skipped. Keeps the book caps honest without depending on
         # the model remembering a field.
-        sized = (shared or {}).get("sizing") or {}
-        if sized.get("max_loss_usd") is not None and (
-            not sized.get("underlying") or sized["underlying"] == underlying.upper()
-        ):
-            pos.max_loss_usd = float(sized["max_loss_usd"])
+        sized = shared.sizing if shared else None
+        if sized is not None and sized.underlying in ("", underlying.upper()):
+            pos.max_loss_usd = float(sized.max_loss_usd)
         elif max_loss_usd is not None:
             pos.max_loss_usd = float(max_loss_usd)
 
@@ -353,33 +410,29 @@ def build_record_position(
         # legs, price them with the market params simulate_experiments stashed.
         # The judged story ("net delta X, theta Y - chosen because...") comes
         # from here, and so does the book-greeks context on later ticks.
-        mkt = (shared or {}).get("market") or {}
-        if mkt:
+        mkt = shared.market if shared else None
+        if mkt is not None:
             occ_legs = []
-            for l in legs:
-                o = optmath.parse_occ(str(l.get("symbol", "")))
-                if o is None:
+            for leg in legs:
+                parsed = optmath.Leg.from_position_leg(leg)
+                if parsed is None:
                     occ_legs = []
                     break
-                occ_legs.append(optmath.Leg(
-                    right=o["right"], strike=o["strike"],
-                    side="long" if str(l.get("side", "")).lower() in ("long", "buy") else "short",
-                    qty=int(l.get("qty", 1) or 1), price=0.0,
-                ))
-            g = optmath.net_greeks(occ_legs, mkt["spot"], mkt["iv"], mkt["days"]) if occ_legs else None
+                occ_legs.append(parsed)
+            g = optmath.net_greeks(occ_legs, mkt.spot, mkt.iv, mkt.days) if occ_legs else None
             if g:
                 pos.greeks_at_entry = {k: round(v, 2) for k, v in g.items()}
-                pos.entry_iv = mkt["iv"]
-                pos.entry_spot = mkt["spot"]
+                pos.entry_iv = mkt.iv
+                pos.entry_spot = mkt.spot
 
         # Carry the thesis onto the position so resolution can attribute the
         # outcome to the VIEW or the STRUCTURE rather than just to P&L. Found
         # live: the very first position ever opened went straight from
         # get_option_chain to place_option_order to record_position with
-        # simulate_experiments never called in between, so `shared["thesis"]`
+        # simulate_experiments never called in between, so `shared.thesis`
         # was never set and this position can NEVER be attributed - silently,
         # since nothing before this line noticed (D-038).
-        th = (shared or {}).get("thesis")
+        th = shared.thesis if shared else None
         thesis_missing = th is None
         if th is not None:
             pos.thesis_claim = th.claim
@@ -407,21 +460,18 @@ def build_record_position(
         # Can the mark-based rules the agent just wrote actually fire? Matched
         # by LEGS against what simulate_experiments priced, so nothing is
         # re-declared and a mismatch simply skips the check.
-        traded_key = _legs_key([
-            (o["right"], o["strike"],
-             "long" if str(l.get("side", "")).lower() in ("long", "buy") else "short")
-            for l in legs
-            if (o := optmath.parse_occ(str(l.get("symbol", "")))) is not None
-        ]) if legs else ()
-        for st in (shared or {}).get("structures") or []:
-            if st["key"] != traded_key or not st["qty"]:
+        traded = [optmath.Leg.from_position_leg(leg) for leg in legs]
+        traded_key = (_legs_key([(t.right, t.strike, t.side) for t in traded if t])
+                      if legs and all(traded) else ())
+        for st in (shared.structures if shared else []):
+            if st.key != traded_key or not st.qty:
                 continue
-            scale = sum(int(l.get("qty", 1) or 1) for l in legs) / st["qty"]
+            scale = sum(int(l.get("qty", 1) or 1) for l in legs) / st.qty
             bad = _unreachable_rules(
                 stop_loss_pct, profit_target_pct,
-                (st["entry_cost"] or 0.0) * scale,
-                (st["max_profit"] * scale) if st["max_profit"] is not None else None,
-                (st["max_loss"] * scale) if st["max_loss"] is not None else None,
+                (st.entry_cost or 0.0) * scale,
+                (st.max_profit * scale) if st.max_profit is not None else None,
+                (st.max_loss * scale) if st.max_loss is not None else None,
             )
             if bad:
                 note += " WARNING - exit rule(s) that cannot trigger: " + "; ".join(bad) + "."
@@ -467,31 +517,43 @@ def build_record_position(
 RR_MATCH_TOLERANCE = 0.02
 
 
-def _matching_payoff_ratio(shared: dict[str, Any] | None,
-                           max_profit: float, max_loss: float) -> float | None:
+def _matching_payoff_ratio(shared: SharedContext | None, max_profit: float,
+                           max_loss: float, name: str = "") -> float | None:
     """The conditional payoff ratio of the simulated structure being sized.
 
-    Matched on risk/reward, which is SCALE-INVARIANT: the model quotes
+    By NAME when the model gives one - the names are echoed back to it in
+    `render_comparison`, so it can. That is exact, and it resolves the case
+    the R:R match documented as unresolvable: two candidates at the same
+    risk/reward returned None rather than guessing, and the sizing silently
+    fell back to max/max, which is the mismatch I-13 measured as directional
+    (credit structures understated 11-35%, debit overstated 43%).
+
+    Falling back to R:R, which is SCALE-INVARIANT: the model quotes
     per-contract max profit and loss while `simulate` priced whatever quantity
     the legs carried, so matching on dollars would fail on every multi-lot
-    candidate. Ambiguity (two candidates at the same R:R) returns None rather
-    than guessing - a wrong `b` is worse than the honest fallback.
+    candidate. Ambiguity there still returns None rather than guessing - a
+    wrong `b` is worse than the honest fallback, and `explain()` says which
+    one it used.
     """
-    structures = (shared or {}).get("structures") or []
+    structures = shared.structures if shared else []
     if not structures or not max_loss:
         return None
+    if name:
+        named = [s for s in structures if s.name == name and s.payoff_ratio is not None]
+        if len(named) == 1:
+            return named[0].payoff_ratio
     want = abs(max_profit / max_loss)
     hits = [s for s in structures
-            if s.get("rr") is not None and s.get("payoff_ratio") is not None
-            and abs(s["rr"] - want) <= RR_MATCH_TOLERANCE]
-    return hits[0]["payoff_ratio"] if len(hits) == 1 else None
+            if s.rr is not None and s.payoff_ratio is not None
+            and abs(s.rr - want) <= RR_MATCH_TOLERANCE]
+    return hits[0].payoff_ratio if len(hits) == 1 else None
 
 
 def build_size_position(
     calibration: CalibrationStore, equity: float,
     open_risk_usd: float = 0.0,
     open_risk_by_underlying: dict[str, float] | None = None,
-    shared: dict[str, Any] | None = None,
+    shared: SharedContext | None = None,
     posture: Any = None,
     extra_forecasts: list[Any] | None = None,
 ) -> StructuredTool:
@@ -508,6 +570,7 @@ def build_size_position(
         max_profit: float,
         max_loss: float,
         underlying: str = "",
+        structure_name: str = "",
     ) -> str:
         """Compute the defensible position size. Call this BEFORE placing an order.
 
@@ -522,6 +585,12 @@ def build_size_position(
             max_profit: from simulate_experiments (use a positive number)
             max_loss: from simulate_experiments (use a NEGATIVE number)
             underlying: the ticker, so per-name concentration is checked
+            structure_name: the candidate's name from simulate_experiments,
+                exactly as it appeared in the comparison table. Optional, but
+                give it: it matches this size to the structure that was
+                actually priced, instead of inferring the match from the
+                risk/reward ratio - which cannot tell two candidates apart
+                when they happen to share one.
         """
         d = sizing.size_position(
             equity=equity,
@@ -531,7 +600,8 @@ def build_size_position(
             # quantity the legs carried, so absolute dollars would not line up.
             # No match (a structure never simulated) falls back to max/max and
             # `explain()` says so, rather than silently using a different `b`.
-            payoff_ratio=_matching_payoff_ratio(shared, max_profit, max_loss),
+            payoff_ratio=_matching_payoff_ratio(shared, max_profit, max_loss,
+                                                structure_name),
             open_risk_usd=open_risk_usd,
             open_risk_by_underlying=open_risk_by_underlying,
             stated_confidence=stated_confidence,
@@ -554,11 +624,10 @@ def build_size_position(
         # forgotten field would have silently counted the position as zero
         # risk and quietly loosened the book caps (D-037).
         if shared is not None and d.contracts > 0:
-            shared["sizing"] = {
-                "underlying": underlying.upper(),
-                "contracts": d.contracts,
-                "max_loss_usd": abs(max_loss) * d.contracts,
-            }
+            shared.sizing = SizingStash(
+                underlying=underlying.upper(), contracts=d.contracts,
+                max_loss_usd=abs(max_loss) * d.contracts,
+            )
         return d.explain()
 
     return StructuredTool.from_function(

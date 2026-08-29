@@ -218,16 +218,12 @@ def book_greeks(positions: list[Any], underlying_prices: dict[str, float],
             skipped += 1
             continue
         legs = []
-        for l in getattr(pos, "legs", []):
-            o = optmath.parse_occ(str(l.get("symbol", "")))
-            if o is None:
+        for leg in getattr(pos, "legs", []):
+            parsed = optmath.Leg.from_position_leg(leg)
+            if parsed is None:
                 legs = []
                 break
-            legs.append(optmath.Leg(
-                right=o["right"], strike=o["strike"],
-                side="long" if str(l.get("side", "")).lower() in ("long", "buy") else "short",
-                qty=int(l.get("qty", 1) or 1), price=0.0, expiry=o["expiry"],
-            ))
+            legs.append(parsed)
         if not legs:
             skipped += 1
             continue

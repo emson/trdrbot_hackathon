@@ -287,7 +287,7 @@ async def _run_loop(interval: int, closed_interval: int, *,
 
 async def _prompts() -> int:
     from . import local_tools, prompts
-    shared: dict = {}
+    shared = local_tools.SharedContext()
     tools = [local_tools.build_simulate_experiments(shared),
              local_tools.build_size_position(None, 1.0),
              local_tools.build_record_position(None, "d")]

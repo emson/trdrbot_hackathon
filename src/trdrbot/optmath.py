@@ -82,6 +82,37 @@ class Leg:
         )
 
 
+    @classmethod
+    def from_position_leg(cls, d: dict[str, Any]) -> Leg | None:
+        """A RECORDED leg (OCC symbol + broker side) -> a Leg, or None.
+
+        The permissive sibling of `parse`, and the one home for a rule that
+        had three copies which DISAGREED with the strict one: analytics and
+        both local_tools sites accepted "buy"/"sell" (what the broker and the
+        model actually write), while `parse` rejects anything but
+        long/short. The same leg dict therefore parsed differently depending
+        on which of four paths read it.
+
+        Both exist deliberately. `parse` validates MODEL-AUTHORED arguments,
+        where a vague side is a defect worth refusing; this reads legs the
+        system already recorded, where refusing would mean losing a real
+        position's greeks over a vocabulary difference.
+        """
+        occ = parse_occ(str(d.get("symbol", "")))
+        if occ is None:
+            return None
+        side = str(d.get("side", "")).lower()
+        try:
+            qty = int(d.get("qty", 1) or 1)
+        except (TypeError, ValueError):
+            qty = 1
+        return cls(
+            right=occ["right"], strike=occ["strike"],
+            side="long" if side in ("long", "buy") else "short",
+            qty=qty, price=float(d.get("price", 0.0) or 0.0), expiry=occ["expiry"],
+        )
+
+
 def require_single_expiry(legs: Iterable[Leg]) -> None:
     """Guard every payoff computation. Raises MultiExpiryError on a calendar.
 

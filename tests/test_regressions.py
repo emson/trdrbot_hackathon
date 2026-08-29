@@ -2566,7 +2566,7 @@ def test_the_reachability_warning_is_actually_WIRED(tmp_path):
     from trdrbot.calibration import CalibrationStore
     from trdrbot.positions import PositionStore
 
-    shared: dict = {}
+    shared = local_tools.SharedContext()
     sim = local_tools.build_simulate_experiments(shared, None, None)
     sim.func(
         thesis_claim="up", underlying="SPY", horizon="2026-09-02", drift_pct=0.5,
@@ -2579,7 +2579,7 @@ def test_the_reachability_warning_is_actually_WIRED(tmp_path):
                 {"right": "P", "strike": 765, "side": "short", "qty": 1, "price": 1.90},
                 {"right": "P", "strike": 760, "side": "long", "qty": 1, "price": 1.10}]},
         ])
-    assert len(shared["structures"]) == 2
+    assert len(shared.structures) == 2
 
     store = PositionStore(tmp_path)
     rec = local_tools.build_record_position(
@@ -2768,12 +2768,14 @@ def test_the_payoff_ratio_is_matched_scale_invariantly():
     """The model quotes PER-CONTRACT figures; simulate priced whatever quantity
     the legs carried. Matching on dollars fails on every multi-lot candidate,
     so the match is on risk/reward, which is scale-free."""
-    from trdrbot.local_tools import _matching_payoff_ratio
+    from trdrbot.local_tools import SharedContext, SimStructure, _matching_payoff_ratio
 
-    shared = {"structures": [
-        {"rr": 0.59, "payoff_ratio": 0.67},
-        {"rr": 5.17, "payoff_ratio": 3.09},
-    ]}
+    def _s(name, rr, payoff):
+        return SimStructure(key=(), name=name, qty=1, entry_cost=None,
+                            max_profit=None, max_loss=None, payoff_ratio=payoff, rr=rr)
+
+    shared = SharedContext(structures=[_s("condor", 0.59, 0.67),
+                                       _s("put spread", 5.17, 3.09)])
     # 10 lots of the condor: same R:R, ten times the dollars.
     assert _matching_payoff_ratio(shared, 1860.0, -3140.0) == 0.67
     assert _matching_payoff_ratio(shared, 186.0, -314.0) == 0.67
@@ -2781,10 +2783,15 @@ def test_the_payoff_ratio_is_matched_scale_invariantly():
     # Never simulated -> no guess.
     assert _matching_payoff_ratio(shared, 999.0, -1000.0) is None
     # Ambiguous -> no guess either.
-    ambiguous = {"structures": [{"rr": 1.0, "payoff_ratio": 1.1},
-                                {"rr": 1.0, "payoff_ratio": 2.2}]}
+    ambiguous = SharedContext(structures=[_s("a", 1.0, 1.1), _s("b", 1.0, 2.2)])
     assert _matching_payoff_ratio(ambiguous, 100.0, -100.0) is None
     assert _matching_payoff_ratio(None, 100.0, -100.0) is None
+
+    # ...unless the model names the candidate, which resolves exactly the case
+    # the R:R match documented as unresolvable (D-092). Falling back to max/max
+    # there is the mismatch I-13 measured as DIRECTIONAL, not conservative.
+    assert _matching_payoff_ratio(ambiguous, 100.0, -100.0, "b") == 2.2
+    assert _matching_payoff_ratio(ambiguous, 100.0, -100.0, "nonexistent") is None
 
 
 # ==================================== D-077 horizons that resolve in time

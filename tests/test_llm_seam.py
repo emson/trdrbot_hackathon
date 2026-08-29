@@ -143,3 +143,55 @@ def test_the_inventory_covers_every_authored_prompt():
 
     assert {"coach.mutate", "news.extract"} <= names
     assert len(names) >= 8
+
+
+# ---------------------------------------------- the cross-tool bus and legs
+
+
+def test_the_three_leg_readers_now_agree():
+    """`buy`/`sell` is what the broker and the model actually write, and
+    `Leg.parse` rejects both - so three copies of a permissive coercion rule
+    existed alongside the strict validator and disagreed with it. The same leg
+    dict parsed differently depending on which of four paths read it."""
+    from trdrbot.optmath import Leg
+
+    for side, expect in (("buy", "long"), ("long", "long"),
+                         ("sell", "short"), ("short", "short"), ("", "short")):
+        leg = Leg.from_position_leg({"symbol": "SPY260903P00766000",
+                                     "side": side, "qty": 13})
+        assert leg is not None and leg.side == expect
+        assert leg.right == "P" and leg.strike == 766.0 and leg.expiry == "2026-09-03"
+
+
+def test_an_unparseable_occ_reads_as_no_leg_rather_than_a_wrong_one():
+    from trdrbot.optmath import Leg
+
+    assert Leg.from_position_leg({"symbol": "NOT-AN-OCC", "side": "buy"}) is None
+    assert Leg.from_position_leg({}) is None
+
+
+def test_the_strict_validator_still_refuses_a_vague_side():
+    """Both exist deliberately: `parse` validates MODEL-AUTHORED arguments,
+    where a vague side is a defect worth refusing."""
+    import pytest
+
+    from trdrbot.optmath import Leg
+
+    with pytest.raises(ValueError, match="side"):
+        Leg.parse({"right": "P", "strike": 766.0, "side": "buy", "qty": 1, "price": 1.0})
+
+
+def test_naming_the_structure_resolves_a_tie_the_ratio_match_cannot():
+    """Two candidates at the same risk/reward returned None and sizing fell
+    back to max/max - which I-13 measured as DIRECTIONAL, not conservative:
+    credit structures understated 11-35%, debit overstated 43%."""
+    from trdrbot.local_tools import SharedContext, SimStructure, _matching_payoff_ratio
+
+    def _s(name: str, payoff: float) -> SimStructure:
+        return SimStructure(key=(), name=name, qty=1, entry_cost=None, max_profit=None,
+                            max_loss=None, payoff_ratio=payoff, rr=1.0)
+
+    shared = SharedContext(structures=[_s("condor", 1.1), _s("put spread", 2.2)])
+
+    assert _matching_payoff_ratio(shared, 100.0, -100.0) is None
+    assert _matching_payoff_ratio(shared, 100.0, -100.0, "put spread") == 2.2
