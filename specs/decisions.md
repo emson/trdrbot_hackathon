@@ -3862,3 +3862,92 @@ worth holding, and if it has not, it should not be in the SELF frame either way.
 **Verified:** 11/11 lessons recallable by their cue (the new flagship recalls at rank 2);
 both wiki notes read back through `durable_text()` with conforming headings; 266 default tests
 + 19 contract pass, including the lesson-quality gate that rejected the unmeasured draft.
+
+## D-091: Phase 1 hardening - the review found eight live defects, and the pattern behind them
+
+Six parallel deep reviews (core loop, LLM layer, thesis sources, trading math, learning/memory,
+tests/specs) read the whole tree against live state, the logs and the installed dependencies.
+Plan in [notes/019](notes/019_refactor_plan.md); the executable phase in
+[notes/020](notes/020_phase1_implementation.md). This entry records what landed and why.
+
+**The pattern, which matters more than any single fix: every hard-won discipline in this
+codebase existed exactly once, next to N places that lacked it.** Atomic writes: 1 of ~12
+writers. Skip-the-bad-line JSONL reading: 4 of 6 readers, four different policies, and the two
+most critical (`journal.read`, `CalibrationStore`) guarded nothing. Failure-renders-into-the-
+prompt: research did it, discovery and muse told the model "(none)" when the API had failed.
+The fix for most of Phase 1 was promoting an existing good pattern to its whole population, not
+inventing anything.
+
+**Eight defects, all verified by running code, not by reading it:**
+
+- **beta aligned two close series by ARRAY POSITION** with no dates, while the cache is written
+  per-symbol with a ten-day staleness window allowed independently per symbol. QQQ against SPY
+  read **+0.10 at R2 0.004** where one session of realignment gives **+1.48 at R2 0.841** - and
+  `shrunk_beta` then pulled the broken estimate toward 1.0, so it read as honest ignorance
+  rather than a wrong number. Fed the CONCENTRATED warning in the decide prompt. (I-30)
+- **langgraph >=1.0 inverted the tool-error default** under a `langgraph>=0.2` pin. A dead MCP
+  subprocess now escaped `agent.ainvoke`, and the handler it landed in called
+  `record_failure` on EVERY pending item - three blips dead-letter every opportunity. Worse: a
+  raise from `record_position` after a fill loses the execution row AND the warning that exists
+  to catch exactly that. (I-31)
+- **Closed positions were credited twice, and the first credit followed the money.**
+  `learn.on_resolution` applied 0.9/0.1 by P&L at close to the same blocks `attribution.run`
+  judges at horizon from the verdict. A lucky win took +0.9 and then "learn nothing" - the
+  superstition the README's four-quadrant table exists to prevent, installed by the path that
+  ran first. Each file read correctly alone, which is why it survived. (I-32)
+- **The capital-protection fast path was killable by one bad character.** `_pct` fell back to
+  `_f`'s 0.0 default, so an unparseable threshold became a stop at exactly breakeven; a null
+  `days_before_expiry` raised TypeError and took evaluation down for every OTHER position; an
+  unguarded `learn` call meant a corrupt minds.json disarmed stops for the tick; one
+  symbol-less broker row KeyErrored `by_symbol`, the first thing reconcile calls. (I-33)
+- **`trdrbot run` never took the tick lock** (INV-7 unenforced on the only unattended path)
+  **and the watchdog was config-only** (FM-26 unmitigated since D-017). (I-34)
+- **`book_greeks` priced a calendar at leg[0]'s expiry** - delta, theta, vega, gamma all
+  exactly 0.0 against an honest -$31.83/day of theta. Zero is the worst possible wrong answer:
+  it reads as "adds nothing to the book". The guard existed and was only ever called on a path
+  the model cannot reach. (I-35)
+- **The two most critical readers were the least guarded, and most writers were non-atomic.**
+  `Ledger` additionally DELETED drift-incompatible rows on the next rewrite, so adding one
+  field to `Entry` would have silently destroyed the pre-registration history D-052 rests on.
+  (I-36)
+- **Opportunities could never dedup** - uuid4-unique by construction, so the live pending
+  directory held XLE six times and MU five, three byte-identical band pairs from three muse
+  runs, all entering one decide batch as if they were five independent signals. (I-37)
+
+Plus, in the machinery that decides what gets promoted: one malformed candidate aborted both
+arms of an open trial; `_open` saved state before appending its event, so a crash left a lever
+permanently stuck mid-experiment with no repair path; and `tally` counted duplicate
+`trial_result` rows, inflating the posterior for whichever arm was duplicated (`run_nonce`
+existed from the start with nothing reading it).
+
+**The enforcement layer the coding principles already mandated was wired for the first time.**
+ruff (282 findings, 216 auto-fixed) and mypy, strict on the numeric core. Two rules earn
+specific mention: `DTZ011` now bans `date.today()` in `src/`, which is how the four-clocks
+problem stays fixed - `ids.today()` (UTC, for anything compared against UTC-stamped data) and
+`ids.market_today()` (ET, for anything meaning "the trading day") are the only two clocks, and
+a lint rule enforces it mechanically rather than a test asserting on source text.
+
+**On tests.** 266 -> 330, and the shape is the point: the six reviews independently found that
+the suite feeds only clean, well-formed inputs, which is where five of the six high-severity
+defects were hiding. Every fix landed with a malformed-input test, at the seam, running real
+stores on tmp_path with a fake only at the elfmem boundary. The credit spine - six decision
+records of bugs, previously policed by eleven `inspect.getsource` string matches - now has
+behavioural coverage.
+
+Two source-inspection tests were deleted and one rewritten, each for the same reason and each
+worth recording: `test_credit_gates_on_measured_pnl_not_the_close_label` matched the literal
+text of the function D-091 changed and **SURVIVED the change untouched**, still reporting green
+about a behaviour that no longer exists there. The vol-clock test asserted a parameter was
+"accepted and IGNORED" - a comment enforced by a test; deleting the parameter makes the
+property structural instead. That is the failure mode of source-inspection tests, twice, in one
+phase.
+
+**Verified after:** 330 tests pass; one live tick runs clean through the housekeeping path;
+`trdrbot health` reports 0 problems; the ledger still holds 101 trials, the calibration record
+its Brier 0.3844, and the Coach its 9 paired runs at posterior 0.379. No capability changed
+except the one deliberate semantic fix (block credit deferred to attribution), which is
+recorded above and revertible in one commit.
+
+**One consequence to expect:** `betas_for` reports ASSUMED for every name until the next
+research pass rewrites the cache with dates. That is the honest degrade; the numbers it
+replaces were confidently wrong.

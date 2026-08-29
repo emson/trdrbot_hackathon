@@ -7,50 +7,17 @@ Sorted by severity.
 
 ## Open
 
-- **I-30 · `beta` aligns close series by array position with no dates - VERIFIED wrong live**
-  (notes/019 review, 2026-08-29). `save_closes` stores bare floats; cached files were fetched
-  on three different days; QQQ reads +0.10 (R² 0.004) against SPY where one session of
-  realignment gives +1.48 (R² 0.841). `shrunk_beta` then pulls broken estimates toward 1.0,
-  hiding the defect. Feeds beta-weighted book delta and the CONCENTRATED warning in the decide
-  prompt. **Fix:** store (date, close) pairs, align on the date intersection (plan 1.6).
-- **I-31 · langgraph 1.x re-raises runtime tool errors - the decide cycle dies on a transport
-  blip** (notes/019 review; verified against installed langgraph 1.2.11). Pre-1.0
-  `handle_tool_errors=True` absorbed all tool exceptions into an error message; the current
-  default re-raises everything except argument-validation errors. A dead MCP subprocess or a
-  raise inside `record_position` now escapes `ainvoke`, burns every pending item's retry
-  budget, and can leave a filled order unjournalled with no exit rules. **Fix:** one line -
-  pass a `ToolNode(tools, handle_tool_errors=True)` (plan 1.1).
-- **I-32 · Closed positions are credited twice, and the first credit follows the money**
-  (notes/019 review). `learn.on_resolution` applies 0.9/0.1 by P&L at close to the same
-  blocks attribution later judges at horizon - so a lucky win takes +0.9 and then "learn
-  nothing", installing exactly the superstition the README's table forbids. Live: the NVDA
-  position closed +52.8% with attribution pending. **Fix:** defer block credit to attribution
-  per `ATTRIBUTION_SIGNAL`'s own docstring (plan 1.9).
-- **I-33 · The capital-protection fast path is killable by one bad input** (notes/019 review;
-  verified). `learn.on_fill/on_resolution` are unguarded inside reconcile (a corrupt
-  minds.json disarms exit rules); a malformed exit-rule threshold parses to a live stop at
-  breakeven (`_pct` → 0.0); one bad rule aborts evaluation for every position; a symbol-less
-  broker row KeyErrors the whole fast path. **Fix:** plan 1.4/1.5.
-- **I-34 · `trdrbot run` never takes the tick lock, and the watchdog is config-only**
-  (notes/019 review). INV-7 is unenforced on the only unattended path (`_acquire_run_lock` is
-  a weaker second mechanism at a relative path); `watchdog_seconds` is read by nothing, so
-  FM-26 (hung LLM call) has no mitigation. **Fix:** plan 1.2/1.3.
-- **I-35 · `book_greeks` prices every leg at leg[0]'s expiry - a calendar renders as zero
-  risk** (notes/019 review; verified: real calendar → delta/theta/vega all 0 vs true
-  −$31.83/day theta). `require_single_expiry` guards only a path the model cannot reach.
-  **Fix:** plan 1.7.
-- **I-36 · The two most critical readers are the least guarded, and most writers are
-  non-atomic** (notes/019 review). `journal.read` and `CalibrationStore.__init__` raise on
-  one truncated line (the latter at the top of every tick); ledger/calibration/positions/
-  sensors/minds/high-water/wiki all rewrite files non-atomically - `ledger.jsonl.bak-before-
-  repair` suggests this already bit once. `Ledger`'s loader also silently *deletes*
-  drift-incompatible rows on the next rewrite. **Fix:** plan 1.8/1.10/2.1.
-- **I-37 · Opportunity items never dedup - the inbox floods** (notes/019 review). Ids are
-  uuid4-unique by construction; live pending dir carries 22 opportunities incl. XLE ×6 with
-  byte-identical bands from three muse runs, all entering one decide batch. The muse's 3/day
-  cap is also enforced only at the tick call site - the CLI bypasses it (9 muse rows on
-  2026-08-29). **Fix:** content-hash ids + cap inside `muse.run` (plan 1.11/2.7).
-
+- ~~**I-30 · `beta` aligns close series by array position with no dates - VERIFIED wrong live**~~ **FIXED 2026-08-29 (D-091).** beta now stores per-bar dates and aligns on the date intersection; a series without dates degrades to the reported ASSUMED_BETA rather than a positional estimate, and self-heals on the next research pass. Verified by reverting the fix and watching the regression test fail.
+- ~~**I-31 · langgraph 1.x re-raises runtime tool errors - the decide cycle dies on a transport
+  blip**~~ **FIXED 2026-08-29 (D-091).** decide_tool_node binds tools with handle_tool_errors=True, restoring the contract the whole decide path assumes (guards return refusal STRINGS, the compactor fails open). Verified by reverting the fix and watching the regression test fail.
+- ~~**I-32 · Closed positions are credited twice, and the first credit follows the money**~~ **FIXED 2026-08-29 (D-091).** block credit is deferred to attribution at the thesis horizon; the mind's own prediction still resolves at close, where P&L is the honest answer to it. Verified by reverting the fix and watching the regression test fail.
+- ~~**I-33 · The capital-protection fast path is killable by one bad input**~~ **FIXED 2026-08-29 (D-091).** learn is advisory at all three call sites (learn.guarded + a learn_run heartbeat); _pct/_normalise return None on anything unparseable; evaluate is isolated per position; by_symbol skips symbol-less rows. Verified by reverting the fix and watching the regression test fail.
+- ~~**I-34 · `trdrbot run` never takes the tick lock, and the watchdog is config-only**~~ **FIXED 2026-08-29 (D-091).** the run loop takes tick_lock and the weaker pid-file lock is deleted; the watchdog bounds the decide call and, x4, the whole tick. Verified by reverting the fix and watching the regression test fail.
+- ~~**I-35 · `book_greeks` prices every leg at leg[0]'s expiry - a calendar renders as zero
+  risk**~~ **FIXED 2026-08-29 (D-091).** book_greeks calls require_single_expiry and counts a calendar into positions_skipped; the guard also refuses a partially-dated leg set instead of assuming shared. Verified by reverting the fix and watching the regression test fail.
+- ~~**I-36 · The two most critical readers are the least guarded, and most writers are
+  non-atomic**~~ **FIXED 2026-08-29 (D-091).** journal.read and CalibrationStore skip-and-count bad lines; both loaders ignore unknown keys so drift cannot be deleted by the next rewrite; store.write_atomic is used by every state writer. Verified by reverting the fix and watching the regression test fail.
+- ~~**I-37 · Opportunity items never dedup - the inbox floods**~~ **FIXED 2026-08-29 (D-091).** opportunity ids are content-derived per source per day, and Inbox.write returns the existing item rather than adding a duplicate. Verified by reverting the fix and watching the regression test fail.
 - **I-29 · The bootstrap base rate is overconfident by 15-18pp where credit spreads live**
   ([notes/017](notes/017_learning_from_historic_data.md)). Measured offline over **21,280
   historical band-forecasts** (56 tickers, horizons 3/5/10, 5 band shapes, history sliced before
@@ -243,6 +210,17 @@ Sorted by severity.
 - SPY/NVDA `last_pnl_pct` values are cumulative-equity estimates, not fill records.
 
 ## Resolved (most recent first - keep the last ~10 for pattern-reading)
+
+- ~~beta aligned two close series by array position; QQQ read +0.10 (R2 .004) vs +1.48~~ (D-091)
+- ~~langgraph 1.x re-raised tool errors, so an MCP blip burned every item's retry budget~~ (D-091)
+- ~~closed positions credited twice, the first credit following the money not the verdict~~ (D-091)
+- ~~one malformed exit-rule threshold became a live stop at breakeven~~ (D-091)
+- ~~`trdrbot run` never took the tick lock; the watchdog was configured and read by nothing~~ (D-091)
+- ~~a calendar spread priced as riskless - delta, theta and vega all exactly zero~~ (D-091)
+- ~~one truncated line in forecasts.jsonl killed every tick, permanently~~ (D-091)
+- ~~the Ledger DELETED drift-incompatible rows on the next rewrite~~ (D-091)
+- ~~opportunities could never dedup; the inbox held XLE six times in one batch~~ (D-091)
+- ~~four clocks: UTC horizons read in local time, DTE off by one every evening~~ (D-091)
 
 - ~~Every mark-based exit rule was unreachable (P&L% of gross, not net premium)~~ (D-074)
 - ~~Interim scoring dead since the bands landed - percent constants, fraction input~~ (D-074)
