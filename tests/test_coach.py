@@ -573,3 +573,81 @@ def test_the_mutate_prompt_warns_about_braces_outside_the_json_example():
     so it was true and insufficient."""
     assert "not only inside the JSON" in coach.MUTATE_PROMPT
     assert "ordinary prose" in coach.MUTATE_PROMPT
+
+
+# --- crash safety: the log is the truth, state is a cache of it ------------
+
+
+def test_a_duplicate_run_nonce_is_counted_once(tmp_path):
+    """`muse.run` derives its nonce from today's `muse` journal rows but calls
+    `record_trial` BEFORE appending its own row - so a crash in that window
+    makes the next run compute the SAME nonce and write a second trial_result
+    for one run. Both counted toward runs, successes, failures and therefore
+    the posterior, inflating the evidence for whichever arm was duplicated.
+    The field existed from the start with nothing reading it."""
+    cfg = _cfg(tmp_path)
+    arm = {"survived": 3, "failed": 2, "candidates": 5}
+    coach._append(coach.events_path(cfg), {
+        "kind": "experiment_opened", "exp_id": "exp_1", "lever": "muse.prompt",
+        "incumbent": "v0", "challenger": "v1"})
+    for _ in range(2):  # the same run, recorded twice
+        coach._append(coach.events_path(cfg), {
+            "kind": "trial_result", "exp_id": "exp_1", "run_nonce": 0,
+            "incumbent": arm, "challenger": arm})
+
+    t = coach.tally(cfg, "exp_1")
+
+    assert t.runs == 1, f"the duplicate was counted as a second run: {t.runs}"
+    assert (t.s_i, t.f_i) == (3, 2)
+    assert t.voided == 1, "the duplicate should be visible, not silently dropped"
+
+
+def test_distinct_nonces_still_accumulate(tmp_path):
+    """The dedup must not collapse genuinely separate runs."""
+    cfg = _cfg(tmp_path)
+    arm = {"survived": 3, "failed": 2, "candidates": 5}
+    coach._append(coach.events_path(cfg), {
+        "kind": "experiment_opened", "exp_id": "exp_1", "lever": "muse.prompt",
+        "incumbent": "v0", "challenger": "v1"})
+    for nonce in (0, 1, 2):
+        coach._append(coach.events_path(cfg), {
+            "kind": "trial_result", "exp_id": "exp_1", "run_nonce": nonce,
+            "incumbent": arm, "challenger": arm})
+
+    assert coach.tally(cfg, "exp_1").runs == 3
+
+
+def test_an_experiment_with_no_opened_event_is_cleared_rather_than_stuck(tmp_path):
+    """`_open` used to save state BEFORE appending its event - the opposite of
+    `_close` and `_promote`. A crash between them left state naming an exp_id
+    with no opened row: tally() None forever, is_closed() False forever, so the
+    muse kept running a paired trial whose results could never be scored, and
+    nothing repaired it."""
+    cfg = _cfg(tmp_path)
+    st = coach.LeverState(lever="muse.prompt", incumbent=coach.Variant("v0", "seed"))
+    st.challenger = coach.Variant("v1", "challenger text")
+    st.exp_id = "exp_orphaned"
+    coach.save_state(cfg, st)
+
+    applied = coach.reconcile(cfg, seeds={"muse.prompt": "seed"})
+
+    assert any("exp_orphaned" in a for a in applied)
+    healed = coach.load_state(cfg, "muse.prompt", "seed")
+    assert healed.exp_id is None and healed.challenger is None
+    assert coach.arms(cfg, "muse.prompt", seed_text="seed").paired is False
+
+
+def test_open_appends_the_event_before_it_swaps_state(tmp_path):
+    """Ordering IS the crash-safety property, so it is asserted on the
+    artifacts rather than trusted: after _open, the event log must already
+    carry the experiment that lever state names."""
+    cfg = _cfg(tmp_path)
+    journal = _journal(tmp_path)
+    st = coach.LeverState(lever="muse.prompt", incumbent=coach.Variant("v0", "seed"))
+
+    coach._open(cfg, st, coach.Variant("v1", "challenger text"), journal)
+
+    opened = [r for r in coach.events(cfg) if r.get("kind") == "experiment_opened"]
+    assert [r["exp_id"] for r in opened] == [st.exp_id]
+    assert coach.reconcile(cfg, seeds={"muse.prompt": "seed"}) == [], \
+        "a freshly opened experiment must not look orphaned"

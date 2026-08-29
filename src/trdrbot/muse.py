@@ -155,6 +155,21 @@ class ShadowLedger:
         return True
 
 
+def _prob(v: Any) -> float:
+    """A candidate's stated probability, defaulting when the model omits or
+    nulls it.
+
+    `float(cand.get("probability", 0.5))` raised TypeError on
+    `"probability": null` - the KEY is present, so the default never fired -
+    and since `_evaluate` had no per-candidate guard, one malformed candidate
+    aborted the whole run and BOTH arms of an open trial with it.
+    """
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return 0.5
+
+
 def _reject(ledger: Ledger, entry: Any, reason: str) -> None:
     """Record the gate that refused a candidate, on its own ledger row.
 
@@ -293,148 +308,163 @@ async def _evaluate(
     """
     evaluated: list[dict[str, Any]] = []
     for cand in raw:
-        if not isinstance(cand, dict) or not cand.get("underlying"):
-            continue
-        u = str(cand["underlying"]).upper()
-        verdict = {"underlying": u, "claim": str(cand.get("claim", ""))[:300],
-                   "stated": float(cand.get("probability", 0.5)),
-                   "chain": cand.get("chain", [])}
-
-        # 1. PRICE HISTORY FIRST, because the band arrives as a percentage move
-        # and cannot become a price without one. This is data availability, not
-        # a judgement gate - a candidate that gets this far is still registered
-        # below whatever happens next.
-        ckey = f"closes|{u}"
-        if ckey in cache:
-            closes = cache[ckey]
-        else:
-            closes = market_stats.load_closes(config.paths.state, u)
-            if closes is None:
-                try:
-                    dates, closes = await market_stats.fetch_daily_series(tools, u)
-                    if len(closes) >= 60:
-                        market_stats.save_closes(config.paths.state, u, closes,
-                                                 dates=dates)
-                except Exception:  # noqa: BLE001
-                    closes = None
-            cache[ckey] = closes
-        usable = bool(closes) and len(closes) >= 60
-        spot = closes[-1] if usable else None
-        band_low, band_high = _bands_from_pct(cand, spot)
-
-        # 2. register EVERY candidate before any gate can discard it - the
-        # multiple-testing correction needs the trials that failed (D-052).
-        # But registered as a TRIAL, not as a claim: `probability_stated=False`
-        # until it survives every gate below, at which point `mark_stated`
-        # promotes it. Registration and belief are different events, and
-        # conflating them put 13 of this ledger's 15 muse rows into the
-        # calibration sample as claims the muse had itself rejected - bands 3x
-        # from spot, base rates of 0% and 100%, a horizon already in the past.
-        entry = ledger.register(
-            kind="muse", underlying=u, claim=str(cand.get("claim", "")),
-            probability=float(cand.get("probability", 0.5)),
-            probability_stated=False,
-            horizon=str(cand.get("horizon", "")),
-            band_low=band_low, band_high=band_high,
-            variant=variant,
-            notes="muse: " + " -> ".join(str(c) for c in cand.get("chain", []))[:300],
-        )
-        if not usable:
-            verdict["fate"] = "rejected: no usable price history"
-            _reject(ledger, entry, verdict["fate"])
-            evaluated.append(verdict)
-            continue
-        if entry is None:
-            verdict["fate"] = "rejected: unfalsifiable (no band)"
-            _reject(ledger, entry, verdict["fate"])
-            evaluated.append(verdict)
-            continue
-        # The bands are now COMPUTED from live closes, so a level recalled from
-        # training data cannot get in. `_plausible_band` stays as a backstop for
-        # an absurd percentage rather than as the primary defence it used to be.
-        cand["band_low"], cand["band_high"] = band_low, band_high
-        if not _plausible_band(cand, spot):
-            verdict["fate"] = f"rejected: band is not a plausible price (spot {spot:.2f})"
-            _reject(ledger, entry, verdict["fate"])
-            evaluated.append(verdict)
-            continue
-
+        # One malformed candidate costs ONE candidate. Without this a
+        # single bad field (a null probability, a non-string underlying)
+        # aborted the whole run AND both arms of an open trial - so a
+        # model hiccup could void a paired trial that had nothing wrong
+        # with either variant.
+        # Bound before the guard so the handler can always reach it: an
+        # exception thrown before registration still needs a verdict recorded.
+        entry: Any = None
+        verdict: dict[str, Any] = {}
         try:
-            from datetime import date
-            days = (date.fromisoformat(str(cand["horizon"])) - date.today()).days
-        except (ValueError, TypeError, KeyError):
-            days = 0
-        # The muse had NO deadline check at all - it could emit a thesis that
-        # resolves after the competition ends, which can never inform anything.
-        # And its output clustered at the far end of whatever range it was
-        # given: all five live forecasts landed on the last useful day but one.
-        if days <= 0 or days > 10:
-            verdict["fate"] = f"rejected: horizon {cand.get('horizon')} outside 1-10 days"
-            _reject(ledger, entry, verdict["fate"])
-            evaluated.append(verdict)
-            continue
-        if latest and str(cand.get("horizon", "")) > latest:
-            verdict["fate"] = (f"rejected: horizon {cand.get('horizon')} resolves too late "
-                               f"to act on before {config.deadline} (latest useful {latest})")
-            _reject(ledger, entry, verdict["fate"])
-            evaluated.append(verdict)
-            continue
+            if not isinstance(cand, dict) or not cand.get("underlying"):
+                continue
+            u = str(cand["underlying"]).upper()
+            verdict = {"underlying": u, "claim": str(cand.get("claim", ""))[:300],
+                       "stated": _prob(cand.get("probability")),
+                       "chain": cand.get("chain", [])}
 
-        # Base rate from the CALIBRATED bootstrap (D-089). The raw one was
-        # measured overconfident by 15-23pp exactly where these gates bite
-        # (I-29): it called bands "vacuous" using an optimistic number and
-        # understated the tails where breakout claims live. The inflation is
-        # fitted offline against history with a holdout veto, read from an
-        # artifact, and 1.0 whenever no fit exists - see band_inflation().
-        inflate = market_stats.band_inflation(config.paths.state, days)
-        factors = market_stats.bootstrap_factors(closes, days, seed=f"muse|{u}",
-                                                 inflate=inflate)
-        spot = closes[-1]
-        lo, hi = cand.get("band_low"), cand.get("band_high")
-        held = sum(1 for f in factors
-                   if (lo is None or spot * f >= lo) and (hi is None or spot * f <= hi))
-        base = held / len(factors) if factors else 0.0
-        verdict["base_prob"] = round(base, 3)
-        verdict["base_inflate"] = inflate
-        verdict["claimed_edge"] = round(verdict["stated"] - base, 3)
+            # 1. PRICE HISTORY FIRST, because the band arrives as a percentage move
+            # and cannot become a price without one. This is data availability, not
+            # a judgement gate - a candidate that gets this far is still registered
+            # below whatever happens next.
+            ckey = f"closes|{u}"
+            if ckey in cache:
+                closes = cache[ckey]
+            else:
+                closes = market_stats.load_closes(config.paths.state, u)
+                if closes is None:
+                    try:
+                        dates, closes = await market_stats.fetch_daily_series(tools, u)
+                        if len(closes) >= 60:
+                            market_stats.save_closes(config.paths.state, u, closes,
+                                                     dates=dates)
+                    except Exception:  # noqa: BLE001
+                        closes = None
+                cache[ckey] = closes
+            usable = bool(closes) and len(closes) >= 60
+            spot = closes[-1] if usable else None
+            band_low, band_high = _bands_from_pct(cand, spot)
 
-        # The gate is about INFORMATION, not the base rate alone. A band that
-        # history almost always holds is vacuous ONLY if the model agrees with
-        # history - a stated 27% against a 99% base is a breakout call, and
-        # that disagreement IS the claim (found on the first live run: the
-        # naive ceiling rejected exactly the most interesting candidate). The
-        # floor stays hard: a band the drift-free bootstrap can never reach
-        # needs a jump the model cannot evidence, which is a lottery ticket
-        # whatever the model says.
-        disagrees = abs(verdict["claimed_edge"]) >= 0.25
-        if base < BASE_PROB_FLOOR:
-            verdict["fate"] = f"rejected: base probability {base:.0%} - a lottery ticket"
+            # 2. register EVERY candidate before any gate can discard it - the
+            # multiple-testing correction needs the trials that failed (D-052).
+            # But registered as a TRIAL, not as a claim: `probability_stated=False`
+            # until it survives every gate below, at which point `mark_stated`
+            # promotes it. Registration and belief are different events, and
+            # conflating them put 13 of this ledger's 15 muse rows into the
+            # calibration sample as claims the muse had itself rejected - bands 3x
+            # from spot, base rates of 0% and 100%, a horizon already in the past.
+            entry = ledger.register(
+                kind="muse", underlying=u, claim=str(cand.get("claim", "")),
+                probability=_prob(cand.get("probability")),
+                probability_stated=False,
+                horizon=str(cand.get("horizon", "")),
+                band_low=band_low, band_high=band_high,
+                variant=variant,
+                notes="muse: " + " -> ".join(str(c) for c in cand.get("chain", []))[:300],
+            )
+            if not usable:
+                verdict["fate"] = "rejected: no usable price history"
+                _reject(ledger, entry, verdict["fate"])
+                evaluated.append(verdict)
+                continue
+            if entry is None:
+                verdict["fate"] = "rejected: unfalsifiable (no band)"
+                _reject(ledger, entry, verdict["fate"])
+                evaluated.append(verdict)
+                continue
+            # The bands are now COMPUTED from live closes, so a level recalled from
+            # training data cannot get in. `_plausible_band` stays as a backstop for
+            # an absurd percentage rather than as the primary defence it used to be.
+            cand["band_low"], cand["band_high"] = band_low, band_high
+            if not _plausible_band(cand, spot):
+                verdict["fate"] = f"rejected: band is not a plausible price (spot {spot:.2f})"
+                _reject(ledger, entry, verdict["fate"])
+                evaluated.append(verdict)
+                continue
+
+            try:
+                from datetime import date
+                days = (date.fromisoformat(str(cand["horizon"])) - date.today()).days
+            except (ValueError, TypeError, KeyError):
+                days = 0
+            # The muse had NO deadline check at all - it could emit a thesis that
+            # resolves after the competition ends, which can never inform anything.
+            # And its output clustered at the far end of whatever range it was
+            # given: all five live forecasts landed on the last useful day but one.
+            if days <= 0 or days > 10:
+                verdict["fate"] = f"rejected: horizon {cand.get('horizon')} outside 1-10 days"
+                _reject(ledger, entry, verdict["fate"])
+                evaluated.append(verdict)
+                continue
+            if latest and str(cand.get("horizon", "")) > latest:
+                verdict["fate"] = (f"rejected: horizon {cand.get('horizon')} resolves too late "
+                                   f"to act on before {config.deadline} (latest useful {latest})")
+                _reject(ledger, entry, verdict["fate"])
+                evaluated.append(verdict)
+                continue
+
+            # Base rate from the CALIBRATED bootstrap (D-089). The raw one was
+            # measured overconfident by 15-23pp exactly where these gates bite
+            # (I-29): it called bands "vacuous" using an optimistic number and
+            # understated the tails where breakout claims live. The inflation is
+            # fitted offline against history with a holdout veto, read from an
+            # artifact, and 1.0 whenever no fit exists - see band_inflation().
+            inflate = market_stats.band_inflation(config.paths.state, days)
+            factors = market_stats.bootstrap_factors(closes, days, seed=f"muse|{u}",
+                                                     inflate=inflate)
+            spot = closes[-1]
+            lo, hi = cand.get("band_low"), cand.get("band_high")
+            held = sum(1 for f in factors
+                       if (lo is None or spot * f >= lo) and (hi is None or spot * f <= hi))
+            base = held / len(factors) if factors else 0.0
+            verdict["base_prob"] = round(base, 3)
+            verdict["base_inflate"] = inflate
+            verdict["claimed_edge"] = round(verdict["stated"] - base, 3)
+
+            # The gate is about INFORMATION, not the base rate alone. A band that
+            # history almost always holds is vacuous ONLY if the model agrees with
+            # history - a stated 27% against a 99% base is a breakout call, and
+            # that disagreement IS the claim (found on the first live run: the
+            # naive ceiling rejected exactly the most interesting candidate). The
+            # floor stays hard: a band the drift-free bootstrap can never reach
+            # needs a jump the model cannot evidence, which is a lottery ticket
+            # whatever the model says.
+            disagrees = abs(verdict["claimed_edge"]) >= 0.25
+            if base < BASE_PROB_FLOOR:
+                verdict["fate"] = f"rejected: base probability {base:.0%} - a lottery ticket"
+                _reject(ledger, entry, verdict["fate"])
+                evaluated.append(verdict)
+                continue
+            if base > BASE_PROB_CEIL and not disagrees:
+                verdict["fate"] = (f"rejected: base {base:.0%} and the model agrees - "
+                                   f"vacuous, carries no information")
+                _reject(ledger, entry, verdict["fate"])
+                evaluated.append(verdict)
+                continue
+
+            gkey = f"gate|{u}"
+            if gkey not in cache:
+                cache[gkey] = await _options_gate(tools, u, config.deadline)
+            gate = cache[gkey]
+            if not gate.get("tradeable"):
+                verdict["fate"] = "rejected: no options chain inside the deadline"
+                _reject(ledger, entry, verdict["fate"])
+                evaluated.append(verdict)
+                continue
+
+            # Survived every gate - NOW it is a claim the system stands behind,
+            # and only now may it score calibration.
+            ledger.mark_stated(entry.id)
+            verdict["fate"] = "candidate"
+            verdict["_cand"] = cand
+            evaluated.append(verdict)
+        except Exception as exc:  # noqa: BLE001 - per-candidate isolation
+            verdict["fate"] = f"error: {type(exc).__name__}"
             _reject(ledger, entry, verdict["fate"])
             evaluated.append(verdict)
             continue
-        if base > BASE_PROB_CEIL and not disagrees:
-            verdict["fate"] = (f"rejected: base {base:.0%} and the model agrees - "
-                               f"vacuous, carries no information")
-            _reject(ledger, entry, verdict["fate"])
-            evaluated.append(verdict)
-            continue
-
-        gkey = f"gate|{u}"
-        if gkey not in cache:
-            cache[gkey] = await _options_gate(tools, u, config.deadline)
-        gate = cache[gkey]
-        if not gate.get("tradeable"):
-            verdict["fate"] = "rejected: no options chain inside the deadline"
-            _reject(ledger, entry, verdict["fate"])
-            evaluated.append(verdict)
-            continue
-
-        # Survived every gate - NOW it is a claim the system stands behind,
-        # and only now may it score calibration.
-        ledger.mark_stated(entry.id)
-        verdict["fate"] = "candidate"
-        verdict["_cand"] = cand
-        evaluated.append(verdict)
     return evaluated
 
 

@@ -350,9 +350,23 @@ def tally(cfg: Any, exp_id: str) -> Tally | None:
               incumbent=str(opened.get("incumbent", "")),
               challenger=str(opened.get("challenger", "")),
               opened_ts=str(opened.get("ts", "")))
+    # A run_nonce is unique per muse run, and the field existed from the start
+    # with nothing reading it. It has to be read: `muse.run` derives the nonce
+    # from today's `muse` journal rows but calls `record_trial` BEFORE
+    # appending its own row, so a crash in that window makes the next run
+    # compute the SAME nonce and write a second trial_result for one run. Both
+    # then counted toward `runs`, the successes, the failures and therefore the
+    # posterior - inflating the evidence for whichever arm happened to be
+    # duplicated.
+    seen_nonces: set[Any] = set()
     for r in rows:
         if r.get("kind") != "trial_result" or r.get("exp_id") != exp_id:
             continue
+        nonce = r.get("run_nonce")
+        if nonce is not None and nonce in seen_nonces:
+            t.voided += 1
+            continue
+        seen_nonces.add(nonce)
         inc, ch = r.get("incumbent") or {}, r.get("challenger") or {}
         if ch.get("voided"):
             t.voided += 1
@@ -1060,17 +1074,31 @@ async def pulse(cfg: Any, journal: Any, *, seeds: dict[str, str] | None = None,
 
 
 def _open(cfg: Any, st: LeverState, challenger: Variant, journal: Any) -> None:
+    """Open an experiment. EVENT FIRST, then the state swap.
+
+    Ordering matters and this was the one site that had it backwards. `_close`
+    and `_promote` both append before mutating state, deliberately, because the
+    log is the truth and the state file is a cache of it - a crash between them
+    leaves a recoverable inconsistency that `reconcile` repairs.
+
+    Opening state-first left the opposite: lever state naming an `exp_id` with
+    no `experiment_opened` row. `tally()` returns None for it forever and
+    `is_closed()` returns False forever, so `arms()` keeps handing the muse a
+    paired challenger, `record_trial` keeps writing results nothing can score,
+    and `verdict` never runs. The lever is stuck mid-experiment permanently,
+    and no existing path repairs it.
+    """
     exp_id = ids.journal_id("exp")
-    st.challenger = challenger
-    st.exp_id = exp_id
-    st.next_variant_n = max(st.next_variant_n + 1,
-                            int(challenger.id.lstrip("v") or 0) + 1)
-    save_state(cfg, st)
     _append(events_path(cfg), {
         "kind": "experiment_opened", "exp_id": exp_id, "lever": st.lever,
         "incumbent": st.incumbent.id, "challenger": challenger.id,
         "challenger_origin": challenger.origin, "challenger_fp": challenger.fingerprint,
         "floors": floors(cfg)})
+    st.challenger = challenger
+    st.exp_id = exp_id
+    st.next_variant_n = max(st.next_variant_n + 1,
+                            int(challenger.id.lstrip("v") or 0) + 1)
+    save_state(cfg, st)
     journal.append("coach_experiment_opened", lever=st.lever, exp_id=exp_id,
                    incumbent=st.incumbent.id, challenger=challenger.id)
     marker(cfg, "experiment_opened", lever=st.lever,
@@ -1128,15 +1156,34 @@ def _promote(cfg: Any, st: LeverState, t: Tally, reason: str, journal: Any) -> N
 
 
 def reconcile(cfg: Any, seeds: dict[str, str] | None = None) -> list[str]:
-    """Re-apply a promotion that was logged but never swapped into state.
+    """Repair lever state against the event log, which is the truth.
 
-    Idempotent: a promotion whose incumbent already matches is skipped. The
-    event log is the ground truth and the state file is a cache of it - the
-    same relationship the journal has with everything else here.
+    Two repairs, both for a crash between an append and the state swap:
+
+    - a promotion that was LOGGED but never applied (the `_promote` ordering
+      is deliberate so this is always recoverable);
+    - an experiment named in state that has NO `experiment_opened` row. That
+      one was unreachable before `_open` was reordered, and permanent: the
+      tally is None forever, `is_closed` is False forever, so the muse keeps
+      running a paired trial whose results can never be scored. Clearing it
+      lets the lever open a fresh experiment.
+
+    Idempotent: a promotion whose incumbent already matches is skipped.
     """
     seeds, applied = seeds or {}, []
     for lv in LEVERS:
         st = load_state(cfg, lv.name, seeds.get(lv.name, ""))
+
+        if st.exp_id and not any(r.get("kind") == "experiment_opened"
+                                 and r.get("exp_id") == st.exp_id
+                                 for r in events(cfg)):
+            orphan = st.exp_id
+            st.challenger, st.exp_id = None, None
+            save_state(cfg, st)
+            applied.append(f"{lv.name}: cleared orphaned experiment {orphan}")
+            print(f"[coach] {lv.name}: experiment {orphan} has no opened event - "
+                  f"cleared so the lever is not stuck mid-trial")
+
         closes = [r for r in events(cfg)
                   if r.get("kind") == "experiment_closed" and r.get("lever") == lv.name
                   and r.get("outcome") == "promoted"]
