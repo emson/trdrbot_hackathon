@@ -450,7 +450,7 @@ async def test_the_mutation_role_never_returns_an_unsafe_prompt(cfg, tmp_path):
                     f"{[r['reason'][:60] for r in rejected]}")
 
     why = coach.validate_prompt(
-        v.text, muse.MUSE_PROMPT, coach.MUSE_PLACEHOLDERS,
+        v.text, muse.MUSE_PROMPT, coach.lever("muse.prompt").placeholders,
         must_contain=("band_low_pct", "band_high_pct", "JSON array"))
     assert why == "", f"mutate() returned a challenger that fails validation: {why}"
 

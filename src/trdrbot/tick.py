@@ -525,8 +525,7 @@ async def _run_tick(
                         # the market is CLOSED - so waiting for it would defer
                         # every promotion to the following night.
                         await coach.pulse(config, journal,
-                                          seeds={"muse.prompt": muse.MUSE_PROMPT},
-                                          verbose=verbose)
+                                                                                    verbose=verbose)
                 except Exception as exc:  # noqa: BLE001 - the muse is advisory
                     print(f"[tick {n}] muse failed, continuing: {exc!r}")
             elif action.level == "review":

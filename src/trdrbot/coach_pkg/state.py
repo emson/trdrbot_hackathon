@@ -60,6 +60,20 @@ SEED_VARIANT_ID = "v0"
 class Lever:
     """A declared space the Coach may move within, autonomously.
 
+    Everything the generic machinery needs about a lever lives HERE, as data.
+    It did not: `mutate` formatted the muse's placeholders into its prompt and
+    passed the muse's validator anchors as literals, `_rejection_digest` read
+    muse journal rows by kind, and the seed text was a
+    `{"muse.prompt": muse.MUSE_PROMPT}` dict copy-pasted at three call sites.
+    Registering a second lever meant editing the Coach's internals - which is
+    exactly what "the Coach touches data, never code" was supposed to make
+    unnecessary.
+
+    Deliberately DATA, not callables. A callable in a module-level registry
+    would have to be imported at module scope, and importing subsystems from
+    the registry is how the coach package's import cycle would come straight
+    back - `seed_ref` is resolved lazily instead (see `seed_text`).
+
     `reward_modules` is what enforces rule 3: an experiment on this lever is
     scored by these modules, so no OTHER lever naming any of them may run an
     experiment at the same time.
@@ -69,15 +83,80 @@ class Lever:
     subsystem: str
     reward_modules: tuple[str, ...]
     kind: str  # prompt | policy
+    #: Where the seed text lives, as (module, attribute). Resolved on demand.
+    seed_ref: tuple[str, str] = ("", "")
+    #: Format placeholders a variant MUST preserve verbatim, or the subsystem's
+    #: `.format()` call raises on a prompt the Coach itself produced.
+    placeholders: tuple[str, ...] = ()
+    #: Substrings a variant must keep - the anchors that stop a mutation
+    #: quietly dropping the part of the contract the parser depends on.
+    must_contain: tuple[str, ...] = ()
+    #: Journal kind whose recent rows carry this lever's rejection evidence,
+    #: fed to the mutation prompt so a challenger knows what keeps failing.
+    #: Empty means no digest is available, which is a fine steady state.
+    evidence_kind: str = ""
 
+
+#: Placeholders the muse's prompt template must keep. Lives with the lever
+#: that owns it rather than inside the generic mutation code.
+_MUSE_PLACEHOLDERS = ("today", "n", "k", "concepts", "news", "odds",
+                      "earliest", "preferred", "latest")
 
 LEVERS: tuple[Lever, ...] = (
-    Lever("muse.prompt", "muse", ("muse.gates",), "prompt"),
+    Lever(
+        "muse.prompt", "muse", ("muse.gates",), "prompt",
+        seed_ref=("trdrbot.muse", "MUSE_PROMPT"),
+        placeholders=_MUSE_PLACEHOLDERS,
+        must_contain=("band_low_pct", "band_high_pct", "JSON array"),
+        evidence_kind="muse",
+    ),
 )
+
+#: TO REGISTER A NEW LEVER, in full:
+#:
+#:   1. Add a `Lever(...)` above declaring its five data fields.
+#:   2. Its subsystem calls `coach.arms(cfg, "<name>", seed_text=<seed>)` on
+#:      its hot path and runs BOTH arms through ONE gate cascade - the shadow
+#:      arm reaching identical verdicts while writing nothing.
+#:   3. Its subsystem calls `coach.record_trial(...)` with the paired scores.
+#:
+#: That is the whole contract; no Coach internals change. Know the cost before
+#: you do it: a live lever spends one mutation call per cooldown plus a second
+#: full subsystem run per trial, for as long as an experiment is open.
 
 
 def lever(name: str) -> Lever | None:
     return next((l for l in LEVERS if l.name == name), None)
+
+
+def seed_text(lv: Lever) -> str:
+    """The lever's in-code seed prompt, imported on demand.
+
+    Lazy and forgiving by design: the registry must not import subsystems at
+    module scope (cycles), and a seed that cannot be resolved must not take a
+    pulse down with it. An empty seed already means "run the incumbent from
+    state", which is the honest degrade.
+    """
+    module, attr = lv.seed_ref
+    if not module:
+        return ""
+    try:
+        import importlib
+
+        return str(getattr(importlib.import_module(module), attr, ""))
+    except Exception as exc:  # noqa: BLE001 - a bad ref must not break a pulse
+        print(f"[coach] lever {lv.name}: cannot resolve seed {lv.seed_ref}: {exc!r}")
+        return ""
+
+
+def seeds() -> dict[str, str]:
+    """{lever: seed text} for every registered lever.
+
+    Replaces a `{"muse.prompt": muse.MUSE_PROMPT}` literal that existed at
+    three call sites - the shape that makes a second lever a code change in
+    four places instead of one declaration.
+    """
+    return {lv.name: seed_text(lv) for lv in LEVERS}
 
 
 # --- variants and lever state ---------------------------------------------

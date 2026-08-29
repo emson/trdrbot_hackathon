@@ -61,7 +61,6 @@ from .coach_pkg.gauges import (  # noqa: E402,F401 - re-exported for callers
 )
 from .coach_pkg.mutate import (  # noqa: E402,F401 - re-exported for callers
     _FENCE_LINES,
-    MUSE_PLACEHOLDERS,
     MUTATE_PROMPT,
     RETRY_SUFFIX,
     _graveyard_digest,
@@ -102,6 +101,7 @@ from .coach_pkg.state import (  # noqa: E402,F401 - re-exported for callers
     load_state,
     metrics_path,
     save_state,
+    seeds,
 )
 
 # --- what a subsystem asks for at run time --------------------------------
@@ -194,7 +194,7 @@ def _disjoint(cfg: Any, want: Lever) -> str:
 # --- the pulse -------------------------------------------------------------
 
 
-async def pulse(cfg: Any, journal: Any, *, seeds: dict[str, str] | None = None,
+async def pulse(cfg: Any, journal: Any, *, seed_override: dict[str, str] | None = None,
                 verbose: bool = False) -> dict[str, Any]:
     """One Coach cycle. Called after every muse run and at housekeeping.
 
@@ -203,7 +203,11 @@ async def pulse(cfg: Any, journal: Any, *, seeds: dict[str, str] | None = None,
     pulse; the heartbeat is written LAST and unconditionally, so a failure in
     any step above still leaves evidence that the Coach ran.
     """
-    seeds = seeds or {}
+    # Derived from the lever registry rather than passed in: every caller
+    # filled this with the identical `{"muse.prompt": MUSE_PROMPT}` literal,
+    # which is a code change in four places the moment a second lever exists.
+    # The override stays for tests that need a lever with a controlled seed.
+    lever_seeds = seed_override if seed_override is not None else seeds()
     state = {"experiments_open": 0, "trials_scored": 0, "trials_scored_today": 0,
              "promotions_today": 0, "sentinels_active": [], "snapshotted": False,
              "opened": None, "closed": None}
@@ -268,7 +272,7 @@ async def pulse(cfg: Any, journal: Any, *, seeds: dict[str, str] | None = None,
         print(f"[coach] sentinel check failed: {exc!r}")
 
     for lv in LEVERS:
-        seed = seeds.get(lv.name, "")
+        seed = lever_seeds.get(lv.name, "")
         try:
             st = load_state(cfg, lv.name, seed)
             open_exp = st.exp_id and not is_closed(cfg, st.exp_id)
@@ -429,7 +433,7 @@ def _promote(cfg: Any, st: LeverState, t: Tally, reason: str, journal: Any) -> N
     print(f"[coach] PROMOTED {st.lever}: {st.previous.id} -> {ch.id} ({reason})")
 
 
-def reconcile(cfg: Any, seeds: dict[str, str] | None = None) -> list[str]:
+def reconcile(cfg: Any, seed_override: dict[str, str] | None = None) -> list[str]:
     """Repair lever state against the event log, which is the truth.
 
     Two repairs, both for a crash between an append and the state swap:
@@ -444,9 +448,10 @@ def reconcile(cfg: Any, seeds: dict[str, str] | None = None) -> list[str]:
 
     Idempotent: a promotion whose incumbent already matches is skipped.
     """
-    seeds, applied = seeds or {}, []
+    lever_seeds = seed_override if seed_override is not None else seeds()
+    applied: list[str] = []
     for lv in LEVERS:
-        st = load_state(cfg, lv.name, seeds.get(lv.name, ""))
+        st = load_state(cfg, lv.name, lever_seeds.get(lv.name, ""))
 
         if st.exp_id and not any(r.get("kind") == "experiment_opened"
                                  and r.get("exp_id") == st.exp_id

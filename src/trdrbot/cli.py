@@ -474,18 +474,17 @@ async def _muse(force: bool = False) -> int:
 
 
 async def _coach(action: str) -> int:
-    from . import coach, ids, muse
+    from . import coach, ids
     from .journal import Journal
 
     cfg = config_mod.load()
-    seeds = {"muse.prompt": muse.MUSE_PROMPT}
     journal = Journal(cfg.paths.journal)
 
     if action == "pulse":
-        applied = coach.reconcile(cfg, seeds=seeds)
+        applied = coach.reconcile(cfg)
         for a in applied:
             print(f"reconciled a logged-but-unapplied promotion: {a}")
-        r = await coach.pulse(cfg, journal, seeds=seeds, verbose=True)
+        r = await coach.pulse(cfg, journal, verbose=True)
         print(f"pulse: open={r['experiments_open']} opened={r['opened'] or '-'} "
               f"closed={r['closed'] or '-'} sentinels={r['sentinels_active'] or 'none'}")
         return 0
@@ -496,7 +495,7 @@ async def _coach(action: str) -> int:
     evs = coach.events(cfg)
     print("\n=== the Coach: what it is improving, and on what evidence ===\n")
     for lv in coach.LEVERS:
-        st = coach.load_state(cfg, lv.name, seeds.get(lv.name, ""))
+        st = coach.load_state(cfg, lv.name, coach.seeds().get(lv.name, ""))
         print(f"{lv.name}  ({lv.subsystem}, scored by {', '.join(lv.reward_modules)})")
         print(f"  incumbent   {st.incumbent.id} {st.incumbent.fingerprint} "
               f"({st.incumbent.origin}, since {st.incumbent.since[:16] or 'seed'})")

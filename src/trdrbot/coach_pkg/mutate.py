@@ -12,13 +12,13 @@ import contextlib
 from typing import Any
 
 from .. import ids
-from .gauges import _muse_rows
 from .state import (
     MUTATE_ATTEMPTS,
     LeverState,
     Variant,
     events,
     fingerprint,
+    lever,
 )
 
 # --- mutation: generating challengers --------------------------------------
@@ -71,13 +71,6 @@ RETRY_SUFFIX = """
 Fix exactly that and return the corrected JSON object. Change nothing else.
 """
 
-#: Placeholders `muse.MUSE_PROMPT` is formatted with. A challenger missing one
-#: raises KeyError in production; a challenger with an EXTRA one raises too.
-#: Both are caught here, at generation time, rather than on a live muse run.
-MUSE_PLACEHOLDERS = ("today", "n", "k", "concepts", "news", "odds",
-                     "earliest", "preferred", "latest")
-
-
 #: Framing the model tends to echo back around the prompt it was handed.
 #: Measured on the first live mutation: the reply copied the delimiter lines
 #: verbatim into the challenger text, and nothing downstream would have
@@ -124,9 +117,17 @@ def validate_prompt(text: str, incumbent: str, placeholders: tuple[str, ...],
     return ""
 
 
-def _rejection_digest(rows: list[dict[str, Any]], n: int = 30) -> str:
+def _rejection_digest(rows: list[dict[str, Any]], kind: str = "", n: int = 30) -> str:
+    """What keeps failing, so a challenger can aim at it.
+
+    `kind` is the lever's declared `evidence_kind` rather than a hardcoded
+    "muse": a lever with no evidence stream is a fine steady state and simply
+    gets no digest, which is what the generic path must tolerate.
+    """
+    if not kind:
+        return "(no rejection evidence for this lever)"
     fates: dict[str, int] = {}
-    for r in _muse_rows(rows, 20):
+    for r in [r for r in rows if r.get("kind") == kind][-20:]:
         for f in (r.get("fates") or []):
             fate = str(f.get("fate", ""))
             if fate.startswith("rejected"):
@@ -162,12 +163,16 @@ async def mutate(cfg: Any, st: LeverState, rows: list[dict[str, Any]],
     """One validated challenger, or None. Never raises."""
     from ..llm import build_model, parse_json_array, parse_json_object, text_of
 
+    lv = lever(st.lever)
+    if lv is None:
+        print(f"[coach] no lever registered as {st.lever!r} - cannot mutate")
+        return None
     try:
         prompt = MUTATE_PROMPT.format(
             incumbent=st.incumbent.text,
-            rejections=_rejection_digest(rows),
+            rejections=_rejection_digest(rows, lv.evidence_kind),
             graveyard=_graveyard_digest(cfg, st.lever),
-            placeholders=", ".join("{" + p + "}" for p in MUSE_PLACEHOLDERS),
+            placeholders=", ".join("{" + p + "}" for p in lv.placeholders),
         )
         model = build_model(cfg, role="coach_mutate")
         # Two attempts, because the validator's message names the exact defect
@@ -188,8 +193,8 @@ async def mutate(cfg: Any, st: LeverState, rows: list[dict[str, Any]],
             else:
                 candidate = clean_prompt(str(parsed["prompt"]))
                 bad = validate_prompt(
-                    candidate, st.incumbent.text, MUSE_PLACEHOLDERS,
-                    must_contain=("band_low_pct", "band_high_pct", "JSON array"))
+                    candidate, st.incumbent.text, lv.placeholders,
+                    must_contain=lv.must_contain)
                 if not bad:
                     vid = f"v{st.next_variant_n}"
                     journal.append("coach_mutation", lever=st.lever, variant=vid,

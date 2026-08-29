@@ -18,6 +18,10 @@ from trdrbot import coach, muse
 from trdrbot.journal import Journal
 from trdrbot.ledger import Ledger
 
+#: The muse lever's own declaration - what the generic machinery reads too,
+#: rather than a constant that could drift from it (D-093).
+_MUSE_LEVER = coach.lever("muse.prompt")
+
 # --- fixtures --------------------------------------------------------------
 
 
@@ -301,11 +305,11 @@ def test_a_promotion_logged_but_never_applied_is_reconciled_on_restart(tmp_path)
         "challenger": "v1", "challenger_text": "NEW TEXT " * 30})
     assert coach.load_state(cfg, "muse.prompt", seed).incumbent.id == "v0"
 
-    applied = coach.reconcile(cfg, seeds={"muse.prompt": seed})
+    applied = coach.reconcile(cfg, seed_override={"muse.prompt": seed})
     assert applied and "v0 -> v1" in applied[0]
     assert coach.load_state(cfg, "muse.prompt", seed).incumbent.id == "v1"
     # and it is idempotent - a second pass must not re-promote
-    assert coach.reconcile(cfg, seeds={"muse.prompt": seed}) == []
+    assert coach.reconcile(cfg, seed_override={"muse.prompt": seed}) == []
 
 
 def test_corrupt_lever_state_degrades_to_the_seed_and_keeps_the_broken_file(tmp_path):
@@ -361,12 +365,12 @@ def test_a_disabled_coach_runs_the_seed_and_opens_nothing(tmp_path):
 def test_a_mutated_prompt_missing_a_placeholder_is_rejected():
     inc = muse.MUSE_PROMPT
     broken = inc.replace("{concepts}", "the concepts")
-    why = coach.validate_prompt(broken, inc, coach.MUSE_PLACEHOLDERS)
+    why = coach.validate_prompt(broken, inc, _MUSE_LEVER.placeholders)
     assert why == "", "a MISSING placeholder is only a problem if code needs it"
     # ...but an UNKNOWN one is a live KeyError on the next muse run
     unknown = inc.replace("{news}", "{nonexistent_field}")
     assert "not a safe format template" in coach.validate_prompt(
-        unknown, inc, coach.MUSE_PLACEHOLDERS)
+        unknown, inc, _MUSE_LEVER.placeholders)
 
 
 def test_a_mutated_prompt_with_unescaped_json_braces_is_rejected():
@@ -376,32 +380,32 @@ def test_a_mutated_prompt_with_unescaped_json_braces_is_rejected():
     inc = muse.MUSE_PROMPT
     bad = inc.replace('[{{"underlying"', '[{"underlying"')
     assert "not a safe format template" in coach.validate_prompt(
-        bad, inc, coach.MUSE_PLACEHOLDERS)
+        bad, inc, _MUSE_LEVER.placeholders)
 
 
 def test_a_mutation_identical_to_the_incumbent_is_rejected():
     inc = muse.MUSE_PROMPT
-    assert "identical" in coach.validate_prompt(inc, inc, coach.MUSE_PLACEHOLDERS)
+    assert "identical" in coach.validate_prompt(inc, inc, _MUSE_LEVER.placeholders)
 
 
 def test_a_mutation_that_drops_the_schema_contract_is_rejected():
     inc = muse.MUSE_PROMPT
     bad = inc.replace("band_low_pct", "band_bottom")
-    why = coach.validate_prompt(bad, inc, coach.MUSE_PLACEHOLDERS,
+    why = coach.validate_prompt(bad, inc, _MUSE_LEVER.placeholders,
                                 must_contain=("band_low_pct", "JSON array"))
     assert "band_low_pct" in why
 
 
 def test_a_bloated_mutation_is_rejected():
     inc = muse.MUSE_PROMPT
-    assert "bloat" in coach.validate_prompt(inc * 3, inc, coach.MUSE_PLACEHOLDERS)
+    assert "bloat" in coach.validate_prompt(inc * 3, inc, _MUSE_LEVER.placeholders)
 
 
 def test_the_real_muse_prompt_passes_its_own_validator():
     """The incumbent must satisfy the rules its challengers are held to, or
     the validator is measuring something the system does not actually do."""
     other = muse.MUSE_PROMPT + "\n\nOne extra instruction line for difference."
-    assert coach.validate_prompt(other, muse.MUSE_PROMPT, coach.MUSE_PLACEHOLDERS,
+    assert coach.validate_prompt(other, muse.MUSE_PROMPT, _MUSE_LEVER.placeholders,
                                  must_contain=("band_low_pct", "band_high_pct",
                                                "JSON array")) == ""
 
@@ -433,7 +437,7 @@ async def test_the_heartbeat_keys_match_exactly_what_the_health_probe_reads(tmp_
     from trdrbot import health
 
     cfg, journal = _cfg(tmp_path), _journal(tmp_path)
-    await coach.pulse(cfg, journal, seeds={})
+    await coach.pulse(cfg, journal, seed_override={})
     rows = [r for r in journal.read() if r.get("kind") == "coach_run"]
     assert rows, "pulse wrote no heartbeat"
 
@@ -460,7 +464,7 @@ async def test_the_heartbeat_keys_match_exactly_what_the_health_probe_reads(tmp_
 async def test_the_heartbeat_is_written_even_when_the_coach_is_disabled(tmp_path):
     cfg, journal = _cfg(tmp_path), _journal(tmp_path)
     cfg.coach = {"enabled": False}
-    await coach.pulse(cfg, journal, seeds={})
+    await coach.pulse(cfg, journal, seed_override={})
     assert [r for r in journal.read() if r.get("kind") == "coach_run"]
 
 
@@ -474,7 +478,7 @@ async def test_an_operator_pause_closes_the_open_experiment_without_promoting(tm
     st.paused = True
     coach.save_state(cfg, st)
 
-    await coach.pulse(cfg, journal, seeds={"muse.prompt": seed})
+    await coach.pulse(cfg, journal, seed_override={"muse.prompt": seed})
     after = coach.load_state(cfg, "muse.prompt", seed)
     assert after.incumbent.id == "v0", "a paused lever was promoted"
     assert after.exp_id is None
@@ -632,7 +636,7 @@ def test_an_experiment_with_no_opened_event_is_cleared_rather_than_stuck(tmp_pat
     st.exp_id = "exp_orphaned"
     coach.save_state(cfg, st)
 
-    applied = coach.reconcile(cfg, seeds={"muse.prompt": "seed"})
+    applied = coach.reconcile(cfg, seed_override={"muse.prompt": "seed"})
 
     assert any("exp_orphaned" in a for a in applied)
     healed = coach.load_state(cfg, "muse.prompt", "seed")
@@ -652,7 +656,7 @@ def test_open_appends_the_event_before_it_swaps_state(tmp_path):
 
     opened = [r for r in coach.events(cfg) if r.get("kind") == "experiment_opened"]
     assert [r["exp_id"] for r in opened] == [st.exp_id]
-    assert coach.reconcile(cfg, seeds={"muse.prompt": "seed"}) == [], \
+    assert coach.reconcile(cfg, seed_override={"muse.prompt": "seed"}) == [], \
         "a freshly opened experiment must not look orphaned"
 
 
@@ -685,3 +689,107 @@ def test_gauges_that_simply_have_no_data_yet_report_no_failure(tmp_path):
     g = coach.snapshot_gauges(_cfg(tmp_path), rows=[])
 
     assert "gauges_failed" not in g
+
+
+# --- a lever is a declaration, not a code change ---------------------------
+
+
+def _synthetic_lever() -> coach.Lever:
+    """A second lever, declared exactly as a real one would be."""
+    return coach.Lever(
+        "widget.prompt", "widget", ("widget.gates",), "prompt",
+        seed_ref=("fixtures_lever", "SEED"),
+        placeholders=("today", "n", "k"),
+        must_contain=("widget_low_pct", "JSON array"),
+        evidence_kind="widget",
+    )
+
+
+def test_a_seed_resolves_by_import_and_a_bad_ref_degrades(capsys):
+    """`seed_ref` is (module, attribute) resolved on demand - data, not a
+    callable, because a callable in a module-level registry would have to be
+    imported at module scope and that is how the coach package's import cycle
+    would come straight back."""
+    from fixtures_lever import SEED
+
+    # `seed_text` is the internal resolver; `coach.seeds()` is what callers
+    # use, and `arms(seed_text=...)` is where the resolved text lands.
+    from trdrbot.coach_pkg.state import seed_text
+
+    assert seed_text(_synthetic_lever()) == SEED
+
+    broken = coach.Lever("x", "x", (), "prompt", seed_ref=("no.such.module", "X"))
+    assert seed_text(broken) == ""
+    assert "cannot resolve seed" in capsys.readouterr().out
+
+
+@pytest.mark.asyncio
+async def test_a_lever_is_registered_by_declaration_alone(tmp_path, monkeypatch):
+    """THE proof of the work unit: a second lever runs the FULL experiment
+    cycle with no muse anywhere in it and no Coach internals edited.
+
+    Everything the generic machinery needs - the seed, the placeholders, the
+    validator's anchors, the evidence stream - now comes off the declaration.
+    It used to come off literals inside `mutate` and a
+    `{"muse.prompt": MUSE_PROMPT}` dict copy-pasted at three call sites.
+    """
+    lv = _synthetic_lever()
+    monkeypatch.setattr(coach, "LEVERS", (lv,))
+    monkeypatch.setattr("trdrbot.coach_pkg.state.LEVERS", (lv,))
+    cfg = _cfg(tmp_path)
+    journal = _journal(tmp_path)
+
+    # 1. the registry supplies its seed, with no caller passing one
+    assert set(coach.seeds()) == {"widget.prompt"}
+    st = coach.load_state(cfg, lv.name, coach.seeds()[lv.name])
+    assert st.incumbent.text.startswith("You are a test subsystem")
+
+    # 2. arms() hands the subsystem an incumbent - unpaired until one opens
+    assert coach.arms(cfg, lv.name, seed_text=coach.seeds()[lv.name]).paired is False
+
+    # 3. a challenger opens
+    challenger = coach.Variant("v1", st.incumbent.text.replace("Consider", "Weigh"))
+    coach._open(cfg, st, challenger, journal)
+    arms = coach.arms(cfg, lv.name, seed_text=coach.seeds()[lv.name])
+    assert arms.paired and arms.challenger.id == "v1"
+
+    # 4. paired trials accumulate, scored by the generic tally
+    strong = ({"survived": 1, "failed": 4, "candidates": 5},
+              {"survived": 5, "failed": 0, "candidates": 5})
+    for nonce in range(coach.MIN_RUNS):
+        coach.record_trial(cfg, arms.exp_id, run_nonce=nonce,
+                           incumbent=strong[0], challenger=strong[1])
+    t = coach.tally(cfg, arms.exp_id)
+    assert t.runs == coach.MIN_RUNS and t.posterior > coach.PROMOTE_AT
+
+    # 5. the generic verdict promotes it, and the state file shows the swap
+    outcome, reason = coach.verdict(t, coach.floors(cfg))
+    assert outcome == "promoted", reason
+    coach._promote(cfg, coach.load_state(cfg, lv.name, ""), t, reason, journal)
+
+    assert coach.load_state(cfg, lv.name, "").incumbent.id == "v1"
+
+
+def test_the_mutation_validates_against_the_levers_own_anchors():
+    """`mutate` passed the MUSE's anchors as literals, so a second lever would
+    have had its challengers validated against a contract belonging to another
+    subsystem."""
+    lv = _synthetic_lever()
+    from fixtures_lever import SEED
+
+    dropped = SEED.replace("widget_low_pct", "something_else")
+    assert "widget_low_pct" in coach.validate_prompt(
+        dropped, SEED, lv.placeholders, must_contain=lv.must_contain)
+
+    # ...and the muse's own anchors are irrelevant to it
+    assert coach.validate_prompt(
+        dropped, SEED, lv.placeholders,
+        must_contain=("band_low_pct",)) != ""
+
+
+def test_a_lever_with_no_evidence_stream_still_mutates():
+    """An evidence kind is optional - a new lever has no rejection history and
+    must not be blocked from ever generating a challenger by its absence."""
+    assert "no rejection evidence" in coach._rejection_digest([], "")
+    assert coach._rejection_digest([{"kind": "widget", "fates": [
+        {"fate": "rejected: too wide"}]}], "widget").startswith("- rejected: too wide")

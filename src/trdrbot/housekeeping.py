@@ -196,11 +196,9 @@ async def run(
     coached: dict[str, Any] = {}
     try:
         from . import coach
-        from . import muse as _muse
-        coach.reconcile(config, seeds={"muse.prompt": _muse.MUSE_PROMPT})
+        coach.reconcile(config)
         coached = await coach.pulse(config, journal,
-                                    seeds={"muse.prompt": _muse.MUSE_PROMPT},
-                                    verbose=verbose)
+                                                                        verbose=verbose)
     except Exception as exc:  # noqa: BLE001 - the Coach is advisory (INV-8)
         print(f"[housekeeping] coach pulse failed, continuing: {exc!r}")
 
