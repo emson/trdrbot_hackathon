@@ -502,3 +502,64 @@ async def test_gpt_5_6_sol_calls_a_bound_tool_through_the_real_build_model_path(
     assert calls[0]["name"] == "get_ticker_price"
     final = str(result["messages"][-1].content)
     assert "123.45" in final, "the tool RESULT must reach the final answer, not just the call"
+
+
+@pytest.mark.asyncio
+async def test_the_mutation_role_never_returns_an_unsafe_prompt(cfg, tmp_path):
+    """Whatever the Coach accepts as a challenger must be safe to run. (D-088)
+
+    The belief under test is about an external model, so it is checked against
+    the real endpoint - the discipline that caught GLM-5.2 returning nothing
+    (D-084) and gpt-5.6-sol refusing bound tools (D-085).
+
+    It asserts the INVARIANT, not a success rate. Generation is stochastic:
+    measured live, a first attempt fails validation a meaningful fraction of
+    the time, always the same way - literal braces written in prose, which
+    `.format()` reads as a placeholder - which is why `mutate` retries with the
+    rejection reason fed back. Returning None after exhausting its attempts is
+    a legitimate outcome the pulse handles. Returning something INVALID is not,
+    and would crash the next live muse run rather than this test.
+
+    Asserting "always produces a valid prompt" would be a flaky test of a
+    probabilistic property. Asserting "never produces an invalid one" is the
+    property the system's safety actually rests on.
+    """
+    from types import SimpleNamespace
+
+    from trdrbot import coach, muse
+    from trdrbot.journal import Journal
+
+    journal_path = tmp_path / "journal.jsonl"
+    journal_path.touch()
+    journal = Journal(journal_path)
+    state = SimpleNamespace(
+        lever="muse.prompt", next_variant_n=1,
+        incumbent=coach.Variant("v0", muse.MUSE_PROMPT))
+
+    v = await coach.mutate(cfg, state, [], journal)
+
+    rows = [r for r in journal.read()
+            if r["kind"] in ("coach_mutation", "coach_mutation_rejected")]
+    assert rows, "the mutation role was never reached - no attempt was journalled"
+
+    if v is None:
+        # Acceptable, but it must have SAID why, on every attempt - a silent
+        # refusal is undiagnosable, and the reasons are how the retry works.
+        rejected = [r for r in rows if r["kind"] == "coach_mutation_rejected"]
+        assert len(rejected) == coach.MUTATE_ATTEMPTS
+        assert all(r.get("reason") for r in rejected)
+        pytest.skip(f"mutation exhausted {coach.MUTATE_ATTEMPTS} attempts: "
+                    f"{[r['reason'][:60] for r in rejected]}")
+
+    why = coach.validate_prompt(
+        v.text, muse.MUSE_PROMPT, coach.MUSE_PLACEHOLDERS,
+        must_contain=("band_low_pct", "band_high_pct", "JSON array"))
+    assert why == "", f"mutate() returned a challenger that fails validation: {why}"
+
+    # The real proof: it survives the exact format() call muse.run makes.
+    rendered = v.text.format(
+        today="2026-08-29", n=3, k=5, concepts="C", news="N", odds="O",
+        earliest="2026-08-31", preferred="2026-09-01", latest="2026-09-03")
+    assert len(rendered) > 500
+    # ...and carries none of the harness's own framing into production.
+    assert not rendered.lstrip().startswith(("<<<", "```", "- - -"))

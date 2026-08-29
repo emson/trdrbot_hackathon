@@ -514,3 +514,22 @@ def test_echoed_delimiters_are_stripped_from_a_generated_prompt():
     assert coach.clean_prompt("- - - - - - - - - -\nbody\n- - - - - - - - - -") == "body"
     # content that merely CONTAINS a fence-like line is untouched in the middle
     assert coach.clean_prompt("a\n---\nb") == "a\n---\nb"
+
+
+def test_a_rejection_reason_is_fed_back_into_the_retry():
+    """The validator's message names the exact defect, so handing it back is
+    strictly better than spending the next mutation cooldown rediscovering it.
+    Measured live: a first attempt fails a meaningful fraction of the time,
+    always the same way - literal braces written in prose - and an attempt told
+    exactly that fixes it."""
+    filled = coach.RETRY_SUFFIX.format(reason="not a safe format template (KeyError: ' and ')")
+    assert "REJECTED" in filled and "KeyError" in filled
+    assert coach.MUTATE_ATTEMPTS >= 2, "a single-shot mutation wastes a whole cooldown"
+
+
+def test_the_mutate_prompt_warns_about_braces_outside_the_json_example():
+    """The first live mutation failure wrote `{X and Y}` in ORDINARY PROSE, not
+    in the JSON block - the original warning only mentioned the JSON example,
+    so it was true and insufficient."""
+    assert "not only inside the JSON" in coach.MUTATE_PROMPT
+    assert "ordinary prose" in coach.MUTATE_PROMPT

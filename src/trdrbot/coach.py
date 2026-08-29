@@ -67,6 +67,13 @@ SNAPSHOT_EVERY_MIN = 30
 #: An LLM call generates challengers. Cheap tier, but not free, and there is
 #: nothing to learn from mutating faster than trials can score.
 MUTATE_COOLDOWN_MIN = 180
+#: Attempts per mutation, each fed the previous rejection reason. Measured
+#: against the real model: a first attempt fails validation a meaningful
+#: fraction of the time - always the same way, literal braces written in prose
+#: (`{X and Y}`), which `.format()` reads as a placeholder - and a second
+#: attempt told exactly that usually fixes it. Cheap tier, so three attempts
+#: cost far less than losing a whole mutation cooldown to a fixable typo.
+MUTATE_ATTEMPTS = 3
 
 SEED_VARIANT_ID = "v0"
 
@@ -684,12 +691,27 @@ Change exactly ONE thing you can argue will raise the survival fraction, and say
 what in `rationale`. Do not change the output schema, the placeholder names, or the \
 percent-move band convention - those are contracts with code.
 
-**The prompt MUST keep every one of these placeholders, spelled exactly, and add no \
-others: {placeholders}. Literal braces in any JSON example must be doubled ({{ and }}) \
-because the text is passed through Python's .format().**
+**The prompt is passed through Python's `.format()`, so EVERY literal curly brace \
+must be doubled - `{{` and `}}` - everywhere in the text, not only inside the JSON \
+example. `{{X and Y}}` in ordinary prose is a format placeholder and will crash the \
+system. The ONLY single braces allowed are these placeholders, which must all survive, \
+spelled exactly, with no others added: {placeholders}.**
 
 Respond with ONLY a JSON object:
 {{"rationale": "one sentence", "prompt": "the full replacement prompt text"}}
+"""
+
+#: Appended when a first attempt fails validation. The check is deterministic and
+#: its message names the exact defect, so handing that back is strictly better
+#: than spending the next pulse's call rediscovering it - and measured: the very
+#: first contract-test run produced `KeyError: ' and '` from braces written in
+#: prose, which is precisely the mistake a model corrects when told.
+RETRY_SUFFIX = """
+
+## Your previous attempt was REJECTED
+{reason}
+
+Fix exactly that and return the corrected JSON object. Change nothing else.
 """
 
 #: Placeholders `muse.MUSE_PROMPT` is formatted with. A challenger missing one
@@ -791,30 +813,39 @@ async def mutate(cfg: Any, st: LeverState, rows: list[dict[str, Any]],
             graveyard=_graveyard_digest(cfg, st.lever),
             placeholders=", ".join("{" + p + "}" for p in MUSE_PLACEHOLDERS),
         )
-        reply = await build_model(cfg, role="coach_mutate").ainvoke(prompt)
-        text = reply.content if isinstance(reply.content, str) else "\n".join(
-            b.get("text", "") for b in reply.content
-            if isinstance(b, dict) and b.get("type") == "text")
-        parsed = _parse_json_block(text)
-        if isinstance(parsed, list):
-            parsed = parsed[0] if parsed else None
-        if not isinstance(parsed, dict) or not parsed.get("prompt"):
-            journal.append("coach_mutation_rejected", lever=st.lever,
-                           reason="reply did not parse to {rationale, prompt}",
-                           reply_head=text[:300])
-            return None
-        candidate = clean_prompt(str(parsed["prompt"]))
-        bad = validate_prompt(candidate, st.incumbent.text, MUSE_PLACEHOLDERS,
-                              must_contain=("band_low_pct", "band_high_pct", "JSON array"))
-        if bad:
+        model = build_model(cfg, role="coach_mutate")
+        # Two attempts, because the validator's message names the exact defect
+        # and a model corrects a named mistake. A rejected challenger otherwise
+        # costs the whole mutation cooldown before anything is tried again.
+        attempt_prompt, bad, parsed = prompt, "", None
+        for attempt in range(1, MUTATE_ATTEMPTS + 1):
+            reply = await model.ainvoke(attempt_prompt)
+            text = reply.content if isinstance(reply.content, str) else "\n".join(
+                b.get("text", "") for b in reply.content
+                if isinstance(b, dict) and b.get("type") == "text")
+            parsed = _parse_json_block(text)
+            if isinstance(parsed, list):
+                parsed = parsed[0] if parsed else None
+            if not isinstance(parsed, dict) or not parsed.get("prompt"):
+                bad = "reply did not parse to {rationale, prompt}"
+            else:
+                candidate = clean_prompt(str(parsed["prompt"]))
+                bad = validate_prompt(
+                    candidate, st.incumbent.text, MUSE_PLACEHOLDERS,
+                    must_contain=("band_low_pct", "band_high_pct", "JSON array"))
+                if not bad:
+                    vid = f"v{st.next_variant_n}"
+                    journal.append("coach_mutation", lever=st.lever, variant=vid,
+                                   attempt=attempt,
+                                   rationale=str(parsed.get("rationale", ""))[:300])
+                    return Variant(id=vid, text=candidate,
+                                   since=ids.utc_now().isoformat(), origin="mutation")
             journal.append("coach_mutation_rejected", lever=st.lever, reason=bad,
-                           rationale=str(parsed.get("rationale", ""))[:200])
-            return None
-        vid = f"v{st.next_variant_n}"
-        journal.append("coach_mutation", lever=st.lever, variant=vid,
-                       rationale=str(parsed.get("rationale", ""))[:300])
-        return Variant(id=vid, text=candidate, since=ids.utc_now().isoformat(),
-                       origin="mutation")
+                           attempt=attempt,
+                           rationale=str((parsed or {}).get("rationale", ""))[:200]
+                           if isinstance(parsed, dict) else "")
+            attempt_prompt = prompt + RETRY_SUFFIX.format(reason=bad)
+        return None
     except Exception as exc:  # noqa: BLE001 - a failed mutation costs one pulse
         print(f"[coach] mutation failed: {exc!r}")
         try:
