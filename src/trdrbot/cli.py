@@ -15,7 +15,7 @@ import os
 import sys
 
 from . import config as config_mod
-from . import mcp_client
+from . import ids, mcp_client
 from .inbox import Inbox
 from .journal import Journal
 from .lock import tick_lock
@@ -256,7 +256,7 @@ async def _run_loop(interval: int, closed_interval: int, *,
     print(f"[run] pid {os.getpid()} looping until {deadline}; "
           f"open={interval}s closed={closed_interval}s watchdog={outer_timeout}s"
           + (f"; stopping after {max_ticks} ticks" if max_ticks else ""), flush=True)
-    while date.today() <= deadline:
+    while ids.market_today() <= deadline:
         if max_ticks and n >= max_ticks:
             print(f"[run] reached --max-ticks {max_ticks}, stopping", flush=True)
             break

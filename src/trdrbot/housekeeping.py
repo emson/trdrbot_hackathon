@@ -128,9 +128,13 @@ async def run(
         # otherwise only free bookkeeping). Gate it to days where the output
         # can still be acted on: Saturday research reads Friday's close and is
         # stale twice over by Monday's open, so it is skipped; Sunday runs,
-        # because its regime read feeds Monday. Weekday check is UTC - close
-        # enough for a Sat/Sun distinction (D-060).
-        weekday = _ids.utc_now().weekday()  # Mon=0 .. Sat=5, Sun=6
+        # because its regime read feeds Monday.
+        #
+        # The weekday is the MARKET's, not UTC's. "Close enough for a Sat/Sun
+        # distinction" was not: UTC crosses into Saturday at 20:00 ET Friday,
+        # so the gate suppressed research every Friday evening - the run that
+        # reads a fresh Friday close and is the most useful one of the week.
+        weekday = _ids.market_today().weekday()  # Mon=0 .. Sat=5, Sun=6
         research_worthwhile = weekday != 5
         if research_worthwhile and (not marker.exists() or marker.read_text().strip() != today):
             try:

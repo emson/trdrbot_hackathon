@@ -18,8 +18,9 @@ from __future__ import annotations
 
 import hashlib
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from typing import Any
+from zoneinfo import ZoneInfo
 
 
 def _short_hash(*parts: str, n: int = 8) -> str:
@@ -33,6 +34,32 @@ def utc_now() -> datetime:
 
 def utc_stamp(dt: datetime | None = None) -> str:
     return (dt or utc_now()).strftime("%Y%m%dT%H%M%SZ")
+
+
+def today() -> date:
+    """The UTC date - for anything compared against UTC-stamped data.
+
+    Horizons, ledger maturity, attribution, cache `as_of` staleness and journal
+    ages are all written from `utc_now()`, so they must be READ against the
+    same clock. `date.today()` is the local date, which on any machine west of
+    UTC is yesterday for part of every day - so a horizon written as today's
+    UTC date looked unreached, and a cache written this morning looked a day
+    older than it was.
+    """
+    return utc_now().date()
+
+
+def market_today() -> date:
+    """The US-market (ET) date - for anything that means "the trading day".
+
+    Days-to-expiry, the competition deadline and weekday gates are claims
+    about the market's calendar, not about UTC. A UTC date is already tomorrow
+    from 20:00 ET, which puts DTE off by one every single evening - precisely
+    when a short-dated option's gamma makes the number matter most. The
+    Saturday research gate had the mirror error: keyed on the UTC weekday, it
+    suppressed research from Friday 20:00 ET.
+    """
+    return datetime.now(ZoneInfo("America/New_York")).date()
 
 
 def position_id(underlying: str, strategy: str, dt: datetime | None = None) -> str:

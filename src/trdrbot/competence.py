@@ -52,7 +52,7 @@ from datetime import date
 from pathlib import Path
 from typing import Any
 
-from . import store
+from . import ids, store
 
 EXPLORE, ESTABLISH, SCALE, MATURE = "explore", "establish", "scale", "mature"
 _ORDER = (EXPLORE, ESTABLISH, SCALE, MATURE)
@@ -249,7 +249,7 @@ def forecast_window(deadline: str | None, today: date | None = None
     """
     if not deadline:
         return None
-    today = today or date.today()
+    today = today or ids.market_today()
     try:
         stop = date.fromisoformat(deadline)
     except (ValueError, TypeError):
@@ -271,7 +271,7 @@ def can_open(deadline: str | None, expiry: str | None, today: date | None = None
     """
     if not deadline:
         return True, ""
-    today = today or date.today()
+    today = today or ids.market_today()
     try:
         left = (date.fromisoformat(deadline) - today).days
     except (ValueError, TypeError):
@@ -294,13 +294,30 @@ def high_water_path(state_dir: Path) -> Path:
     return state_dir / "high_water.json"
 
 
-def update_high_water(state_dir: Path, equity: float) -> float:
+def update_high_water(state_dir: Path, equity: float, journal: Any = None) -> float:
+    """The peak equity drawdown is measured against. Corruption is LOUD.
+
+    A corrupt file used to reset `hw` to 0.0, at which point `equity > hw` was
+    trivially true and the peak became today's equity - so drawdown computed
+    to exactly 0 and demotion silently stopped working until a new peak formed
+    naturally. Fail-open on a capital-protection input, and invisible.
+
+    The lost peak cannot be recovered (atomic writes now stop it being lost in
+    the first place), so the fix is to say so: a `state_corrupt` row makes the
+    degraded window visible to `trdrbot health` and `trdrbot report` instead
+    of leaving the ladder quietly unguarded.
+    """
     p = high_water_path(state_dir)
     hw = 0.0
     if p.exists():
         try:
             hw = float(json.loads(p.read_text()).get("high_water", 0.0))
-        except (json.JSONDecodeError, ValueError, TypeError):
+        except (json.JSONDecodeError, ValueError, TypeError) as exc:
+            print(f"[competence] high_water.json unreadable ({exc!r}) - drawdown "
+                  f"protection is degraded until a new peak forms")
+            if journal is not None:
+                journal.append("state_corrupt", file="high_water.json",
+                               consequence="drawdown_unguarded", error=repr(exc)[:200])
             hw = 0.0
     if equity > hw:
         hw = equity

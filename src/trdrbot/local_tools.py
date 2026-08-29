@@ -597,7 +597,7 @@ def _vacuity_check(state_dir: Path | None, underlying: str, probability: float,
         closes = market_stats.load_closes(state_dir, underlying)
         if not closes or len(closes) < 60:
             return None
-        days = (date.fromisoformat(horizon) - date.today()).days
+        days = (date.fromisoformat(horizon) - ids.market_today()).days
         if days <= 0 or days > 30:
             return None  # horizon sanity is scored elsewhere; not this gate's job
         factors = market_stats.bootstrap_factors(closes, days, seed=f"forecast|{underlying}")

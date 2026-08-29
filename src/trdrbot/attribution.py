@@ -15,7 +15,7 @@ from __future__ import annotations
 from datetime import date
 from typing import Any
 
-from . import experiments, mcp_client
+from . import experiments, ids, mcp_client
 from .elfmem_adapter import ElfmemAdapter
 from .journal import Journal
 from .positions import Position, PositionStore
@@ -24,7 +24,7 @@ from .wiki import Wiki
 
 def _horizon_passed(pos: Position) -> bool:
     try:
-        return date.today() >= date.fromisoformat(pos.thesis_horizon)
+        return ids.today() >= date.fromisoformat(pos.thesis_horizon)
     except (ValueError, TypeError):
         return False
 

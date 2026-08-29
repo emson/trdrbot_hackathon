@@ -457,7 +457,7 @@ async def _run_tick(
                     by_underlying.get(op.underlying.upper(), 0.0) + (op.max_loss_usd or 0.0)
                 )
         equity_now = snap.equity or 100000.0
-        hw = competence.update_high_water(config.paths.state, equity_now)
+        hw = competence.update_high_water(config.paths.state, equity_now, journal)
         # Calibration draws on declined-thesis forecasts too (D-052). Computed
         # ONCE and passed everywhere it is needed: the ladder, the sizing tool
         # and the prompt all used to derive their own, and the sizing tool's
@@ -511,7 +511,7 @@ async def _run_tick(
             ev_lines = []
             for ev in config.events:
                 try:
-                    days = (_date.fromisoformat(str(ev["date"])) - _date.today()).days
+                    days = (_date.fromisoformat(str(ev["date"])) - ids.market_today()).days
                 except (KeyError, ValueError):
                     continue
                 if 0 <= days <= 14:

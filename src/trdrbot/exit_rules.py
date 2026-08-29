@@ -29,7 +29,7 @@ from dataclasses import dataclass
 from datetime import date
 from typing import Any
 
-from . import learn, mcp_client
+from . import ids, learn, mcp_client
 from .analytics import Snapshot, _f, position_pnl_pct
 from .calibration import CalibrationStore
 from .elfmem_adapter import ElfmemAdapter
@@ -43,7 +43,7 @@ NEEDED = 2  # N
 
 def _days_to(day: str) -> int | None:
     try:
-        return (date.fromisoformat(str(day)) - date.today()).days
+        return (date.fromisoformat(str(day)) - ids.market_today()).days
     except (ValueError, TypeError):
         return None
 

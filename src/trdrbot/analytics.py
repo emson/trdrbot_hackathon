@@ -9,11 +9,10 @@ cannot see.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import date
 from pathlib import Path
 from typing import Any
 
-from . import mcp_client
+from . import ids, mcp_client
 
 
 def _f(v: Any, default: float = 0.0) -> float:
@@ -139,7 +138,7 @@ def position_pnl_pct(symbols: list[str], snap: Snapshot) -> float | None:
 
 async def snapshot(tools: dict[str, Any], underlyings: list[str] | None = None) -> Snapshot:
     """Gather deterministic state. A failing call degrades, never aborts."""
-    snap = Snapshot(as_of=date.today().isoformat())
+    snap = Snapshot(as_of=ids.market_today().isoformat())
 
     try:
         clock = await mcp_client.call(tools, "get_clock")
@@ -246,7 +245,7 @@ def book_greeks(positions: list[Any], underlying_prices: dict[str, float],
             continue
         days = None
         try:
-            days = ( _date.fromisoformat(legs[0].expiry) - _date.today()).days
+            days = (_date.fromisoformat(legs[0].expiry) - ids.market_today()).days
         except ValueError:
             pass
         g = optmath.net_greeks(legs, spot, iv, days) if days and days > 0 else None

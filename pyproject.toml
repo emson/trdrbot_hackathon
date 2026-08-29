@@ -41,7 +41,12 @@ line-length = 100
 target-version = "py311"
 
 [tool.ruff.lint]
-select = ["E", "F", "B", "SIM", "UP", "I"]
+# DTZ earns its place here specifically: `date.today()` and a naive
+# `datetime.now()` answer a question about the MACHINE's timezone, which is
+# never the question this system is asking. Use ids.today() for anything
+# compared against UTC-stamped data, ids.market_today() for anything meaning
+# "the trading day" (D-091).
+select = ["E", "F", "B", "SIM", "UP", "I", "DTZ"]
 ignore = [
     # Long rationale comments are house style - they carry measured incident
     # history and reflowing them loses the shape a reader scans for.
@@ -56,6 +61,11 @@ ignore = [
     # 16 sites. Deferred deliberately rather than swept.
     "B905",
 ]
+
+[tool.ruff.lint.per-file-ignores]
+# A test constructing a relative date from the machine's clock is fine - the
+# rule exists to stop PRODUCTION code silently asking the wrong question.
+"tests/*" = ["DTZ"]
 
 [tool.mypy]
 files = ["src/trdrbot"]

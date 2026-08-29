@@ -407,7 +407,7 @@ def load_dated_closes(state_dir: Path, symbol: str, *,
     try:
         d = json.loads(p.read_text())
         from datetime import date
-        if (date.today() - date.fromisoformat(d["as_of"])).days > max_age_days:
+        if (ids.today() - date.fromisoformat(d["as_of"])).days > max_age_days:
             return None
         dates, closes = d.get("dates"), d.get("closes")
         if not isinstance(dates, list) or not isinstance(closes, list):
@@ -428,7 +428,7 @@ def load_closes(state_dir: Path, symbol: str, *, max_age_days: int = 4) -> list[
     try:
         d = json.loads(p.read_text())
         from datetime import date
-        age = (date.today() - date.fromisoformat(d["as_of"])).days
+        age = (ids.today() - date.fromisoformat(d["as_of"])).days
         if age > max_age_days:
             return None
         return [float(c) for c in d["closes"]]
@@ -475,11 +475,11 @@ async def fetch_daily_closes(tools: dict[str, Any], symbol: str, *, days: int = 
 async def _fetch_bars(tools: dict[str, Any], symbol: str, *,
                       days: int) -> list[dict[str, Any]]:
     """Raw daily bars, oldest -> newest. The one place the envelope is unpacked."""
-    from datetime import date, timedelta
+    from datetime import timedelta
 
     from . import mcp_client
 
-    start = (date.today() - timedelta(days=int(days * 1.6))).isoformat()
+    start = (ids.market_today() - timedelta(days=int(days * 1.6))).isoformat()
     r = await mcp_client.call(
         tools, "get_stock_bars",
         symbols=symbol, timeframe="1Day", start=start, feed="iex",

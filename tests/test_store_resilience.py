@@ -161,3 +161,43 @@ def test_a_ledger_row_with_an_unknown_field_survives_the_next_rewrite(tmp_path):
     reloaded.mark_rejected(kept.id, "a gate")  # forces the full rewrite
     survivors = {json.loads(x)["id"] for x in path.read_text().splitlines() if x}
     assert survivors == {kept.id, "fc_from_the_future"}, "the drifted row was deleted"
+
+
+def test_a_corrupt_high_water_file_is_loud_rather_than_silently_unguarding(tmp_path):
+    """A corrupt high_water.json reset the peak to 0.0, at which point
+    `equity > hw` was trivially true and the peak became today's equity - so
+    drawdown computed to exactly 0 and DEMOTION SILENTLY STOPPED WORKING until
+    a new peak formed naturally. Fail-open on a capital-protection input, with
+    nothing anywhere saying so."""
+    from trdrbot import competence
+    from trdrbot.journal import Journal
+
+    state = tmp_path / "state"
+    state.mkdir()
+    (state / "high_water.json").write_text("{not json")
+    journal = Journal(tmp_path / "journal.jsonl")
+
+    hw = competence.update_high_water(state, 100_000.0, journal)
+
+    assert hw == 100_000.0  # the degrade itself is unchanged - the peak is gone
+    rows = [r for r in journal.read() if r.get("kind") == "state_corrupt"]
+    assert len(rows) == 1
+    assert rows[0]["consequence"] == "drawdown_unguarded"
+
+
+def test_a_readable_high_water_file_journals_nothing(tmp_path):
+    """The corruption row must mean something when it appears."""
+    import json as _json
+
+    from trdrbot import competence
+    from trdrbot.journal import Journal
+
+    state = tmp_path / "state"
+    state.mkdir()
+    (state / "high_water.json").write_text(_json.dumps({"high_water": 120_000.0}))
+    journal = Journal(tmp_path / "journal.jsonl")
+
+    hw = competence.update_high_water(state, 100_000.0, journal)
+
+    assert hw == 120_000.0, "the real peak must survive a lower equity reading"
+    assert [r for r in journal.read() if r.get("kind") == "state_corrupt"] == []

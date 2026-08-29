@@ -42,7 +42,7 @@ from datetime import date
 from pathlib import Path
 from typing import Any
 
-from . import store
+from . import ids, store
 
 #: How a forecast came to exist. `thesis` rows are auto-registered from
 #: simulate_experiments; `standalone` rows are the agent putting a view on
@@ -100,7 +100,7 @@ class Entry:
 
     def matured(self, today: date | None = None) -> bool:
         try:
-            return date.fromisoformat(self.horizon) <= (today or date.today())
+            return date.fromisoformat(self.horizon) <= (today or ids.today())
         except (ValueError, TypeError):
             return False
 

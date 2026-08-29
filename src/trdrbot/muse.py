@@ -386,7 +386,7 @@ async def _evaluate(
 
             try:
                 from datetime import date
-                days = (date.fromisoformat(str(cand["horizon"])) - date.today()).days
+                days = (date.fromisoformat(str(cand["horizon"])) - ids.today()).days
             except (ValueError, TypeError, KeyError):
                 days = 0
             # The muse had NO deadline check at all - it could emit a thesis that
