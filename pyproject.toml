@@ -96,6 +96,10 @@ module = [
     "trdrbot.ids",
     "trdrbot.failures",
     "trdrbot.lock",
+    "trdrbot.store",
+    "trdrbot.opportunity",
+    "trdrbot.evidence",
+    "trdrbot.coach_pkg.posterior",
 ]
 strict = true
 

@@ -80,8 +80,6 @@ from .coach_pkg.posterior import (  # noqa: E402,F401 - re-exported for callers
 )
 from .coach_pkg.state import (  # noqa: E402,F401 - re-exported for callers
     CAP_RUNS,
-    FUTILITY_AT,
-    FUTILITY_MIN_RUNS,
     LEVERS,
     MIN_CANDIDATES,
     MIN_RUNS,
@@ -94,10 +92,7 @@ from .coach_pkg.state import (  # noqa: E402,F401 - re-exported for callers
     LeverState,
     Variant,
     _append,
-    _levers_dir,
-    _read,
     _state_path,
-    _variant,
     enabled,
     events,
     events_path,
