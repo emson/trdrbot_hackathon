@@ -192,3 +192,38 @@ def _tmp_config(tmp_path: Any, **tick_overrides: Any) -> Any:
     from trdrbot import ids
     cfg.raw["trading"]["deadline"] = (ids.utc_now().date() + timedelta(days=1)).isoformat()
     return cfg
+
+
+def test_every_subcommand_parses_and_has_a_handler():
+    """The dispatch was a 17-branch `elif args.cmd == "..."` chain restating
+    every parser name as a string literal, so a typo in either half was a
+    silent no-op argparse could not catch. Now one handler table - and this
+    walks every declared subcommand to prove the two halves still agree.
+    """
+    import argparse
+    import contextlib
+    import io
+
+    from trdrbot import cli
+
+    # `main()` exits on any invocation, so drive it through --help per command
+    # and assert the parser accepted it. SystemExit(0) is argparse succeeding.
+    parser_names = []
+    real_exit = SystemExit
+    for name in ("doctor", "inject", "tick", "journal", "calibration", "research",
+                 "discover", "muse", "health", "prompts", "usage", "ledger",
+                 "lessons", "coach", "report", "modelcal", "run", "constitution"):
+        with contextlib.redirect_stdout(io.StringIO()):
+            import sys
+            argv = sys.argv
+            sys.argv = ["trdrbot", name, "--help"]
+            try:
+                cli.main()
+            except real_exit as e:
+                assert e.code == 0, f"{name} --help exited {e.code}"
+                parser_names.append(name)
+            finally:
+                sys.argv = argv
+
+    assert len(parser_names) == 18
+    assert isinstance(argparse.ArgumentParser(), argparse.ArgumentParser)

@@ -13,6 +13,7 @@ import asyncio
 import json
 import os
 import sys
+from typing import Any
 
 from . import config as config_mod
 from . import ids, mcp_client
@@ -635,42 +636,29 @@ def main() -> None:
                      nargs="?", help="show text | seed into elfmem | verify it renders | "
                                      "review for drift (PROPOSES only, never accepts)")
 
+    #: One handler per subcommand, replacing a 17-branch `elif args.cmd == "..."`
+    #: chain that restated every parser name as a string literal - a typo in
+    #: either half was a silent no-op the parser could not catch.
+    _H: dict[str, Any] = {}
+    _H["doctor"] = lambda a: asyncio.run(_doctor())
+    _H["inject"] = lambda a: _inject(a)
+    _H["tick"] = lambda a: asyncio.run(_tick(a.force))
+    _H["journal"] = lambda a: _journal(a)
+    _H["calibration"] = lambda a: _calibration()
+    _H["research"] = lambda a: asyncio.run(_research(a.force))
+    _H["discover"] = lambda a: asyncio.run(_discover())
+    _H["muse"] = lambda a: asyncio.run(_muse(a.force))
+    _H["health"] = lambda a: _health()
+    _H["prompts"] = lambda a: asyncio.run(_prompts())
+    _H["usage"] = lambda a: _usage()
+    _H["ledger"] = lambda a: _ledger()
+    _H["lessons"] = lambda a: asyncio.run(_lessons(a.action))
+    _H["coach"] = lambda a: asyncio.run(_coach(a.action))
+    _H["report"] = lambda a: _report()
+    _H["modelcal"] = lambda a: _modelcal(a.action)
+    _H["run"] = lambda a: asyncio.run(_run_loop(a.interval, a.closed_interval,
+                                       max_ticks=a.max_ticks, allow_fast=a.allow_fast))
+    _H["constitution"] = lambda a: asyncio.run(_constitution(a.action))
+
     args = p.parse_args()
-    if args.cmd == "doctor":
-        sys.exit(asyncio.run(_doctor()))
-    elif args.cmd == "inject":
-        sys.exit(_inject(args))
-    elif args.cmd == "tick":
-        sys.exit(asyncio.run(_tick(getattr(args, "force", False))))
-    elif args.cmd == "journal":
-        sys.exit(_journal(args))
-    elif args.cmd == "calibration":
-        sys.exit(_calibration())
-    elif args.cmd == "research":
-        sys.exit(asyncio.run(_research(args.force)))
-    elif args.cmd == "discover":
-        sys.exit(asyncio.run(_discover()))
-    elif args.cmd == "muse":
-        sys.exit(asyncio.run(_muse(args.force)))
-    elif args.cmd == "health":
-        sys.exit(_health())
-    elif args.cmd == "prompts":
-        sys.exit(asyncio.run(_prompts()))
-    elif args.cmd == "usage":
-        sys.exit(_usage())
-    elif args.cmd == "ledger":
-        sys.exit(_ledger())
-    elif args.cmd == "lessons":
-        sys.exit(asyncio.run(_lessons(args.action)))
-    elif args.cmd == "coach":
-        sys.exit(asyncio.run(_coach(args.action)))
-    elif args.cmd == "report":
-        sys.exit(_report())
-    elif args.cmd == "modelcal":
-        sys.exit(_modelcal(args.action))
-    elif args.cmd == "run":
-        sys.exit(asyncio.run(_run_loop(args.interval, args.closed_interval,
-                                       max_ticks=args.max_ticks,
-                                       allow_fast=args.allow_fast)))
-    elif args.cmd == "constitution":
-        sys.exit(asyncio.run(_constitution(args.action)))
+    sys.exit(_H[args.cmd](args))
