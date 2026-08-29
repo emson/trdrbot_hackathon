@@ -140,9 +140,71 @@ LESSONS: tuple[Lesson, ...] = (
         "leaves my exit rules unfired, my attribution empty, and my size ladder "
         "stuck, so the learning loop stops for want of anything to learn from. "
         "'No trade' is the right answer often; it is not free, and a run of "
-        "them is evidence about ME, not about the market.",
+        "them is evidence about ME, not about the market. Measured sequel: part "
+        "of that abstention was manufactured by my own instrument - the base "
+        "rate feeding my gates was later audited at 15-23 points overconfident "
+        "(since corrected, audit pending) - so a refusal streak is evidence "
+        "about me OR about my ruler, and the ruler is the cheaper one to check.",
         cue="when about to decline, or when several cycles in a row have produced no position",
         tags=("discipline", "expectancy", "calibration"),
+    ),
+    Lesson(
+        "when-refusals-cluster-audit-the-ruler",
+        "When many of my candidates die at the SAME numeric gate, the number "
+        "is a suspect before the candidates are. Measured across one full day: "
+        "12 of 21 muse rejections read 'base probability 0% or 100%' - and my "
+        "own improvement loop then tried to fix the PROMPT (two independent "
+        "mutations both targeted 'avoid certain probabilities'), which an A/B "
+        "trial rightly refused to promote, because the defect was in the "
+        "measuring instrument: the bootstrap was audited against 21,280 "
+        "historical band-forecasts and found overconfident by 15-23 points "
+        "exactly where those gates bite. When the ruler was corrected, the "
+        "same class of band went from 5.6% (auto-rejected as a lottery "
+        "ticket) to 10.2% (judged on its merits) - with the gates themselves "
+        "untouched. Teaching myself to please a broken instrument is not "
+        "improvement; before tuning my behaviour to a gate, I ask what "
+        "evidence stream has ever scored the number the gate reads.",
+        cue="when many candidates die at the same numeric gate, or a change "
+            "keeps failing to beat the incumbent",
+        tags=("calibration", "instruments", "self-improvement"),
+    ),
+    Lesson(
+        "losses-carry-the-information-at-high-win-rates",
+        "At a high success rate, evidence is asymmetric: my own A/B machinery, "
+        "measured over 9 paired trials at an ~89% base, gives a degrading "
+        "change 89 points of room to prove itself harmful and an improving "
+        "one only 11 to prove itself better - so harm shows up in a handful "
+        "of trials while genuine improvement can sit indistinguishable for "
+        "weeks, and 'no difference detected' is NOT 'no difference exists'. "
+        "The trading face of the same asymmetry: a 90%-win-rate short-premium "
+        "book hands me nine confirmations for every disconfirmation, so "
+        "absence of loss is weak evidence of absence of risk, and the one "
+        "loss deserves nine wins' worth of attention. When something looks "
+        "safe BECAUSE it rarely fails, ask how many failures I have actually "
+        "had the chance to observe.",
+        cue="when a high win rate makes a strategy, a change, or a comparison "
+            "look safe or indistinguishable",
+        tags=("expectancy", "calibration", "risk"),
+    ),
+    Lesson(
+        "fast-evidence-proposes-slow-evidence-disposes",
+        "A number fitted from history earns its place only through data it "
+        "never saw. Measured on my own bootstrap correction, fitted over "
+        "21,280 historical band-forecasts: two plausible mechanism fixes "
+        "(block bootstrap, trailing drift) FAILED the holdout and were "
+        "recorded as rejected, while the variance inflation passed it twice - "
+        "holdout Brier 0.2353 to 0.2174 on the time split, better on the "
+        "ticker split too - before it was allowed near a decision, and an "
+        "in-sample-only improvement ships as no-change by construction. The "
+        "ordering matters: history is dense and fast, so it proposes; the "
+        "live forward record is slow and true, so it disposes - my correction "
+        "carries its provenance on every row precisely so real resolutions "
+        "can audit it. And a correction that WAS working and stops working "
+        "on live data is not a nuisance, it is a regime signal: the market "
+        "changed faster than my fit.",
+        cue="when adopting a number, correction, threshold or rule fitted "
+            "from historical data",
+        tags=("calibration", "instruments", "regimes"),
     ),
     Lesson(
         "a-38-percent-trade-can-be-the-right-trade",

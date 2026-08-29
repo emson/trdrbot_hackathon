@@ -3806,3 +3806,59 @@ exit-rule replay, which should be built concretely first).
 (k=1.30/1.30/1.25 at 3/5/10d, holdout scores stored in it), `modelcal` rendering it, the
 inflation flowing through `band_inflation -> bootstrap_factors -> muse` with the measured band
 movements above.
+
+## D-090: Theo learns the session - three lessons, one amendment, two technique notes, no constitutional change
+**Date:** 2026-08-29
+**Status:** accepted
+**Context:** A request to distil this session's experiments (the Coach, D-088; the historic-data
+findings, notes/017; the model calibration, D-089) into learning blocks. Method unchanged from
+D-076: identify the concepts, route each to the store it belongs in per the constitution's own
+`[routing]` principle, and apply the slot test - anything a deterministic mechanism enforces
+stays code and gets NO memory slot; what memory holds is the judgment residue.
+
+**The analysis was run on the actual record, not on recollection.** The session's 19 muse runs
+show 12 of 21 rejections dying on ONE numeric gate ("base probability 0%/100%"), and the Coach's
+two mutations - read from the journal - both independently targeted that pattern at the PROMPT
+layer ("prevent absolute-certain probabilities") while the defect was in the measurement layer
+(I-29: the bootstrap overconfident 15-23pp). The A/B trial rightly refused to promote the
+wrong-layer fix (P=0.379 after 9 runs). That arc - refusals cluster, the loop tunes behaviour to
+please the gate, the trial says no-better, the instrument turns out to be lying - is the
+session's flagship learnable moment, and no existing block covered it.
+
+**Three new lessons** (ordinary decaying blocks, cued, each carrying its measurement - the
+existing lesson-quality test enforced that literally, rejecting a first draft with no number in
+it, which is the test doing its job):
+
+- `when-refusals-cluster-audit-the-ruler` - the full arc above. Cue: many candidates dying at
+  the same numeric gate, or a change repeatedly failing to beat the incumbent.
+- `losses-carry-the-information-at-high-win-rates` - I-27's measured asymmetry (89 points of
+  room to prove harm, 11 to prove improvement) joined to its trading face: nine confirmations
+  per disconfirmation on a 90% book means absence of loss is weak evidence of absence of risk.
+- `fast-evidence-proposes-slow-evidence-disposes` - the holdout veto with its real numbers (two
+  mechanism fixes failed it, the inflation passed twice, Brier 0.2353->0.2174), and a working
+  correction that stops working live is a regime signal, not a nuisance.
+
+**One amendment:** `abstention-has-a-price` gains its measured sequel - part of the 18-and-0
+abstention record was manufactured by the instrument, so a refusal streak is evidence about me
+OR about my ruler, and the ruler is the cheaper check.
+
+**Two wiki technique notes**, written through the enforced lifecycle path in the canonical
+structure (Rule / When it applies / What it means / Evidence), both durable and now in the
+muse's collision pool: `technique/who-audits-this-number` (the audit map - every load-bearing
+number names the evidence stream that scores it and the slower one that audits it; the
+graveyard rule) and `technique/information-lives-in-the-rare-side` (the asymmetry as a
+standing concept rather than a decaying lesson, because the arithmetic is timeless even if the
+measured instance is not).
+
+**Deliberately NO constitutional change, and the reasoning is the decision.** The candidate
+principle - "instruments are claims too" - fails the slot test on both prongs: it is now
+substantially CODE-backstopped (modelcal's holdout veto, the Coach's gauges, the forward audit,
+the fail-safe loader), and the constitution sits at 427/430 tokens where adding means retiring.
+The judgment residue that remains (noticing a refusal cluster as an instrument symptom) is
+better held as a cued lesson that can earn confidence through outcomes than as pinned identity -
+notes/010's own rule: a mechanism worth knowing has already been compiled into a principle
+worth holding, and if it has not, it should not be in the SELF frame either way.
+
+**Verified:** 11/11 lessons recallable by their cue (the new flagship recalls at rank 2);
+both wiki notes read back through `durable_text()` with conforming headings; 266 default tests
++ 19 contract pass, including the lesson-quality gate that rejected the unmeasured draft.
