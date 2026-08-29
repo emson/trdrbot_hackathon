@@ -22,14 +22,13 @@ than no bookkeeping.
 
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from langchain_core.callbacks import BaseCallbackHandler
 
-from . import ids
+from . import ids, store
 
 #: Anthropic's published cache multipliers against the base input rate: a
 #: cache WRITE costs 1.25x, a READ 0.1x. OpenAI's automatic caching discounts
@@ -104,25 +103,20 @@ class UsageLedger:
                     cost_usd=price(self.pricing, model, inp, out,
                                    cache_read, cache_write),
                     cache_read_tokens=cache_read, cache_write_tokens=cache_write)
-        try:
-            self.path.parent.mkdir(parents=True, exist_ok=True)
-            with self.path.open("a") as fh:
-                fh.write(json.dumps(call.__dict__) + "\n")
-        except OSError as exc:  # noqa: BLE001 - never break a trade over bookkeeping
-            print(f"[usage] could not write ledger: {exc!r}")
+        store.append_jsonl(self.path, dict(call.__dict__), advisory=True)
         return call
 
     def calls(self) -> list[Call]:
         if not self.path.exists():
             return []
         out = []
-        for line in self.path.read_text().splitlines():
-            line = line.strip()
-            if not line:
-                continue
+        for row in store.read_jsonl(self.path)[0]:
             try:
-                out.append(Call(**json.loads(line)))
-            except (json.JSONDecodeError, TypeError):
+                # Ignore keys Call has not heard of - `v` is one, and a field
+                # added later must not make every older row unreadable.
+                out.append(Call(**{k: v for k, v in row.items()
+                                   if k in Call.__dataclass_fields__}))
+            except TypeError:
                 continue
         return out
 

@@ -7,12 +7,11 @@ record and resume rather than re-decide, or write-ahead buys nothing.
 
 from __future__ import annotations
 
-import json
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
-from . import ids
+from . import ids, store
 
 
 class Journal:
@@ -26,14 +25,13 @@ class Journal:
             "kind": kind,
             **fields,
         }
-        with self.path.open("a") as f:
-            f.write(json.dumps(entry) + "\n")
+        store.append_jsonl(self.path, entry)  # advisory=False: ground truth
         return entry["id"]
 
     def read(self) -> Iterator[dict[str, Any]]:
         """Every entry, skipping any line that cannot be parsed.
 
-        This is the ground-truth store and it was the LEAST fault-tolerant
+        This is the ground-truth store and it was once the LEAST fault-tolerant
         reader in the system: a bare `json.loads` per line, where `ledger` and
         `health` already skipped bad ones. Appends are a buffered write and
         rows carry a 2000-char summary plus the recalled block ids, so a crash
@@ -44,20 +42,10 @@ class Journal:
         Skipping is right rather than raising, but silence is not: a corrupt
         line means a lost event, so it is counted and printed.
         """
-        if not self.path.exists():
-            return
-        skipped = 0
-        with self.path.open() as f:
-            for line in f:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    yield json.loads(line)
-                except json.JSONDecodeError:
-                    skipped += 1
+        rows, skipped = store.read_jsonl(self.path)
         if skipped:
             print(f"[journal] skipped {skipped} unparseable line(s) in {self.path.name}")
+        yield from rows
 
     def last_decision_at(self):
         """When the agent last actually reasoned. None if never.

@@ -198,3 +198,79 @@ def test_a_readable_high_water_file_journals_nothing(tmp_path):
 
     assert hw == 120_000.0, "the real peak must survive a lower equity reading"
     assert [r for r in journal.read() if r.get("kind") == "state_corrupt"] == []
+
+
+# ------------------------------------------------------- the JSONL primitives
+
+
+def test_an_appended_row_carries_a_schema_version(tmp_path):
+    """`v` is what makes the NEXT schema change auditable. Measured before it
+    existed: `decision` rows carry four distinct key shapes across the
+    journal's history, every consumer absorbing the drift with `.get()`, and
+    no way to tell which population a historical aggregate is mixing."""
+    from trdrbot import store
+
+    path = tmp_path / "rows.jsonl"
+    store.append_jsonl(path, {"kind": "thing", "n": 1})
+
+    rows, skipped = store.read_jsonl(path)
+    assert rows == [{"v": store.SCHEMA_VERSION, "kind": "thing", "n": 1}]
+    assert skipped == 0
+
+
+def test_rows_written_before_versioning_still_read(tmp_path):
+    """Nothing rewrites history, so a mixed file is the normal state."""
+    from trdrbot import store
+
+    path = tmp_path / "rows.jsonl"
+    path.write_text(json.dumps({"kind": "old", "n": 0}) + "\n")
+    store.append_jsonl(path, {"kind": "new", "n": 1})
+
+    rows, _ = store.read_jsonl(path)
+    assert [r["kind"] for r in rows] == ["old", "new"]
+    assert "v" not in rows[0] and rows[1]["v"] == store.SCHEMA_VERSION
+
+
+def test_a_ground_truth_write_failure_is_loud_and_a_bookkeeping_one_is_not(tmp_path):
+    """The failure POLICY is the argument, because the three appenders this
+    replaced each chose a different one silently. The journal must not lose a
+    write quietly; a gauge row must never break a trade."""
+    import pytest
+
+    from trdrbot import store
+
+    unwritable = tmp_path / "nope"
+    unwritable.write_text("i am a file, not a directory")
+    target = unwritable / "rows.jsonl"
+
+    with pytest.raises(OSError):
+        store.append_jsonl(target, {"kind": "ground_truth"})
+
+    assert store.append_jsonl(target, {"kind": "bookkeeping"}, advisory=True) is False
+
+
+def test_the_journal_still_reports_what_it_skipped(tmp_path, capsys):
+    """Behaviour preserved through the move to the shared reader."""
+    from trdrbot.journal import Journal
+
+    journal = Journal(tmp_path / "journal.jsonl")
+    journal.append("decision", batch="b1")
+    with journal.path.open("a") as fh:
+        fh.write("{ truncated\n")
+
+    assert [r["kind"] for r in journal.read()] == ["decision"]
+    assert "skipped 1 unparseable" in capsys.readouterr().out
+
+
+def test_the_usage_ledger_ignores_keys_Call_has_not_heard_of(tmp_path):
+    """`v` is one such key, and so is any field added later - a row must not
+    become unreadable because the dataclass grew."""
+    from trdrbot.usage import UsageLedger
+
+    path = tmp_path / "usage.jsonl"
+    led = UsageLedger(path)
+    led.record("decide", "some-model", 100, 50)
+
+    reread = UsageLedger(path).calls()
+    assert len(reread) == 1
+    assert reread[0].role == "decide" and reread[0].input_tokens == 100

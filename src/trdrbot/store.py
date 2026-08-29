@@ -17,8 +17,19 @@ Phase 1's crash-safety needs.
 
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
+from typing import Any
+
+#: Schema version stamped on every appended row. Nothing rewrites old rows and
+#: nothing branches on this yet - the point is that the NEXT schema change is
+#: auditable. Measured before it existed: `decision` rows carry four distinct
+#: key shapes across the journal's history (`context` dropped, `tick`,
+#: `elfmem_blocks` and `prompts` added at three different times), every
+#: consumer absorbing the drift with `.get()`, and no way to tell which
+#: population a historical aggregate is mixing.
+SCHEMA_VERSION = 1
 
 
 def write_atomic(path: Path, text: str) -> None:
@@ -33,3 +44,52 @@ def write_atomic(path: Path, text: str) -> None:
     tmp = path.with_suffix(path.suffix + ".tmp")
     tmp.write_text(text)
     os.replace(tmp, path)
+
+
+def append_jsonl(path: Path, row: dict[str, Any], *, advisory: bool = False) -> bool:
+    """Append one row as one line. Returns False only when advisory and it failed.
+
+    `advisory` is the write's failure POLICY, made explicit because the three
+    appenders this replaces each chose a different one silently: the journal
+    propagated, the coach's event log printed and continued, the usage ledger
+    printed and continued. Both policies are right for their caller and the
+    difference matters - the journal is ground truth, so a lost write there
+    must be loud; a lost gauge row must never break a trade.
+
+    `v` is stamped when absent rather than always, so a caller that already
+    versions its own rows keeps control.
+    """
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a", encoding="utf-8") as fh:
+            fh.write(json.dumps({"v": SCHEMA_VERSION, **row}) + "\n")
+        return True
+    except OSError as exc:
+        if not advisory:
+            raise
+        print(f"[store] could not append to {path.name}: {exc!r}")
+        return False
+
+
+def read_jsonl(path: Path) -> tuple[list[dict[str, Any]], int]:
+    """(rows, skipped). One policy: skip the unparseable line and count it.
+
+    Six readers had four different policies before this, and the two most
+    critical - the journal and the calibration store - had none at all, so one
+    truncated line took down every consumer at once (D-091). Skipping is right
+    because a partial line is a lost event, not a corrupt store; counting is
+    right because a lost event should never be silent.
+    """
+    if not path.exists():
+        return [], 0
+    rows: list[dict[str, Any]] = []
+    skipped = 0
+    for line in path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            rows.append(json.loads(line))
+        except json.JSONDecodeError:
+            skipped += 1
+    return rows, skipped

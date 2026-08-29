@@ -45,7 +45,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
-from . import ids
+from . import ids, store
 
 # --- promotion defaults ----------------------------------------------------
 #
@@ -240,29 +240,12 @@ def metrics_path(cfg: Any) -> Path:
 
 
 def _append(path: Path, row: dict[str, Any]) -> None:
-    try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with path.open("a") as fh:
-            fh.write(json.dumps({"ts": ids.utc_now().isoformat(), **row}) + "\n")
-    except OSError as exc:  # noqa: BLE001 - bookkeeping never blocks a run
-        print(f"[coach] could not append to {path.name}: {exc!r}")
+    """Advisory: bookkeeping never blocks a run."""
+    store.append_jsonl(path, {"ts": ids.utc_now().isoformat(), **row}, advisory=True)
 
 
 def _read(path: Path) -> list[dict[str, Any]]:
-    if not path.exists():
-        return []
-    out: list[dict[str, Any]] = []
-    try:
-        for line in path.read_text().splitlines():
-            line = line.strip()
-            if line:
-                try:
-                    out.append(json.loads(line))
-                except json.JSONDecodeError:
-                    continue
-    except OSError:
-        return []
-    return out
+    return store.read_jsonl(path)[0]
 
 
 def events(cfg: Any) -> list[dict[str, Any]]:
