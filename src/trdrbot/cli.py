@@ -168,7 +168,7 @@ def _calibration() -> int:
     return 0
 
 
-async def _research() -> int:
+async def _research(force: bool = False) -> int:
     from . import research
     from .journal import Journal
     from .wiki import Wiki
@@ -180,8 +180,10 @@ async def _research() -> int:
     # for every one of them (mcp_client.session_tools).
     async with mcp_client.session_tools(cfg) as tl:
         tools = {t.name: t for t in tl}
-        r = await research.run(tools, cfg, inbox, Wiki(cfg.paths.wiki), Journal(cfg.paths.journal))
-    print(f"research complete: {r}")
+        r = await research.run(tools, cfg, inbox, Wiki(cfg.paths.wiki),
+                               Journal(cfg.paths.journal), force=force)
+    print(f"research skipped: {r['skipped']} (pass --force)" if r.get("skipped")
+          else f"research complete: {r}")
     return 0
 
 
@@ -291,7 +293,7 @@ async def _prompts() -> int:
     tools = [local_tools.build_simulate_experiments(shared),
              local_tools.build_size_position(None, 1.0),
              local_tools.build_record_position(None, "d")]
-    print(prompts.render_inventory(prompts.inventory(tools)))
+    print(prompts.render_inventory(prompts.inventory(tools, config_mod.load())))
     return 0
 
 
@@ -449,7 +451,7 @@ async def _constitution(action: str) -> int:
     return 0
 
 
-async def _muse() -> int:
+async def _muse(force: bool = False) -> int:
     from . import ledger as ledger_mod
     from . import muse
     from .journal import Journal
@@ -461,8 +463,12 @@ async def _muse() -> int:
     async with mcp_client.session_tools(cfg) as tl:
         tools = {t.name: t for t in tl}
         r = await muse.run(tools, cfg, inbox, Wiki(cfg.paths.wiki),
-                           Journal(cfg.paths.journal), book)
-    print(f"muse complete: {r['candidates']} candidates, {r['emitted']} emitted")
+                           Journal(cfg.paths.journal), book, force=force)
+    if r.get("skipped"):
+        print(f"muse skipped: {r['skipped']} ({r.get('ran_today')} run(s) today). "
+              f"Pass --force to override.")
+    else:
+        print(f"muse complete: {r['candidates']} candidates, {r['emitted']} emitted")
     return 0
 
 
@@ -596,9 +602,13 @@ def main() -> None:
     jrn.add_argument("-n", type=int, default=20)
 
     sub.add_parser("calibration", help="show forecast calibration (Brier/Murphy)")
-    sub.add_parser("research", help="run the daily research cycle now")
+    res = sub.add_parser("research", help="run the daily research cycle now")
+    res.add_argument("--force", action="store_true",
+                     help="run even if it already ran today, or it is Saturday")
     sub.add_parser("discover", help="news-driven company discovery + thesis building")
-    sub.add_parser("muse", help="creative theses by random concept collision")
+    mus = sub.add_parser("muse", help="creative theses by random concept collision")
+    mus.add_argument("--force", action="store_true",
+                     help="run even if today's cap is already reached")
     sub.add_parser("health", help="detect subsystems that run but never produce")
     sub.add_parser("prompts", help="inventory every prompt the models read")
     sub.add_parser("usage", help="LLM token usage and cost, by model and role")
@@ -637,11 +647,11 @@ def main() -> None:
     elif args.cmd == "calibration":
         sys.exit(_calibration())
     elif args.cmd == "research":
-        sys.exit(asyncio.run(_research()))
+        sys.exit(asyncio.run(_research(args.force)))
     elif args.cmd == "discover":
         sys.exit(asyncio.run(_discover()))
     elif args.cmd == "muse":
-        sys.exit(asyncio.run(_muse()))
+        sys.exit(asyncio.run(_muse(args.force)))
     elif args.cmd == "health":
         sys.exit(_health())
     elif args.cmd == "prompts":

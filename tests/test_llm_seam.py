@@ -195,3 +195,64 @@ def test_naming_the_structure_resolves_a_tie_the_ratio_match_cannot():
 
     assert _matching_payoff_ratio(shared, 100.0, -100.0) is None
     assert _matching_payoff_ratio(shared, 100.0, -100.0, "put spread") == 2.2
+
+
+# ------------------------------------- caps live with the thing they cap
+
+
+async def test_the_muse_enforces_its_own_daily_cap(paths, monkeypatch):
+    """The cap was checked at ONE of two call sites, so `trdrbot muse`
+    bypassed it entirely and the journal recorded 9 runs against a cap of 3 on
+    2026-08-29. A cap that lives with the thing it caps cannot be forgotten by
+    a new caller."""
+    from types import SimpleNamespace
+
+    from trdrbot import ids, muse
+    from trdrbot.journal import Journal
+
+    journal = Journal(paths.journal)
+    for _ in range(muse.RUNS_PER_DAY):
+        journal.append("muse", candidates=1, emitted=0)
+
+    generated: list[int] = []
+    monkeypatch.setattr(muse, "_generate",
+                        lambda *a, **k: generated.append(1) or _none())
+
+    cfg = SimpleNamespace(paths=paths, deadline="2099-01-01", polymarket_queries=[],
+                          coach={"enabled": False})
+    out = await muse.run({}, cfg, None, None, journal, None, verbose=False)
+
+    assert out["skipped"] == "daily_cap"
+    assert out["ran_today"] == muse.RUNS_PER_DAY
+    assert generated == [], "the cap did not stop the LLM call"
+    assert ids.today()  # the cap is per UTC day, same clock the rows carry
+
+
+def _none():
+    async def _f():
+        return []
+    return _f()
+
+
+def test_research_holds_its_own_cadence(paths, monkeypatch):
+    """Same story: the day-marker and the Saturday gate lived only in
+    housekeeping, so `trdrbot research` bypassed both."""
+    from types import SimpleNamespace
+
+    from trdrbot import ids, research
+
+    cfg = SimpleNamespace(paths=paths)
+
+    monkeypatch.setattr(research.ids, "market_today",
+                        lambda: __import__("datetime").date(2026, 8, 29))  # a Saturday
+    due, why = research._due_today(cfg)
+    assert not due and why == "saturday"
+
+    monkeypatch.setattr(research.ids, "market_today",
+                        lambda: __import__("datetime").date(2026, 8, 31))  # Monday
+    assert research._due_today(cfg)[0] is True
+
+    research._mark_ran(cfg)
+    due, why = research._due_today(cfg)
+    assert not due and why == "already_ran_today"
+    assert (paths.state / "last_research").read_text() == ids.today().isoformat()

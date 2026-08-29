@@ -55,8 +55,13 @@ class PromptRef:
         return len(self.text) // 4
 
 
-def _active_muse_prompt() -> str:
+def _active_muse_prompt(config: Any = None) -> str:
     """The muse prompt variant currently live, falling back to the seed.
+
+    `config` is PASSED now. Self-loading here meant `config.load(quiet=True)` -
+    and therefore `load_dotenv(override=True)` plus a mkdir of every path - ran
+    inside `fingerprints()`, which runs on EVERY decision write. A hashing
+    helper had become one of the tick's filesystem writers.
 
     Never raises: an inventory that cannot be produced would take `trdrbot
     prompts` and every journalled decision's provenance down with it, and the
@@ -69,12 +74,13 @@ def _active_muse_prompt() -> str:
         from . import coach
         from . import config as _cm
 
-        return coach.load_state(_cm.load(quiet=True), "muse.prompt", MUSE_PROMPT).incumbent.text
+        cfg = config if config is not None else _cm.load(quiet=True)
+        return coach.load_state(cfg, "muse.prompt", MUSE_PROMPT).incumbent.text
     except Exception:  # noqa: BLE001
         return MUSE_PROMPT
 
 
-def inventory(tools: list[Any] | None = None) -> list[PromptRef]:
+def inventory(tools: list[Any] | None = None, config: Any = None) -> list[PromptRef]:
     """Everything authored that a model reads. Tools passed in when available."""
     from .constitution import PRINCIPLES
     from .discovery import NOMINATE_PROMPT, SYNTH_PROMPT
@@ -91,7 +97,7 @@ def inventory(tools: list[Any] | None = None) -> list[PromptRef]:
         # which after one promotion is merely the seed it started from. Reading
         # the constant here would fingerprint a prompt nothing is running, and
         # a provenance record that names the wrong artefact is worse than none.
-        PromptRef("muse.collide", "free_standing", _active_muse_prompt()),
+        PromptRef("muse.collide", "free_standing", _active_muse_prompt(config)),
     ]
     # The two artefacts this inventory used to omit while its own docstring
     # claimed eight. Neither is a lever: the mutation prompt is the Coach's own
@@ -110,7 +116,7 @@ def inventory(tools: list[Any] | None = None) -> list[PromptRef]:
     return refs
 
 
-def fingerprints(tools: list[Any] | None = None) -> dict[str, str]:
+def fingerprints(tools: list[Any] | None = None, config: Any = None) -> dict[str, str]:
     """{name: fingerprint} for journalling on a decision.
 
     Called with no tools at decision time - the tool objects are built after
@@ -118,7 +124,7 @@ def fingerprints(tools: list[Any] | None = None) -> dict[str, str]:
     waiting for the next decide cycle. Tool contracts are stable per release
     anyway; `trdrbot prompts` reports them in full.
     """
-    return {r.name: r.fingerprint for r in inventory(tools)}
+    return {r.name: r.fingerprint for r in inventory(tools, config)}
 
 
 def render_inventory(refs: list[PromptRef]) -> str:

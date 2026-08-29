@@ -11,6 +11,7 @@ from typing import Any
 
 from . import attribution
 from .analytics import Snapshot, position_pnl_pct
+from .config import Config
 from .elfmem_adapter import ElfmemAdapter
 from .journal import Journal
 from .positions import PositionStore
@@ -47,15 +48,19 @@ def _materiality_band(pnl_pct: float) -> int:
     return band
 
 
-def _load_config():
-    from . import config as _cm
-    return _cm.load(quiet=True)
-
-
 async def run(
     store: PositionStore, snap: Snapshot, mem: ElfmemAdapter, wiki: Wiki, journal: Journal,
-    *, tools: dict[str, Any] | None = None, verbose: bool = True,
+    config: Config, *, tools: dict[str, Any] | None = None, verbose: bool = True,
 ) -> dict[str, int]:
+    """Closed-market work. `config` is PASSED, not re-loaded.
+
+    This used to call `config.load(quiet=True)` three times per run, and each
+    call re-runs `load_dotenv(override=True)` and re-mkdirs every path. Worse
+    than the cost: the run loop captures its config once at startup, so an
+    edit to config.yaml mid-run left housekeeping reading the new file while
+    everything else ran on the old one - two live configurations, with nothing
+    saying so.
+    """
     interim_scored = 0
     interim_eligible = 0
 
@@ -118,34 +123,18 @@ async def run(
     # Daily research cycle (D-032): regime + dossiers + opportunities. Once
     # per calendar day - it costs an LLM call and regime does not move hourly.
     if tools:
-        from . import ids as _ids
         from . import research
-        marker = store.dir.parent.parent / "state" / "last_research"
-        today = _ids.utc_now().date().isoformat()
-        # Research is the ONLY recurring LLM cost of the closed-market loop
-        # (measured from the journal: overnight ticks emit research 1x/day and
-        # otherwise only free bookkeeping). Gate it to days where the output
-        # can still be acted on: Saturday research reads Friday's close and is
-        # stale twice over by Monday's open, so it is skipped; Sunday runs,
-        # because its regime read feeds Monday.
-        #
-        # The weekday is the MARKET's, not UTC's. "Close enough for a Sat/Sun
-        # distinction" was not: UTC crosses into Saturday at 20:00 ET Friday,
-        # so the gate suppressed research every Friday evening - the run that
-        # reads a fresh Friday close and is the most useful one of the week.
-        weekday = _ids.market_today().weekday()  # Mon=0 .. Sat=5, Sun=6
-        research_worthwhile = weekday != 5
-        if research_worthwhile and (not marker.exists() or marker.read_text(encoding="utf-8").strip() != today):
-            try:
-                cfg = _load_config()
-                from .inbox import Inbox as _Inbox
-                inbox = _Inbox(cfg.paths, max_retries=cfg.max_retries)
-                r = await research.run(tools, cfg, inbox, wiki, journal, verbose=verbose)
-                marker.write_text(today, encoding="utf-8")
-                if verbose:
-                    print(f"[housekeeping] research: {r['opportunities']} opportunities")
-            except Exception as exc:  # noqa: BLE001 - research is advisory (INV-8)
-                print(f"[housekeeping] research failed, continuing: {exc!r}")
+        # The cadence (once a day, never Saturday) lives in `research.run`
+        # now, so `trdrbot research` inherits it too - it used to bypass both
+        # the marker and the weekday gate (D-092).
+        try:
+            from .inbox import Inbox as _Inbox
+            inbox = _Inbox(config.paths, max_retries=config.max_retries)
+            r = await research.run(tools, config, inbox, wiki, journal, verbose=verbose)
+            if verbose and not r.get("skipped"):
+                print(f"[housekeeping] research: {r['opportunities']} opportunities")
+        except Exception as exc:  # noqa: BLE001 - research is advisory (INV-8)
+            print(f"[housekeeping] research failed, continuing: {exc!r}")
 
     # Resolve matured forecasts against the tape (D-052). This is where the
     # cheap evidence lands: theses we DECLINED get scored exactly like traded
@@ -156,8 +145,7 @@ async def run(
         from . import ids as _i
         from . import ledger as _ledger
         from .attribution import _spot
-        cfg2 = _load_config()
-        book = _ledger.Ledger(cfg2.paths.state / "ledger.jsonl")
+        book = _ledger.Ledger(config.paths.state / "ledger.jsonl")
         due = book.matured_unresolved()
         for e in due:
             spot = await _spot(tools, e.underlying)
@@ -205,9 +193,8 @@ async def run(
     try:
         from . import coach
         from . import muse as _muse
-        cfg3 = _load_config()
-        coach.reconcile(cfg3, seeds={"muse.prompt": _muse.MUSE_PROMPT})
-        coached = await coach.pulse(cfg3, journal,
+        coach.reconcile(config, seeds={"muse.prompt": _muse.MUSE_PROMPT})
+        coached = await coach.pulse(config, journal,
                                     seeds={"muse.prompt": _muse.MUSE_PROMPT},
                                     verbose=verbose)
     except Exception as exc:  # noqa: BLE001 - the Coach is advisory (INV-8)

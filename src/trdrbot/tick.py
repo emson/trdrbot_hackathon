@@ -103,13 +103,6 @@ BETA_DELTA_FLAG_PCT = 1.5
 #: tickers cannot drown out the name actually being traded.
 ATTENTION_MAX_NAMES = 6
 
-#: Muse runs per UTC day, on the hunt rung. The Coach's trials need repetition
-#: to accumulate evidence - at this cadence a promotion needs ~3 days of
-#: trading, which fits the window. Each run is one LLM call, or two while an
-#: experiment is open, and the Coach's cost sentinel bounds the total.
-MUSE_RUNS_PER_DAY = 3
-
-
 def decide_tool_node(agent_tools: list[Any]) -> ToolNode:
     """Tools bound so a RUNTIME tool error becomes a ToolMessage, not a crash.
 
@@ -324,7 +317,8 @@ async def _run_tick(
         # execution - useful for development and for demoing the agent's
         # reasoning without waiting for the bell.
         if not snap.market_open and not force_decide:
-            hk = await housekeeping.run(store, snap, mem, wiki, journal, tools=tools, verbose=verbose)
+            hk = await housekeeping.run(store, snap, mem, wiki, journal, config,
+                                        tools=tools, verbose=verbose)
             return {"status": "housekeeping", "tick": n, "market_open": snap.market_open,
                     "sensed": sensed, "exits": triggered, **hk}
 
@@ -387,18 +381,14 @@ async def _run_tick(
 
                 # The muse rides the same rung (D-088). It was CLI-only, so its
                 # A/B trials had no runs to feed on - a lever nothing exercises
-                # improves nothing. Capped per UTC day because each run is one
-                # LLM call, or two while a trial is open.
+                # improves nothing. The daily cap lives in `muse.run` now, so
+                # every caller inherits it (D-092).
                 try:
                     from . import coach, muse
-                    today = ids.utc_now().date().isoformat()
-                    ran_today = sum(1 for r in journal.read()
-                                    if r.get("kind") == "muse"
-                                    and str(r.get("ts", ""))[:10] == today)
-                    if ran_today < MUSE_RUNS_PER_DAY:
-                        book = ledger_mod.Ledger(config.paths.state / "ledger.jsonl")
-                        await muse.run(tools, config, inbox, wiki, journal, book,
-                                       verbose=verbose)
+                    book = ledger_mod.Ledger(config.paths.state / "ledger.jsonl")
+                    r_muse = await muse.run(tools, config, inbox, wiki, journal, book,
+                                            verbose=verbose)
+                    if not r_muse.get("skipped"):
                         items = inbox.pending()
                         # Pulse immediately: the trial result just landed, and
                         # housekeeping (the other pulse site) only runs while
@@ -450,7 +440,7 @@ async def _run_tick(
             # Which prompts actually produced this decision. Cannot be
             # reconstructed later, so it is recorded now even though no
             # second variant exists yet (D-045).
-            prompts=prompts.fingerprints(),
+            prompts=prompts.fingerprints(config=config),
             item_ids=[i.id for i in items],
             resumed_from=prior["id"] if prior else None,
             elfmem_blocks=ctx.blocks,

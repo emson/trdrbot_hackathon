@@ -462,10 +462,33 @@ def _score_arm(evaluated: list[dict[str, Any]], asked: int) -> dict[str, Any]:
             "fates": [str(v.get("fate", ""))[:80] for v in evaluated]}
 
 
+#: Muse runs per UTC day. The Coach's trials need repetition to accumulate
+#: evidence - at this cadence a promotion needs ~3 days of trading, which fits
+#: the window. Each run is one LLM call, or two while an experiment is open,
+#: and the Coach's cost sentinel bounds the total.
+#:
+#: Enforced HERE rather than at a call site, because it was enforced at ONE of
+#: two: `trdrbot muse` bypassed it entirely, and the journal recorded 9 runs
+#: against a cap of 3 on 2026-08-29. A cap that lives with the thing it caps
+#: cannot be forgotten by a new caller.
+RUNS_PER_DAY = 3
+
+
 async def run(
     tools: dict[str, Any], config: Config, inbox: Inbox, wiki: Wiki,
     journal: Journal, ledger: Ledger, *, verbose: bool = True,
+    force: bool = False,
 ) -> dict[str, Any]:
+    today = ids.utc_now().date().isoformat()
+    ran_today = sum(1 for r in journal.read()
+                    if r.get("kind") == "muse" and str(r.get("ts", ""))[:10] == today)
+    if ran_today >= RUNS_PER_DAY and not force:
+        if verbose:
+            print(f"[muse] daily cap reached ({ran_today}/{RUNS_PER_DAY}) - "
+                  f"pass force=True to override")
+        return {"skipped": "daily_cap", "ran_today": ran_today,
+                "candidates": 0, "emitted": 0, "evaluated": []}
+
     # Which prompt variant is live, and is a challenger being trialled?
     arms = coach.arms(config, "muse.prompt", seed_text=MUSE_PROMPT)
 

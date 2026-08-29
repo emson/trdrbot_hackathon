@@ -191,7 +191,7 @@ async def test_research_now_rejects_the_percentage_band_it_used_to_admit(
     journal = Journal(paths.journal)
 
     out = await research.run(tools_for(), cfg, Inbox(paths), Wiki(paths.wiki),
-                             journal, verbose=False)
+                             journal, verbose=False, force=True)
 
     assert out["opportunities"] == 1, "the percentage-move band was admitted"
     rejected = [r for r in journal.read() if r.get("kind") == "research_rejected"]

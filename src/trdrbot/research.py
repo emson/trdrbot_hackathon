@@ -131,6 +131,32 @@ def opportunity_defect(o: Any) -> str | None:
     return None
 
 
+def _due_today(config: Config) -> tuple[bool, str]:
+    """(should run, why not). Research's own cadence, held where it belongs.
+
+    Once per calendar day, and never on Saturday: a Saturday run reads
+    Friday's close and is stale twice over by Monday's open, while Sunday's
+    regime read feeds Monday. The weekday is the MARKET's - keyed on UTC it
+    suppressed research every Friday evening from 20:00 ET, which is the run
+    that reads a fresh close and is the most useful of the week.
+
+    This lived in `housekeeping` alone, so `trdrbot research` bypassed both
+    the marker and the weekday gate (D-092).
+    """
+    if ids.market_today().weekday() == 5:
+        return False, "saturday"
+    marker = config.paths.state / "last_research"
+    today = ids.today().isoformat()
+    if marker.exists() and marker.read_text(encoding="utf-8").strip() == today:
+        return False, "already_ran_today"
+    return True, ""
+
+
+def _mark_ran(config: Config) -> None:
+    (config.paths.state / "last_research").write_text(
+        ids.today().isoformat(), encoding="utf-8")
+
+
 async def run(
     tools: dict[str, Any],
     config: Config,
@@ -139,7 +165,14 @@ async def run(
     journal: Journal,
     *,
     verbose: bool = True,
+    force: bool = False,
 ) -> dict[str, Any]:
+    due, why = _due_today(config)
+    if not due and not force:
+        if verbose:
+            print(f"[research] skipped: {why} (pass force=True to override)")
+        return {"skipped": why, "wiki": [], "opportunities": 0}
+
     universe = config.research_universe
 
     # ---- deterministic layer: stats + persisted closes per ticker ----
@@ -245,6 +278,7 @@ async def run(
             journal.append("research_admitted_unchecked", source="research",
                            underlying=o.underlying, unchecked=list(verdict.unchecked))
 
+    _mark_ran(config)
     journal.append(
         "research",
         universe=universe,
