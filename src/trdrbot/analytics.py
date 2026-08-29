@@ -94,7 +94,7 @@ class Snapshot:
 MIN_NET_COST_SHARE = 0.02
 
 
-def position_pnl_pct(symbols: list[str], snap: Snapshot) -> float | None:
+def position_pnl_fraction(symbols: list[str], snap: Snapshot) -> float | None:
     """Position-level P&L as a fraction of NET ENTRY COST (INV-19).
 
     Shared by C24 (exit rules) and housekeeping's interim scoring (INV-24) -

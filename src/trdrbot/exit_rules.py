@@ -30,7 +30,7 @@ from datetime import date
 from typing import Any
 
 from . import ids, learn, mcp_client
-from .analytics import Snapshot, _f, position_pnl_pct
+from .analytics import Snapshot, _f, position_pnl_fraction
 from .calibration import CalibrationStore
 from .elfmem_adapter import ElfmemAdapter
 from .journal import Journal
@@ -67,7 +67,7 @@ EXIT_SIGNALS: dict[str, ExitSignal] = {
     # Noisiest signal available on an options position: a wide or stale quote
     # can print -100%-of-credit on a healthy spread. Debounce matters most here.
     "position_mark": ExitSignal(
-        "position_mark", lambda p, s, d: position_pnl_pct(p.symbols, s),
+        "position_mark", lambda p, s, d: position_pnl_fraction(p.symbols, s),
         1.0, lambda v: f"{v:+.1%}",
     ),
     # What a professional actually exits on: the underlying breaking the level
@@ -96,8 +96,11 @@ _PRIORITY = {"deadline": 0, "stop_loss": 1, "underlying_stop": 1,
              "time_stop": 2, "profit_target": 3}
 
 
-def _pct(v: Any) -> float | None:
-    """A "-65.0%" threshold as a fraction. None when it does not parse.
+def _pct_string_to_fraction(v: Any) -> float | None:
+    """A "-65.0%" threshold string as a FRACTION. None when it does not parse.
+
+    Named for what it converts, because the `_pct` suffix meant two things in
+    this codebase and one of the collisions shipped a dead subsystem (D-092).
 
     This used to lean on `_f`, whose default is 0.0 - so a threshold of "abc",
     or an empty string, became a stop at EXACTLY BREAKEVEN. Any position
@@ -125,7 +128,7 @@ def _normalise(rule: dict[str, Any]) -> tuple[str, str, float, str] | None:
     if kind == "deadline":
         return ("days_to_deadline", "below", 0.0, kind)
     if kind in ("stop_loss", "profit_target") and rule.get("threshold") is not None:
-        thr = _pct(rule["threshold"])
+        thr = _pct_string_to_fraction(rule["threshold"])
         if thr is None:
             return None  # unparseable threshold: hold, never guess a level
         direction = "below" if kind == "stop_loss" else "above"
@@ -183,13 +186,13 @@ def watched_signals(pos: Position) -> list[str]:
 
 
 def evaluate(pos: Position, snap: Snapshot, deadline: str) -> tuple[str | None, str, float | None]:
-    """Return (close_reason, explanation, pnl_pct). None means hold.
+    """Return (close_reason, explanation, pnl_fraction). None means hold.
 
-    pnl_pct comes back alongside the reason so the caller can feed it straight
+    pnl_fraction comes back alongside the reason so the caller can feed it straight
     to learn.on_resolution() without recomputing - the position's net mark is
     exactly the signal credit assignment needs (D-018 #9).
     """
-    pnl = position_pnl_pct(pos.symbols, snap)
+    pnl = position_pnl_fraction(pos.symbols, snap)
     # Remember the last time we could see it. A position that closes outside
     # our rules leaves the broker, taking its final P&L with it (D-056).
     if pnl is not None:
@@ -311,7 +314,7 @@ async def run(
         if closed_ok:
             store.transition(pos, "closed")  # INV-17: terminal, exactly once
             await learn.guarded(  # F3 - advisory, never aborts the evaluator
-                learn.on_resolution(pos, store, mem, wiki, journal, pnl_pct=pnl,
+                learn.on_resolution(pos, store, mem, wiki, journal, pnl_fraction=pnl,
                                     calibration=calibration),
                 journal, stage="on_resolution", position_id=pos.position_id)
         triggered.append(pos.position_id)

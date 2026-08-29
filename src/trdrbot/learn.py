@@ -77,12 +77,12 @@ async def on_resolution(
     wiki: Wiki,
     journal: Journal,
     *,
-    pnl_pct: float | None,
+    pnl_fraction: float | None,
     calibration: CalibrationStore | None = None,
 ) -> None:
     """F3: a position reached a terminal state, however it got there.
 
-    pnl_pct is None when the resolving detector has no P&L to hand (e.g. an
+    pnl_fraction is None when the resolving detector has no P&L to hand (e.g. an
     external close discovered after the position already vanished from
     holdings) - credit assignment is skipped rather than guessed, same
     philosophy as skipping a non-self-resolved close.
@@ -95,8 +95,8 @@ async def on_resolution(
     # position has carried `last_pnl_pct` since D-056; this is the third place
     # the same measured number failed to reach its consumer, so the fallback
     # goes HERE, where every caller inherits it, rather than in each detector.
-    if pnl_pct is None and pos.last_pnl_pct is not None:
-        pnl_pct = pos.last_pnl_pct
+    if pnl_fraction is None and pos.last_pnl_pct is not None:
+        pnl_fraction = pos.last_pnl_pct
 
     self_resolved = pos.close_reason in SELF_RESOLVED
     scored = False
@@ -107,8 +107,8 @@ async def on_resolution(
     # a stop-triggered loss answers that question honestly even though it says
     # nothing about whether the entry thesis was sound. Suppressing those would
     # bias the calibration record toward trades that went well.
-    if calibration is not None and pnl_pct is not None:
-        calibration.resolve(pos.position_id, outcome=pnl_pct > 0, at=ids.utc_now().isoformat())
+    if calibration is not None and pnl_fraction is not None:
+        calibration.resolve(pos.position_id, outcome=pnl_fraction > 0, at=ids.utc_now().isoformat())
 
     # The MIND's prediction resolves here, and only the mind's. It is a binary
     # claim about this position - right or wrong once - and a measured P&L is
@@ -128,20 +128,20 @@ async def on_resolution(
     # Deferring costs nothing real: attribution is where the view is actually
     # tested, and a position that closes before its horizon has not yet
     # produced the evidence that would justify moving a memory.
-    if pnl_pct is not None:
-        hit = pnl_pct > 0
+    if pnl_fraction is not None:
+        hit = pnl_fraction > 0
         await mem.record_mind_outcome(pos, hit=hit)
         scored = True
     else:
         hit = None
 
-    _write_lesson(wiki, pos, pnl_pct=pnl_pct, scored=scored)
+    _write_lesson(wiki, pos, pnl_fraction=pnl_fraction, scored=scored)
 
     journal.append(
         "reflection",
         position_id=pos.position_id,
         close_reason=pos.close_reason,
-        pnl_pct=pnl_pct,
+        pnl_pct=pnl_fraction,
         self_resolved=self_resolved,
         credit_assigned=scored,
         #: Block credit is attribution's job now (D-091). Recorded so the
@@ -154,7 +154,7 @@ async def on_resolution(
     store.save(pos)  # persist any state the resolve step touched
 
 
-def _write_lesson(wiki: Wiki, pos: Position, *, pnl_pct: float | None, scored: bool) -> str:
+def _write_lesson(wiki: Wiki, pos: Position, *, pnl_fraction: float | None, scored: bool) -> str:
     """Append to the single evolving lessons.md concept (D-022/D-023).
 
     One growing body, one heading per resolved position - the augmentation
@@ -166,7 +166,7 @@ def _write_lesson(wiki: Wiki, pos: Position, *, pnl_pct: float | None, scored: b
     if heading in existing.body:
         return existing.concept_id  # already recorded, do not duplicate
 
-    pnl_text = f"{pnl_pct:+.1%}" if pnl_pct is not None else "unknown (not self-resolved)"
+    pnl_text = f"{pnl_fraction:+.1%}" if pnl_fraction is not None else "unknown (not self-resolved)"
     credit_text = (
         "prediction resolved; block credit deferred to attribution at the thesis "
         "horizon (D-091 - crediting on P&L here would let a lucky win reinforce a "

@@ -104,7 +104,7 @@ def test_materiality_bands_speak_the_unit_the_caller_passes():
     the caller spoke fractions, and each was internally consistent.
 
     So the unit is pinned to its ONE producer rather than to a literal."""
-    from trdrbot.analytics import Snapshot, position_pnl_pct
+    from trdrbot.analytics import Snapshot, position_pnl_fraction
     from trdrbot.housekeeping import INTERIM_BANDS
 
     # A debit spread: $2,000 paid, now worth $600 less. -30% by any trader's
@@ -113,7 +113,7 @@ def test_materiality_bands_speak_the_unit_the_caller_passes():
         {"symbol": "X1", "cost_basis": 3000.0, "unrealized_pl": -600.0},
         {"symbol": "X2", "cost_basis": -1000.0, "unrealized_pl": 0.0},
     ])
-    pnl = position_pnl_pct(["X1", "X2"], snap)
+    pnl = position_pnl_fraction(["X1", "X2"], snap)
     assert abs(pnl - (-0.30)) < 1e-9, "P&L is a fraction of NET entry cost"
     assert max(INTERIM_BANDS) < 1.0, "bands must be fractions, like their input"
     assert _materiality_band(pnl) == 1, "a real -30% move must be material"
@@ -1365,7 +1365,7 @@ def test_only_opening_orders_demand_a_recorded_position():
 
 # `test_credit_gates_on_measured_pnl_not_the_close_label` stood here. It
 # asserted on the TEXT of `learn.on_resolution` - the literal
-# `"if pnl_pct is not None:\n        hit = pnl_pct > 0"` - to pin D-057's fix
+# `"if pnl_fraction is not None:\n        hit = pnl_fraction > 0"` - to pin D-057's fix
 # that credit follows a measured P&L rather than the close-reason label.
 #
 # D-091 moved block credit out of that function entirely (it was crediting on
@@ -2269,14 +2269,14 @@ def test_pnl_percent_is_of_net_entry_cost_not_gross_premium():
     2-7x, so every mark-based stop the agent ever wrote was measured against a
     base several times larger than the money it put up - and three of the four
     rules on the live book could never fire at all."""
-    from trdrbot.analytics import Snapshot, position_pnl_pct
+    from trdrbot.analytics import Snapshot, position_pnl_fraction
 
     # Credit spread: sold for 2.65, bought for 1.58, 5 lots -> $535 credit.
     snap = Snapshot(broker_positions=[
         {"symbol": "S", "cost_basis": -1325.0, "unrealized_pl": 267.5},
         {"symbol": "L", "cost_basis": 790.0, "unrealized_pl": 0.0},
     ])
-    pnl = position_pnl_pct(["S", "L"], snap)
+    pnl = position_pnl_fraction(["S", "L"], snap)
     assert abs(pnl - 0.50) < 1e-9, "+50% means half the CREDIT, the trader's meaning"
     # On the old gross base ($2,115) the same money read as +12.6%, so a +50%
     # target needed $1,057 against a max profit of $535: unreachable, forever.
@@ -2284,12 +2284,12 @@ def test_pnl_percent_is_of_net_entry_cost_not_gross_premium():
 
 
 def test_a_spread_with_no_net_cost_reports_nothing_rather_than_noise():
-    from trdrbot.analytics import Snapshot, position_pnl_pct
+    from trdrbot.analytics import Snapshot, position_pnl_fraction
     snap = Snapshot(broker_positions=[
         {"symbol": "A", "cost_basis": 1000.0, "unrealized_pl": 5.0},
         {"symbol": "B", "cost_basis": -999.0, "unrealized_pl": 0.0},
     ])
-    assert position_pnl_pct(["A", "B"], snap) is None, "unobservable holds, never fires blind"
+    assert position_pnl_fraction(["A", "B"], snap) is None, "unobservable holds, never fires blind"
 
 
 def test_unreachable_exit_rules_are_named_at_record_time():

@@ -99,7 +99,7 @@ async def reconcile(
                 # holdings by the time we noticed. D-018 #9 skips credit
                 # assignment here rather than guessing a sign.
                 ok = await learn.guarded(
-                    learn.on_resolution(pos, store, mem, wiki, journal, pnl_pct=None,
+                    learn.on_resolution(pos, store, mem, wiki, journal, pnl_fraction=None,
                                         calibration=calibration),
                     journal, stage="on_resolution", position_id=pos.position_id)
                 learn_errors += 0 if ok else 1

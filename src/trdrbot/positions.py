@@ -108,6 +108,12 @@ class Position:
     #: Feeds the portfolio-level at-risk cap (D-036). None on legacy
     #: positions - counted as zero risk by the cap, leniently.
     max_loss_usd: float | None = None
+    #: **A FRACTION despite the `_pct` suffix** (-0.30 = -30%). The name is a
+    #: WIRE FORMAT - it is the frontmatter key every position page on disk
+    #: already carries - so D-092's rename of the `_pct`-means-two-things
+    #: collision deliberately stopped at the persistence boundary. The
+    #: producer is `analytics.position_pnl_fraction`, whose name does say so.
+    #:
     #: Last observed P&L fraction while the position was visible at the
     #: broker. When a position closes OUTSIDE our exit rules - the agent
     #: repricing its own limit, an assignment, an expiry - the broker no

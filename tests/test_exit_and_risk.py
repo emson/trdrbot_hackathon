@@ -22,7 +22,7 @@ from trdrbot.wiki import Wiki
 
 def _underwater(symbols: list[str], pnl_fraction: float) -> Snapshot:
     """A broker snapshot showing the position at `pnl_fraction` of its net
-    entry cost - built the way `position_pnl_pct` actually reads it, not the
+    entry cost - built the way `position_pnl_fraction` actually reads it, not the
     way a test would find convenient."""
     per_leg = 1000.0 / max(1, len(symbols))
     return Snapshot(broker_positions=[

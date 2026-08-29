@@ -48,15 +48,17 @@ async def test_a_close_with_known_pnl_resolves_calibration_and_records_the_lesso
     store.save(pos)
     calib.record(pos.position_id, probability=0.6, subject="SPY")
 
-    await learn.on_resolution(pos, store, mem, wiki, journal, pnl_pct=None, calibration=calib)
+    await learn.on_resolution(pos, store, mem, wiki, journal, pnl_fraction=None, calibration=calib)
 
-    # pnl_pct=None fell back to the position's own last observation (D-058:
+    # pnl_fraction=None fell back to the position's own last observation (D-058:
     # the same measured number failed to reach three consumers in a row).
     resolved = calib.resolved()
     assert len(resolved) == 1 and resolved[0].outcome is True
 
     reflection = journal_rows(journal, "reflection")
     assert len(reflection) == 1
+    # The journal FIELD keeps its name: it is a wire format that 388
+    # historical rows already carry (D-092 renamed code identifiers only).
     assert reflection[0]["pnl_pct"] == 0.5
 
     lesson = wiki.read("lessons")
@@ -83,7 +85,7 @@ async def test_a_close_with_no_pnl_anywhere_skips_credit_rather_than_guessing(
     store.save(pos)
     calib.record(pos.position_id, probability=0.6, subject="SPY")
 
-    await learn.on_resolution(pos, store, mem, wiki, journal, pnl_pct=None, calibration=calib)
+    await learn.on_resolution(pos, store, mem, wiki, journal, pnl_fraction=None, calibration=calib)
 
     assert mem.credited == []
     assert mem.mind_outcomes == []
@@ -266,7 +268,7 @@ async def test_a_lucky_win_moves_no_memory_end_to_end(paths, make_position, mem:
     # 1. it closes profitably, outside our rules, the way both real ones have.
     pos.last_pnl_pct = 0.4
     store.transition(pos, "closed", close_reason="external")
-    await learn.on_resolution(pos, store, mem, wiki, journal, pnl_pct=0.4,
+    await learn.on_resolution(pos, store, mem, wiki, journal, pnl_fraction=0.4,
                               calibration=calib)
 
     # 2. the horizon arrives and the underlying is ABOVE the band: view wrong.

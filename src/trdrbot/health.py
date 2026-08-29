@@ -143,7 +143,7 @@ PROBES: tuple[Probe, ...] = (
         "interim_scoring", ("interim_run",),
         lambda rows: sum(int(r.get("scored") or 0) for r in rows), 3,
         "positions were eligible every cycle and none was ever scored - check "
-        "the materiality bands against the units position_pnl_pct returns",
+        "the materiality bands against the units position_pnl_fraction returns",
         work=lambda rows: sum(int(r.get("eligible") or 0) for r in rows),
         never_producing_is_ok=True,
     ),

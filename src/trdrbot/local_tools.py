@@ -94,7 +94,7 @@ def _unreachable_rules(
     """Mark-based rules that can never fire, given this structure's own payoff.
 
     A percentage stop is a percentage OF THE NET ENTRY COST (see
-    `analytics.position_pnl_pct`), so its trigger is a dollar amount that the
+    `analytics.position_pnl_fraction`), so its trigger is a dollar amount that the
     position's bounded payoff may simply never reach. Both live positions had
     this and nobody could see it:
 

@@ -10,7 +10,7 @@ from __future__ import annotations
 from typing import Any
 
 from . import attribution
-from .analytics import Snapshot, position_pnl_pct
+from .analytics import Snapshot, position_pnl_fraction
 from .config import Config
 from .elfmem_adapter import ElfmemAdapter
 from .journal import Journal
@@ -22,7 +22,7 @@ from .wiki import Wiki
 #: noise on a freshly opened spread, which is exactly what was being
 #: learned from before.
 #:
-#: **FRACTIONS, not percents, because that is what `position_pnl_pct` returns.**
+#: **FRACTIONS, not percents, because that is what `position_pnl_fraction` returns.**
 #: These read 25.0 and 50.0 - i.e. +2500% and +5000% - so no position could
 #: ever reach band 1 and interim scoring has been dead since the day the bands
 #: were added. The journal proves it: eight `interim_outcome` rows, all from
@@ -34,13 +34,17 @@ from .wiki import Wiki
 INTERIM_BANDS = (0.25, 0.50)
 
 
-def _materiality_band(pnl_pct: float) -> int:
+def _materiality_band(pnl_fraction: float) -> int:
     """0 = not material yet; 1 and 2 = successively larger real moves.
 
-    `pnl_pct` is a FRACTION of net entry cost (0.25 = a 25% move), the same
-    unit `analytics.position_pnl_pct` returns.
+    The argument is a FRACTION of net entry cost (0.25 = a 25% move), the same
+    unit `analytics.position_pnl_fraction` returns - and the name now says so.
+    It read `pnl_pct` while the constants beside it were percentages, which is
+    exactly the collision that shipped interim scoring dead on arrival: the
+    bands read 25.0/50.0 against a fraction input, so no position could ever
+    reach band 1 (D-074).
     """
-    mag = abs(pnl_pct)
+    mag = abs(pnl_fraction)
     band = 0
     for i, threshold in enumerate(INTERIM_BANDS, start=1):
         if mag >= threshold:
@@ -67,7 +71,7 @@ async def run(
     for pos in store.open_positions():
         if pos.status != "open" or not pos.all_elfmem_block_ids:
             continue
-        pnl = position_pnl_pct(pos.symbols, snap)
+        pnl = position_pnl_fraction(pos.symbols, snap)
         if pnl is None:
             continue
         interim_eligible += 1
