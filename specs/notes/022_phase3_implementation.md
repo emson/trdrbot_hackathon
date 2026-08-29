@@ -339,9 +339,11 @@ posterior of the PREVIOUS state - the recorded number is always one trial stale.
 `p_challenger_better` of that single trial's counts (not 0.5). Pinned deletion: the suite is
 the net (grep tests/ for `pinned` first - update any construction sites, listed per A.10).
 
-**Behaviour delta, deliberate:** an operator who had set `pinned: true` (none live - verify
-`grep -l pinned data/state/levers/`) would now find it inert; the README told them it did
-something the code never did, which is the defect.
+**Behaviour delta, deliberate:** an operator who had set `pinned: true` would now find it
+inert; the README told them it did something the code never did, which is the defect.
+Verified against live state: `data/state/levers/muse.prompt.json` carries `"pinned": false` -
+the KEY exists on disk (so the loader-ignores-unknown-keys path is what makes the deletion
+safe, and the key sheds on the next save), but no pin is active.
 
 ### WU-3.6 · The stated vol forecast is scored (closes I-14, resolves 019 §11.2)
 
