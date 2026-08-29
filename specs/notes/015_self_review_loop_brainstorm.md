@@ -1,189 +1,313 @@
-# A Scheduled/Triggered Self-Review Loop for Theo — Brainstorm
+# The Coach - an autonomous self-improvement loop over every subsystem
 
-Requested 2026-08-28: "a scheduled or triggered reinforcement LLM loop that... internally
-review[s] how it's operating and its own prompts and its own performance and tries to minimise
-the gap between its goals and its current state," asked explicitly to be creative and to draw on
-the muse's collision mechanism for "alternative ideas." **Status: brainstormed and evaluated, not
-built.** Companion to [notes/009](009_epistemic_constitution_plan.md) and
-[notes/010](010_constitutional_blocks_brainstorm.md), which already did this exercise for the
-constitution specifically; this note is broader — behaviour and prompts, not only principles.
+Rewritten 2026-08-29, superseding the 2026-08-28 draft (git history holds it). The first draft
+routed every finding through human ratification. Direction from the user: **that is the wrong
+trade for a hackathon** - human gates block the fast feedback loop, this is paper trading, the
+risk is tolerable. The system should improve itself autonomously; the human reads clear metrics,
+charts and reports afterwards and *steers* if it drifts, rather than *approving* before it moves.
+This is the operating agreement the whole project already runs under, applied to the bot itself:
+**reversibility replaces permission.** Every change the loop makes must be data, recorded, and
+instantly revertible - then it does not need to ask.
 
-## The prior art this has to be honest about
+**Status: designed and simulated, not built.** The simulation record is at the bottom; the
+design presented first is its winner.
 
-**Today's own D-076 is a working demo of exactly what's being asked for, done by hand.** A
-human read the live journal with an adversarial "would I trade this?" lens, found that 18 theses
-had produced zero trades while all five price forecasts were holding — a miscalibration invisible
-to any per-decision check because every individual refusal was locally defensible. The fix
-touched code (`breakeven_vol`/`dominant_risk`), memory (amended two lessons, added two), and the
-constitution (`[assumptions]`). **That whole cycle — read the aggregate, diagnose the gap, propose
-fixes across three different stores — is the loop the user is asking to automate.** So the
-question isn't "should this exist," it visibly already worked once. The question is what's safe
-and useful to run without a human doing the reading.
+---
 
-**And the loop this most resembles has already been tried, inside the dependency this system is
-built on, and failed.** `constitution.py`'s own docstring: elfmem's ADR 0003 found that four
-architectures for *automatic* constitutional evolution all failed to beat baseline. That's why
-`trdrbot constitution review` (already wired, `cli.py`) calls `review_constitutional` and only
-ever shows proposals — nothing auto-applies. Any new design here inherits that constraint at full
-force: **whatever this loop produces, a human ratifies.** The interesting design space is
-entirely in what gets reviewed, how it's triggered, and how "here's a gap" turns into something
-concrete enough to ratify — not in whether the loop gets to act on its own.
+## Intent, held in one paragraph
 
-**Two more constraints this project already discovered the hard way:**
-- **D-045: P&L cannot judge two versions of anything within this window.** A genuinely 60%-edge
-  agent beats a coin flip only 69% of the time over 20 trades. A self-review loop that judges
-  itself by "did returns improve" is measuring noise. What CAN be measured, per D-045, is
-  behaviour — it accrues every cycle, not every trade.
-  - **D-074/D-082/D-086: a check that never fires reads as healthy.** This loop is itself a new
-  subsystem with exactly the silent-no-op risk the whole day's throughline was about. Whatever
-  gets built needs its OWN heartbeat from day one — "reviewed N times, found M gaps" — not
-  bolted on after it goes quiet for a week unnoticed, which is precisely how three of today's
-  four bugs got as old as they did.
-- **The constitution is full.** 427 of 430 tokens (D-076). A loop that proposes new constitutional
-  principles is proposing into a queue that requires retiring one to add one. That's not a flaw
-  to design around — it's a good forcing function, and any design here should make retirement
-  proposals a normal output, not an edge case.
+The system is subsystems: muse, discovery, research, decide, sizing, exit rules, memory. Each
+one currently gets better only when a human-led session finds a defect (D-074's shakedown,
+D-076's critique). The Coach makes improvement a *runtime* behaviour: each subsystem exposes
+what "good" looks like as measured numbers, exposes the choices it could make differently as
+declared variants, runs controlled A/B trials against its own evidence, promotes winners
+automatically, and records everything in time-series form so a human can see the trajectory and
+intervene by editing declarations - never by being a blocking approval step. One protocol, every
+subsystem, so the improvements stay in harmony rather than becoming seven bespoke loops.
 
-## What already exists that this must NOT duplicate
+## What survives from the first draft - constraints backed by evidence, not preference
 
-| Mechanism | What it already does | Gap it leaves |
+These are kept **not** as caution but because this project measured them:
+
+1. **P&L cannot judge anything in this window (D-045).** A genuinely 60%-edge agent beats a coin
+   flip only 69% of the time over 20 trades. All rewards below are behavioural and dense - they
+   accrue per candidate or per cycle, not per resolved trade.
+2. **The constitution and elfmem's blocks stay out of the autonomous lever space (ADR 0003).**
+   elfmem's own project simulated four architectures for automatic constitutional evolution and
+   none beat baseline. That is a measured result, not a governance preference - so memory gets
+   gauges and reporting only, and keeps its existing learning machinery. Everything else is fair
+   game.
+3. **Compute the gap, never ask the model to notice it** (research.py's own principle, re-proven
+   by D-081). Rewards and gap-detection are deterministic; LLM calls generate *candidates* for
+   improvement, never the *scores*.
+4. **The loop needs its own heartbeat from cycle one** (the D-074/D-082/D-086 tautology, fixed
+   four times in one day). `coach_run` journal rows record trials assigned and results scored,
+   independent of whether anything was promoted, with both silence flags set correctly at birth.
+
+And one piece of luck: **D-045 already built the provenance this needs.** Every decision
+journals `{prompt: fingerprint}` (`prompts.py`), added precisely because "a decision recorded
+today without a prompt label can never be compared against tomorrow's." The machinery D-045
+deferred is exactly what is being asked for now.
+
+---
+
+## The design: one protocol, four parts per subsystem
+
+Every subsystem registers four things with `coach.py`. The registry is code (a dict per
+subsystem), the *state* is data.
+
+### 1. Gauges - deterministic measures, recorded over time
+
+Each subsystem names the numbers that define "working well," computed from stores that already
+exist (journal, ledger, usage, calibration). Housekeeping snapshots every gauge every run into
+**`data/metrics.jsonl`** (append-only, same convention as journal and ledger). This is the
+time-series the user asked for: divergence becomes visible as a trajectory, not an anecdote.
+
+Gauges are for **sentinels and the report only - never for promotion.** Promotion uses local
+rewards (below). This split is what keeps concurrent activity attributable: a global metric
+moving proves nothing about which change moved it, so nothing global is ever allowed to promote
+anything.
+
+### 2. Levers - bounded autonomy, variants as data
+
+A lever is a declared choice the Coach may change on its own: a prompt variant, a sampling
+policy, a threshold, a collision arity. **Everything not declared as a lever is off-limits** -
+the Coach cannot touch code, gate semantics, sizing math, the sentinels, or its own reward
+functions. The human pre-authorises the *space*, not each move; that is the entire replacement
+for the approval gate, and it is enforceable by construction because variants live as data under
+`data/state/levers/` (current incumbent + at most one challenger per lever), not as edits to
+source.
+
+The one hard structural rule: **a lever's set and its experiment's reward set must be disjoint,
+and the scheduler refuses any experiment where they intersect.** The muse's gauntlet gates score
+muse prompt trials - so the gates cannot be a lever while such a trial runs. The thing that
+measures must never be movable by the thing measured; this is the Goodhart defence, held as a
+scheduling invariant rather than a hope.
+
+Gate thresholds *are* still tunable - on their own slower cadence, scored by a different signal
+they cannot influence: **gate regret**, from D-081's rejected-thesis recording (a rejected
+candidate still resolves; "we refused it and it would have held" scores the gate's threshold at
+zero cost, against real outcomes).
+
+### 3. Trials - paired A/B, promoted by posterior, everything registered
+
+- **Paired by default.** During a muse trial, one run feeds the *same* sampled concepts and the
+  same news to incumbent and challenger prompts; per-candidate pass/fail through the same gates
+  gives paired evidence, which at this project's n is the difference between a usable signal and
+  noise. Each run yields ~5 candidates x ~8 gates, so evidence is dense even when runs are few.
+- **Promotion rule:** challenger replaces incumbent when P(challenger > incumbent) >= 0.9 on the
+  paired reward (Beta-Binomial for pass/fail; demeaned-bootstrap over paired differences for
+  continuous rewards - the same estimator discipline the trading side already uses), with a
+  floor of 12 paired runs, capped at 40. Ties and timeouts keep the incumbent - the conservative
+  default costs nothing because the incumbent is already the thing running.
+- **Concurrency: at most one experiment per subsystem, at most two system-wide.** Confounds are
+  prevented by scheduling, not untangled by statistics afterwards.
+- **Every trial is registered, including the losers** - D-052's multiple-testing discipline,
+  reapplied one level up. Defeated challengers go to a **graveyard** in the experiment ledger
+  (`data/experiments.jsonl`, append-only) with their evidence, and the mutation prompt (below)
+  receives the graveyard summary so the loop never re-litigates a dead idea blind - the same
+  reason D-076 recorded its killed mechanisms.
+
+### 4. Sentinels - the autonomic brake, and the revert path
+
+Global, deterministic, checked every housekeeping run: daily LLM cost ceiling; a `health` FAIL
+persisting across two windows; calibration reliability collapsing; seed-entropy floor (below);
+promotion churn (more than K promotions/day is itself suspicious). A sentinel firing **pauses
+new trials, reverts any in-flight experiment to its incumbent, and flags itself at the top of
+the report.** Reverting is instant and safe because variants are data. The book cap, tool
+guard and gauntlet stay exactly where they are - the Coach sits above them and cannot loosen
+them.
+
+### Two-tier reward: the fast one promotes, the slow one audits
+
+Proximate rewards (gauntlet survival, band-anchoring accuracy) arrive in minutes and drive
+promotion. Outcome rewards (did the band actually hold at horizon) arrive in days and **audit**:
+every promotion carries the gain it claimed, and when resolved outcomes land, realized-vs-claimed
+is scored. A promoted variant whose outcomes degrade triggers an automatic **re-match** against
+the previous incumbent - autonomy preserved, but evidence gets the last word. This is the
+calibration philosophy applied to the loop itself: the Coach keeps a Brier-style score on its
+own promotions, and that score is a gauge on the report.
+
+### Challenger generation - the creative channel, muse-shaped
+
+Two generators, both trial-registered:
+
+- **Mutation.** An LLM role receives the incumbent prompt, the recent rejection evidence (which
+  gates killed which candidates, verbatim fates), and the graveyard summary, and produces ONE
+  challenger variant. This is how prompts improve without a human writing variants - directed
+  creativity, aimed by real failure data.
+- **Wildcard collision.** The muse's own trick pointed inward: sample two unrelated signals (an
+  uncited lesson + a flat gauge; a scaffold finding + a gate's regret record) and ask whether a
+  causal story connects them. Survivors that map onto an existing lever become experiments.
+  Survivors that don't - structural ideas needing new code - are appended to `specs/issues.md`
+  as `[coach]`-tagged entries: an autonomous write to a human-read file, blocking nothing. The
+  dev sessions consume that queue. (Live example of what belongs there: I-15, entry commitments
+  not surviving a decide cycle - no lever can fix it, code must.)
+
+### Scaffolds as evidence generators, and the offline pre-screen
+
+D-079's structure zoo is re-runnable, deterministic, and LLM-free - it converted "is sizing
+biased?" into an exact measurement. Generalised: a **scaffold registry**, re-run by housekeeping
+on cadence, whose outputs are gauges (invariants pass/fail, measured biases in pp). A scaffold
+finding that *shifts* between runs auto-files an improvement thesis. And where a lever has an
+offline scorer, challengers are **pre-screened offline before burning live paired trials** -
+the full pipeline being: mutate -> offline screen -> live paired trial -> promote -> outcome
+audit. The diagnostic pass may also propose *missing* scaffolds ("nothing covers calendar
+spreads"), which is the outside-the-box channel for test coverage itself.
+
+### The report - the human's steering interface
+
+`trdrbot report` renders `data/metrics.jsonl` + `data/experiments.jsonl` into one self-contained
+HTML page (`data/report.html`, inline SVG sparklines, no external deps), regenerated by
+housekeeping. It leads with **what changed**: promotions, reverts, sentinel fires, top gauge
+deltas, open experiments, cost - then each gauge's trajectory with the Coach's own actions
+overlaid as markers, so "muse survival rate rose after promotion #3" is a picture, not a claim.
+
+Steering is by editing state, not by approving actions: pin a variant, pause a subsystem's
+experimentation, adjust a sentinel ceiling - honoured at the next cycle. Demo day is one pin.
+
+### The Coach is itself a subsystem
+
+It registers its own gauges (trials run, promotion rate, realized-vs-claimed gain, experiment
+cost share), its own sentinels (churn, cost), and its own heartbeat. It must eat its own food,
+and the report shows the Coach's trajectory next to everyone else's.
+
+---
+
+## Worked example: the muse
+
+The user's own example, and the correct first target - dense signal, cheap runs, isolated
+blast radius (its output faces the gauntlet before anything real happens).
+
+**Gauges:** candidates per run; gauntlet survival rate (D-081 measured this moving 13/15
+rejected -> 1/5 in one fix - it is *known* to be sensitive to prompt quality); band-anchoring
+error (|band mid vs realized move| at horizon, computable since bands became percent moves);
+distinct underlyings per week; seed-type entropy (which concept types actually got sampled);
+gate regret (rejected theses that resolved inside their bands).
+
+**Levers:**
+- *Seed sampling policy.* Incumbent: uniform random. Challenger: Thompson sampling over
+  **concept-type pairs** (technique x research, research x regime...), reward = a candidate
+  seeded from that pair survives the gauntlet. Hierarchical on purpose: type-pair arms
+  generalise at low n where per-concept arms cannot, and an epsilon exploration floor plus the
+  seed-entropy sentinel guard the muse's actual mandate - random collision - from being
+  optimised away into a momentum machine.
+- *Collision prompt.* Incumbent vs one mutated challenger, paired runs as above.
+- *Collision arity* (2 vs 3 concepts).
+- *Gauntlet thresholds* (`BASE_PROB_FLOOR` etc.) - slower cadence, scored by gate regret only,
+  never concurrent with any experiment that uses the gates as its reward (the disjointness
+  rule, in the flesh).
+
+**Rewards:** per-candidate gauntlet survival (proximate, promotes); band resolution at horizon
+(audit). Both deterministic, both from mechanisms the muse cannot touch.
+
+**What improvement looks like here, concretely:** within days the Coach can learn *which kinds
+of collisions produce theses that survive scrutiny* and *which prompt wording anchors bands
+better* - the two things currently frozen at whatever the first version happened to be.
+
+## The same protocol, across the board
+
+| Subsystem | Gauges (examples) | Levers | Proximate reward | Audit signal |
+|---|---|---|---|---|
+| muse | survival rate, band error, entropy | sampling policy, prompt, arity | gauntlet survival | band resolution |
+| discovery | nominee survival, dossier quality flags | nominate prompt, synth prompt | gauntlet survival | thesis resolution |
+| research | premise-break rate downstream, "date unknown" honesty | dossier prompt | downstream premise checks passing | forecast resolution |
+| decide | abstention streak, principle citation, stated-prob Brier, premise-verification rate | context assembly weights, prompt variant | behavioural metrics via **shadow trials** | resolved forecast calibration |
+| gates/sizing thresholds | gate regret, refusal EV | threshold values | - (slow lane only) | gate regret vs resolved rejects |
+| memory/constitution | citation rates, credit flow | **none (ADR 0003)** | - | report only |
+| the Coach | promotions, realized-vs-claimed, cost | its own cadence | - | its own audit |
+
+**Decide runs shadow trials:** the challenger decides on the same live inputs, its decision
+journaled but never executed, scored counterfactually by the same retrospective machinery D-080
+built (bands vs subsequent price history). Paired comparison at zero position risk; the cost is
+LLM spend, so shadows run every Nth cycle under the cost sentinel, and decide is deliberately
+the *last* subsystem enabled.
+
+**Rollout order:** muse -> discovery -> research -> decide-shadow. Gate thresholds join once
+enough rejects have resolved to make regret a real signal.
+
+---
+
+## Simulation record (optimize; ephemeral; stop on goal-reached or 5 iterations)
+
+**Goal:** a loop that autonomously improves subsystems on evidence, stays bounded and
+non-interfering, and is observable/steerable by a human who never becomes a gate.
+**Fitness:** velocity 🟢/🟡/🔴, safety, statistical honesty, harmony, observability, simplicity.
+
+**Frozen scenario set:**
+
+| ID | Scenario | Nature |
 |---|---|---|
-| `health.py` | Deterministic: is each subsystem running and producing? | Never asks whether the OUTPUT is good, only whether it exists |
-| `housekeeping.run()` (interim scoring, wiki sweep, `dream()`) | Scheduled maintenance, already the place elfmem consolidation is allowed to run | Maintains state; doesn't diagnose the agent's own behaviour |
-| Credit assignment (D-072, D-073) | Incidents → principle/lesson credit, similarity-weighted | Operates on EXISTING blocks; can't notice a missing principle or a bad prompt |
-| `constitution review` (elfmem `review_constitutional`) | Drift proposals for EXISTING constitutional blocks, human-ratified | Constitution-only; needs ~20 reinforced blocks + 30-day age (rarely satisfiable inside an 8-day hackathon — confirmed today, `insufficient_history` is the live answer) |
-| The muse | Forced collision of unrelated wiki concepts + news → falsifiable trading theses, deterministic gauntlet | Only ever produces TRADING theses, never a claim about the SYSTEM itself |
+| F1 | Muse dry spell: 3 runs, 0 gauntlet survivors | happy-path improvement |
+| F2 | Mutated challenger is genuinely worse (survival halves) | adversarial |
+| F3 | Challenger games the reward: near-duplicate SPY candidates pass gates, diversity collapses | Goodhart |
+| F4 | Sampling-policy and prompt experiments proposed on the muse simultaneously | confound |
+| F5 | Challenger ahead 4-1 after 5 trials by luck | low-n |
+| F6 | Decide-shadow doubles daily LLM spend | resource |
+| F7 | Experiment assignment silently stops; nothing notices | the tautology class |
+| F8 | Promoted variant fine on proximate reward; its resolved bands miss high, systematically | delayed failure |
+| F9 | Operator wants incumbent pinned and experiments paused for demo day | steering |
+| F10 | Diagnostic finds I-15 (commitments don't survive a cycle) - no lever can express the fix | structural gap |
 
-The gap all five leave in common: **nothing reads the aggregate of the agent's own recent
-behaviour against its own stated goals and says so in words.** That is specifically a judgement
-task — comparing a measured pattern against `charter.md`'s intent isn't a threshold check — which
-is the one thing on this list only an LLM call can do, and the one thing none of the five do.
+**Iteration 1 - baseline: the v1 human-ratified design.** F1: gap detected, fix waits on
+ratification - days lost. F2-F5, F8: no experiments exist to fail. F9, F10: fine. Fitness:
+velocity 🔴, safety 🟢, honesty 🟢, harmony 🟢, observability 🟡, simplicity 🟢.
+**Verdict: incumbent to beat - it fails the brief's core requirement by design.**
 
-## Candidate mechanisms, evaluated
+**Iteration 2 - full self-modification: an LLM critiques recent behaviour and edits prompts and
+parameters directly.** F1: acts fast 🟢. F2: bad edit ships live, found only by later drift.
+F3: nothing measures diversity. F4: several edits land together, attribution unrecoverable.
+F5: promotes luck. F7: no heartbeat. Matches the shape ADR 0003 already measured as
+not-better-than-baseline. Velocity 🟢, safety 🔴, honesty 🔴, harmony 🔴.
+**Verdict: REJECTED. Incumbent unchanged.**
 
-**A — Continuous per-cycle self-test.** Every decide cycle states which principle its current
-thesis is most at risk of violating (notes/009's original proposal). Cheapest: zero new LLM
-calls, reuses the existing decide call. **Rejected as the sole mechanism**: each cycle only sees
-itself. D-076's finding was invisible from any single cycle — every individual refusal was
-locally fine — and only became visible by reading eighteen of them together. A per-cycle test
-structurally cannot catch an aggregate pattern. Kept as a cheap COMPLEMENT (see chosen design).
+**Iteration 3 - gauges/levers/trials/sentinels, unpaired, single-tier reward.** F2: challenger
+loses on evidence, reverted 🟢. F4: scheduler refuses the second experiment 🟢. F6: cost
+sentinel pauses 🟢. F9: pin honoured 🟢. F10: routed to the issues queue 🟢. But F5: unpaired
+trials at n=5 stay noisy - the 0.9 threshold helps, slowly 🟡. F1: no challenger exists unless a
+human writes one 🟡. F3: no diversity gauge 🔴. F8: uncaught 🔴.
+**Verdict: KEPT - beats baseline on velocity while holding safety. New incumbent.**
 
-**B — Full autonomy: let it change its own prompts/config directly.** Rejected outright, not
-weighed against alternatives — ADR 0003 already answered this for the narrower case
-(constitutional blocks alone) and came back negative even there. Extending unsupervised
-self-modification to prompts and config is a strictly larger blast radius for a mechanism already
-shown not to beat baseline in the smaller one.
+**Iteration 4 - + paired trials, 12-run floor, type-pair Thompson arms, mutation generator with
+graveyard.** F5: paired evidence + floor rejects the lucky streak 🟢. F1: mutation produces a
+challenger from the rejection evidence itself 🟢. F2: cheaper to reject (paired variance) 🟢.
+F3, F7, F8 still open.
+**Verdict: KEPT. New incumbent.**
 
-**C — Pure collision, no structured review** ("meta-muse"): skip any deterministic gap-detection
-step, just run periodic random pairings of unrelated behavioural signals (a lesson that's never
-been cited + a metric that's been flat for N cycles) and ask if there's a hidden causal story.
-**Rejected as the sole mechanism.** D-076's central finding — 18 theses, 0 trades — didn't need a
-clever collision, it needed someone to count. A pure-serendipity mechanism would very plausibly
-never stumble onto "count your own abstentions." Kept as a supplementary generator (below),
-because it's genuinely good at the class of gap a straight metrics-diff would never think to
-compute.
+**Iteration 5 - + outcome-audit tier with auto re-match, seed-entropy sentinel, scaffold
+registry + offline pre-screen, metrics.jsonl + annotated report, Coach heartbeat.** F3: entropy
+sentinel fires, experiment reverted, flagged 🟢. F7: heartbeat rows make assignment silence a
+health FAIL 🟢. F8: audit compares realized vs claimed, files the re-match 🟢. F6: offline
+screen cuts live shadow trials needed 🟢. Full frozen set passes.
+**Verdict: KEPT - winner. Stopping reason: goal reached on the frozen set (and the iteration
+cap is adjacent).**
 
-**D — Scheduled-only, no threshold trigger.** Simple, and it's what `housekeeping.dream()`
-already does for consolidation. **Rejected as the sole trigger**: a fixed weekly cadence would
-have let the 18-and-0 pattern run for a full week before the next scheduled look, burning the
-system's entire trading window on a gate it wasn't going to loosen on its own. Kept as a backstop
-(below), not the primary trigger.
+**Journey:**
 
-**E (chosen) — Deterministic gap-detection gates a periodic, adversarially-framed diagnostic LLM
-pass; every output is a typed, human-ratified proposal.** Detailed below.
+| Iter | Change | Frozen-set vs incumbent | Kept? |
+|---|---|---|---|
+| 1 | v1 human-gated baseline | fails F1 (velocity) by design | incumbent to beat |
+| 2 | direct self-modification | fast, fails F2/F3/F4/F5/F7 | REJECTED |
+| 3 | gauges/levers/trials/sentinels | fixes F2/F4/F6/F9/F10 | KEPT |
+| 4 | pairing, floors, arms, mutation | fixes F1/F5 | KEPT |
+| 5 | audit, entropy, scaffolds, report, heartbeat | fixes F3/F7/F8, all pass | **KEPT - winner** |
 
-## The chosen design
+## Residual risks
 
-**1. Compute the gap, don't ask the model to notice it.** This project's own repeated principle
-(`research.py`'s docstring, cited again in D-081: *numbers are computed, never asked of the LLM*)
-applies here exactly as it does to trading. A small set of metrics ALREADY exist individually in
-this codebase and just need diffing against an explicit target, not invented:
+| Risk | Note |
+|---|---|
+| Low n is physics | Promotions inside a hackathon week will be few; paired + dense per-candidate evidence is the mitigation, and the report says so honestly rather than dressing it up |
+| Regime shift after promotion | The audit re-match is the counter, and it is slow by nature; the previous incumbent is always retained as the re-match opponent |
+| Goodhart beyond enumerated sentinels | Sentinels are a list, not a proof; the annotated report and the human's read of it are the backstop - which is what "steer, don't gate" means |
+| Mutation quality variance | A weak challenger costs one bounded experiment and enriches the graveyard; the failure mode is wasted trials, not damage |
+| Complexity creep | The registry must stay small; muse-only first, and every later subsystem must reuse the identical protocol or not join |
+| The Coach competes with trading for budget | The cost sentinel arbitrates, and the Coach's own cost share is a gauge on the report |
 
-  - consecutive declined theses without a trade (the exact D-076 number — a threshold around 8
-    would have caught it ten theses before a human did)
-  - any `health` FAIL persisting across more than one review window
-  - `n_eff` / concentration stalling above `CONCENTRATION_WARN` (already defined, D-081) across
-    several calibration checks in a row
-  - cache-hit share dropping in `trdrbot usage` (a regression on the exact lever D-074 measured)
-  - the primary model's fallback rate rising (visible in `usage.jsonl`'s served-model field)
-  - a constitutional principle with zero citations across N cycles (a real retirement candidate —
-    directly enables the "retire one to add one" rule the full budget now requires)
+## Build sketch (when built)
 
-  None of this needs an LLM call. It's the same shape as `health.py`, just aimed at PATTERN
-  rather than PRESENCE.
-
-**2. Trigger on threshold crossing, backstopped by a schedule.** Any one metric crossing its
-threshold fires an immediate review (same discipline as the idle ladder's "do not hunt when you
-cannot shoot" — don't burn a review call when nothing has moved). A fixed backstop cadence (e.g.
-weekly, or however housekeeping's own maintenance cadence is tuned) catches slow drift that never
-crosses a hard line — the D-quality of drift that's real but diffuse, which is exactly the kind a
-threshold is bad at catching and a human reading the aggregate is good at.
-
-**3. The diagnostic pass is deliberately adversarial, not neutral.** The single best piece of
-evidence for this shape, gathered TODAY: the manual critique that found D-076 was explicitly
-framed as "would a professional trader take this position," not "please review recent decisions."
-A neutral review prompt invites the same harmonizing failure mode constitutional block 6 already
-guards against in memory — smoothing over a tension instead of naming it. The reviewer role's
-system prompt should ask it to find the sharpest defensible criticism of the last N cycles, the
-same framing that worked once already today.
-
-**4. A muse-style wildcard pass runs alongside it, not instead of it.** Sample two unrelated
-behavioural signals at random (an unused lesson + a flat metric; two principles that fired in the
-same cycle; a muse-rejected thesis + a resolved forecast) and ask whether a causal story connects
-them. Most pairings will be noise, exactly like most muse candidates get rejected — that's fine,
-it's the same trial-and-gate shape this project already trusts for trading ideas, and it should
-be held to the same discipline: register every attempt so a later reviewer can see the trial
-count, not just the survivors (D-052's multiple-testing correction, reapplied one layer up).
-
-**5. Output is typed and routed to the store that already owns that type — never a new store.**
-Mirroring notes/010's own routing answer (`[routing]`: events → journal, evolving patterns →
-elfmem, stable reference → wiki), a self-review finding is none of those three — it's an
-engineering proposal about the system itself, and this project already has a store for exactly
-that: `specs/issues.md`, in the same `I-N` format used all day today, git-tracked and human-read.
-A constitutional-amendment-shaped proposal goes through the mechanism that already exists for it
-(`propose_amendment` / `trdrbot constitution review`) rather than inventing a second path. Nothing
-writes to the wiki or to elfmem directly — those stores are about the MARKET, not about the agent's
-own engineering, and blurring that would repeat exactly the mistake D-078 spent today fixing
-(a store holding content of the wrong nature for what reads it).
-
-**6. The loop gets its own heartbeat from cycle one.** `reviewed N times, M gaps surfaced, K
-proposals ratified, K' rejected` — a record independent of whether it found anything, precisely
-because "found nothing this week" and "never actually ran this week" must never look the same.
-This is not optional polish; it's the single most repeated lesson of the day this note is
-attached to (see the diary's throughline section), and building the heartbeat in from the start
-is cheaper than discovering its absence three separate times the way `exit_rules` and
-`interim_scoring` did.
-
-## Would it have caught today's finding? A quick trace
-
-Replaying D-076 against the design above: metric #1 (consecutive declines without a trade) would
-have crossed a threshold of ~8 well before the actual count of 18 — call it roughly the midpoint
-of the hackathon's trading window rather than three days from the deadline. The adversarial
-diagnostic pass, given the journal slice up to that point plus `charter.md`'s stated goal, is
-exactly the kind of read a "would a pro take this" framing is built for — this is not
-speculative, it's the same prompt shape that produced D-076 by hand. The wildcard pass adds
-something the targeted metric wouldn't: colliding "abstention count rising" with "which lessons
-fired most often in the declined cycles" is a plausible route to noticing *which* haircut is doing
-most of the work (the 21-day vol anchor, in the event) rather than just that abstention is high —
-a level of diagnosis the threshold alone doesn't reach.
-
-## What this deliberately does not attempt
-
-- **No autonomous action.** Every output is a proposal in a human-read file or a
-  `propose_amendment` call. ADR 0003 is the reason, stated plainly, not hedged.
-- **No new memory store.** Proposals route to `specs/issues.md` or the existing amendment API;
-  nothing new for elfmem or the wiki to hold.
-- **No judging by P&L.** The gap metrics are behavioural (D-045's own finding about what's
-  actually measurable in this window), never a trade-outcome comparison.
-- **No unbounded constitutional growth.** A proposal to ADD a principle should come paired with a
-  candidate to retire, given the budget is already full — this is a real constraint discovered
-  today, not a nicety.
-
-## Cost and next step
-
-Cheap to prototype: the deterministic metrics mostly already exist as values computed elsewhere
-in the codebase (an aggregation module, not new instrumentation); the diagnostic and wildcard
-passes are two more LLM roles in the existing `llm.roles` chain, at whatever tier `research`/
-`muse` already run at; the output path (`specs/issues.md` entries, `propose_amendment` calls) is
-plumbing this project already has. **Not built** — this is the agenda for the next session that
-wants it, the same status notes/009 carried for a day before its companion note was written.
+`coach.py` (registry, scheduler, trial assignment, promotion, sentinels) + `data/state/levers/`
+(variant state, human-editable) + `data/metrics.jsonl` / `data/experiments.jsonl` (append-only)
++ `trdrbot coach` (status) / `trdrbot report` (HTML) + hooks: `muse.run` consults the registry
+for its active variant per trial; housekeeping snapshots gauges, checks sentinels, runs the
+audit and the scaffold registry; `coach_run` heartbeat journaled every pass. Muse first, alone,
+until the first honest promotion or rejection lands end-to-end.
