@@ -236,6 +236,22 @@ class ElfmemAdapter:
 
     # -- resolution learning (F3) - the actual credit-assignment step --
 
+    async def record_mind_outcome(self, pos: Position, *, hit: bool) -> None:
+        """Resolve the mind's PREDICTION, and nothing else.
+
+        A mind prediction is a binary claim about this position - it is right
+        or wrong once, at close, and P&L is the honest answer to it. That is a
+        different question from "which recalled memories deserve credit for
+        this decision", which only the attribution verdict at the thesis
+        horizon can answer (D-091). Keeping them in one method is what let the
+        second one ride along on the first.
+        """
+        if not pos.mind_decision_block_id:
+            return
+        await self.mem.mind_outcome(
+            pos.mind_decision_block_id, hit=hit, reason=pos.close_reason or "resolved"
+        )
+
     async def resolve(self, pos: Position, *, hit: bool, signal: float, weight: float = 1.0,
                       interim: bool = False) -> None:
         """Score both systems: the mind prediction, and the recalled blocks

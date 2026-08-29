@@ -89,6 +89,14 @@ async def run(
         # loop turns at all inside an 8-day window where most positions won't
         # fully resolve - not to substitute for resolution. Narrower signal
         # (0.7/0.3, not resolution's 0.9/0.1) reflects that lower certainty.
+        #
+        # This is now the ONLY place a money-derived signal reaches a block,
+        # and it stays deliberately (D-091 removed the one at close). The
+        # distinction is what evidence exists yet: an OPEN position has no
+        # verdict available and never will until its horizon, so a low-weight
+        # mark is the only signal there is. A CLOSED one is different -
+        # attribution IS coming, so crediting on the money first would just
+        # pre-empt the verdict with the number the verdict exists to overrule.
         signal = 0.7 if pnl > 0 else 0.3
         await mem.resolve(pos, hit=pnl > 0, signal=signal, weight=0.1, interim=True)
         journal.append(

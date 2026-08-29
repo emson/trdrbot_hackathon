@@ -110,22 +110,27 @@ async def on_resolution(
     if calibration is not None and pnl_pct is not None:
         calibration.resolve(pos.position_id, outcome=pnl_pct > 0, at=ids.utc_now().isoformat())
 
-    # Credit gates on a KNOWN P&L, not on the close-reason label (D-057).
-    # It used to require close_reason in SELF_RESOLVED, which silently skipped
-    # credit assignment for every 'external' close - and both real closes so
-    # far have been external, because the agent manages its own exits through
-    # the broker (repricing its profit-target limit) rather than through our
-    # evaluator. A close with a measured P&L is honest evidence however the
-    # position ended; only an UNKNOWN P&L skips, because that would be a guess.
-    # Same principle as D-056: measured, not inferred from a label.
+    # The MIND's prediction resolves here, and only the mind's. It is a binary
+    # claim about this position - right or wrong once - and a measured P&L is
+    # the honest answer to it, on any close however it happened (D-057: gating
+    # this on the close-reason label silently skipped every 'external' close,
+    # which is how both real closes so far have ended).
+    #
+    # BLOCK CREDIT DOES NOT HAPPEN HERE, and that is the point of D-091.
+    # This used to apply a money-derived 0.9/0.1 signal at full weight to the
+    # very blocks `attribution.run` judges later, from the verdict, at the
+    # thesis horizon. So every closed position was credited TWICE, and the
+    # first credit followed the P&L - which means a lucky win took +0.9 here
+    # and then "learn nothing" there, installing exactly the superstition the
+    # design exists to prevent (see experiments.ATTRIBUTION_SIGNAL, whose
+    # docstring assumes this function is not doing what it was doing).
+    #
+    # Deferring costs nothing real: attribution is where the view is actually
+    # tested, and a position that closes before its horizon has not yet
+    # produced the evidence that would justify moving a memory.
     if pnl_pct is not None:
         hit = pnl_pct > 0
-        # elfmem's own idiom for this signal shape (verified against its
-        # mind_outcome usage during the earlier exploration): 0.9/0.1, not a
-        # bare 0/1 - a resolved position is still evidence under uncertainty,
-        # not a certainty.
-        signal = 0.9 if hit else 0.1
-        await mem.resolve(pos, hit=hit, signal=signal, weight=1.0)
+        await mem.record_mind_outcome(pos, hit=hit)
         scored = True
     else:
         hit = None
@@ -139,6 +144,11 @@ async def on_resolution(
         pnl_pct=pnl_pct,
         self_resolved=self_resolved,
         credit_assigned=scored,
+        #: Block credit is attribution's job now (D-091). Recorded so the
+        #: journal distinguishes "credited at close" (pre-D-091 rows) from
+        #: "waiting for the horizon", which is otherwise invisible.
+        credit_deferred=True,
+        mind_resolved=hit is not None,
         hit=hit,
     )
     store.save(pos)  # persist any state the resolve step touched
@@ -157,7 +167,14 @@ def _write_lesson(wiki: Wiki, pos: Position, *, pnl_pct: float | None, scored: b
         return existing.concept_id  # already recorded, do not duplicate
 
     pnl_text = f"{pnl_pct:+.1%}" if pnl_pct is not None else "unknown (not self-resolved)"
-    credit_text = "scored" if scored else "not scored (D-018 #9: not self-resolved, or P&L unavailable)"
+    credit_text = (
+        "prediction resolved; block credit deferred to attribution at the thesis "
+        "horizon (D-091 - crediting on P&L here would let a lucky win reinforce a "
+        "wrong view before the view was ever tested)"
+        if scored else
+        "nothing scored - no measured P&L, so both the prediction and the credit "
+        "would be a guess"
+    )
     entry = (
         f"\n\n{heading}\n"
         f"{pos.underlying} {pos.strategy}, closed `{pos.close_reason}`, P&L {pnl_text}. "

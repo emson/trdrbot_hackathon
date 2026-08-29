@@ -69,13 +69,12 @@ async def test_a_close_with_known_pnl_resolves_calibration_and_records_the_lesso
     # The mind's prediction is a binary claim and it genuinely resolves here.
     assert mem.mind_outcomes == [("mind_dec_1", True)]
 
-    # CHARACTERIZATION, and this is the defect WU-1.9 removes: the creditable
-    # blocks are ALSO credited here, at full weight, on a signal derived from
-    # the MONEY (0.9 win / 0.1 loss) - and attribution will judge the very same
-    # blocks at horizon from the verdict. A lucky win therefore takes +0.9 here
-    # and "learn nothing" there, which installs precisely the superstition the
-    # design forbids. Pinned as-is so the change is visible in one diff.
-    assert [(bid, sig) for bid, sig, _, _ in mem.credited] == [("blk_a", 0.9), ("blk_b", 0.9)]
+    # Block credit does NOT happen here (D-091). It used to, at full weight, on
+    # a money-derived 0.9/0.1 signal applied to the very blocks attribution
+    # judges later from the verdict - so every position was credited twice and
+    # the first credit followed the P&L.
+    assert mem.credited == [], "blocks credited at close - attribution judges them later"
+    assert reflection[0]["credit_deferred"] is True
 
 
 async def test_a_close_with_no_pnl_anywhere_skips_credit_rather_than_guessing(
@@ -251,6 +250,37 @@ async def test_a_lucky_win_teaches_nothing_at_all(paths, make_position, mem: Fak
     assert store.load(pos.position_id).attribution == experiments.THESIS_WRONG_PROFITED_ANYWAY
     assert mem.credited == [], "a lucky win must move no memory at all"
     assert _rows(journal, "attribution")[0]["signal"] is None
+
+
+async def test_a_lucky_win_moves_no_memory_end_to_end(paths, make_position, mem: FakeMem):
+    """The whole loop for the row the design turns on, in one test.
+
+    Close (profit) -> attribution at horizon (view was WRONG) -> memory. The
+    two halves each looked correct alone, which is why the double credit
+    survived: `learn.on_resolution` credited on the money at close, and
+    `ATTRIBUTION_SIGNAL` then said "apply nothing" at the horizon. Net effect
+    on a lucky win was +0.9, i.e. strong reinforcement of a view that did not
+    happen - the exact superstition P&L-based scoring produces and this system
+    is built to avoid.
+    """
+    store, journal, wiki, calib = _stores(paths)
+    pos = make_position(status="open", thesis_horizon="2020-01-01")
+    store.save(pos)
+
+    # 1. it closes profitably, outside our rules, the way both real ones have.
+    pos.last_pnl_pct = 0.4
+    store.transition(pos, "closed", close_reason="external")
+    await learn.on_resolution(pos, store, mem, wiki, journal, pnl_pct=0.4,
+                              calibration=calib)
+
+    # 2. the horizon arrives and the underlying is ABOVE the band: view wrong.
+    await attribution.run(store, _snapshot_tool(800.0), mem, wiki, journal, verbose=False)
+
+    assert store.load(pos.position_id).attribution == experiments.THESIS_WRONG_PROFITED_ANYWAY
+    assert mem.credited == [], "a lucky win reinforced memory somewhere in the loop"
+    # The mind's own prediction still resolves - it asked a different question
+    # ("does this position work out") and the money is its honest answer.
+    assert mem.mind_outcomes == [("mind_dec_1", True)]
 
 
 async def test_attribution_without_a_price_says_so_rather_than_guessing(

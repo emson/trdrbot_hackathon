@@ -277,6 +277,14 @@ def attribute(thesis_held: bool | None, profited: bool) -> tuple[str, str]:
 #: +0.018. It punished what was right and rewarded what was wrong - the exact
 #: inversion of the comment's intent. "Learn nothing" has to mean no Beta
 #: update at all, so these two carry None and the caller skips.
+#:
+#: **This table is the ONLY thing that credits a position's recalled blocks**
+#: (D-091), and that sentence is load-bearing rather than descriptive. Until
+#: D-091 `learn.on_resolution` also credited them at close on a 0.9/0.1 signal
+#: derived from the money - so a lucky win took +0.9 there and None here, and
+#: the superstition this table exists to prevent was installed by the path
+#: that ran first. Each file read correctly on its own, which is exactly why
+#: it survived; if either one changes, read the other.
 ATTRIBUTION_SIGNAL: dict[str, float | None] = {
     THESIS_RIGHT_EXPRESSION_RIGHT: 0.9,
     THESIS_RIGHT_EXPRESSION_WRONG: 0.65,  # view held up; keep most of the credit

@@ -1365,18 +1365,24 @@ def test_only_opening_orders_demand_a_recorded_position():
 
 # ---------------- D-057 credit lost on external closes and inbox blocks
 
-def test_credit_gates_on_measured_pnl_not_the_close_label():
-    """close_reason in SELF_RESOLVED silently skipped credit assignment for
-    every 'external' close - and both real closes so far have been external,
-    because the agent manages its own exits through the broker. Found by the
-    learning-loop simulation: the credited block ended with reinforcement=None."""
-    import inspect
-
-    from trdrbot import learn
-    src = inspect.getsource(learn.on_resolution)
-    assert "if pnl_pct is not None:\n        hit = pnl_pct > 0" in src
-    # the None-P&L guess path must still be skipped
-    assert "skipped rather than guessed" in src
+# `test_credit_gates_on_measured_pnl_not_the_close_label` stood here. It
+# asserted on the TEXT of `learn.on_resolution` - the literal
+# `"if pnl_pct is not None:\n        hit = pnl_pct > 0"` - to pin D-057's fix
+# that credit follows a measured P&L rather than the close-reason label.
+#
+# D-091 moved block credit out of that function entirely (it was crediting on
+# the money at close, and attribution then re-judged the same blocks from the
+# verdict at horizon - a lucky win took +0.9 and then "learn nothing", which
+# is the superstition the design exists to prevent). The string match SURVIVED
+# that change untouched, because the surrounding lines happen to be identical
+# - so it kept reporting green about a behaviour that no longer exists there.
+# That is the failure mode of source-inspection tests in one example.
+#
+# D-057's actual behaviour is now covered by running the code:
+# `test_a_close_with_known_pnl_resolves_calibration_and_records_the_lesson`
+# and `test_a_close_with_no_pnl_anywhere_skips_credit_rather_than_guessing` in
+# tests/test_memory_and_credit.py, plus the end-to-end
+# `test_a_lucky_win_moves_no_memory_end_to_end`.
 
 
 def test_resolve_self_heals_when_outcomes_hit_unconsolidated_blocks():
