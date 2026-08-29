@@ -278,3 +278,59 @@ def test_the_learning_heartbeat_fires_even_when_there_is_nothing_to_learn(tmp_pa
     findings = _check(tmp_path, list(journal.read()) * 3)
     learning = [f for f in findings if f[1] == "learning"]
     assert learning and learning[0][0] == health.OK, learning
+
+
+# --- coach staleness must count CHANCES, not clock ticks -------------------
+
+
+def _coach_row(*, trials_scored, muse_runs_since_pulse, experiments_open=1):
+    return {"kind": "coach_run", "trials_scored": trials_scored,
+            "experiments_open": experiments_open,
+            "muse_runs_since_pulse": muse_runs_since_pulse}
+
+
+def test_a_closed_weekend_of_housekeeping_pulses_does_not_read_as_a_stalled_coach(tmp_path):
+    """Found live: 20 housekeeping cycles over a Saturday, with an experiment
+    left open from Friday, read as "ran 24x, produced 4 - but nothing in the
+    last 20 runs" - a health FAIL for a market that never opened.
+
+    `record_trial` has exactly one call site, inside `muse.run` (grep it) - a
+    trial can exist only where a muse run does. `experiments_open` stays 1
+    through every one of these pulses regardless, which is why it was the
+    wrong thing for `work` to measure: it says a lever is ACTIVE, not that a
+    pulse had any CHANCE to see a trial."""
+    one_success = [_coach_row(trials_scored=1, muse_runs_since_pulse=1)]
+    weekend = [_coach_row(trials_scored=0, muse_runs_since_pulse=0) for _ in range(30)]
+
+    findings = _check(tmp_path, one_success + weekend)
+
+    coach = [f for f in findings if f[1] == "coach"][0]
+    assert coach[0] == health.OK, coach
+
+
+def test_a_muse_run_that_never_reaches_record_trial_still_reads_as_stalled(tmp_path):
+    """The bug this probe exists to catch must still be caught: the muse IS
+    running - real chances existed - and none of them produced a trial."""
+    one_success = [_coach_row(trials_scored=1, muse_runs_since_pulse=1)]
+    broken = [_coach_row(trials_scored=0, muse_runs_since_pulse=1) for _ in range(25)]
+
+    findings = _check(tmp_path, one_success + broken)
+
+    coach = [f for f in findings if f[1] == "coach"][0]
+    assert coach[0] == health.BAD, coach
+
+
+def test_housekeeping_noise_between_two_muse_runs_does_not_mask_a_real_break(tmp_path):
+    """A closed evening's worth of no-op pulses sits between two real muse
+    chances, one of which failed to score. The failure must still surface -
+    diluting it below detection would be worse than the false positive this
+    fix removes."""
+    rows = ([_coach_row(trials_scored=1, muse_runs_since_pulse=1)]
+            + [_coach_row(trials_scored=0, muse_runs_since_pulse=0) for _ in range(15)]
+            + [_coach_row(trials_scored=0, muse_runs_since_pulse=1)]  # the real miss
+            + [_coach_row(trials_scored=0, muse_runs_since_pulse=0) for _ in range(15)])
+
+    findings = _check(tmp_path, rows)
+
+    coach = [f for f in findings if f[1] == "coach"][0]
+    assert coach[0] == health.BAD, coach

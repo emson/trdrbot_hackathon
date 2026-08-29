@@ -197,10 +197,19 @@ PROBES: tuple[Probe, ...] = (
     Probe(
         "coach", ("coach_run",),
         lambda rows: sum(int(r.get("trials_scored") or 0) for r in rows), 3,
-        "experiments are open but no trial is being scored - the muse is not "
-        "running, or the challenger arm is not reaching record_trial",
-        work=lambda rows: sum(int(r.get("experiments_open") or 0) for r in rows),
-        heartbeat_fields=("experiments_open", "trials_scored"),
+        "the muse ran but no trial is being scored - the challenger arm is "
+        "not reaching record_trial",
+        # NOT `experiments_open`: that only says a lever is ACTIVE, and stays
+        # 1 through every housekeeping pulse over a closed weekend regardless
+        # of whether the muse ran. `record_trial` has exactly one call site,
+        # inside `muse.run` - so a trial can exist only where a muse run does,
+        # and this is the count of those chances. Found live: the coach read
+        # "ran 24x, produced 4 - but nothing in the last 20 runs" on a
+        # Saturday, purely from 30-minute housekeeping cycles counting against
+        # a muse that structurally cannot run on a day the market never opens
+        # (D-093).
+        work=lambda rows: sum(int(r.get("muse_runs_since_pulse") or 0) for r in rows),
+        heartbeat_fields=("experiments_open", "trials_scored", "muse_runs_since_pulse"),
         never_producing_is_ok=True,
     ),
 )

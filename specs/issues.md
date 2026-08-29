@@ -30,6 +30,18 @@ Sorted by severity.
   gave the function its first caller, which is how it was found: the number went in front of the
   agent as "the market is charging MORE than the tape has delivered", and that had to be true
   before it could be shown.
+- ~~**I-39 · The coach's staleness check counted heartbeats, not chances**~~ **FIXED 2026-08-29
+  (D-093, live-caught on restart).** Found within an hour of the Phase 3 run-loop restart:
+  `trdrbot health` read "coach ran 24x, produced 4 - but nothing in the last 20 runs" on a
+  Saturday, with an experiment left open from Friday. `record_trial` has exactly one call site,
+  inside `muse.run`, and the muse structurally cannot run on a day the market never opens - so the
+  20 "silent" runs were 20 housekeeping cycles 30 minutes apart, not 20 missed chances. The probe's
+  `work` measured `experiments_open` (an ACTIVE lever, which stays 1 through every housekeeping
+  pulse regardless) rather than opportunities to see a trial. `pulse()` now records
+  `muse_runs_since_pulse` - the same per-heartbeat-delta convention `trials_scored` already uses -
+  and `work` sums that instead. A closed weekend of housekeeping noise now reads OK; a muse run
+  that genuinely fails to reach `record_trial` still reads BAD, including when housekeeping noise
+  sits either side of it.
 - **I-29 · The bootstrap base rate is overconfident by 15-18pp where credit spreads live**
   ([notes/017](notes/017_learning_from_historic_data.md)). Measured offline over **21,280
   historical band-forecasts** (56 tickers, horizons 3/5/10, 5 band shapes, history sliced before

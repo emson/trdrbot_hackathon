@@ -216,11 +216,11 @@ async def pulse(cfg: Any, journal: Any, *, seed_override: dict[str, str] | None 
     lever_seeds = seed_override if seed_override is not None else seeds()
     state = {"experiments_open": 0, "trials_scored": 0, "trials_scored_today": 0,
              "promotions_today": 0, "sentinels_active": [], "snapshotted": False,
-             "opened": None, "closed": None}
+             "opened": None, "closed": None, "muse_runs_since_pulse": 0}
     if not enabled(cfg):
         health.heartbeat(journal, "coach_run", experiments_open=0, trials_scored=0,
                          trials_scored_today=0, promotions_today=0,
-                         sentinels_active=[], disabled=True)
+                         sentinels_active=[], muse_runs_since_pulse=0, disabled=True)
         return state
 
     rows: list[dict[str, Any]] = []
@@ -248,6 +248,17 @@ async def pulse(cfg: Any, journal: Any, *, seed_override: dict[str, str] | None 
         and str(r.get("ts", "")) > last_beat)
     state["trials_scored_today"] = sum(
         1 for r in evs if r.get("kind") == "trial_result" and str(r.get("ts", ""))[:10] == day)
+    # How many CHANCES this pulse had to see a trial, same delta convention as
+    # `trials_scored`. Housekeeping pulses every 30 minutes while the market is
+    # closed; the muse - the only thing that can ever produce a trial (see
+    # `record_trial`'s one call site) - runs only while it is open. Without
+    # this, a health check counting bare `coach_run` heartbeats since the last
+    # trial cannot tell "20 housekeeping cycles over a closed weekend, nothing
+    # COULD have been scored" from "20 muse runs in a row, the challenger arm
+    # stopped reaching record_trial" - and the first is a quiet Saturday, not a
+    # stall (D-093).
+    state["muse_runs_since_pulse"] = sum(
+        1 for r in rows if r.get("kind") == "muse" and str(r.get("ts", "")) > last_beat)
     state["promotions_today"] = sum(
         1 for r in evs if r.get("kind") == "experiment_closed"
         and r.get("outcome") == "promoted" and str(r.get("ts", ""))[:10] == day)
@@ -355,7 +366,8 @@ async def pulse(cfg: Any, journal: Any, *, seed_override: dict[str, str] | None 
                      trials_scored=state["trials_scored"],
                      trials_scored_today=state["trials_scored_today"],
                      promotions_today=state["promotions_today"],
-                     sentinels_active=state["sentinels_active"])
+                     sentinels_active=state["sentinels_active"],
+                     muse_runs_since_pulse=state["muse_runs_since_pulse"])
     if verbose:
         print(f"[coach] open={state['experiments_open']} "
               f"trials={state['trials_scored']} (today {state['trials_scored_today']}) "
