@@ -7,6 +7,49 @@ Sorted by severity.
 
 ## Open
 
+- **I-30 · `beta` aligns close series by array position with no dates - VERIFIED wrong live**
+  (notes/019 review, 2026-08-29). `save_closes` stores bare floats; cached files were fetched
+  on three different days; QQQ reads +0.10 (R² 0.004) against SPY where one session of
+  realignment gives +1.48 (R² 0.841). `shrunk_beta` then pulls broken estimates toward 1.0,
+  hiding the defect. Feeds beta-weighted book delta and the CONCENTRATED warning in the decide
+  prompt. **Fix:** store (date, close) pairs, align on the date intersection (plan 1.6).
+- **I-31 · langgraph 1.x re-raises runtime tool errors - the decide cycle dies on a transport
+  blip** (notes/019 review; verified against installed langgraph 1.2.11). Pre-1.0
+  `handle_tool_errors=True` absorbed all tool exceptions into an error message; the current
+  default re-raises everything except argument-validation errors. A dead MCP subprocess or a
+  raise inside `record_position` now escapes `ainvoke`, burns every pending item's retry
+  budget, and can leave a filled order unjournalled with no exit rules. **Fix:** one line -
+  pass a `ToolNode(tools, handle_tool_errors=True)` (plan 1.1).
+- **I-32 · Closed positions are credited twice, and the first credit follows the money**
+  (notes/019 review). `learn.on_resolution` applies 0.9/0.1 by P&L at close to the same
+  blocks attribution later judges at horizon - so a lucky win takes +0.9 and then "learn
+  nothing", installing exactly the superstition the README's table forbids. Live: the NVDA
+  position closed +52.8% with attribution pending. **Fix:** defer block credit to attribution
+  per `ATTRIBUTION_SIGNAL`'s own docstring (plan 1.9).
+- **I-33 · The capital-protection fast path is killable by one bad input** (notes/019 review;
+  verified). `learn.on_fill/on_resolution` are unguarded inside reconcile (a corrupt
+  minds.json disarms exit rules); a malformed exit-rule threshold parses to a live stop at
+  breakeven (`_pct` → 0.0); one bad rule aborts evaluation for every position; a symbol-less
+  broker row KeyErrors the whole fast path. **Fix:** plan 1.4/1.5.
+- **I-34 · `trdrbot run` never takes the tick lock, and the watchdog is config-only**
+  (notes/019 review). INV-7 is unenforced on the only unattended path (`_acquire_run_lock` is
+  a weaker second mechanism at a relative path); `watchdog_seconds` is read by nothing, so
+  FM-26 (hung LLM call) has no mitigation. **Fix:** plan 1.2/1.3.
+- **I-35 · `book_greeks` prices every leg at leg[0]'s expiry - a calendar renders as zero
+  risk** (notes/019 review; verified: real calendar → delta/theta/vega all 0 vs true
+  −$31.83/day theta). `require_single_expiry` guards only a path the model cannot reach.
+  **Fix:** plan 1.7.
+- **I-36 · The two most critical readers are the least guarded, and most writers are
+  non-atomic** (notes/019 review). `journal.read` and `CalibrationStore.__init__` raise on
+  one truncated line (the latter at the top of every tick); ledger/calibration/positions/
+  sensors/minds/high-water/wiki all rewrite files non-atomically - `ledger.jsonl.bak-before-
+  repair` suggests this already bit once. `Ledger`'s loader also silently *deletes*
+  drift-incompatible rows on the next rewrite. **Fix:** plan 1.8/1.10/2.1.
+- **I-37 · Opportunity items never dedup - the inbox floods** (notes/019 review). Ids are
+  uuid4-unique by construction; live pending dir carries 22 opportunities incl. XLE ×6 with
+  byte-identical bands from three muse runs, all entering one decide batch. The muse's 3/day
+  cap is also enforced only at the tick call site - the CLI bypasses it (9 muse rows on
+  2026-08-29). **Fix:** content-hash ids + cap inside `muse.run` (plan 1.11/2.7).
 
 - **I-29 · The bootstrap base rate is overconfident by 15-18pp where credit spreads live**
   ([notes/017](notes/017_learning_from_historic_data.md)). Measured offline over **21,280
