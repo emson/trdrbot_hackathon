@@ -137,13 +137,30 @@ def compact_option_chain(result: Any, config: Any = None) -> Any:
              f"{', MORE PAGES EXIST' if result.get('next_page_token') else ''}. "
              f"Prices verbatim, bid x size / ask x size / last."]
     for expiry in sorted({r["expiry"] for r in kept}):
-        lines.append(f"\n== expiry {expiry} ==")
-        lines.append(f"{'strike':>8} {'C bid x sz':>12} {'C ask x sz':>12} {'C last':>7}"
-                     f" | {'P bid x sz':>12} {'P ask x sz':>12} {'P last':>7}")
         per = {}
         for r in kept:
             if r["expiry"] == expiry:
                 per.setdefault(r["strike"], {})[r["right"]] = r
+
+        # The OCC symbol is what `place_option_order` legs and
+        # `record_position` legs both require, and the table used to omit it
+        # entirely - the rows carried `occ` and nothing rendered it, so the
+        # agent had to reconstruct 21-character contract symbols by hand from
+        # a strike and a date. Rather than repeat a long string on every row
+        # (this table exists to save tokens), each section states its real
+        # prefix and one WORKED EXAMPLE lifted from the page - so the encoding
+        # is shown rather than described, and the strike padding that is easy
+        # to get wrong is visible in an instance the agent can copy.
+        sample = next((r for s in sorted(per) for r in per[s].values() if r.get("occ")), None)
+        head = f"\n== expiry {expiry} =="
+        if sample:
+            root = str(sample["occ"])[:len(str(sample["occ"])) - 15]
+            head += (f"  OCC: {root}{str(sample['occ'])[len(root):len(root) + 6]}"
+                     f"[C|P][strike x1000, 8 digits]"
+                     f"   e.g. {sample['strike']:g} {sample['right']} = {sample['occ']}")
+        lines.append(head)
+        lines.append(f"{'strike':>8} {'C bid x sz':>12} {'C ask x sz':>12} {'C last':>7}"
+                     f" | {'P bid x sz':>12} {'P ask x sz':>12} {'P last':>7}")
         for strike in sorted(per):
             c, p = per[strike].get("C"), per[strike].get("P")
 

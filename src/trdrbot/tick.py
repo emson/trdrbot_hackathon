@@ -483,7 +483,17 @@ async def _run_tick(
             shared=shared, posture=posture, extra_forecasts=declined,
         )
         record_tool = local_tools.build_record_position(
-            store, decision_id, elfmem_blocks=ctx.blocks, generated_by=config.model,
+            store, decision_id, elfmem_blocks=ctx.blocks,
+            # The CHAIN, not its head. `config.model` is the configured intent,
+            # and the fallback demonstrably fires: on 2026-08-28 the decide
+            # role was served by claude-opus-5 (97 calls), gpt-5 (19) and
+            # gpt-5.6-sol (6) per usage.jsonl, while every position page
+            # recorded a single name. D-070 fixed exactly this for the journal
+            # (`model_served`) and left the position pages saying something
+            # confidently wrong. Which model answered each call is in
+            # usage.jsonl, keyed by time; what the page can honestly claim at
+            # write time is the chain that was eligible to answer.
+            generated_by=" | ".join(config.model_chain("decide")),
             calibration=calib,
             sources=[{"id": i.id, "resource": f"inbox/{i.id}", "author": i.source}
                      for i in items],

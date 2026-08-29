@@ -1646,6 +1646,32 @@ def test_chain_compaction_keeps_near_atm_and_drops_far_strikes():
     assert "strike_price_gte" in out, "the escape hatch must be stated"
 
 
+def test_the_compacted_chain_shows_how_to_build_an_occ_symbol():
+    """The rows carried `occ` and NOTHING rendered it, so the agent had to
+    reconstruct 21-character contract symbols by hand from a strike and a date
+    - and the OCC is the one field that must be exactly right for
+    `place_option_order` and `record_position` to refer to the same contract.
+
+    Shown as a real prefix plus a worked example taken from the page, rather
+    than repeated on every row: this table exists to save tokens, and an
+    example demonstrates the strike padding that prose would only describe.
+    """
+    from trdrbot.compact import compact_option_chain
+    from trdrbot.optmath import parse_occ
+
+    out = compact_option_chain(_chain_payload())
+
+    assert "OCC:" in out, "the chain says nothing about contract symbols"
+    occ_line = next(ln for ln in out.splitlines() if "OCC:" in ln)
+    example = occ_line.split("=")[-1].strip()
+
+    parsed = parse_occ(example)
+    assert parsed is not None, f"the worked example is not a valid OCC: {example}"
+    # And it must describe a contract really ON this page, not a plausible
+    # invention - an example the agent copies has to be one it can trade.
+    assert example in _chain_payload()["snapshots"]
+
+
 def test_chain_compaction_fails_open_on_any_surprise():
     """A compactor that returns an empty string on a shape change would starve
     the decision silently - the null-path class again. Surprises pass the
