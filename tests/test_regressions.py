@@ -1017,18 +1017,34 @@ def test_greeks_and_probabilities_share_one_clock():
     assert 0.0 < prob_profit([leg], spot, iv, days) < 0.5
 
 
-def test_implied_vs_realized_converts_before_comparing():
-    """252 sessions against 365 calendar days. Comparing raw understates
-    implied by 17% - every time, in the direction that says do not sell."""
+def test_implied_vs_realized_compares_two_already_annualised_numbers():
+    """The world that produced a realized vol prices its own options AT that
+    vol, so equal figures must read 1.00 (D-093).
+
+    This function carried a sqrt(252/365) adjustment on the realized side for
+    its whole life and nobody noticed, because it had no callers. Derive it:
+    a world with per-trading-day variance sd^2 has annualised realized vol
+    sd*sqrt(252); an option there spanning n_c calendar days covers
+    n_t = n_c*252/365 sessions with total variance n_t*sd^2, and BS charges
+    sigma^2 * n_c/365 for that - so sigma = sd*sqrt(252), the same number.
+    The trading-day count is already inside both sides.
+    """
     import math
 
     from trdrbot.optmath import implied_vs_realized
 
-    # Implied and realised describing the SAME world must read as 1.0.
-    realized = 0.20                       # annualised over 252 sessions
-    implied = realized * math.sqrt(252 / 365)   # the same vol, ACT/365
-    assert abs(implied_vs_realized(implied, realized) - 1.0) < 1e-12
-    assert implied_vs_realized(0.20, 0.20) > 1.15, "raw equality is really a premium"
+    sd = 0.01
+    realized = sd * math.sqrt(252)
+    n_c = 6.0
+    total_var = (n_c * 252 / 365) * sd ** 2
+    fair_iv = math.sqrt(total_var / (n_c / 365))
+
+    assert abs(implied_vs_realized(fair_iv, realized) - 1.0) < 1e-12
+    assert implied_vs_realized(0.20, 0.20) == pytest.approx(1.0)
+    # The old behaviour, named so it cannot come back: a fifth of a premium
+    # that was not there, always in the direction that says sell.
+    assert implied_vs_realized(0.20, 0.20) < 1.15
+    assert implied_vs_realized(0.24, 0.20) == pytest.approx(1.2)
     assert implied_vs_realized(0.20, 0.0) is None
 
 

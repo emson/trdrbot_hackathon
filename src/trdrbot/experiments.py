@@ -79,6 +79,7 @@ def simulate(
     *, round_trip_cost: float = DEFAULT_ROUND_TRIP_COST,
     terminal_factors: list[float] | None = None,
     friction_usd: float | None = None,
+    realized_vol_pct: float | None = None,
 ) -> dict[str, Any]:
     """Score one candidate. Exact facts and modelled estimates kept distinct."""
     legs = exp.legs
@@ -195,6 +196,22 @@ def simulate(
         "days": days,
         "expected_move": optmath.expected_move(spot, iv, days),
         "spot": spot,
+        # Is the market charging more than the tape has been delivering? The
+        # first question a short-premium desk asks, computed here for the first
+        # time - `implied_vs_realized` has existed, correct and documented, with
+        # zero callers.
+        #
+        # **THE CONVERSION HAPPENS HERE, EXPLICITLY, ONCE.** `realized_vol_pct`
+        # is a percent because every model-facing number in this system is
+        # (`Stats.realized_vol` is `vols[-1] * 100`); `iv` is already a
+        # fraction; `implied_vs_realized` requires BOTH IN THE SAME UNITS and
+        # says so. A percent meeting a fraction unnoticed would report a
+        # 100-to-1 premium and look like the trade of the decade. This is the
+        # documented trap, and this line is the only place the two meet.
+        "iv_vs_realized": (optmath.implied_vs_realized(iv, realized_vol_pct / 100.0)
+                           if realized_vol_pct else None),
+        "realized_vol_pct": realized_vol_pct,
+        "iv_pct": iv * 100,
     }
 
 
@@ -365,6 +382,22 @@ def render_comparison(
                 f"Market 1-sigma expected move by horizon: +/-${em:,.2f}"
                 f" (i.e. {sp - em:,.2f} to {sp + em:,.2f}; spot {sp:,.2f})."
                 f" Thesis band [{lo}, {hi}]."
+            )
+            break
+    # Printed once, in the market-context block rather than per candidate: the
+    # IV and the tape are the same for every expression of one thesis, so
+    # repeating the line down the table would be noise, not emphasis.
+    for _, m0 in ranked:
+        ratio, rv, ivp = (m0.get("iv_vs_realized"), m0.get("realized_vol_pct"),
+                          m0.get("iv_pct"))
+        if ratio and rv and ivp:
+            reading = ("the market is charging MORE than the tape has delivered "
+                       "- premium favours selling" if ratio > 1.0 else
+                       "the market is charging LESS than the tape has delivered "
+                       "- premium favours buying")
+            lines.append(
+                f"Implied vs realized: entry IV {ivp:.1f}% vs trailing realized"
+                f" {rv:.1f}% -> ratio {ratio:.2f}x ({reading})."
             )
             break
     lines.append("\n### Candidate expressions (ranked)")

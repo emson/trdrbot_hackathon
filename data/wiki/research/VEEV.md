@@ -7,6 +7,7 @@ sources:
   last_modified: '2026-08-27T17:29:36.141846+00:00'
 generated:
   at: '2026-08-27T17:29:36.141876+00:00'
+status: deprecated
 ---
 
 # What it is
@@ -22,4 +23,4 @@ Options gate FAILED (0 contracts seen) — untradeable in this framework regardl
 (not researched - discovery pass)
 
 # Environment
-Verdict: pass. Evidence: Veeva Stock Takes Off After Best CRM Quarter Ever: Analysts Approve | benzinga | ['VEEV']; Crude Oil Moves Higher; Dollar General Shares Gain After Upbeat Q2 Earnings | benzinga | ['VEEV']; Nvidia's Best Day Since April 2025, Cybersecurity Stocks Go Vertical: Stock Market Today | benzinga | ['IGV', 
+Verdict: pass. Evidence: Veeva Stock Takes Off After Best CRM Quarter Ever: Analysts Approve | benzinga | ['VEEV']; Crude Oil Moves Higher; Dollar General Shares Gain After Upbeat Q2 Earnings | benzinga | ['VEEV']; Nvidia's Best Day Since April 2025, Cybersecurity Stocks Go Vertical: Stock Market Today | benzinga | ['IGV',

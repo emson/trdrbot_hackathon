@@ -49,6 +49,21 @@ from . import ids, optmath, store
 #: record without trading it.
 THESIS, STANDALONE = "thesis", "standalone"
 
+#: What `band_low`/`band_high` are bounds ON.
+#:
+#: Every entry was implicitly a PRICE claim: resolution fetched spot and asked
+#: whether the band held. Meanwhile the agent states a realized-vol view in
+#: prose every cycle ("I forecast 8.5%; the condors needed sub-7.5%") and
+#: nothing scored it, so the most falsifiable thing it says moved no
+#: calibration and earned no size - which is most of the point of saying it
+#: (I-14).
+#:
+#: Vol bands are in PERCENT, annualized, matching the units the agent reads
+#: them in: the stats block quotes "realized vol 21d 12.3%", and a forecast
+#: must be scored in the units it was stated in or the seam is a units bug
+#: waiting to happen.
+PRICE_BAND, REALIZED_VOL_PCT = "price_band", "realized_vol_pct"
+
 
 @dataclass
 class Entry:
@@ -66,9 +81,15 @@ class Entry:
     probability_stated: bool = True
     traded: bool = False      # did this thesis become a position?
     position_id: str | None = None
+    #: What the band is a claim about. Defaults to the price band every
+    #: historical row implicitly was, so nothing on disk needs rewriting.
+    metric: str = PRICE_BAND
     #: resolution
     outcome: bool | None = None
     resolved_at: str | None = None
+    #: The resolved value the band was checked against. Wire name kept because
+    #: it is on every row ever written; for a `realized_vol_pct` entry it holds
+    #: the annualized realized vol in percent, not a price.
     price_at_horizon: float | None = None
     notes: str = ""
     #: Which gate threw this candidate out, if one did. Structured rather than
@@ -152,6 +173,7 @@ class Ledger:
         self, *, kind: str, underlying: str, claim: str, probability: float,
         horizon: str, band_low: float | None, band_high: float | None,
         notes: str = "", probability_stated: bool = True, variant: str = "",
+        metric: str = PRICE_BAND,
     ) -> Entry | None:
         """Record a forecast. Returns None if it could never be scored.
 
@@ -170,6 +192,7 @@ class Ledger:
             probability=max(0.0, min(1.0, probability)), horizon=horizon,
             probability_stated=probability_stated, variant=variant,
             band_low=band_low, band_high=band_high, notes=notes[:400],
+            metric=metric,
         )
         # Do not double-register the same thesis on repeated simulate calls in
         # one decide cycle - the agent often simulates twice while comparing.
@@ -189,6 +212,7 @@ class Ledger:
             if (prior.outcome is None and prior.underlying == e.underlying
                     and prior.horizon == e.horizon
                     and prior.probability_stated == e.probability_stated
+                    and prior.metric == e.metric
                     and prior.band_low == e.band_low and prior.band_high == e.band_high):
                 return prior
         self._items.append(e)
@@ -246,11 +270,14 @@ class Ledger:
         return [e for e in self._items
                 if e.outcome is None and e.scoreable() and e.matured(today)]
 
-    def resolve(self, entry_id: str, price: float, at: str) -> Entry | None:
+    def resolve(self, entry_id: str, value: float, at: str) -> Entry | None:
+        """Score one entry against the resolved value of its metric - a price
+        for a price band, an annualized realized vol in percent for a vol
+        band. `holds_at` needs no metric branch: a band is a band."""
         for e in self._items:
             if e.id == entry_id and e.outcome is None:
-                e.outcome = e.holds_at(price)
-                e.price_at_horizon = price
+                e.outcome = e.holds_at(value)
+                e.price_at_horizon = value
                 e.resolved_at = at
                 self._rewrite()
                 return e

@@ -11,6 +11,7 @@ sources:
   last_modified: '2026-08-27T17:29:36.143332+00:00'
 generated:
   at: '2026-08-27T17:29:36.143743+00:00'
+status: deprecated
 ---
 
 # What it is
@@ -26,4 +27,4 @@ Directional bet on broadening that the chart explicitly refuses to confirm; forw
 (not researched - discovery pass)
 
 # Environment
-Verdict: watch. Evidence: QUICK SPARK: Nvidia's Next Rally Could Create Another Fourteen Intels in Market Value | benzinga | ['AMD', 'INTC', 'MU', 'NVDA']; The IV Crush Is Only Half The Story: How Options Get So Expensive Before Earnings | benzinga | ['CRM', 'INTC', 'NVDA']; Nvidia's Best Day Since April 2025, Cybersecurity 
+Verdict: watch. Evidence: QUICK SPARK: Nvidia's Next Rally Could Create Another Fourteen Intels in Market Value | benzinga | ['AMD', 'INTC', 'MU', 'NVDA']; The IV Crush Is Only Half The Story: How Options Get So Expensive Before Earnings | benzinga | ['CRM', 'INTC', 'NVDA']; Nvidia's Best Day Since April 2025, Cybersecurity

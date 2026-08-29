@@ -122,3 +122,46 @@ def test_the_rendered_comparison_is_unchanged():
 
 
 RENDER_VERTICAL = "### Thesis\nSPY drifts down [holds if 750 <= price <= 770 on 2026-09-03] (drift -1.2%)\nMarket 1-sigma expected move by horizon: +/-$13.31 (i.e. 755.74 to 782.36; spot 769.05). Thesis band [750, 770].\n\n### Candidate expressions (ranked)\n\n**1. vertical** (debit $270)\n   FACTS    max profit $530 | max loss $-270 | R:R 1.96 | breakevens [763.3]\n   MODELLED P(profit) market 34% -> your view 61% | thesis edge +26.8%\n   PAYOFF   after costs, when it wins $327, when it loses $378 -> 0.87:1 (max/max says 1.96). Sizing uses this, not max/max\n   GREEKS   delta $-15,899 (-21 sh) | theta $-12/day | vega $+11/IVpt | gamma +0.8 sh/$ | implied daily move $5.43\n   HISTORY  P(profit) from real-return bootstrap 43% (vs lognormal 34%)  <- tails disagree, edge is assumption-dependent\n   COSTS    est. round-trip friction $135 | EV after costs, YOUR VIEW $+49 | at market's own drift $-163\n   NEEDS    a DIRECTION bet (15x) | wins if drift < -0.9% | EV positive at every realized vol tested\n   r\n\n_FACTS are arithmetic on the contracts. MODELLED assumes lognormal returns at current IV - the tails are wrong and IV is itself a forecast. Weight accordingly._\n_The two EV columns answer different questions. 'At market's own drift' prices the structure under the distribution the QUOTES imply, where a fairly priced trade is worth about zero and after friction is negative - that column is close to a measure of what you are paying to trade, not a verdict on the trade. 'YOUR VIEW' applies the drift you stated. If your thesis cannot make that column positive, the thesis is either too weak or too cheap to express this way._"
+
+
+#: The implied-vs-realized line, pinned exactly. It only renders when a trailing
+#: realized figure is supplied, which is why the golden above is unchanged by
+#: its arrival - absent means absent line.
+RENDER_IV_VS_REALIZED = (
+    "Implied vs realized: entry IV 13.5% vs trailing realized 11.0% -> ratio 1.23x "
+    "(the market is charging MORE than the tape has delivered - premium favours selling)."
+)
+
+
+def test_the_implied_vs_realized_line_is_pinned_including_its_units():
+    """The percent-to-fraction seam, held by a string the model reads.
+
+    `implied_vs_realized` wants both figures in the SAME units and says so;
+    `realized_vol_pct` is a percent and `iv` is a fraction. A percent meeting a
+    fraction here unnoticed would report a 100-to-1 premium and read as the
+    trade of the decade. 13.5% IV against 11.0% realized is 1.23x - a real but
+    ordinary premium, not 100x and not 0.01x.
+    """
+    exp = experiments.Experiment(name="vertical", legs=_vertical(), rationale="r")
+
+    m = experiments.simulate(exp, THESIS, spot=SPOT, iv=IV, days=DAYS,
+                             terminal_factors=FACTORS, realized_vol_pct=11.0)
+    rendered = experiments.render_comparison(THESIS, experiments.rank([(exp, m)]))
+
+    assert RENDER_IV_VS_REALIZED in rendered
+    # And the golden above still holds without it: absent means absent line.
+    assert "Implied vs realized" not in RENDER_VERTICAL
+
+
+def test_equal_implied_and_realized_read_as_parity_not_as_a_unit_bug():
+    """The identity case. Both figures describe the same volatility, so the
+    ratio must be 1.0 - the reading that says nobody double-converted."""
+    from trdrbot.optmath import implied_vs_realized
+
+    assert implied_vs_realized(0.12, 0.12) == pytest.approx(1.0)
+
+    exp = experiments.Experiment(name="vertical", legs=_vertical(), rationale="r")
+    m = experiments.simulate(exp, THESIS, spot=SPOT, iv=0.12, days=DAYS,
+                             realized_vol_pct=12.0)
+
+    assert m["iv_vs_realized"] == pytest.approx(1.0)

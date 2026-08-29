@@ -7,6 +7,7 @@ sources:
   last_modified: '2026-08-28T13:44:59.076249+00:00'
 generated:
   at: '2026-08-28T13:44:59.076279+00:00'
+status: deprecated
 ---
 
 # What it is

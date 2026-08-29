@@ -77,14 +77,48 @@ def _sma(closes: list[float], n: int) -> float | None:
     return sum(closes[-n:]) / n
 
 
+def _annualized_vol(rets: list[float]) -> float:
+    """Sample stdev of log returns, annualized. A FRACTION, not a percent.
+
+    One copy, because the rolling series and the between-dates window are the
+    same arithmetic and this project's most familiar bug is two copies of one
+    definition drifting apart.
+    """
+    n = len(rets)
+    mean = sum(rets) / n
+    var = sum((r - mean) ** 2 for r in rets) / (n - 1)
+    return math.sqrt(var) * math.sqrt(TRADING_DAYS)
+
+
 def _rolling_vol(rets: list[float], window: int = 21) -> list[float]:
-    out = []
-    for i in range(window, len(rets) + 1):
-        chunk = rets[i - window : i]
-        mean = sum(chunk) / window
-        var = sum((r - mean) ** 2 for r in chunk) / (window - 1)
-        out.append(math.sqrt(var) * math.sqrt(TRADING_DAYS))
-    return out
+    return [_annualized_vol(rets[i - window : i])
+            for i in range(window, len(rets) + 1)]
+
+
+#: Below this many returns a vol estimate is noise wearing a number's clothing.
+#: A forecast scored against it would be scored against nothing.
+MIN_VOL_SAMPLE = 5
+
+
+def realized_vol_between(dates: list[str], closes: list[float],
+                         start: str, end: str) -> float | None:
+    """Annualized realized vol IN PERCENT over the calendar window, or None.
+
+    Percent, because that is the unit the claim was stated in: the stats block
+    the agent reads quotes "realized vol 21d 12.3%", so its forecast bands are
+    percent and a forecast must be scored in the units it was made in. The
+    fraction form lives one function up and is converted exactly once, here.
+
+    None rather than a guess whenever the window is absent or too short. A vol
+    forecast resolved against four returns would enter calibration as evidence,
+    and a wrong resolution poisons calibration in a way an unresolved one does
+    not.
+    """
+    window = [c for d, c in zip(dates, closes) if start <= str(d) <= end]
+    rets = _log_returns(window)
+    if len(rets) < MIN_VOL_SAMPLE:
+        return None
+    return _annualized_vol(rets) * 100
 
 
 def _rsi(closes: list[float], n: int = 14) -> float | None:

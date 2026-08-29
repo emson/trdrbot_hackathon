@@ -11,6 +11,7 @@ sources:
   last_modified: '2026-08-28T13:44:59.072981+00:00'
 generated:
   at: '2026-08-28T13:44:59.073487+00:00'
+status: deprecated
 ---
 
 # What it is

@@ -7,6 +7,7 @@ Two jobs relevant to stage 3: interim scoring (INV-24 - the actual fix for
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 from . import attribution, health
@@ -50,6 +51,34 @@ def _materiality_band(pnl_fraction: float) -> int:
         if mag >= threshold:
             band = i
     return band
+
+
+async def _resolved_value(entry: Any, tools: dict[str, Any], state_dir: Path) -> float | None:
+    """What this forecast's band is checked against, or None to try later.
+
+    One place where "what does this metric resolve to" is answered, so adding
+    a third claim type is a branch here and nothing else. A price claim needs a
+    spot; a vol claim needs a dated close series covering entry -> horizon.
+
+    Never guesses. Absent, stale or too short all mean SKIP, exactly as a
+    missing spot always has: an unresolved forecast is a forecast that resolves
+    tomorrow, while a wrongly resolved one enters calibration as evidence and
+    stays there. The 10-day staleness window is the one other stored-series
+    callers use; the cache self-heals daily (D-091).
+    """
+    from . import ledger as _ledger
+    from . import market_stats
+    from .attribution import _spot
+
+    if entry.metric == _ledger.REALIZED_VOL_PCT:
+        series = market_stats.load_dated_closes(state_dir, entry.underlying,
+                                                max_age_days=10)
+        if series is None:
+            return None
+        dates, closes = series
+        return market_stats.realized_vol_between(dates, closes,
+                                                 str(entry.created)[:10], entry.horizon)
+    return await _spot(tools, entry.underlying)
 
 
 async def run(
@@ -149,24 +178,23 @@ async def run(
     if tools:
         from . import ids as _i
         from . import ledger as _ledger
-        from .attribution import _spot
         book = _ledger.Ledger(config.paths.state / "ledger.jsonl")
         due = book.matured_unresolved()
         for e in due:
-            spot = await _spot(tools, e.underlying)
-            if spot is None:
-                continue  # never guess the price; try again next cycle
-            done = book.resolve(e.id, spot, _i.utc_now().isoformat())
+            value = await _resolved_value(e, tools, config.paths.state)
+            if value is None:
+                continue  # never guess; try again next cycle
+            done = book.resolve(e.id, value, _i.utc_now().isoformat())
             if done:
                 forecasts_resolved += 1
                 journal.append(
                     "forecast_resolved", entry_id=e.id, underlying=e.underlying,
                     traded=e.traded, stated=e.probability, held=done.outcome,
-                    price_at_horizon=spot,
+                    metric=e.metric, price_at_horizon=value,
                 )
         if due:
             journal.append("forecast_run", due=len(due), resolved=forecasts_resolved,
-                           skipped_no_price=len(due) - forecasts_resolved)
+                           skipped_no_data=len(due) - forecasts_resolved)
 
     # Attribute any thesis whose horizon has now arrived (view vs structure).
     attributed = 0

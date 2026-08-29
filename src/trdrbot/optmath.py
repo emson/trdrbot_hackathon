@@ -692,9 +692,11 @@ def year_fraction(days: float) -> float:
     - within 1.6% of ACT/365, and a landmine for the first person to "fix" the
     missing argument.
 
-    `vol_days` survives for the one job it is genuinely right for: converting a
-    trading-time realized vol into calendar-time implied terms, so
-    implied-vs-realized is a fair comparison. See `implied_vs_realized`.
+    `vol_days` survives for the one job it is genuinely right for: TIME TO
+    EXPIRY in years, which is what BS asks for and what every pricing call
+    here passes. It is NOT the conversion `implied_vs_realized` needs - see
+    that function for why an annualised realized vol is already comparable to
+    a quoted IV with no clock change at all (D-093).
     """
     return max(days, 0.0) / CALENDAR_DAYS_PER_YEAR
 
@@ -728,23 +730,31 @@ def vol_days(days: float, start: date | None = None) -> float:
 
 
 def implied_vs_realized(iv: float, realized_vol: float) -> float | None:
-    """Ratio of implied to realized vol, both in the SAME units. >1 = premium.
+    """Ratio of implied to realized vol, both ANNUALISED. >1 = premium.
 
-    The single most useful number a short-premium book has, and it is easy to
-    get wrong by 20%: an implied vol is annualised over 365 calendar days, a
-    realized vol computed from daily closes over 252 sessions. Comparing them
-    raw understates implied by sqrt(252/365) = 0.83 - i.e. it makes selling
-    premium look like a worse deal than it is by a fifth, every single time.
+    The single most useful number a short-premium book has. Both figures are
+    already per-sqrt-year, so the comparison is the plain quotient - and it
+    took wiring this function to a live caller to establish that, because it
+    shipped with a sqrt(252/365) adjustment applied to the realized side and
+    no consumer to notice (D-093).
 
-    Converts the realized figure onto the implied's calendar clock before
-    dividing, so 1.0 genuinely means "the market is charging what the tape has
-    been delivering".
+    Why no adjustment. Take a world with constant per-trading-day variance
+    `sd^2` and none on the days the market is shut. Its annualised realized vol
+    is `sd*sqrt(252)`. Now price an option over `n_c` calendar days, spanning
+    `n_t = n_c*252/365` sessions, in that same world: its total variance is
+    `n_t*sd^2`, and Black-Scholes charges `sigma^2 * n_c/365` for it, so
+    `sigma = sd*sqrt(252)` exactly. A market charging precisely what the tape
+    delivers quotes an IV EQUAL to the 252-annualised realized figure. There is
+    no clock to convert between; the trading-day count is already inside both.
+
+    The old adjustment therefore read 1.20 for a market charging exactly fair
+    value - a fifth of a premium that was not there, always in the direction
+    that says sell. `vol_days` still does a real conversion, but for time to
+    expiry, which is a different question.
     """
     if realized_vol is None or realized_vol <= 0 or iv is None or iv <= 0:
         return None
-    realized_calendar = realized_vol * math.sqrt(
-        TRADING_DAYS_PER_YEAR / CALENDAR_DAYS_PER_YEAR)
-    return iv / realized_calendar
+    return iv / realized_vol
 
 
 def gamma_breakeven(greeks: dict[str, float] | None) -> float | None:

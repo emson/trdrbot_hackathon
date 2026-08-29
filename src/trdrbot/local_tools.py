@@ -20,7 +20,7 @@ from langchain_core.tools import StructuredTool
 
 from . import experiments, ids, market_stats, optmath, sizing
 from .calibration import CalibrationStore
-from .ledger import STANDALONE
+from .ledger import PRICE_BAND, REALIZED_VOL_PCT, STANDALONE
 from .positions import Position, PositionStore
 
 
@@ -230,15 +230,20 @@ def build_simulate_experiments(shared: SharedContext, state_dir: Path | None = N
         # the HISTORY row is comparable with the thesis view, and the tail
         # gap is attributable to distribution shape.
         factors = None
+        realized_vol_pct = None
         if state_dir is not None:
             closes = market_stats.load_closes(state_dir, underlying)
             if closes:
                 factors = market_stats.bootstrap_factors(
                     closes, days_to_expiry, seed=underlying, drift=drift_pct / 100.0
                 ) or None
+                # Same closes, already loaded: what the tape has actually been
+                # delivering, to sit beside what the market is charging.
+                realized_vol_pct = market_stats.compute_stats(underlying, closes).realized_vol
         results = [
             (e, experiments.simulate(e, thesis, spot, iv_pct / 100.0, days_to_expiry,
-                                     terminal_factors=factors, friction_usd=fr))
+                                     terminal_factors=factors, friction_usd=fr,
+                                     realized_vol_pct=realized_vol_pct))
             for e, fr in zip(built, frictions)
         ]
         ranked = experiments.rank(results)
@@ -692,6 +697,13 @@ def _vacuity_check(state_dir: Path | None, underlying: str, probability: float,
     return None
 
 
+#: The model-facing metric names, mapped to the ledger's wire values. Two
+#: vocabularies on purpose: the tool argument is what an agent would naturally
+#: write, the stored value says its units out loud so a reader of the ledger
+#: file cannot mistake a vol band for a price.
+_METRICS = {"price": PRICE_BAND, "realized_vol": REALIZED_VOL_PCT}
+
+
 def build_record_forecast(ledger: Any, state_dir: Path | None = None) -> StructuredTool:
     """Tool: put a view on the record without trading it.
 
@@ -710,6 +722,7 @@ def build_record_forecast(ledger: Any, state_dir: Path | None = None) -> Structu
         band_low: float | None = None,
         band_high: float | None = None,
         why: str = "",
+        metric: str = "price",
     ) -> str:
         """Record a falsifiable prediction you are NOT trading.
 
@@ -732,29 +745,51 @@ def build_record_forecast(ledger: Any, state_dir: Path | None = None) -> Structu
                 worth less than three fast ones, even though it feels more
                 serious. Short horizons are also harder, which is the point:
                 they test judgement rather than drift.
-            band_low: holds only if price >= this at the horizon
-            band_high: holds only if price <= this at the horizon.
+            band_low: holds only if the metric is >= this at the horizon
+            band_high: holds only if the metric is <= this at the horizon.
                 Give at least one, or it cannot be scored and will be refused.
                 Make the band genuinely uncertain - one history almost always
                 holds is refused as uninformative, because scoring 'right' on
                 a near-certainty earns size without testing judgement.
             why: brief reasoning, for the record
+            metric: what the band is about.
+                'price' (default): band_low/band_high are prices at the horizon.
+                'realized_vol': band_low/band_high bound the ANNUALIZED realized
+                vol IN PERCENT over now -> horizon (e.g. 7.0/9.5 = "realized
+                lands between 7% and 9.5%"). This is the claim your
+                breakeven-vol comparison already makes in prose every cycle -
+                recorded here, it is scored against the tape automatically and
+                moves your calibration like any other forecast.
         """
-        vacuous = _vacuity_check(state_dir, underlying, probability,
-                                 horizon, band_low, band_high)
-        if vacuous:
-            return vacuous
+        wanted = _METRICS.get(metric)
+        if wanted is None:
+            return (f"REFUSED: unknown metric {metric!r}. "
+                    f"Use one of: {', '.join(sorted(_METRICS))}.")
+
+        # The vacuity anchor is a bootstrap over the PRICE distribution, so it
+        # can only judge a price band. A vol analogue is future work; until it
+        # exists, a vol claim is unguarded rather than judged by the wrong
+        # ruler - the same fail-open rule this check already follows when it
+        # has no history at all.
+        if wanted == PRICE_BAND:
+            vacuous = _vacuity_check(state_dir, underlying, probability,
+                                     horizon, band_low, band_high)
+            if vacuous:
+                return vacuous
 
         e = ledger.register(
             kind=STANDALONE, underlying=underlying, claim=claim,
             probability=probability, horizon=horizon,
-            band_low=band_low, band_high=band_high, notes=why,
+            band_low=band_low, band_high=band_high, notes=why, metric=wanted,
         )
         if e is None:
             return ("REFUSED: no band given, so this could never be scored. "
                     "Give band_low and/or band_high.")
+        units = "%" if e.metric == REALIZED_VOL_PCT else ""
+        what = "realized vol" if e.metric == REALIZED_VOL_PCT else "price"
         return (f"Recorded forecast {e.id} on {e.underlying}: {e.probability:.0%} that "
-                f"[{e.band_low}, {e.band_high}] holds on {e.horizon}. "
+                f"{what} lands in [{e.band_low}{units}, {e.band_high}{units}] "
+                f"on {e.horizon}. "
                 f"It will be scored automatically and counts toward your calibration.")
 
     return StructuredTool.from_function(

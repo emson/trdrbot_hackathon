@@ -18,6 +18,18 @@ Sorted by severity.
 - ~~**I-36 · The two most critical readers are the least guarded, and most writers are
   non-atomic**~~ **FIXED 2026-08-29 (D-091).** journal.read and CalibrationStore skip-and-count bad lines; both loaders ignore unknown keys so drift cannot be deleted by the next rewrite; store.write_atomic is used by every state writer. Verified by reverting the fix and watching the regression test fail.
 - ~~**I-37 · Opportunity items never dedup - the inbox floods**~~ **FIXED 2026-08-29 (D-091).** opportunity ids are content-derived per source per day, and Inbox.write returns the existing item rather than adding a duplicate. Verified by reverting the fix and watching the regression test fail.
+- ~~**I-38 · `implied_vs_realized` inflated every premium reading by 20%**~~ **FIXED 2026-08-29
+  (D-093, WU-3.6).** The function adjusted the realized side by sqrt(252/365) before dividing, on
+  the reasoning that "implied annualises over 365 calendar days, realized over 252 sessions". It
+  does not survive the derivation: a world with per-trading-day variance `sd^2` has annualised
+  realized vol `sd*sqrt(252)`, and an option there spanning `n_c` calendar days covers
+  `n_t = n_c*252/365` sessions with total variance `n_t*sd^2`, which BS charges as
+  `sigma^2 * n_c/365` - so `sigma = sd*sqrt(252)`, the same number. The trading-day count is
+  already inside both sides. A market charging exactly fair value therefore read 1.20x, a fifth of
+  a premium that was not there, **always in the direction that says sell**. Inert until WU-3.6
+  gave the function its first caller, which is how it was found: the number went in front of the
+  agent as "the market is charging MORE than the tape has delivered", and that had to be true
+  before it could be shown.
 - **I-29 · The bootstrap base rate is overconfident by 15-18pp where credit spreads live**
   ([notes/017](notes/017_learning_from_historic_data.md)). Measured offline over **21,280
   historical band-forecasts** (56 tickers, horizons 3/5/10, 5 band shapes, history sliced before
@@ -161,12 +173,17 @@ Sorted by severity.
   elements from a truncated array, so a cut-off reply now yields four candidates instead of none -
   but the truncation itself is unaddressed. **Options:** a per-role max_tokens, or fewer candidates
   per run at the cost of the diversity that is the muse's whole point.
-- **I-14 · The stated vol forecast is not scored** (D-076). The agent now states a realized-vol
+- ~~**I-14 · The stated vol forecast is not scored** (D-076). The agent now states a realized-vol
   forecast and compares it to each structure's breakeven vol ("I forecast 8.5%, the condors needed
   sub-7.5%") - but nothing resolves that claim against realized vol at the horizon, so it moves no
-  calibration and earns no size, which is most of the point of making it explicit. Resolution needs
-  `market_stats._rolling_vol` over stored closes (no network, no LLM) plus one `metric` field on a
-  ledger Entry. **Highest-value next step.**
+  calibration and earns no size, which is most of the point of making it explicit.~~ **CLOSED
+  (D-093, WU-3.6).** `Entry.metric` carries `realized_vol_pct`, `record_forecast(metric=
+  "realized_vol")` records the claim in the percent the agent states it in, and housekeeping
+  resolves it from stored dated closes via `market_stats.realized_vol_between` - no network, no
+  LLM, and skipped rather than guessed when the series is absent, stale or too short. It enters
+  calibration through `as_forecasts` unchanged, which needed no metric branch: calibration asks
+  "when this agent says 70%, does it happen", a question that does not care what the claim was
+  about.
 - **I-15 · Entry commitments do not survive the cycle** (D-076). The agent committed at 07:15 to
   "775/785 at <= ~$2.10 -> act"; it traded at $1.62 six hours later with spot unchanged, and no
   cycle re-checked it. Every cycle is a cold start that states fresh act-conditions and discards
