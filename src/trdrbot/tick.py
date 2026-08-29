@@ -267,6 +267,136 @@ async def run_tick(
                                force_decide=force_decide)
 
 
+def _guarded_mcp_tools(tools_list: list[Any], config: Config, batch: str,
+                       store: PositionStore) -> list[Any]:
+    """The MCP tools the decide agent may call, wrapped in the four guards.
+
+    One coherent step, and the only part of the tool assembly that is one -
+    the local tools are built alongside the competence assessment they depend
+    on, so hoisting those too would give this function a name it does not
+    earn.
+
+    Order matters and composes deliberately (D-065): bind only the allowlisted
+    tools (schemas for 72 cost ~21k tokens per call and the agent has ever
+    used 17), compact heavy results at the boundary so a 61k-char option chain
+    enters context as a ~4k table instead of being re-sent every turn, then
+    the two guards. `enforce_order_ids` is what makes INV-18 hold at all: the
+    model authors every tool argument, so without it the client_order_id is
+    whatever it invents.
+    """
+    allow = set(config.decide_tools)
+    tools = [t for t in tools_list if not allow or t.name in allow]
+    tools = compact.wrap_heavy_tools(tools, config)
+    tools = tool_guard.enforce_order_ids(tools, batch)
+    return tool_guard.redirect_whole_book_close(
+        tools, lambda: len([p for p in store.open_positions() if p.status == "open"])
+    )
+
+
+async def _build_decide_prompt(
+    *, snap: analytics.Snapshot, store: PositionStore, wiki: Wiki, config: Config,
+    posture: Any, cal_now: Any, ctx: Any, items: list[Item], prior: Any, n: int,
+) -> str:
+    """Everything the decide agent reads, assembled in priority order.
+
+    Extracted from `_run_tick` verbatim - ~90 lines of `prompt_parts.append`
+    that made the tick's actual ORDERING (the D-019 guarantees the module
+    docstring is at pains to explain) impossible to see. Only the assembly
+    moved; the fast path, the idle ladder and the post-invoke bookkeeping stay
+    inline, because scattering those would lose the plot this module exists to
+    keep straight.
+    """
+    prompt_parts = [snap.render(), _render_positions(store, snap, config.paths.state, snap.equity or 0.0)]
+    _ok, _why = competence.can_open(config.deadline, None)
+    prompt_parts.append(
+        f"## Competence tier: {posture.tier.upper()}\n"
+        f"{posture.reason}. Book cap {posture.book_cap:.0%} of equity in defined "
+        f"max-loss; size_position enforces it - do not argue with the number it returns.\n"
+        f"To earn more size: {posture.next_tier_needs()}. Size is earned by resolved, "
+        f"ATTRIBUTABLE theses - a profit on a wrong view is luck and counts for nothing."
+        + (f"\nHARD STOP: {_why}" if not _ok else "")
+    )
+    if config.events:
+        from datetime import date as _date
+        ev_lines = []
+        for ev in config.events:
+            try:
+                days = (_date.fromisoformat(str(ev["date"])) - ids.market_today()).days
+            except (KeyError, ValueError):
+                continue
+            if 0 <= days <= 14:
+                ev_lines.append(f"- {ev['date']} ({days}d away): {ev.get('name','')}")
+        if ev_lines:
+            prompt_parts.append(
+                "## Known macro events (binary risk - check every holding window)\n"
+                + "\n".join(ev_lines)
+            )
+    regime = wiki.read("context/regime")
+    if regime and regime.body.strip():
+        # Labelled when expired rather than dropped. The regime page is a
+        # singleton that rewrites itself, so an old one is the only market
+        # context there is - but presenting it undated as "the regime"
+        # is what makes a stale read indistinguishable from a fresh one.
+        # It IS stale on disk right now, and nothing said so.
+        stale = " - STALE, read as history" if regime.is_stale() else ""
+        generated = (regime.frontmatter.get("generated") or {}).get("at", "")
+        prompt_parts.append(
+            f"## Market regime (research desk, {generated[:10]}{stale})\n\n"
+            + regime.body[:1800]
+        )
+    if ctx.text:
+        prompt_parts.append(f"## What you remember\n\n{ctx.text}")
+    # News gets enriched HERE, at the decide seam, not at ingestion (D-070).
+    # Sensors are deliberately deterministic and LLM-free (D-015), and the
+    # decide path is the one that both pays for news and acts on it. Doing
+    # it here also means the freshest article - the one that just arrived
+    # and matters most - is enriched at the moment of the decision rather
+    # than whenever research/discovery/muse next happens to run.
+    #
+    # Measured on two live articles: raw JSON payloads rendered 1,322 chars;
+    # enriched rendered 824 - 38% SMALLER while adding sentiment, event
+    # type, regime, claim horizon and entities. Extraction cost ~$0.0002.
+    # Cheaper and more informative, which is the only kind of trade worth
+    # making here.
+    news_items = [i for i in items if i.type == "news"]
+    other_items = [i for i in items if i.type != "news"]
+    obs_lines = []
+    if news_items:
+        try:
+            payloads = [dict(i.payload, id=i.payload.get("id") or i.id) for i in news_items]
+            extracts = await news_extract.enrich(payloads, config)
+            obs_lines.append(news_extract.render_block(extracts))
+        except Exception as exc:  # noqa: BLE001 - fail open to the raw payloads
+            print(f"[tick {n}] news enrichment failed, using raw payloads: {exc!r}")
+            obs_lines += [f"- [news | trust={i.trust}] {json.dumps(i.payload)}"
+                          for i in news_items]
+    obs_lines += [f"- [{i.type} | trust={i.trust}] {json.dumps(i.payload)}" for i in other_items]
+    prompt_parts.append("## Observations this cycle\n\n" + "\n".join(obs_lines))
+    # Same `cal_now` the ladder and the sizing tool read - one number, one
+    # meaning. The prompt used to show a position-only figure while size
+    # was gated on a ledger-inclusive one.
+    if cal_now.n:
+        prompt_parts.append(
+            f"## Your calibration so far\n\n{cal_now.verdict()}\n\n"
+            f"Base rate: {cal_now.base_rate:.0%} of your resolved forecasts and closed "
+            f"positions came in. Use this to set `confidence` honestly - it is scored, "
+            f"and it is the same number size_position shrinks your claim against.\n"
+            f"Sample: {cal_now.sample_note()}."
+        )
+    prompt_parts.append(
+        f"## Constraints\n- Competition deadline: {config.deadline} "
+        f"(everything is force-closed then, so prefer expiries well inside it).\n"
+        f"- Watchlist: {', '.join(config.watchlist)}"
+    )
+    if prior:
+        prompt_parts.append(
+            "## Resuming\nA previous decision for this batch did not complete. "
+            "Its order id is idempotent, so re-attempting the same action is safe - "
+            "a duplicate will be rejected."
+        )
+    return "\n\n".join(prompt_parts)
+
+
 async def _run_tick(
     config: Config, tools_list: list[Any], *, verbose: bool = True,
     force_decide: bool = False,
@@ -423,10 +553,7 @@ async def _run_tick(
         # ~21k tokens per call and the agent has ever used 17; (2) compact
         # heavy results at the boundary so a 61k-char option chain enters
         # context as a ~4k table instead of being re-sent in full every turn.
-        allow = set(config.decide_tools)
-        decide_mcp = [t for t in tools_list if not allow or t.name in allow]
-        decide_mcp = compact.wrap_heavy_tools(decide_mcp, config)
-        guarded = tool_guard.enforce_order_ids(decide_mcp, batch)
+        guarded = _guarded_mcp_tools(tools_list, config, batch, store)
 
         open_pos = store.open_positions()
         query = _attention_query(items, open_pos, config)
@@ -500,102 +627,14 @@ async def _run_tick(
                      for i in items],
             shared=shared, ledger=book,
         )
-        guarded = tool_guard.redirect_whole_book_close(
-            guarded, lambda: len([p for p in store.open_positions() if p.status == "open"])
-        )
         agent_tools = guarded + [sim_tool, size_tool, record_tool, forecast_tool]
         agent = create_react_agent(build_model(config, role="decide"),
                                    decide_tool_node(agent_tools), prompt=SYSTEM_PROMPT)
 
-        prompt_parts = [snap.render(), _render_positions(store, snap, config.paths.state, snap.equity or 0.0)]
-        _ok, _why = competence.can_open(config.deadline, None)
-        prompt_parts.append(
-            f"## Competence tier: {posture.tier.upper()}\n"
-            f"{posture.reason}. Book cap {posture.book_cap:.0%} of equity in defined "
-            f"max-loss; size_position enforces it - do not argue with the number it returns.\n"
-            f"To earn more size: {posture.next_tier_needs()}. Size is earned by resolved, "
-            f"ATTRIBUTABLE theses - a profit on a wrong view is luck and counts for nothing."
-            + (f"\nHARD STOP: {_why}" if not _ok else "")
+        prompt = await _build_decide_prompt(
+            snap=snap, store=store, wiki=wiki, config=config, posture=posture,
+            cal_now=cal_now, ctx=ctx, items=items, prior=prior, n=n,
         )
-        if config.events:
-            from datetime import date as _date
-            ev_lines = []
-            for ev in config.events:
-                try:
-                    days = (_date.fromisoformat(str(ev["date"])) - ids.market_today()).days
-                except (KeyError, ValueError):
-                    continue
-                if 0 <= days <= 14:
-                    ev_lines.append(f"- {ev['date']} ({days}d away): {ev.get('name','')}")
-            if ev_lines:
-                prompt_parts.append(
-                    "## Known macro events (binary risk - check every holding window)\n"
-                    + "\n".join(ev_lines)
-                )
-        regime = wiki.read("context/regime")
-        if regime and regime.body.strip():
-            # Labelled when expired rather than dropped. The regime page is a
-            # singleton that rewrites itself, so an old one is the only market
-            # context there is - but presenting it undated as "the regime"
-            # is what makes a stale read indistinguishable from a fresh one.
-            # It IS stale on disk right now, and nothing said so.
-            stale = " - STALE, read as history" if regime.is_stale() else ""
-            generated = (regime.frontmatter.get("generated") or {}).get("at", "")
-            prompt_parts.append(
-                f"## Market regime (research desk, {generated[:10]}{stale})\n\n"
-                + regime.body[:1800]
-            )
-        if ctx.text:
-            prompt_parts.append(f"## What you remember\n\n{ctx.text}")
-        # News gets enriched HERE, at the decide seam, not at ingestion (D-070).
-        # Sensors are deliberately deterministic and LLM-free (D-015), and the
-        # decide path is the one that both pays for news and acts on it. Doing
-        # it here also means the freshest article - the one that just arrived
-        # and matters most - is enriched at the moment of the decision rather
-        # than whenever research/discovery/muse next happens to run.
-        #
-        # Measured on two live articles: raw JSON payloads rendered 1,322 chars;
-        # enriched rendered 824 - 38% SMALLER while adding sentiment, event
-        # type, regime, claim horizon and entities. Extraction cost ~$0.0002.
-        # Cheaper and more informative, which is the only kind of trade worth
-        # making here.
-        news_items = [i for i in items if i.type == "news"]
-        other_items = [i for i in items if i.type != "news"]
-        obs_lines = []
-        if news_items:
-            try:
-                payloads = [dict(i.payload, id=i.payload.get("id") or i.id) for i in news_items]
-                extracts = await news_extract.enrich(payloads, config)
-                obs_lines.append(news_extract.render_block(extracts))
-            except Exception as exc:  # noqa: BLE001 - fail open to the raw payloads
-                print(f"[tick {n}] news enrichment failed, using raw payloads: {exc!r}")
-                obs_lines += [f"- [news | trust={i.trust}] {json.dumps(i.payload)}"
-                              for i in news_items]
-        obs_lines += [f"- [{i.type} | trust={i.trust}] {json.dumps(i.payload)}" for i in other_items]
-        prompt_parts.append("## Observations this cycle\n\n" + "\n".join(obs_lines))
-        # Same `cal_now` the ladder and the sizing tool read - one number, one
-        # meaning. The prompt used to show a position-only figure while size
-        # was gated on a ledger-inclusive one.
-        if cal_now.n:
-            prompt_parts.append(
-                f"## Your calibration so far\n\n{cal_now.verdict()}\n\n"
-                f"Base rate: {cal_now.base_rate:.0%} of your resolved forecasts and closed "
-                f"positions came in. Use this to set `confidence` honestly - it is scored, "
-                f"and it is the same number size_position shrinks your claim against.\n"
-                f"Sample: {cal_now.sample_note()}."
-            )
-        prompt_parts.append(
-            f"## Constraints\n- Competition deadline: {config.deadline} "
-            f"(everything is force-closed then, so prefer expiries well inside it).\n"
-            f"- Watchlist: {', '.join(config.watchlist)}"
-        )
-        if prior:
-            prompt_parts.append(
-                "## Resuming\nA previous decision for this batch did not complete. "
-                "Its order id is idempotent, so re-attempting the same action is safe - "
-                "a duplicate will be rejected."
-            )
-        prompt = "\n\n".join(prompt_parts)
 
         # Marks the start of THIS cycle's LLM calls, so the served model can be
         # read back from the usage ledger afterwards (D-070). Taken before the
