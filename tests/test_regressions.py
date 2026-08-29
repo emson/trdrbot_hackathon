@@ -767,7 +767,6 @@ def test_close_all_positions_is_refused_while_several_are_open():
             return "liquidated"
 
     t = FakeTool()
-    orig_called = lambda: t.called
     tools = tool_guard.redirect_whole_book_close([t], lambda: 3)
     out = asyncio.run(tools[0].coroutine(cancel_orders=True))
     assert "REFUSED" in out and not t.called
@@ -899,9 +898,11 @@ def _synthetic(kind, n, seed=11):
     out = []
     for i in range(n):
         if kind == "perfect":
-            p = rng.choice([0.3, 0.4, 0.5, 0.6, 0.7]); hit = rng.random() < p
+            p = rng.choice([0.3, 0.4, 0.5, 0.6, 0.7])
+            hit = rng.random() < p
         else:  # badly overconfident: says 80%, right 55%
-            p = 0.8; hit = rng.random() < 0.55
+            p = 0.8
+            hit = rng.random() < 0.55
         out.append(Forecast(position_id=f"f{i}", probability=p, outcome=hit))
     return out
 
@@ -1598,11 +1599,9 @@ def test_build_model_raises_clearly_when_nothing_is_usable():
     class P:
         state = Path("/tmp")
     cfg = Config(raw={"llm": {"models": ["notaprovider:nope"], "max_tokens": 16}}, paths=P())
-    try:
+    with pytest.raises(RuntimeError) as exc:
         build_model(cfg, role="decide")
-        assert False, "should have raised"
-    except RuntimeError as e:
-        assert "No usable model" in str(e) and "decide" in str(e)
+    assert "No usable model" in str(exc.value) and "decide" in str(exc.value)
 
 
 # ---------------------------- D-065 context diet
@@ -2619,9 +2618,13 @@ def _L(r, k, s, q, p):
     return Leg.parse({"right": r, "strike": k, "side": s, "qty": q, "price": p})
 
 
-CONDOR = lambda: [_L("P", 766, "short", 1, 1.87), _L("P", 761, "long", 1, 0.95),
-                  _L("C", 776, "short", 1, 1.22), _L("C", 781, "long", 1, 0.28)]
-CALL_SPREAD = lambda: [_L("C", 775, "long", 1, 1.77), _L("C", 785, "short", 1, 0.15)]
+def CONDOR():
+    return [_L("P", 766, "short", 1, 1.87), _L("P", 761, "long", 1, 0.95),
+            _L("C", 776, "short", 1, 1.22), _L("C", 781, "long", 1, 0.28)]
+
+
+def CALL_SPREAD():
+    return [_L("C", 775, "long", 1, 1.77), _L("C", 785, "short", 1, 0.15)]
 
 
 def test_breakeven_vol_states_the_trade_the_way_a_desk_states_it():
@@ -3343,7 +3346,9 @@ def test_effective_n_counts_bets_not_forecasts():
     so sizing each at its own Kelly overbets by 4.6x (D-080)."""
     from trdrbot.calibration import Forecast, effective_n, score
 
-    F = lambda i, s: Forecast(position_id=f"f{i}", probability=0.6, outcome=True, subject=s)
+    def F(i, s):
+        return Forecast(position_id=f"f{i}", probability=0.6, outcome=True, subject=s)
+
     all_spy = [F(i, "SPY") for i in range(10)]
     all_different = [F(i, f"N{i}") for i in range(10)]
     assert effective_n(all_spy) == 1.0, "ten bets on one name is one bet"

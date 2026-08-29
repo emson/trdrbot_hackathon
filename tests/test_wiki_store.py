@@ -80,7 +80,6 @@ def test_a_page_with_no_stale_after_ages_off_its_generated_date(tmp_path):
     `stale_after`, so `is_stale` was False forever - permanently unsweepable
     and permanently eligible as muse collision material. Fail-safe when it
     shipped, but the safety never expired."""
-    w = Wiki(tmp_path)
     old = ids.utc_now() - timedelta(hours=48)
     c = Concept(concept_id="research/OLD",
                 frontmatter={"type": "CompanyDossier",
