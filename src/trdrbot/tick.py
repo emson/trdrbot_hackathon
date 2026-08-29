@@ -29,7 +29,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from langgraph.prebuilt import create_react_agent
+from langgraph.prebuilt import ToolNode, create_react_agent
 
 from . import (
     analytics,
@@ -104,6 +104,32 @@ ATTENTION_MAX_NAMES = 6
 #: trading, which fits the window. Each run is one LLM call, or two while an
 #: experiment is open, and the Coach's cost sentinel bounds the total.
 MUSE_RUNS_PER_DAY = 3
+
+
+def decide_tool_node(agent_tools: list[Any]) -> ToolNode:
+    """Tools bound so a RUNTIME tool error becomes a ToolMessage, not a crash.
+
+    langgraph's pre-1.0 default was `handle_tool_errors=True`: every tool
+    exception came back to the model as an error message it could react to.
+    The >=1.0 default returns a message only for pydantic argument-validation
+    errors and RE-RAISES everything else - and this project pins
+    `langgraph>=0.2`, so the behaviour the whole decide path assumes changed
+    underneath it. Verified against the installed 1.2.11: with the default, a
+    tool raising RuntimeError propagates straight out of `agent.ainvoke`.
+
+    That costs far more than a lost turn. The escape lands in the handler at
+    the end of this module, which classifies TRANSIENT and calls
+    `inbox.record_failure` on EVERY pending item - so three MCP blips
+    dead-letter every opportunity, for something none of them caused. Worse,
+    a raise from `record_position` AFTER an order filled means the `execution`
+    row is never journalled and the "order placed but record_position was not
+    called" warning never runs: a live position with no exit rules, and
+    nothing saying so.
+
+    The design already assumes this contract - every `tool_guard` refusal is a
+    STRING and the compactor fails open, both results rather than exceptions.
+    """
+    return ToolNode(agent_tools, handle_tool_errors=True)
 
 
 def _attention_query(items: list[Item], open_pos: list[Any], config: Config) -> str:
@@ -463,7 +489,8 @@ async def _run_tick(
             guarded, lambda: len([p for p in store.open_positions() if p.status == "open"])
         )
         agent_tools = guarded + [sim_tool, size_tool, record_tool, forecast_tool]
-        agent = create_react_agent(build_model(config, role="decide"), agent_tools, prompt=SYSTEM_PROMPT)
+        agent = create_react_agent(build_model(config, role="decide"),
+                                   decide_tool_node(agent_tools), prompt=SYSTEM_PROMPT)
 
         prompt_parts = [snap.render(), _render_positions(store, snap, config.paths.state, snap.equity or 0.0)]
         _ok, _why = competence.can_open(config.deadline, None)
