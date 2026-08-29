@@ -8,17 +8,20 @@ Sorted by severity.
 ## Open
 
 
-- **I-27 · The Coach's proximate reward may have a ceiling** (D-088). The first live paired trial
-  came back **5/5 against 5/5** - both arms cleared every gate, so the run carried no information
-  and the posterior stayed at exactly 0.500. That is the machinery behaving correctly (a tie is a
-  tie, and the fair-coin test says it will time out rather than promote noise), but it points at a
-  real asymmetry: since D-081 fixed band anchoring, gauntlet survival runs high, so the reward can
-  still detect a variant that **degrades** while having little headroom to detect one that
-  **improves**. One run is not evidence of a ceiling - the base rate was ~80% at D-081, which
-  leaves room. **Action due:** watch the next ~8 trials; if incumbent survival sits at or near
-  100% throughout, add a secondary reward with more headroom (candidates per run, |claimed_edge|
-  among survivors, or emission rate) rather than replacing the gate reward, which is the one that
-  cannot be gamed.
+- **I-27 · The Coach's gate reward is ASYMMETRIC, measured over 7 real paired runs** (D-088).
+  Opened as "the reward may have a ceiling" after one 5/5-vs-5/5 trial; now measured properly and
+  the answer is more useful than the worry. Over 7 live paired runs the incumbent scored **32/35
+  (91.4%)** and the challenger **31/35 (88.6%)**, posterior 0.355 - so survival is NOT pinned at
+  100% and the reward does discriminate (run 6 was the first to separate the arms). But the
+  headroom is one-sided: with a ~91% base rate a **degrading** variant has ~91 points to fall
+  through and an **improving** one has ~9 to climb, so the reward detects harm far faster than
+  benefit. That is a defensible bias for an autonomous loop - it fails safe, and the incumbent
+  keeps its place on a tie - but it means "no promotion" must never be read as "no better variant
+  exists". **Not fixed, and deliberately:** the trigger stated when this was opened (survival at
+  or near 100%) is NOT met, so the gate reward stays as the primary - it is the one that cannot be
+  gamed. **Action due if promotions stay absent past ~20 trials:** add a secondary reward with
+  more headroom (candidates per run, |claimed_edge| among survivors, or emission rate) ALONGSIDE
+  the gate reward, never replacing it.
 - **I-28 · The Coach's outcome audit is designed but unbuilt** (D-088, notes/016 phase 3).
   Promotion currently rests on the proximate reward alone (surviving the gauntlet); nothing yet
   checks a promoted variant against what its theses actually DID at horizon, or re-matches it
