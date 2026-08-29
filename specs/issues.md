@@ -143,11 +143,7 @@ Sorted by severity.
   this, since the muse names arbitrary underlyings and nobody knows which spots to supply until it
   has replied. Measured same-day: 13 of 15 candidates rejected -> 1 of 5, bands landing -2.1% and
   +3.8% from spot.
-- **I-20 · 24 legacy dossiers carry no lifecycle stamp** (D-078). `is_stale()` is False without
-  `stale_after`, so they are never swept until re-researched - deliberate, fail-safe migration.
-  Their durable sections also still carry the old welded text (22 of 28 read "Company Inc. -
-  Strong Q4 results..."), corrected only on the next write of that ticker. No action needed; they
-  self-heal as tickers are re-nominated.
+- ~~**I-20 · 24 legacy dossiers carry no lifecycle stamp**~~ **FIXED 2026-08-29 (D-092).** `is_stale` falls back to `generated.at + perishable_after_hours` when no `stale_after` is stamped, so the pre-lifecycle dossiers age out and reach `sweep()` instead of being permanently un-tombstoneable and permanently eligible as muse collision material. The muse's sampler also skips `status: deprecated` pages now, which the raw rglob it used could not see.
 - **I-18 · D-073's credit weighting has gone nearly inert** (found D-077 by its own contract
   test failing). `credit_weight` was built on elfmem min-max normalising each recall - worst match
   exactly 0.0, best exactly 1.0 - giving a documented 4x credit differential. Measured against the
@@ -210,6 +206,8 @@ Sorted by severity.
 - SPY/NVDA `last_pnl_pct` values are cumulative-equity estimates, not fill records.
 
 ## Resolved (most recent first - keep the last ~10 for pattern-reading)
+
+- ~~legacy dossiers never aged out, so the sweep could not reach them~~ (D-092)
 
 - ~~beta aligned two close series by array position; QQQ read +0.10 (R2 .004) vs +1.48~~ (D-091)
 - ~~langgraph 1.x re-raised tool errors, so an MCP blip burned every item's retry budget~~ (D-091)

@@ -3951,3 +3951,84 @@ recorded above and revertible in one commit.
 **One consequence to expect:** `betas_for` reports ASSUMED for every name until the next
 research pass rewrites the cache with dates. That is the honest degrade; the numbers it
 replaces were confidently wrong.
+
+## D-092: Phase 2 foundations - shared seams, typed contracts, one config
+
+Executed from [notes/021](notes/021_phase2_implementation.md). Phase 1 fixed defects; this
+phase moved structure, under a stricter rule: **behaviour-preserving except where the plan
+named a delta in advance**, with the suite green at every one of the twelve work units.
+
+**The consolidations, and what each one deleted.** The reply-flattening idiom existed SEVEN
+times - six inline copies that raised TypeError on unexpected content, and one good version
+with the fallback and the extended-thinking docstring. The JSON parser was a PRIVATE name in
+`research` imported by four siblings, one of them through a function-local import that
+existed only to break a cycle. The news+odds gather existed three times. The dossier template
+twice. The leg-side coercion three times, DISAGREEING with the strict validator. The JSONL
+appenders three times with three silently different failure policies. The dispatch chain
+restated seventeen parser names as string literals.
+
+**Two fixes fell out of consolidating rather than being sought.** Odds queries are now
+isolated per query - all three copies wrapped the loop in one try, so the first failure
+discarded every later query's results and then rendered the lot as if the markets had been
+quiet. And `admit`'s `unchecked` list replaced a gate that VANISHED silently whenever its
+input was missing: discovery's band check disappeared exactly when the close fetch had
+failed, which is when the data is worst.
+
+**The D-035 hole was still open on the research path.** Research had none of the four
+admission gates discovery and the muse earned through shipped bugs, so a percentage-move band
+still reached the decide prompt, where `holds_at` is always-False and attribution scores the
+thesis as failed. Verified by reverting: research admits `[-6.0, 8.0]` against a 766
+underlying, and now rejects it.
+
+**Performance, measured and guarded.** One two-leg candidate cost 1,180 ms of pure CPU and the
+agent submits 3-5 per cycle, so 3-7 seconds sat inside the watchdogged call - 726,544 `pnl_at`
+calls, each rebuilding the leg list, re-validating the expiry set and recomputing a constant
+entry cost. Now 331 ms, and the test suite dropped from 20s to 9s. The guard is a golden test
+captured from the CURRENT implementation and committed BEFORE optmath was touched, asserting
+EXACT equality across 23 scalar fields plus the rendered string. `intrinsic` is inlined with
+the operand order preserved exactly, because reassociating float multiplication moves the last
+ulp and the claim was identity.
+
+**The coach split found a real cycle.** 1,202 lines became a package, and the first attempt
+failed because `gauges` and `mutate` both need `state` - which is precisely what the five
+function-local imports inside the old single module were working around. The cycle was real;
+it was invisible while everything lived in one file. Acceptance gate: `tests/test_coach.py`
+passes UNMODIFIED.
+
+**Config is loaded once.** `housekeeping.run` re-loaded from disk three times per run and
+`prompts._active_muse_prompt` did it inside every decision write - each call re-running
+`load_dotenv(override=True)` and re-mkdir'ing every path. Worse than the cost: the run loop
+captures config at startup, so an edit mid-run left two live configurations with nothing
+saying so. **Consequence: config edits now require a restart to take effect anywhere.**
+
+**Three behaviour deltas, all named in the plan before implementation:** research rejects
+out-of-window horizons and implausible bands it previously admitted; the muse no longer samples
+tombstoned pages; and `trdrbot muse` / `trdrbot research` honour the daily caps they used to
+bypass (the journal recorded 9 muse runs against a cap of 3), both gaining `--force`. Caps now
+live inside `muse.run` and `research.run`, so a cap cannot be forgotten by a new caller.
+
+**Two deltas from the 019 sketch, decided in 021 with reasons:** `SimResult` stays a dict (its
+consumers are adjacent in one module with no seam bug; the typed-seam budget went to the
+invisible `shared` bus where the bugs actually lived), and `append_log` keeps its
+newest-first rewrite (that is OKF's `log.md` convention, and Phase 1 already made it atomic).
+
+**Renames stopped at the persistence boundary.** `_pct` meant fraction in four places and
+percent in six, and housekeeping's own comment records that collision shipping interim scoring
+dead on arrival. Code identifiers renamed; the `reflection` and `interim_outcome` journal
+fields and `Position.last_pnl_pct` keep their names, because 388 historical rows and every
+position page carry them. Verified against live state after the rename.
+
+**Also:** I-20 closed (legacy dossiers age off `generated.at` and reach the sweep); wiki path
+validation, since concept ids are built from model output and a `..` escaped the root;
+`_parse` degrades instead of raising on the hot path; UTF-8 named on every read and write
+across 18 modules; every appended JSONL row carries a schema version so the NEXT drift is
+auditable.
+
+**Verified:** 395 tests (from 332), src lint clean, four new modules pass mypy strict, one live
+tick clean through housekeeping, `trdrbot health` 0 problems, and the state intact - 101 ledger
+trials, Brier 0.3844, the Coach still at 9 paired runs and posterior 0.379.
+
+**Honest on the ledger:** src is +816 lines gross, +184 excluding comments and docstrings. That
+misses this phase's own net-negative target. The consolidations really are negative; the
+surplus is new capability (`unchecked` reporting, the typed bus, the version stamp) plus the
+package's import ceremony. Recorded rather than rounded.
