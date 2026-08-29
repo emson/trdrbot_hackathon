@@ -519,8 +519,10 @@ async def run(
         for q in config.polymarket_queries:
             for m in await polymarket.search(q, limit=2):
                 odds_lines.append(f"- {m['probability']:.0%} {m['question']}")
-    except Exception:  # noqa: BLE001
-        pass
+    except Exception as exc:  # noqa: BLE001
+        # See discovery._options_gate's sibling comment: "(none)" claims the
+        # markets are quiet; an API failure is not evidence of quiet.
+        odds_lines.append(f"(odds unavailable: {type(exc).__name__})")
 
     # Derived, not recalled (D-032's date discipline), and shared with every
     # other thesis source so the three cannot drift apart again.

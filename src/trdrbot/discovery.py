@@ -27,7 +27,7 @@ import json
 from datetime import UTC, datetime
 from typing import Any
 
-from . import competence, ids, market_stats, mcp_client, news_extract
+from . import competence, ids, market_stats, mcp_client, news_extract, optmath
 from .config import Config
 from .inbox import Inbox
 from .journal import Journal
@@ -136,15 +136,40 @@ async def _fundamentals(ticker: str) -> dict[str, Any]:
 
 
 async def _options_gate(tools: dict[str, Any], ticker: str, deadline: str) -> dict[str, Any]:
-    """Does a chain exist with an expiry on/before the deadline? Sample its spread."""
+    """Does a chain exist with an expiry on/before the deadline?
+
+    Counts real contracts, by parsing the OCC keys the chain is actually keyed
+    by. It used to count the SUBSTRING "symbol" in `str(response)`, which made
+    an error payload like `{"error": "no chain for symbol XYZ"}` score 1 and
+    return tradeable - the gate answering yes on the evidence that it failed.
+    The same heuristic would have broken the other way the moment chain
+    compaction ran first: a compacted table contains neither "symbol" nor the
+    ticker, so every candidate would have been rejected as untradeable,
+    permanently and silently.
+    """
     try:
         r = await mcp_client.call(
             tools, "get_option_chain", underlying_symbol=ticker,
             expiration_date_lte=deadline,
         )
+        snaps = r.get("snapshots") if isinstance(r, dict) else None
+        if isinstance(snaps, dict):
+            n = sum(1 for occ in snaps if optmath.parse_occ(str(occ)))
+            return {"tradeable": n > 0, "contracts_seen": n, "via": "snapshots"}
+        if isinstance(r, dict) and r.get("error"):
+            # An error is an answer, and the answer is no. Under the old
+            # substring count this was the WORST case: the message itself
+            # usually contains the word "symbol", so a failure scored 1 and
+            # the gate returned tradeable.
+            return {"tradeable": False, "contracts_seen": 0,
+                    "error": str(r["error"])[:120], "via": "error_payload"}
+        # Unrecognised shape. Keep the old heuristic so a schema change
+        # degrades rather than blocking every candidate - but SAY which path
+        # answered, because a silent fallback is how the substring count
+        # survived unnoticed in the first place (D-038).
         text = str(r)
         n = text.count("symbol") or text.count(ticker)
-        return {"tradeable": n > 0, "contracts_seen": n}
+        return {"tradeable": n > 0, "contracts_seen": n, "via": "substring_fallback"}
     except Exception as exc:  # noqa: BLE001
         return {"tradeable": False, "error": type(exc).__name__}
 
@@ -172,8 +197,12 @@ async def run(
         for q in config.polymarket_queries:
             for m in await polymarket.search(q, limit=2):
                 odds_lines.append(f"- {m['probability']:.0%} {m['question']}")
-    except Exception:  # noqa: BLE001
-        pass
+    except Exception as exc:  # noqa: BLE001
+        # Rendered, not swallowed: an empty odds block reads to the model as
+        # "no prediction markets exist", which is a different claim from "the
+        # API failed". research.py already got this right; these two told the
+        # model something untrue.
+        odds_lines.append(f"(odds unavailable: {type(exc).__name__})")
 
     # ---- LLM call 1: nominate from evidence ----
     reply = await model.ainvoke(NOMINATE_PROMPT.format(
