@@ -1230,6 +1230,17 @@ def test_negative_beta_is_preserved_not_clamped():
     assert raw < -0.9 and r2 > 0.9
 
 
+def _synthetic_dates(n: int) -> list[str]:
+    """Dates for a synthetic close series.
+
+    Beta aligns two series on their SHARED dates (D-091) rather than pairing
+    them by array position, so a synthetic series has to carry dates to be
+    estimable at all - the same requirement the real cache now meets.
+    """
+    from datetime import date, timedelta
+    return [(date(2026, 1, 1) + timedelta(days=i)).isoformat() for i in range(n)]
+
+
 def test_book_delta_is_beta_weighted_and_can_offset():
     """Raw delta treats $10k of a 1.85-beta name as $10k of the market. On our
     own live book that understated market exposure by 85%."""
@@ -1248,8 +1259,9 @@ def test_book_delta_is_beta_weighted_and_can_offset():
     hi = [100.0]
     for a, b in zip(spy, spy[1:]):
         hi.append(hi[-1] * math.exp(2 * math.log(b / a)))
-    market_stats.save_closes(d, "SPY", spy)
-    market_stats.save_closes(d, "HI", hi)
+    dates = _synthetic_dates(len(spy))
+    market_stats.save_closes(d, "SPY", spy, dates=dates)
+    market_stats.save_closes(d, "HI", hi, dates=dates)
 
     betas, assumed = market_stats.betas_for(d, ["SPY", "HI"])
     assert betas["SPY"] == 1.0
@@ -1282,9 +1294,10 @@ def test_beta_weighting_reveals_a_hedge_that_raw_delta_hides():
             o.append(o[-1] * math.exp(m * math.log(b / a)))
         return o
 
-    market_stats.save_closes(d, "SPY", spy)
-    market_stats.save_closes(d, "HIB", track(2.0))
-    market_stats.save_closes(d, "INV", track(-1.0))
+    dates = _synthetic_dates(len(spy))
+    market_stats.save_closes(d, "SPY", spy, dates=dates)
+    market_stats.save_closes(d, "HIB", track(2.0), dates=dates)
+    market_stats.save_closes(d, "INV", track(-1.0), dates=dates)
 
     def pos(u, qty):
         return Position(position_id=f"p_{u}", status="open", underlying=u, entry_iv=0.30,

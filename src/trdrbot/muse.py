@@ -311,9 +311,10 @@ async def _evaluate(
             closes = market_stats.load_closes(config.paths.state, u)
             if closes is None:
                 try:
-                    closes = await market_stats.fetch_daily_closes(tools, u)
+                    dates, closes = await market_stats.fetch_daily_series(tools, u)
                     if len(closes) >= 60:
-                        market_stats.save_closes(config.paths.state, u, closes)
+                        market_stats.save_closes(config.paths.state, u, closes,
+                                                 dates=dates)
                 except Exception:  # noqa: BLE001
                     closes = None
             cache[ckey] = closes

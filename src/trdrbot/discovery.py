@@ -200,14 +200,15 @@ async def run(
                    f"Nominated because: {n.get('why_interesting','')}",
                    f"Evidence: {'; '.join(n.get('evidence', []))[:400]}"]
 
-        closes = []
+        closes: list[float] = []
+        dates: list[str] = []
         try:
-            closes = await market_stats.fetch_daily_closes(tools, t)
+            dates, closes = await market_stats.fetch_daily_series(tools, t)
         except Exception as exc:  # noqa: BLE001
             section.append(f"Price history: UNAVAILABLE ({type(exc).__name__})")
         if len(closes) >= 60:
             last_close[t] = closes[-1]
-            market_stats.save_closes(config.paths.state, t, closes)
+            market_stats.save_closes(config.paths.state, t, closes, dates=dates)
             stats = market_stats.compute_stats(t, closes)
             section.append(f"Computed technicals: {stats.render()}")
             # Drift-free bootstrap from the stock's OWN returns: what a

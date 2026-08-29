@@ -371,14 +371,52 @@ def returns_path(state_dir: Path, symbol: str) -> Path:
     return state_dir / "returns" / f"{symbol.upper()}.json"
 
 
-def save_closes(state_dir: Path, symbol: str, closes: list[float]) -> None:
+def save_closes(state_dir: Path, symbol: str, closes: list[float],
+                dates: list[str] | None = None) -> None:
+    """Persist a close series, and its per-bar dates when the caller has them.
+
+    `dates` is what makes beta estimable at all (see `beta_series`). It is
+    optional so that every existing caller and every file already on disk stay
+    valid: a series with no dates is still a perfectly good bootstrap sample,
+    it just cannot be aligned against another series.
+    """
     p = returns_path(state_dir, symbol)
     p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(json.dumps({
+    body: dict[str, Any] = {
         "symbol": symbol.upper(),
         "as_of": ids.utc_now().date().isoformat(),
         "closes": closes,
-    }))
+    }
+    if dates is not None:
+        body["dates"] = list(dates)
+    p.write_text(json.dumps(body))
+
+
+def load_dated_closes(state_dir: Path, symbol: str, *,
+                      max_age_days: int = 4) -> tuple[list[str], list[float]] | None:
+    """(dates, closes) for a symbol, or None if unusable for ALIGNMENT.
+
+    Stricter than `load_closes` on purpose: it refuses a file with no `dates`,
+    or one whose dates and closes disagree in length. Those are readable as a
+    sample and unusable as a series, and only the caller comparing two symbols
+    needs to care.
+    """
+    p = returns_path(state_dir, symbol)
+    if not p.exists():
+        return None
+    try:
+        d = json.loads(p.read_text())
+        from datetime import date
+        if (date.today() - date.fromisoformat(d["as_of"])).days > max_age_days:
+            return None
+        dates, closes = d.get("dates"), d.get("closes")
+        if not isinstance(dates, list) or not isinstance(closes, list):
+            return None
+        if len(dates) != len(closes) or not dates:
+            return None
+        return [str(x) for x in dates], [float(c) for c in closes]
+    except (json.JSONDecodeError, KeyError, ValueError, TypeError):
+        return None
 
 
 def load_closes(state_dir: Path, symbol: str, *, max_age_days: int = 4) -> list[float] | None:
@@ -398,6 +436,26 @@ def load_closes(state_dir: Path, symbol: str, *, max_age_days: int = 4) -> list[
         return None
 
 
+async def fetch_daily_series(
+    tools: dict[str, Any], symbol: str, *, days: int = 300
+) -> tuple[list[str], list[float]]:
+    """(dates, closes), oldest -> newest. Same fetch as `fetch_daily_closes`,
+    keeping the bar timestamps that make cross-symbol alignment possible."""
+    dates, closes = [], []
+    for bar in await _fetch_bars(tools, symbol, days=days):
+        c = bar.get("c", bar.get("close"))
+        t = bar.get("t", bar.get("timestamp"))
+        if c is None:
+            continue
+        closes.append(float(c))
+        dates.append(str(t)[:10] if t else "")
+    if any(not d for d in dates):
+        # A partially-dated series cannot be aligned and must not pretend it
+        # can. The closes are still returned - they remain a valid sample.
+        dates = []
+    return dates, closes
+
+
 async def fetch_daily_closes(tools: dict[str, Any], symbol: str, *, days: int = 300) -> list[float]:
     """Daily closes via Alpaca bars, oldest -> newest. IEX feed (D-031: SIP 403s).
 
@@ -411,6 +469,12 @@ async def fetch_daily_closes(tools: dict[str, Any], symbol: str, *, days: int = 
     construction: whatever the limit cuts off is the distant past, never the
     recent present.
     """
+    return (await fetch_daily_series(tools, symbol, days=days))[1]
+
+
+async def _fetch_bars(tools: dict[str, Any], symbol: str, *,
+                      days: int) -> list[dict[str, Any]]:
+    """Raw daily bars, oldest -> newest. The one place the envelope is unpacked."""
     from datetime import date, timedelta
 
     from . import mcp_client
@@ -421,22 +485,16 @@ async def fetch_daily_closes(tools: dict[str, Any], symbol: str, *, days: int = 
         symbols=symbol, timeframe="1Day", start=start, feed="iex",
         limit=days, sort="desc",
     )
-    bars = []
+    bars: Any = []
     if isinstance(r, dict):
         bars = r.get("bars") or r.get(symbol) or []
         if isinstance(bars, dict):
             bars = bars.get(symbol) or []
     elif isinstance(r, list):
         bars = r
-    closes = []
-    for b in bars:
-        c = b.get("c") if isinstance(b, dict) else None
-        if c is None and isinstance(b, dict):
-            c = b.get("close")
-        if c is not None:
-            closes.append(float(c))
-    closes.reverse()  # desc -> oldest-first, which every consumer expects
-    return closes
+    out = [b for b in bars if isinstance(b, dict)]
+    out.reverse()  # desc -> oldest-first, which every consumer expects
+    return out
 
 
 # ------------------------------------------------------- beta to the market
@@ -503,14 +561,43 @@ def shrunk_beta(raw: float, r2: float) -> float:
     return 1.0 + (raw - 1.0) * w
 
 
+def align_on_dates(
+    a: tuple[list[str], list[float]], b: tuple[list[str], list[float]]
+) -> tuple[list[float], list[float]]:
+    """Two dated series -> their closes on the dates they SHARE, in date order.
+
+    Beta compares two series day by day, so the pairing has to be by date.
+    Without this it was by array POSITION - `zip(a[-n:], b[-n:])` - which is
+    only correct when both series were fetched on the same day, cover the same
+    calendar, and have no gaps. None of those held: the cache is written
+    per-symbol as each ticker is researched, and a ten-day staleness window is
+    allowed independently per symbol.
+
+    Measured on the live cache, QQQ against SPY: **+0.10 with an R-squared of
+    0.004 as stored, +1.48 at R-squared 0.841 once realigned by one session.**
+    A synthetic series with a known beta of 1.50 (R2 1.000) returns -0.087
+    (R2 0.003) under a one-day shift. `shrunk_beta` then pulls the broken
+    estimate toward 1.0, which HIDES the defect by making it look like honest
+    ignorance rather than a wrong number.
+    """
+    by_date = dict(zip(b[0], b[1]))
+    shared = sorted(d for d in a[0] if d in by_date)
+    a_by_date = dict(zip(a[0], a[1]))
+    return [a_by_date[d] for d in shared], [by_date[d] for d in shared]
+
+
 def betas_for(state_dir: Path, symbols: list[str]) -> tuple[dict[str, float], list[str]]:
     """{symbol: beta} from persisted closes, plus the symbols we had to assume.
 
     Reads only what the research cycle already stored, so this costs no network
     calls. The benchmark is beta 1.0 by definition, never estimated against
     itself.
+
+    A series with no stored dates cannot be aligned (see `align_on_dates`) and
+    is therefore ASSUMED rather than estimated. That is the honest degrade and
+    it self-heals: the next research pass rewrites the file with dates.
     """
-    bench = load_closes(state_dir, BENCHMARK, max_age_days=10)
+    bench = load_dated_closes(state_dir, BENCHMARK, max_age_days=10)
     out: dict[str, float] = {}
     assumed: list[str] = []
     for sym in symbols:
@@ -518,8 +605,11 @@ def betas_for(state_dir: Path, symbols: list[str]) -> tuple[dict[str, float], li
         if u == BENCHMARK:
             out[u] = 1.0
             continue
-        closes = load_closes(state_dir, u, max_age_days=10) if bench else None
-        est = beta(closes, bench) if closes and bench else None
+        series = load_dated_closes(state_dir, u, max_age_days=10) if bench else None
+        est = None
+        if series and bench:
+            sym_closes, bench_closes = align_on_dates(series, bench)
+            est = beta(sym_closes, bench_closes)
         if est is None:
             out[u] = ASSUMED_BETA
             assumed.append(u)

@@ -205,9 +205,12 @@ async def run(
     stats_lines = []
     for sym in universe:
         try:
-            closes = await market_stats.fetch_daily_closes(tools, sym)
+            dates, closes = await market_stats.fetch_daily_series(tools, sym)
             if len(closes) >= 60:
-                market_stats.save_closes(config.paths.state, sym, closes)
+                # Dates go in too: without them beta pairs two series by array
+                # POSITION, which is only correct when both were fetched the
+                # same day (D-091).
+                market_stats.save_closes(config.paths.state, sym, closes, dates=dates)
                 stats_lines.append("- " + market_stats.compute_stats(sym, closes).render())
             else:
                 stats_lines.append(f"- {sym}: insufficient history ({len(closes)} bars)")
