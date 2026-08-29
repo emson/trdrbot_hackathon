@@ -71,7 +71,7 @@ class SensorState:
         self._values: dict[str, dict[str, float]] = {}
         if path.exists():
             try:
-                raw = json.loads(path.read_text())
+                raw = json.loads(path.read_text(encoding="utf-8"))
                 self._seen = raw.get("seen", {})
                 self._values = raw.get("values", {})
             except json.JSONDecodeError:
@@ -94,7 +94,8 @@ class SensorState:
     def save(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.path.write_text(
-            json.dumps({"seen": self._seen, "values": self._values}, indent=2)
+            json.dumps({"seen": self._seen, "values": self._values}, indent=2),
+            encoding="utf-8",
         )
 
 

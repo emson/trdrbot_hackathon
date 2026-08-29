@@ -33,6 +33,7 @@ from .inbox import Inbox
 from .journal import Journal
 from .llm import build_model, parse_json_array, parse_json_object, text_of
 from .opportunity import Opportunity, admit
+from .research import dossier
 from .wiki import Concept, Wiki
 
 NOMINATE_PROMPT = """You are scouting for an options trading agent (paper account, all positions \
@@ -273,21 +274,18 @@ async def run(
         fc = (forecasts or {}).get(t, {})
         cid = f"research/{t}"
         c = wiki.read(cid) or Concept(concept_id=cid, frontmatter={"type": "CompanyDossier"}, body="")
-        # DURABLE above, perishable below. These two used to be welded into one
-        # sentence - "Affirm Holdings, Inc. - Strong Q4 results with...beats" -
-        # so 22 of 28 dossiers had today's earnings news sitting in the one
-        # heading later cycles read as a standing fact. Same five headings as
-        # research.py's template, deliberately: two writers share this file and
-        # the augmentation guard refuses a write that drops a heading, so their
-        # heading sets have to stay identical.
-        c.body = (
-            f"# What it is\n{n.get('what_it_is') or n.get('company','')}\n\n"
-            f"# Bull case\n{n.get('why_interesting','')} "
-            f"{fc.get('outlook','(no forecast)')}\n\n"
-            f"# Bear case\n{fc.get('key_risk','(no forecast)')}\n\n"
-            f"# People\n(not researched - discovery pass)\n\n"
-            f"# Environment\nVerdict: {fc.get('verdict','?')}. Evidence: "
-            f"{'; '.join(n.get('evidence', []))[:300]}\n"
+        # Same builder as research: two writers share this file and the
+        # augmentation guard refuses a write that drops a heading, so a
+        # heading set that drifted between them would wedge dossier updates
+        # permanently. One template, filled differently.
+        c.body = dossier(
+            t,
+            what_it_is=n.get("what_it_is") or n.get("company", ""),
+            bull_case=f"{n.get('why_interesting','')} {fc.get('outlook','(no forecast)')}",
+            bear_case=fc.get("key_risk", "(no forecast)"),
+            people="(not researched - discovery pass)",
+            environment=(f"Verdict: {fc.get('verdict','?')}. Evidence: "
+                         f"{'; '.join(n.get('evidence', []))[:300]}"),
         )
         c.add_source("discovery:news+polymarket+yahoo", author="trdrbot/discovery")
         try:

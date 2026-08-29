@@ -263,7 +263,7 @@ class PositionStore:
         return [p for p in self.all() if p.status in ACTIVE]
 
     def _parse(self, path: Path) -> Position:
-        text = path.read_text()
+        text = path.read_text(encoding="utf-8")
         _, fm, body = text.split("---", 2)
         d = yaml.safe_load(fm) or {}
         thesis = body.split("## Thesis", 1)[-1].strip() if "## Thesis" in body else ""

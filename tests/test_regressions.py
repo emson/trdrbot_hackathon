@@ -3073,41 +3073,49 @@ def test_sources_stop_growing_without_bound(tmp_path):
     w.write_concept(again, type_="CompanyDossier")  # must not raise
 
 
-def test_discovery_no_longer_welds_perishable_text_into_the_durable_heading():
-    """22 of 28 live dossiers read 'Affirm Holdings, Inc. - Strong Q4 results
-    with...beats' because the template concatenated a durable field and a
-    perishable one into one sentence."""
-    import inspect
+def test_the_durable_heading_carries_only_durable_text():
+    """22 of 28 live dossiers read "Affirm Holdings, Inc. - Strong Q4 results
+    with...beats" because the template concatenated a durable field and a
+    perishable one into one sentence, so today's earnings news sat in the one
+    heading later cycles read as a standing fact (D-078)."""
+    from trdrbot.research import dossier
+    from trdrbot.wiki import LIFECYCLE, Concept
 
-    from trdrbot import discovery
+    c = Concept(concept_id="research/X", frontmatter={"type": "CompanyDossier"},
+                body=dossier("X", what_it_is="A payments lender.",
+                             bull_case="Strong Q4 results with beats.",
+                             bear_case="b", people="p", environment="e"))
 
-    src = inspect.getsource(discovery.run)
-    assert "{n.get('what_it_is') or n.get('company','')}" in src
-    assert "# What it is\\n{n.get('company','')} - {n.get('why_interesting','')}" not in src
-    assert "what_it_is" in discovery.NOMINATE_PROMPT, "the schema must ask for it"
+    durable = c.section(LIFECYCLE["CompanyDossier"].durable_section)
+    assert durable == "A payments lender."
+    assert "Q4" not in durable, "perishable text welded into the durable heading"
+    assert c.durable_text() == "A payments lender."
 
 
-def test_both_dossier_writers_keep_identical_headings():
-    """discovery and research write the SAME file. The augmentation guard
-    refuses a write that drops a heading, so if their templates diverge the
-    second writer is refused and the dossier silently stops updating."""
-    import inspect
-    import re
+def test_both_dossier_writers_produce_the_same_headings():
+    """discovery and research write the SAME file, and the augmentation guard
+    refuses a write that drops a heading - so if their templates diverge the
+    second writer is refused and the dossier silently stops updating.
 
-    from trdrbot import discovery, research
+    This used to REGEX THE HEADING LITERALS out of both functions' source, a
+    test whose only job was policing copy-paste. There is one template now, so
+    the property is checked by building both bodies and comparing them.
+    """
+    from trdrbot.research import dossier
+    from trdrbot.wiki import LIFECYCLE, Concept
 
-    DOSSIER_HEADINGS = {"What it is", "Bull case", "Bear case", "People", "Environment"}
+    def headings(**fields):
+        body = dossier("X", **{"what_it_is": "", "bull_case": "", "bear_case": "",
+                               "people": "", "environment": "", **fields})
+        return Concept(concept_id="c", frontmatter={"type": "CompanyDossier"},
+                       body=body).headings()
 
-    def headings(fn):
-        return set(re.findall(r'"# ([A-Za-z][^\\"]*)', inspect.getsource(fn)))
+    as_research = headings(what_it_is="w", bull_case="b", people="p")
+    as_discovery = headings(what_it_is="w", bear_case="r",
+                            people="(not researched - discovery pass)")
 
-    d, r = headings(discovery.run), headings(research.run)
-    assert d >= DOSSIER_HEADINGS, f"discovery lost dossier heading(s) {DOSSIER_HEADINGS - d}"
-    assert r >= DOSSIER_HEADINGS, f"research lost dossier heading(s) {DOSSIER_HEADINGS - r}"
-    # And the durable one is exactly what the policy names, so the split the
-    # muse relies on cannot drift away from the template that produces it.
-    from trdrbot.wiki import LIFECYCLE
-    assert LIFECYCLE["CompanyDossier"].durable_section in DOSSIER_HEADINGS
+    assert as_research == as_discovery
+    assert LIFECYCLE["CompanyDossier"].durable_section in "".join(as_research)
 
 
 # ============================ D-079 the scaffold's invariants, made permanent

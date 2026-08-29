@@ -256,7 +256,7 @@ def band_inflation(state_dir: Path, days: int) -> float:
     had for its whole life before the fit existed. Never raises.
     """
     try:
-        d = json.loads(model_cal_path(state_dir).read_text())
+        d = json.loads(model_cal_path(state_dir).read_text(encoding="utf-8"))
         per_h = d.get("per_horizon") or {}
         if not per_h:
             return 1.0
@@ -363,7 +363,7 @@ def load_all_closes(state_dir: Path) -> dict[str, list[float]]:
     out: dict[str, list[float]] = {}
     for p in sorted((state_dir / "returns").glob("*.json")):
         try:
-            d = json.loads(p.read_text())
+            d = json.loads(p.read_text(encoding="utf-8"))
             if isinstance(d.get("closes"), list):
                 out[str(d.get("symbol") or p.stem)] = d["closes"]
         except (OSError, json.JSONDecodeError):
@@ -411,7 +411,7 @@ def load_dated_closes(state_dir: Path, symbol: str, *,
     if not p.exists():
         return None
     try:
-        d = json.loads(p.read_text())
+        d = json.loads(p.read_text(encoding="utf-8"))
         from datetime import date
         if (ids.today() - date.fromisoformat(d["as_of"])).days > max_age_days:
             return None
@@ -432,7 +432,7 @@ def load_closes(state_dir: Path, symbol: str, *, max_age_days: int = 4) -> list[
     if not p.exists():
         return None
     try:
-        d = json.loads(p.read_text())
+        d = json.loads(p.read_text(encoding="utf-8"))
         from datetime import date
         age = (ids.today() - date.fromisoformat(d["as_of"])).days
         if age > max_age_days:

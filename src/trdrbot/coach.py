@@ -186,7 +186,7 @@ def load_state(cfg: Any, lever_name: str, seed_text: str) -> LeverState:
     if not path.exists():
         return LeverState(lever=lever_name, incumbent=seed)
     try:
-        raw = json.loads(path.read_text())
+        raw = json.loads(path.read_text(encoding="utf-8"))
         inc = _variant(raw.get("incumbent")) or seed
         return LeverState(
             lever=lever_name,
@@ -224,7 +224,7 @@ def save_state(cfg: Any, st: LeverState) -> None:
         "last_mutation_at": st.last_mutation_at,
     }
     tmp = path.with_suffix(".json.tmp")
-    tmp.write_text(json.dumps(body, indent=2))
+    tmp.write_text(json.dumps(body, indent=2), encoding="utf-8")
     os.replace(tmp, path)
 
 
@@ -602,7 +602,7 @@ def snapshot_gauges(cfg: Any, rows: list[dict[str, Any]]) -> dict[str, Any]:
         path = _ms.model_cal_path(Path(cfg.paths.state))
         if not path.exists():
             return  # no fit yet is the NORMAL case, and no gauge is the answer
-        art = json.loads(path.read_text())
+        art = json.loads(path.read_text(encoding="utf-8"))
         per_h = art.get("per_horizon") or {}
         if "5" in per_h:
             put("model.inflation_5d", float(per_h["5"]))

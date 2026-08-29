@@ -28,7 +28,7 @@ def tick_lock(path: Path, stale_after: int = 600) -> Iterator[None]:
     path.parent.mkdir(parents=True, exist_ok=True)
     if path.exists():
         try:
-            held = json.loads(path.read_text())
+            held = json.loads(path.read_text(encoding="utf-8"))
             age = time.time() - held["ts"]
             if _alive(held["pid"]) and age < stale_after:
                 raise BlockingIOError(
@@ -38,7 +38,7 @@ def tick_lock(path: Path, stale_after: int = 600) -> Iterator[None]:
         except (json.JSONDecodeError, KeyError):
             print("[lock] breaking unreadable lock")
 
-    path.write_text(json.dumps({"pid": os.getpid(), "ts": time.time()}))
+    path.write_text(json.dumps({"pid": os.getpid(), "ts": time.time()}), encoding="utf-8")
     try:
         yield
     finally:

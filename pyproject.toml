@@ -47,6 +47,11 @@ target-version = "py311"
 # compared against UTC-stamped data, ids.market_today() for anything meaning
 # "the trading day" (D-091).
 select = ["E", "F", "B", "SIM", "UP", "I", "DTZ"]
+# NOT enabled: PLW1514 (unspecified-encoding), which would keep the D-092
+# encoding sweep swept mechanically. It requires ruff's `preview = true`, and
+# that enables a raft of unstable rules across the whole tree for one check.
+# Revisit when it stabilises; until then the sweep is held by the test in
+# tests/test_wiki_store.py that round-trips non-ASCII through a real page.
 ignore = [
     # Long rationale comments are house style - they carry measured incident
     # history and reflowing them loses the shape a reader scans for.

@@ -30,7 +30,6 @@ Discipline, because creativity without it is noise:
 from __future__ import annotations
 
 import random
-import re
 from typing import Any
 
 from . import coach, competence, evidence, ids, market_stats
@@ -235,34 +234,18 @@ def _sample_concepts(wiki: Wiki, rng: random.Random, k: int) -> list[tuple[str, 
     not market theses. Companies, regimes and events are what collide into
     opportunities; a technique is allowed one slot as a lens.
     """
-    root = wiki.root
-    all_paths = sorted(p for p in root.rglob("*.md")
-                       if "positions/" not in str(p) and p.name not in ("log.md",))
-    market = [p for p in all_paths if "technique/" not in str(p)]
-    rules = [p for p in all_paths if "technique/" in str(p)]
+    # `all_concepts` rather than a second rglob with a hand-copied filter -
+    # and it skips TOMBSTONED pages, which the raw walk could not see. A
+    # dossier housekeeping has deprecated is one the sweep judged too stale to
+    # trust; feeding it back in as collision material undoes that judgement.
+    concepts = [c for c in wiki.all_concepts()
+                if c.frontmatter.get("status") != "deprecated"]
+    market = [c for c in concepts if "technique/" not in c.concept_id]
+    rules = [c for c in concepts if "technique/" in c.concept_id]
     picks = rng.sample(market, min(k - 1, len(market)))
     if rules and len(picks) < k:
         picks.append(rng.choice(rules))
-    # Read the DURABLE half of each concept, not its first 400 characters.
-    # Those two used to be the same thing and it poisoned the collisions: the
-    # 400-char window ran past "# What it is" into "# Bull case", so the muse
-    # was handed "Closed 228.17, +5.2% on the week" as raw material 15.8 hours
-    # after it stopped being true (measured - that exact NVDA dossier was one
-    # of this date's three picks, against a live tape of 223.90, -1.8%).
-    #
-    # A concept does not go stale because a price did. Reading the durable
-    # section means an old dossier stays USEFUL rather than needing to be
-    # excluded, which is what keeps the pool from starving on a day with no
-    # research run - and colliding a month-old company concept with today's
-    # news is the muse's whole mandate, not a defect.
-    out = []
-    for p in picks:
-        cid = str(p.relative_to(root)).removesuffix(".md")
-        c = wiki.read(cid)
-        text = c.durable_text() if c else re.sub(
-            r"^---.*?---\s*", "", p.read_text(), flags=re.DOTALL).strip()
-        out.append((cid, text[:400]))
-    return out
+    return [(c.concept_id, c.durable_text()[:400]) for c in picks]
 
 
 async def _generate(prompt_text: str, fields: dict[str, Any], config: Config,

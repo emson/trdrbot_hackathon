@@ -555,7 +555,7 @@ def _modelcal(action: str) -> int:
         print(f"fitting band inflation on {len(series)} tickers "
               f"(holdout has the veto; this takes a minute)...")
         art = ms.fit_band_inflation(series)
-        path.write_text(_json.dumps(art, indent=2))
+        path.write_text(_json.dumps(art, indent=2), encoding="utf-8")
         print(f"wrote {path}\n")
 
     if not path.exists():
@@ -564,7 +564,7 @@ def _modelcal(action: str) -> int:
               "that as 15-23pp overconfident where credit spreads live)")
         return 0
 
-    art = _json.loads(path.read_text())
+    art = _json.loads(path.read_text(encoding="utf-8"))
     print(f"fitted {str(art.get('fitted', ''))[:16]}  "
           f"bounds {art.get('bounds')}  "
           f"tickers {(art.get('sample') or {}).get('tickers')}")

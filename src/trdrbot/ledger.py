@@ -112,7 +112,7 @@ class Ledger:
         self._items: list[Entry] = []
         skipped = 0
         if path.exists():
-            for line in path.read_text().splitlines():
+            for line in path.read_text(encoding="utf-8").splitlines():
                 line = line.strip()
                 if not line:
                     continue
@@ -138,7 +138,7 @@ class Ledger:
 
     def _append(self, e: Entry) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        with self.path.open("a") as fh:
+        with self.path.open("a", encoding="utf-8") as fh:
             fh.write(json.dumps(asdict(e)) + "\n")
 
     def _rewrite(self) -> None:

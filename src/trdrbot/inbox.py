@@ -91,7 +91,7 @@ class Inbox:
     def _read(self, path: Path) -> Item | None:
         """One pending file as an Item, or None if it cannot be parsed."""
         try:
-            d = json.loads(path.read_text())
+            d = json.loads(path.read_text(encoding="utf-8"))
             return Item(
                 id=d["id"], ts=d["ts"], type=d["type"],
                 source=d.get("source", "unknown"), payload=d.get("payload", {}),
@@ -183,4 +183,4 @@ class Inbox:
         self.paths.inbox_failed.mkdir(parents=True, exist_ok=True)
         dest = self.paths.inbox_failed / path.name
         shutil.move(str(path), str(dest))
-        (self.paths.inbox_failed / f"{path.stem}.reason.txt").write_text(reason)
+        (self.paths.inbox_failed / f"{path.stem}.reason.txt").write_text(reason, encoding="utf-8")

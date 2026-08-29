@@ -23,6 +23,9 @@ import yaml
 
 from . import ids, store
 
+#: A concept id is a path fragment, and it arrives from model output.
+_SAFE_CONCEPT_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*(/[A-Za-z0-9][A-Za-z0-9._-]*)*$")
+
 
 class AugmentationError(ValueError):
     """A write would shrink an existing concept. Fix it and retry - do not force it."""
@@ -114,10 +117,28 @@ class Concept:
         return self.body.strip()
 
     def is_stale(self, now: datetime | None = None) -> bool:
-        """Has the perishable content passed its declared instant?"""
+        """Has the perishable content passed its expiry?
+
+        Falls back to `generated.at + perishable_after_hours` when no
+        `stale_after` is stamped. Without that fallback the 24 dossiers written
+        before lifecycle stamping landed were permanently un-sweepable and
+        permanently eligible as muse collision material - fail-safe at the time
+        it shipped, but the safety never expired (I-20).
+        """
         raw = self.frontmatter.get("stale_after")
         if not raw:
-            return False
+            policy = LIFECYCLE.get(self.type)
+            generated = (self.frontmatter.get("generated") or {}).get("at")
+            if not policy or policy.perishable_after_hours is None or not generated:
+                return False
+            try:
+                born = datetime.fromisoformat(str(generated).replace("Z", "+00:00"))
+            except (TypeError, ValueError):
+                return False
+            if born.tzinfo is None:
+                born = born.replace(tzinfo=UTC)
+            deadline = born + timedelta(hours=policy.perishable_after_hours)
+            return (now or ids.utc_now()) >= deadline
         try:
             when = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
         except (TypeError, ValueError):
@@ -163,6 +184,19 @@ class Wiki:
         self.root.mkdir(parents=True, exist_ok=True)
 
     def path_for(self, concept_id: str) -> Path:
+        """The file for a concept id, refusing anything that escapes the root.
+
+        Concept ids are built from MODEL OUTPUT - `f"research/{ticker}"` where
+        the ticker came back from an LLM - so this is a boundary, and
+        validating at a boundary is the fail-fast rule rather than defensive
+        code. Without it a key containing `..` writes outside the wiki
+        entirely.
+        """
+        if not _SAFE_CONCEPT_ID.match(concept_id) or ".." in concept_id.split("/"):
+            raise ValueError(
+                f"unsafe concept id {concept_id!r}: expected path-like segments of "
+                f"letters, digits, dot, dash or underscore - no absolute paths, no `..`"
+            )
         return self.root / f"{concept_id}.md"
 
     def read(self, concept_id: str) -> Concept | None:
@@ -172,12 +206,26 @@ class Wiki:
         return self._parse(p, concept_id)
 
     def _parse(self, path: Path, concept_id: str) -> Concept:
-        text = path.read_text()
+        """Parse a page, degrading rather than raising on a malformed one.
+
+        `text.split("---", 2)` unpacking three values raised ValueError on a
+        file with unterminated frontmatter - and `read()` is on the hot path
+        (the decide prompt's regime block, every dossier lookup) with no guard,
+        while `all_concepts` already caught per-page. One truncated write and
+        the tick died reading its own wiki.
+        """
+        text = path.read_text(encoding="utf-8")
+        fm: dict[str, Any] = {}
+        body = text
         if text.startswith("---"):
-            _, fm_text, body = text.split("---", 2)
-            fm = yaml.safe_load(fm_text) or {}
-        else:
-            fm, body = {}, text
+            try:
+                _, fm_text, body = text.split("---", 2)
+                loaded = yaml.safe_load(fm_text)
+                fm = loaded if isinstance(loaded, dict) else {}
+            except (ValueError, yaml.YAMLError) as exc:
+                print(f"[wiki] {concept_id}: unreadable frontmatter ({exc!r}) - "
+                      f"reading the whole file as body")
+                fm, body = {}, text
         return Concept(concept_id=concept_id, frontmatter=fm, body=body.strip() + "\n", path=path)
 
     def write_concept(self, concept: Concept, *, type_: str | None = None,
@@ -308,7 +356,7 @@ class Wiki:
         today = ids.utc_now().strftime("%Y-%m-%d")
         line = f"- {entry}\n"
         if log_path.exists():
-            text = log_path.read_text()
+            text = log_path.read_text(encoding="utf-8")
             heading = f"## {today}\n"
             if text.startswith(heading):
                 store.write_atomic(log_path, text.replace(heading, heading + line, 1))

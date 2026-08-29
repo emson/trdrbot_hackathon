@@ -258,7 +258,7 @@ def load(root: Path | None = None, *, quiet: bool = False) -> Config:
             if old and new and old != new:
                 print(f"[config] .env overrode a different shell value for {k}")
 
-    with (root / "config.yaml").open() as f:
+    with (root / "config.yaml").open(encoding="utf-8") as f:
         raw = yaml.safe_load(f)
     paths = Paths.build(root)
     paths.ensure()

@@ -311,7 +311,7 @@ def update_high_water(state_dir: Path, equity: float, journal: Any = None) -> fl
     hw = 0.0
     if p.exists():
         try:
-            hw = float(json.loads(p.read_text()).get("high_water", 0.0))
+            hw = float(json.loads(p.read_text(encoding="utf-8")).get("high_water", 0.0))
         except (json.JSONDecodeError, ValueError, TypeError) as exc:
             print(f"[competence] high_water.json unreadable ({exc!r}) - drawdown "
                   f"protection is degraded until a new peak forms")

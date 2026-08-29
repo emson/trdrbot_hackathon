@@ -212,7 +212,7 @@ class ElfmemAdapter:
         """
         minds: dict[str, str] = {}
         if self._minds_path and self._minds_path.exists():
-            minds = json.loads(self._minds_path.read_text())
+            minds = json.loads(self._minds_path.read_text(encoding="utf-8"))
 
         if underlying in minds:
             return minds[underlying]

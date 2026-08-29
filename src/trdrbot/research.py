@@ -76,6 +76,31 @@ the next 10 days. An empty array is a valid, often correct answer.)
 """
 
 
+#: The five headings a CompanyDossier carries, DURABLE first. Two writers
+#: share this file - research and discovery - and the augmentation guard
+#: refuses any write that drops a heading, so a heading set that drifted
+#: between them would wedge dossier updates permanently. It existed twice and
+#: was policed by a test that regexed the literals out of both functions;
+#: now it exists once and the test can go.
+def dossier(ticker: str, *, what_it_is: str, bull_case: str, bear_case: str,
+            people: str, environment: str) -> str:
+    """A dossier body. Durable above, perishable below.
+
+    "What it is" is true next month; the bull and bear cases are a snapshot of
+    a tape that has already moved. These used to be welded into one sentence -
+    "Affirm Holdings, Inc. - Strong Q4 results with...beats" - so 22 of 28
+    dossiers had today's earnings news sitting in the one heading later cycles
+    read as a standing fact (D-078).
+    """
+    return (
+        f"# What it is\n{what_it_is}\n\n"
+        f"# Bull case\n{bull_case}\n\n"
+        f"# Bear case\n{bear_case}\n\n"
+        f"# People\n{people}\n\n"
+        f"# Environment\n{environment}\n"
+    )
+
+
 def opportunity_defect(o: Any) -> str | None:
     """Why this opportunity cannot be scored, or None if it can.
 
@@ -180,12 +205,10 @@ async def run(
             continue
         cid = f"research/{sym.upper()}"
         c = wiki.read(cid) or Concept(concept_id=cid, frontmatter={"type": "CompanyDossier"}, body="")
-        c.body = (
-            f"# What it is\n{d.get('what_it_is','')}\n\n"
-            f"# Bull case\n{d.get('bull_case','')}\n\n"
-            f"# Bear case\n{d.get('bear_case','')}\n\n"
-            f"# People\n{d.get('people','')}\n\n"
-            f"# Environment\n{d.get('environment','')}\n"
+        c.body = dossier(
+            sym, what_it_is=d.get("what_it_is", ""), bull_case=d.get("bull_case", ""),
+            bear_case=d.get("bear_case", ""), people=d.get("people", ""),
+            environment=d.get("environment", ""),
         )
         c.add_source("computed:market_stats", author="trdrbot/research")
         try:

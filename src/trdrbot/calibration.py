@@ -141,7 +141,7 @@ class CalibrationStore:
         if not path.exists():
             return
         skipped = 0
-        for line in path.read_text().splitlines():
+        for line in path.read_text(encoding="utf-8").splitlines():
             if not line.strip():
                 continue
             try:

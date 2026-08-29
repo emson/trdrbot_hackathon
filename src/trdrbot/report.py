@@ -53,7 +53,7 @@ def _rows(path: Path) -> list[dict[str, Any]]:
     if not path.exists():
         return []
     out = []
-    for line in path.read_text().splitlines():
+    for line in path.read_text(encoding="utf-8").splitlines():
         line = line.strip()
         if line:
             try:
@@ -219,5 +219,5 @@ code{font-family:ui-monospace,monospace;font-size:.85em}
 def write(cfg: Any, path: Path | None = None) -> Path:
     out = path or (Path(cfg.paths.data) / "report.html")
     out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(build(cfg))
+    out.write_text(build(cfg), encoding="utf-8")
     return out

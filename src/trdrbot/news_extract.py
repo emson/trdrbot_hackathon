@@ -202,7 +202,7 @@ class ExtractCache:
         self._items: dict[str, dict[str, Any]] = {}
         if path.exists():
             try:
-                self._items = json.loads(path.read_text())
+                self._items = json.loads(path.read_text(encoding="utf-8"))
             except (json.JSONDecodeError, OSError):
                 self._items = {}
 

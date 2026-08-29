@@ -69,7 +69,7 @@ from .wiki import Wiki
 
 def _tick_count(config: Config) -> int:
     p = config.paths.state / "tick_count"
-    n = int(p.read_text().strip() or 0) + 1 if p.exists() else 1
+    n = int(p.read_text(encoding="utf-8").strip() or 0) + 1 if p.exists() else 1
     store_mod.write_atomic(p, str(n))
     return n
 
@@ -544,8 +544,15 @@ async def _run_tick(
                 )
         regime = wiki.read("context/regime")
         if regime and regime.body.strip():
+            # Labelled when expired rather than dropped. The regime page is a
+            # singleton that rewrites itself, so an old one is the only market
+            # context there is - but presenting it undated as "the regime"
+            # is what makes a stale read indistinguishable from a fresh one.
+            # It IS stale on disk right now, and nothing said so.
+            stale = " - STALE, read as history" if regime.is_stale() else ""
+            generated = (regime.frontmatter.get("generated") or {}).get("at", "")
             prompt_parts.append(
-                f"## Market regime (research desk, {regime.frontmatter.get('generated',{}).get('at','')[:10]})\n\n"
+                f"## Market regime (research desk, {generated[:10]}{stale})\n\n"
                 + regime.body[:1800]
             )
         if ctx.text:

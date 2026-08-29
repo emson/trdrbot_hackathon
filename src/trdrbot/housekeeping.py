@@ -135,13 +135,13 @@ async def run(
         # reads a fresh Friday close and is the most useful one of the week.
         weekday = _ids.market_today().weekday()  # Mon=0 .. Sat=5, Sun=6
         research_worthwhile = weekday != 5
-        if research_worthwhile and (not marker.exists() or marker.read_text().strip() != today):
+        if research_worthwhile and (not marker.exists() or marker.read_text(encoding="utf-8").strip() != today):
             try:
                 cfg = _load_config()
                 from .inbox import Inbox as _Inbox
                 inbox = _Inbox(cfg.paths, max_retries=cfg.max_retries)
                 r = await research.run(tools, cfg, inbox, wiki, journal, verbose=verbose)
-                marker.write_text(today)
+                marker.write_text(today, encoding="utf-8")
                 if verbose:
                     print(f"[housekeeping] research: {r['opportunities']} opportunities")
             except Exception as exc:  # noqa: BLE001 - research is advisory (INV-8)

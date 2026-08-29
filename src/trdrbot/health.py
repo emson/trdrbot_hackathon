@@ -184,7 +184,7 @@ def _rows(journal_path: Path) -> list[dict[str, Any]]:
     if not journal_path.exists():
         return []
     out = []
-    for line in journal_path.read_text().splitlines():
+    for line in journal_path.read_text(encoding="utf-8").splitlines():
         line = line.strip()
         if line:
             try:
