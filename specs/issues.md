@@ -26,9 +26,14 @@ Sorted by severity.
   0.2255) because trailing drift is noisy. **Root cause NOT established; recorded without one.**
   `bootstrap_factors`' own docstring already declared the limitation ("IID resampling destroys
   autocorrelation and volatility clustering... still not truth") - the contribution here is the
-  magnitude. **Action due:** decide whether to shrink the base rate toward 0.5 in the high region,
-  widen the estimator, or (cheapest, and consistent with D-009) simply REPORT the measured
-  reliability alongside the base rate so the agent sees that its 75% is historically a 57%.
+  magnitude. **PARTIALLY ADDRESSED (D-089):** a fitted variance-inflation correction
+  (k=1.30/1.30/1.25 at 3/5/10d) is live at the muse's base rate, holdout-validated on both a
+  time split and a ticker split, with `base_inflate` recorded on every verdict for the forward
+  audit. **Still open:** (a) root cause - the correction is empirical, not explanatory; (b) the
+  EV grids/tail_gap/sizing deliberately still run raw pending the forward audit; (c) **the
+  forward audit itself** - when the pending muse resolutions land (08-31+), score calibrated
+  base vs raw base as predictors; that result decides whether the correction extends to the
+  pricing grid or gets revisited.
 - **I-27 · The Coach's gate reward is ASYMMETRIC, measured over 9 real paired runs** (D-088).
   Opened as "the reward may have a ceiling" after one 5/5-vs-5/5 trial; now measured properly and
   the answer is more useful than the worry. Over 9 live paired runs the incumbent scored **40/45

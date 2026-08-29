@@ -380,13 +380,22 @@ async def _evaluate(
             evaluated.append(verdict)
             continue
 
-        factors = market_stats.bootstrap_factors(closes, days, seed=f"muse|{u}")
+        # Base rate from the CALIBRATED bootstrap (D-089). The raw one was
+        # measured overconfident by 15-23pp exactly where these gates bite
+        # (I-29): it called bands "vacuous" using an optimistic number and
+        # understated the tails where breakout claims live. The inflation is
+        # fitted offline against history with a holdout veto, read from an
+        # artifact, and 1.0 whenever no fit exists - see band_inflation().
+        inflate = market_stats.band_inflation(config.paths.state, days)
+        factors = market_stats.bootstrap_factors(closes, days, seed=f"muse|{u}",
+                                                 inflate=inflate)
         spot = closes[-1]
         lo, hi = cand.get("band_low"), cand.get("band_high")
         held = sum(1 for f in factors
                    if (lo is None or spot * f >= lo) and (hi is None or spot * f <= hi))
         base = held / len(factors) if factors else 0.0
         verdict["base_prob"] = round(base, 3)
+        verdict["base_inflate"] = inflate
         verdict["claimed_edge"] = round(verdict["stated"] - base, 3)
 
         # The gate is about INFORMATION, not the base rate alone. A band that
@@ -559,7 +568,11 @@ async def run(
                    prompt_variant=arms.incumbent.id,
                    prompt_fp=arms.incumbent.fingerprint,
                    exp_id=arms.exp_id,
-                   fates=[{k: v[k] for k in ("underlying", "fate", "stated")
+                   # base_prob + base_inflate ride along so the forward audit
+                   # can score calibrated-vs-raw against real resolutions
+                   # later (D-089) - provenance is the part with a deadline.
+                   fates=[{k: v[k] for k in ("underlying", "fate", "stated",
+                                             "base_prob", "base_inflate")
                            if k in v} for v in evaluated])
     if verbose:
         print(f"[muse] collided {[c for c, _ in concepts]}")

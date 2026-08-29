@@ -578,6 +578,26 @@ def snapshot_gauges(cfg: Any, rows: list[dict[str, Any]]) -> dict[str, Any]:
     except Exception:  # noqa: BLE001
         pass
 
+    # The model layer's calibration (D-089): the fitted inflation and how old
+    # the fit is. A drifting inflation across refits, or a fit going stale
+    # while the market moves regimes, is exactly the trajectory the report
+    # exists to make visible.
+    try:
+        from . import market_stats as _ms
+
+        art = json.loads(_ms.model_cal_path(Path(cfg.paths.state)).read_text())
+        per_h = art.get("per_horizon") or {}
+        if "5" in per_h:
+            put("model.inflation_5d", float(per_h["5"]))
+        fitted = str(art.get("fitted", ""))
+        if fitted:
+            from datetime import datetime
+
+            age = (ids.utc_now() - datetime.fromisoformat(fitted)).days
+            put("model.cal_age_days", age)
+    except Exception:  # noqa: BLE001 - no artifact -> no gauge, never a zero
+        pass
+
     opens = 0
     for l in LEVERS:
         st = load_state(cfg, l.name, "")

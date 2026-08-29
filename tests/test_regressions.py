@@ -3512,3 +3512,127 @@ def test_interim_scoring_does_not_cry_wolf_on_a_calm_young_position(tmp_path):
     found = {n: (l, d) for l, n, d in health.check(p, [])}
     assert found["interim_scoring"][0] == health.OK, found["interim_scoring"]
     assert "not stalled" in found["interim_scoring"][1]
+
+
+# --------------------------------------------------------------------------
+# D-089: the model layer gets calibrated - fitted bootstrap inflation
+
+
+def test_inflate_of_one_is_byte_identical_to_the_uninflated_bootstrap():
+    """The default must be EXACTLY the old behaviour - same seed, same draws,
+    same floats - or every historical comparison silently shifts."""
+    from trdrbot import market_stats
+
+    closes = [100 * (1 + 0.001 * ((i * 7) % 13 - 6)) ** i for i in range(1, 130)]
+    a = market_stats.bootstrap_factors(closes, 5, n_paths=200, seed="ident")
+    b = market_stats.bootstrap_factors(closes, 5, n_paths=200, seed="ident", inflate=1.0)
+    assert a == b
+
+
+def test_inflation_widens_the_distribution_in_both_directions():
+    """The I-29 signature is symmetric bands overstated and BOTH tails
+    understated - a too-narrow distribution. Widening must therefore LOWER
+    P(inside a symmetric band) and RAISE P(beyond a tail), while keeping the
+    martingale property (mean factor ~ 1)."""
+    from trdrbot import market_stats
+
+    import random as _r
+    rng = _r.Random(42)
+    closes = [100.0]
+    for _ in range(250):
+        closes.append(closes[-1] * (1 + rng.gauss(0, 0.012)))
+
+    raw = market_stats.bootstrap_factors(closes, 5, n_paths=2000, seed="w")
+    wide = market_stats.bootstrap_factors(closes, 5, n_paths=2000, seed="w", inflate=1.3)
+
+    def p_inside(f, lo, hi):
+        return sum(1 for x in f if lo <= x <= hi) / len(f)
+
+    assert p_inside(wide, 0.97, 1.03) < p_inside(raw, 0.97, 1.03)
+    assert (sum(1 for x in wide if x >= 1.02) / len(wide)
+            > sum(1 for x in raw if x >= 1.02) / len(raw))
+    assert abs(sum(wide) / len(wide) - 1.0) < 0.02, "inflation broke the martingale recentering"
+
+
+def test_the_fit_wants_inflation_on_autocorrelated_data_and_not_on_iid():
+    """Positive return autocorrelation inflates multi-day variance beyond what
+    IID resampling reproduces - the class of structure the docstring already
+    admitted the bootstrap destroys. The fit must detect it, and must NOT
+    hallucinate inflation on data where IID is true by construction."""
+    import random as _r
+
+    from trdrbot import market_stats
+
+    def series(phi, seed, n=300):
+        rng = _r.Random(seed)
+        closes, r_prev = [100.0], 0.0
+        for _ in range(n):
+            r = phi * r_prev + rng.gauss(0, 0.015)
+            closes.append(closes[-1] * (1 + r))
+            r_prev = r
+        return closes
+
+    ar = {f"AR{i}": series(0.45, i) for i in range(8)}
+    iid = {f"IID{i}": series(0.0, 100 + i) for i in range(8)}
+
+    fit_ar = market_stats.fit_band_inflation(ar, horizons=(5,), n_paths=200, step=11)
+    fit_iid = market_stats.fit_band_inflation(iid, horizons=(5,), n_paths=200, step=11)
+
+    assert fit_ar["per_horizon"]["5"] > 1.05, (
+        f"autocorrelated data needs widening, fit chose {fit_ar['per_horizon']}")
+    assert fit_iid["per_horizon"]["5"] <= 1.15, (
+        f"IID data is calibrated by construction, fit chose {fit_iid['per_horizon']}")
+
+
+def test_band_inflation_loader_fails_safe_and_clamps(tmp_path):
+    """No artifact, a corrupt one, or an insane value must all degrade to the
+    uninflated bootstrap - the behaviour the system had before the fit
+    existed - and a fit past the ceiling is refused, not obeyed: a k of 3.0
+    is evidence of something structural, not a bigger knob."""
+    from trdrbot import market_stats
+
+    assert market_stats.band_inflation(tmp_path, 5) == 1.0  # absent
+
+    p = market_stats.model_cal_path(tmp_path)
+    p.write_text("{ not json")
+    assert market_stats.band_inflation(tmp_path, 5) == 1.0  # corrupt
+
+    p.write_text('{"per_horizon": {"5": 3.0, "10": 0.4}}')
+    assert market_stats.band_inflation(tmp_path, 5) == market_stats.INFLATE_MAX
+    assert market_stats.band_inflation(tmp_path, 10) == 1.0  # below the floor
+
+    p.write_text('{"per_horizon": {"3": 1.1, "10": 1.3}}')
+    assert market_stats.band_inflation(tmp_path, 4) == 1.1   # nearest horizon
+    assert market_stats.band_inflation(tmp_path, 9) == 1.3
+
+
+def test_the_muse_base_rate_uses_the_fitted_inflation():
+    """The muse's gates were the measured defect site (I-29): the vacuity
+    ceiling and the lottery floor both consumed the overconfident raw base.
+    The calibrated number must be what those gates see, and the inflation
+    used must be recorded on the verdict for the forward audit."""
+    import inspect
+
+    from trdrbot import muse
+
+    src = inspect.getsource(muse._evaluate)
+    assert "band_inflation(" in src, "muse does not load the fitted inflation"
+    assert "inflate=inflate" in src, "muse loads the inflation but does not pass it"
+    assert 'verdict["base_inflate"]' in src, "the inflation used is not recorded"
+
+
+def test_model_gauges_are_omitted_when_no_artifact_exists(tmp_path):
+    """Absence-as-zero (notes/012): a missing fit must produce NO model gauge,
+    not a gauge reading 0 or 1.0 - on a chart those are indistinguishable
+    from a real measurement."""
+    from types import SimpleNamespace
+
+    from trdrbot import coach
+
+    (tmp_path / "state").mkdir(exist_ok=True)
+    cfg = SimpleNamespace(paths=SimpleNamespace(state=tmp_path / "state", data=tmp_path,
+                                                journal=tmp_path / "journal.jsonl"),
+                          coach={"enabled": True}, pricing={})
+    g = coach.snapshot_gauges(cfg, [])
+    assert "model.inflation_5d" not in g
+    assert "model.cal_age_days" not in g

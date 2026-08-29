@@ -3737,3 +3737,72 @@ is stamped from today so the join will be possible when they land, which is the 
 deadline (D-045's own reasoning). The sampling lever (Thompson over concept-type pairs) is
 designed in notes/016 phase 3 and unbuilt; the test that matters for it is that it needs no
 protocol change.
+
+## D-089: The model layer gets calibrated - fitted bootstrap inflation, holdout-vetoed
+**Date:** 2026-08-29
+**Status:** accepted
+**Context:** I-29 measured the bootstrap base rate overconfident by 15-23pp in the 0.7-0.9
+region over 21,280 historical band-forecasts, with BOTH tails understated - and two mechanism
+fixes (block bootstrap, trailing drift) already tested and failed. The systemic question, argued
+through an optimize loop in [notes/018](notes/018_calibration_harmony.md): the agent's
+probabilities are calibrated against live resolutions, memory blocks against scored outcomes,
+Coach variants against paired trials - **the model layer was the one producer nothing ever
+audited, and it is the layer everything else stands on.** Its natural evidence stream is
+historic replay: dense (thousands of samples), LLM-free, and lookahead-impossible by slicing.
+
+**Choice: a fitted variance-inflation factor, because the measured signature demands that
+functional form and rejects the alternatives.** Symmetric bands overstated while one-sided
+bands are UNDERstated at the same predicted p - a p->p reliability map cannot tell those apart
+and would correct breakout bands the wrong direction; a too-narrow distribution is the one
+explanation that produces both, and widening fixes both at once. One parameter per horizon,
+against ten for a binned map.
+
+**The holdout has the veto, and the fit passed it twice.** Fit on the first 60% of history,
+validate on the last 40%: Brier 0.2160->0.2021 (3d), 0.2353->0.2174 (5d), 0.2161->0.2097 (10d),
+with the 10d 0.7-0.9 gap going +0.152 -> -0.004. Ticker split (fit even, test odd): better at
+every horizon there too. `fit_band_inflation` ships k=1.0 whenever the holdout does not confirm
+- an in-sample-only improvement never reaches production. Property-tested: the fit detects
+synthetic autocorrelated data (k>1.05) and refuses to hallucinate on IID data, which is the
+pair of behaviours that separates a measurement from a knob.
+
+**Applied at the measured defect site only, deliberately.** The muse's gates were where I-29
+bit: the vacuity ceiling read an optimistic base and the lottery floor read understated tails.
+The muse now consumes calibrated factors and records `base_inflate` on every verdict and
+journal fate row - provenance is the part with a deadline, because the forward audit
+(calibrated-vs-raw against real resolutions, landing 08-31+) is impossible for rows that never
+recorded which number they used. **The EV grids, tail_gap and sizing still run raw**: apply
+where measured, validate forward, then extend. tail_gap in particular must stay raw - it
+compares bootstrap tails to lognormal tails, and inflating one side would manufacture a
+permanent artificial disagreement.
+
+**Fail-safe by construction:** `band_inflation()` returns 1.0 on a missing, corrupt or absurd
+artifact and clamps to [1.0, 1.5] - a fit wanting k=3 is evidence of something structural, not
+a bigger knob. `inflate=1.0` is byte-identical to the old bootstrap (tested, same seed, same
+draws), and `inflate` is deliberately NOT in the RNG seed so calibrated and raw estimates are
+paired on identical paths.
+
+**Measured live effect, same day:** a SPY 5d symmetric band read 97.3% raw -> 91.9% calibrated
+(below the vacuity ceiling - now carries information); an upside breakout read 5.6% -> 10.2%
+(crosses the lottery floor - now survives to be judged). Both move in the direction D-076's
+critique demanded, and **neither gate changed - the number they read stopped lying.** This is
+the quantitative half of the stacked-conservatism diagnosis: the starvation loop (wrong ruler
+-> fewer theses -> fewer resolutions -> starved calibration -> floor-stuck sizing) loses its
+first link.
+
+**Also:** Coach gauges `model.inflation_5d` / `model.cal_age_days` put the correction on the
+report trajectory; `trdrbot modelcal [status|fit]` is the operator surface, the counterpart of
+`trdrbot calibration` for the model layer. The open Coach experiment (v1 vs v0, 9 runs) sees
+the changed gates equally in both arms, so the trial stays unbiased between them - noted rather
+than restarted.
+
+**Rejected, with reasons on the record:** report-only (the defect's main consumers are gates in
+code, which never read prose - kept as a component, not the answer); the p->p map (wrong
+functional form, above); root-cause bootstrap redesign (two mechanism attempts already failed
+cheap tests; unbounded cost against a 6-day window - I-29 stays open on root cause); a general
+calibrated-quantity framework (machinery before a second instance - the second instance is the
+exit-rule replay, which should be built concretely first).
+
+**Verified:** 266 default tests (6 new) + 19 contract. Live: artifact fitted on 56 tickers
+(k=1.30/1.30/1.25 at 3/5/10d, holdout scores stored in it), `modelcal` rendering it, the
+inflation flowing through `band_inflation -> bootstrap_factors -> muse` with the measured band
+movements above.

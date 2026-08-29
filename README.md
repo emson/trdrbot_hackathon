@@ -190,6 +190,7 @@ uv run trdrbot usage          # spend by model and role, with cached share
 | `prompts` | every prompt the models read, with fingerprints |
 | `coach status\|pulse` | the self-improvement loop: levers, open trials, promotions |
 | `report` | write `data/report.html` - gauges over time, experiments, what the Coach did |
+| `modelcal status\|fit` | the model layer's calibration: fitted bootstrap inflation, holdout-vetoed |
 
 ## The Coach — subsystems that improve themselves
 

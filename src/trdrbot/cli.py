@@ -534,6 +534,47 @@ def _report() -> int:
     return 0
 
 
+def _modelcal(action: str) -> int:
+    """The MODEL layer's calibration (D-089) - the counterpart of
+    `trdrbot calibration`, which scores the agent."""
+    import json as _json
+
+    from . import market_stats as ms
+
+    cfg = config_mod.load()
+    path = ms.model_cal_path(cfg.paths.state)
+
+    if action == "fit":
+        series = ms.load_all_closes(cfg.paths.state)
+        if len(series) < 10:
+            print(f"only {len(series)} cached return series - not enough to fit honestly")
+            return 1
+        print(f"fitting band inflation on {len(series)} tickers "
+              f"(holdout has the veto; this takes a minute)...")
+        art = ms.fit_band_inflation(series)
+        path.write_text(_json.dumps(art, indent=2))
+        print(f"wrote {path}\n")
+
+    if not path.exists():
+        print("no model calibration artifact - run `trdrbot modelcal fit`")
+        print("(the bootstrap runs UNINFLATED until one exists; I-29 measured "
+              "that as 15-23pp overconfident where credit spreads live)")
+        return 0
+
+    art = _json.loads(path.read_text())
+    print(f"fitted {str(art.get('fitted', ''))[:16]}  "
+          f"bounds {art.get('bounds')}  "
+          f"tickers {(art.get('sample') or {}).get('tickers')}")
+    print(f"\n{'horizon':>8} {'k':>6} {'holdout Brier raw -> fit':>26}")
+    for h, d in sorted((art.get("holdout") or {}).items(), key=lambda kv: int(kv[0])):
+        print(f"{h + 'd':>8} {d.get('chosen'):>6} "
+              f"{d.get('test_brier_raw')} -> {d.get('test_brier_fit')}"
+              + ("   (holdout vetoed the fit)" if d.get("chosen") == 1.0
+                 and d.get("k_star") != 1.0 else ""))
+    print(f"\nprovenance: {art.get('provenance', '')}")
+    return 0
+
+
 def main() -> None:
     p = argparse.ArgumentParser(prog="trdrbot")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -564,6 +605,8 @@ def main() -> None:
     coa = sub.add_parser("coach", help="the self-improvement loop: levers, trials, promotions")
     coa.add_argument("action", choices=["status", "pulse"], default="status", nargs="?")
     sub.add_parser("report", help="write data/report.html - gauges, experiments, actions")
+    mc = sub.add_parser("modelcal", help="the model layer's calibration: fitted bootstrap inflation")
+    mc.add_argument("action", choices=["status", "fit"], default="status", nargs="?")
     run = sub.add_parser("run", help="loop ticks continuously until the deadline")
     run.add_argument("--interval", type=int, default=300,
                      help="seconds between ticks while the market is open (default 300)")
@@ -610,6 +653,8 @@ def main() -> None:
         sys.exit(asyncio.run(_coach(args.action)))
     elif args.cmd == "report":
         sys.exit(_report())
+    elif args.cmd == "modelcal":
+        sys.exit(_modelcal(args.action))
     elif args.cmd == "run":
         sys.exit(asyncio.run(_run_loop(args.interval, args.closed_interval,
                                        max_ticks=args.max_ticks,

@@ -152,7 +152,7 @@ def compute_stats(symbol: str, closes: list[float]) -> Stats:
 
 def bootstrap_factors(
     closes: list[float], days: int, *, n_paths: int = 2000, seed: str = "",
-    drift: float = 0.0,
+    drift: float = 0.0, inflate: float = 1.0,
 ) -> list[float]:
     """Terminal price multipliers by IID resampling of real daily returns.
 
@@ -192,13 +192,176 @@ def bootstrap_factors(
     # Center so E[exp(r')] ~= 1 per session (martingale), same correction as
     # the lognormal grid - which is what makes the two comparable, and their
     # GAP attributable to tail shape rather than to drift.
-    target_mean = -0.5 * var + (math.log(1.0 + drift) / draws if drift > -1 else 0.0)
-    adj = [r - mean + target_mean for r in rets]
+    # `inflate` widens the distribution by scaling each demeaned return - a
+    # MEASURED empirical correction, not a modelling choice. Scored offline
+    # over 21,280 historical band-forecasts with the history sliced before
+    # every estimate (I-29 / notes/017): the raw bootstrap overstates
+    # P(stays inside a band) by 15-23pp exactly where credit spreads live,
+    # and UNDERstates both tails - the signature of a too-narrow
+    # distribution, which is why the fix is variance inflation rather than a
+    # p->p map (a map cannot tell band shapes apart; widening corrects both
+    # directions at once). Validated OUT-OF-SAMPLE on both a time split and
+    # a ticker split before being wired in; the fitted values, their
+    # provenance and their holdout scores live in the artifact
+    # `band_inflation()` reads. At 1.0 this is byte-identical to the
+    # uninflated bootstrap, and there is a test pinning that. The martingale
+    # recentering scales with inflate^2 so E[factor] stays ~1.
+    #
+    # The residual the correction deliberately does NOT touch: the upside
+    # tail stays understated, because demeaning strips drift BY DESIGN -
+    # direction is something the agent states, never something the data
+    # smuggles in. That gap is where the agent's view is supposed to live.
+    var_i = var * inflate * inflate
+    target_mean = -0.5 * var_i + (math.log(1.0 + drift) / draws if drift > -1 else 0.0)
+    adj = [(r - mean) * inflate + target_mean for r in rets]
 
+    # `inflate` is deliberately NOT in the seed: the same seed draws the same
+    # return indices at every inflation, so calibrated and raw estimates are
+    # paired on identical paths rather than differing by resampling noise.
     rng = random.Random(f"{seed}|{len(adj)}|{days}|{drift:.6f}")
     out = []
     for _ in range(n_paths):
         out.append(math.exp(sum(rng.choice(adj) for _ in range(draws))))
+    return out
+
+
+# ----------------------------------------- model calibration (D-089)
+#
+# The agent's probabilities are calibrated against live resolutions
+# (calibration.py). Nothing calibrated the MODEL's probabilities until I-29
+# measured them against history and found a real defect. This is the model
+# layer's counterpart: fit against the dense evidence stream (historic
+# replay, thousands of samples, no LLM, lookahead structurally impossible),
+# validate on held-out data, store as an artifact with provenance, and let
+# the slow evidence stream (live forward resolutions) audit it.
+
+#: Sanity bounds on a fitted inflation. A fit wanting more than the ceiling
+#: is evidence of something structural, not a bigger knob - refuse it.
+INFLATE_MIN, INFLATE_MAX = 1.0, 1.5
+FIT_HORIZONS = (3, 5, 10)
+_FIT_BANDS = ((-0.03, 0.03), (-0.05, 0.05), (None, -0.02), (0.02, None))
+
+
+def model_cal_path(state_dir: Path) -> Path:
+    return state_dir / "model_calibration.json"
+
+
+def band_inflation(state_dir: Path, days: int) -> float:
+    """The fitted inflation for this horizon, clamped, 1.0 when absent.
+
+    Fail-safe by construction: no artifact, an unreadable one, or an insane
+    value all degrade to the uninflated bootstrap - the behaviour the system
+    had for its whole life before the fit existed. Never raises.
+    """
+    try:
+        d = json.loads(model_cal_path(state_dir).read_text())
+        per_h = d.get("per_horizon") or {}
+        if not per_h:
+            return 1.0
+        nearest = min(per_h, key=lambda h: abs(int(h) - days))
+        k = float(per_h[nearest])
+        return max(INFLATE_MIN, min(INFLATE_MAX, k))
+    except (OSError, ValueError, TypeError, KeyError, json.JSONDecodeError):
+        return 1.0
+
+
+def fit_band_inflation(
+    series: dict[str, list[float]], *, horizons: tuple[int, ...] = FIT_HORIZONS,
+    n_paths: int = 400, step: int = 9,
+) -> dict[str, Any]:
+    """Fit per-horizon inflation on historic closes, holdout-validated.
+
+    Pure: takes {symbol: closes}, returns the artifact dict (not written).
+    For every (ticker, date, band) the estimate uses ONLY closes before the
+    date - lookahead is impossible by slicing, not by care. The time split
+    (fit on the first 60%, validate on the last 40%) is the honest one for
+    forward use; a k that only helps in-sample is reported as 1.0.
+
+    Speed and fairness share one trick: per path, the sum S of demeaned
+    draws is computed once, and the factor at any k is exp(k*S - draws *
+    k^2 * var / 2) - so every candidate k is scored on IDENTICAL draws.
+    """
+    ks = [round(1.0 + 0.05 * i, 2) for i in range(11)]  # 1.00 .. 1.50
+    per_h: dict[str, float] = {}
+    diag: dict[str, Any] = {}
+    for h in horizons:
+        draws = max(1, round(h * TRADING_DAYS / 365.0))
+        train: list[tuple[list[float], float, float, float]] = []
+        test: list[tuple[list[float], float, float, float]] = []
+        for sym, closes in sorted(series.items()):
+            if len(closes) < 150:
+                continue
+            cutoff = 120 + int(0.6 * (len(closes) - 120 - h))
+            for i in range(120, len(closes) - h, step):
+                rets = _log_returns(closes[:i])
+                if len(rets) < 60:
+                    continue
+                mean = sum(rets) / len(rets)
+                var = sum((r - mean) ** 2 for r in rets) / (len(rets) - 1)
+                dm = [r - mean for r in rets]
+                rng = random.Random(f"fit|{sym}|{i}|{h}")
+                S = [sum(dm[rng.randrange(len(dm))] for _ in range(draws))
+                     for _ in range(n_paths)]
+                row = (S, var, closes[i], closes[i + h])
+                (test if i >= cutoff else train).append(row)
+
+        def brier(pts: list, k: float) -> float | None:
+            tot = n = 0
+            for S, var, spot, fut in pts:
+                tm = -0.5 * var * k * k
+                facs = [math.exp(k * s + draws * tm) for s in S]
+                for lo_p, hi_p in _FIT_BANDS:
+                    lo = spot * (1 + lo_p) if lo_p is not None else None
+                    hi = spot * (1 + hi_p) if hi_p is not None else None
+                    held = sum(1 for x in facs
+                               if (lo is None or spot * x >= lo)
+                               and (hi is None or spot * x <= hi))
+                    p = held / len(facs)
+                    a = 1 if ((lo is None or fut >= lo)
+                              and (hi is None or fut <= hi)) else 0
+                    tot += (p - a) ** 2
+                    n += 1
+            return tot / n if n else None
+
+        if not train or not test:
+            continue
+        scored = [(brier(train, k), k) for k in ks]
+        _, k_star = min(scored)
+        b1, bk = brier(test, 1.0), brier(test, k_star)
+        # The holdout has the veto: an in-sample-only k ships as 1.0.
+        chosen = k_star if (b1 is not None and bk is not None and bk < b1) else 1.0
+        per_h[str(h)] = chosen
+        diag[str(h)] = {"k_star": k_star, "chosen": chosen,
+                        "train_n": len(train) * len(_FIT_BANDS),
+                        "test_n": len(test) * len(_FIT_BANDS),
+                        "test_brier_raw": round(b1, 4) if b1 else None,
+                        "test_brier_fit": round(bk, 4) if bk else None}
+
+    return {
+        "kind": "bootstrap_band_inflation",
+        "fitted": ids.utc_now().isoformat(),
+        "per_horizon": per_h,
+        "bounds": [INFLATE_MIN, INFLATE_MAX],
+        "sample": {"tickers": len(series), "horizons": list(horizons),
+                   "n_paths": n_paths, "step": step},
+        "holdout": diag,
+        "provenance": "notes/017 + D-089; time-split holdout has the veto; "
+                      "root cause of the raw defect NOT established (I-29)",
+    }
+
+
+def load_all_closes(state_dir: Path) -> dict[str, list[float]]:
+    """Every cached return series, regardless of age - for FITTING, where an
+    old series is still a valid historical sample (unlike live use, where
+    `load_closes` correctly refuses stale data)."""
+    out: dict[str, list[float]] = {}
+    for p in sorted((state_dir / "returns").glob("*.json")):
+        try:
+            d = json.loads(p.read_text())
+            if isinstance(d.get("closes"), list):
+                out[str(d.get("symbol") or p.stem)] = d["closes"]
+        except (OSError, json.JSONDecodeError):
+            continue
     return out
 
 
