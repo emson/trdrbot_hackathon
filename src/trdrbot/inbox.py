@@ -19,7 +19,7 @@ from datetime import UTC
 from pathlib import Path
 from typing import Any
 
-from . import ids
+from . import ids, store
 from .config import Paths
 from .failures import Cause
 
@@ -59,8 +59,14 @@ class Inbox:
         source: str = "manual",
         trust: str = "primary",
     ) -> Item:
+        # An opportunity's identity is its CLAIM, so the same claim written
+        # twice is one pending item rather than two (see ids.opportunity_id).
+        # Everything else keeps uuid4 uniqueness, which a real incident bought:
+        # a news sensor emitting a batch produced N identical filenames and
+        # silently overwrote its own output.
         item = Item(
-            id=ids.item_id(type_, source),
+            id=(ids.opportunity_id(source, payload) if type_ == "opportunity"
+                else ids.item_id(type_, source)),
             ts=ids.utc_now().isoformat(),
             type=type_,
             source=source,
@@ -68,9 +74,26 @@ class Inbox:
             trust=trust,
         )
         path = self.paths.inbox_pending / f"{item.id}.json"
-        path.write_text(json.dumps(item.to_dict(), indent=2))
+        if type_ == "opportunity" and path.exists():
+            existing = self._read(path)
+            if existing is not None:
+                return existing
+        store.write_atomic(path, json.dumps(item.to_dict(), indent=2))
         item.path = path
         return item
+
+    def _read(self, path: Path) -> Item | None:
+        """One pending file as an Item, or None if it cannot be parsed."""
+        try:
+            d = json.loads(path.read_text())
+            return Item(
+                id=d["id"], ts=d["ts"], type=d["type"],
+                source=d.get("source", "unknown"), payload=d.get("payload", {}),
+                trust=d.get("trust", "primary"),
+                retry_count=int(d.get("retry_count", 0)), path=path,
+            )
+        except (json.JSONDecodeError, KeyError, ValueError):
+            return None
 
     def expire_stale(self, max_age_min: float, journal=None) -> int:
         """Move opportunity items older than max_age_min out of pending.
@@ -109,23 +132,12 @@ class Inbox:
     def pending(self) -> list[Item]:
         items: list[Item] = []
         for p in sorted(self.paths.inbox_pending.glob("*.json")):
-            try:
-                d = json.loads(p.read_text())
-                items.append(
-                    Item(
-                        id=d["id"],
-                        ts=d["ts"],
-                        type=d["type"],
-                        source=d.get("source", "unknown"),
-                        payload=d.get("payload", {}),
-                        trust=d.get("trust", "primary"),
-                        retry_count=int(d.get("retry_count", 0)),
-                        path=p,
-                    )
-                )
-            except (json.JSONDecodeError, KeyError):
+            item = self._read(p)
+            if item is None:
                 # Malformed on disk: straight to dead-letter, it will never parse.
                 self._dead_letter(p, reason="unparseable")
+            else:
+                items.append(item)
         return items
 
     def archive(self, items: list[Item]) -> None:
@@ -159,7 +171,7 @@ class Inbox:
         if item.retry_count >= self.max_retries:
             self._dead_letter(item.path, reason=f"[transient x{item.retry_count}] {reason}")
         else:
-            item.path.write_text(json.dumps(item.to_dict(), indent=2))
+            store.write_atomic(item.path, json.dumps(item.to_dict(), indent=2))
 
     def _dead_letter(self, path: Path, reason: str) -> None:
         self.paths.inbox_failed.mkdir(parents=True, exist_ok=True)

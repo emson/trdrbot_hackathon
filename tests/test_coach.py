@@ -192,7 +192,15 @@ async def test_the_shadow_arm_writes_nothing_at_all(tmp_path, monkeypatch):
     monkeypatch.setattr(muse, "_sample_concepts", lambda *a, **k: [("c/a", "text")])
 
     async def fake_generate(prompt_text, fields, config, journal, *, variant, verbose):
-        return [dict(cand)]
+        # The two arms produce DIFFERENT candidates, as two prompt variants
+        # really would. That matters since D-091: opportunities dedup on their
+        # claim, so if both arms proposed the identical band, a challenger that
+        # wrongly emitted would collapse into the incumbent's item and this
+        # test would pass while the contract it guards was broken.
+        c = dict(cand)
+        if variant != "v0":
+            c["band_low_pct"], c["band_high_pct"] = -9.0, 9.0
+        return [c]
 
     monkeypatch.setattr(muse, "_generate", fake_generate)
 
@@ -216,7 +224,16 @@ async def test_the_shadow_arm_writes_nothing_at_all(tmp_path, monkeypatch):
     base_inbox = len(list(Path(paths.inbox_pending).glob("*")))
     base_muse_rows = sum(1 for r in journal.read() if r.get("kind") == "muse")
 
-    # 2. the same run, with a challenger being trialled
+    # 2. the same run, with a challenger being trialled.
+    #
+    # Pending is cleared first so the two runs are INDEPENDENT, which the delta
+    # arithmetic below assumes. Opportunities dedup on their claim now (D-091),
+    # and both runs emit the identical candidate - so leaving the baseline
+    # item in place would make the paired run's emission a no-op and the test
+    # would "pass" by measuring dedup instead of the shadow-arm contract.
+    for stale in Path(paths.inbox_pending).glob("*"):
+        stale.unlink()
+
     monkeypatch.setattr(coach, "arms", lambda *a, **k: coach.Arms(
         incumbent=coach.Variant("v0", muse.MUSE_PROMPT),
         challenger=coach.Variant("v1", muse.MUSE_PROMPT + "\nvariant"),
@@ -225,7 +242,9 @@ async def test_the_shadow_arm_writes_nothing_at_all(tmp_path, monkeypatch):
     await muse.run({}, cfg, inbox, Wiki(paths.wiki), journal, book2, verbose=False)
 
     added_ledger = len(book2.all()) - base_ledger
-    added_inbox = len(list(Path(paths.inbox_pending).glob("*"))) - base_inbox
+    # Pending was emptied above, so whatever is there now is what the PAIRED
+    # run emitted - and it must match what the unpaired baseline emitted.
+    added_inbox = len(list(Path(paths.inbox_pending).glob("*")))
     added_muse_rows = sum(1 for r in journal.read() if r.get("kind") == "muse") - base_muse_rows
 
     assert added_ledger == base_ledger, (

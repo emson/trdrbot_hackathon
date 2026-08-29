@@ -19,6 +19,7 @@ from __future__ import annotations
 import hashlib
 import uuid
 from datetime import UTC, datetime
+from typing import Any
 
 
 def _short_hash(*parts: str, n: int = 8) -> str:
@@ -71,6 +72,40 @@ def journal_id(kind: str) -> str:
     (decision + execution + reconciliation in one tick).
     """
     return f"jrn_{utc_stamp()}_{kind[:3]}{uuid.uuid4().hex[:6]}"
+
+
+def opportunity_id(source: str, payload: dict) -> str:
+    """Identity of an opportunity is the CLAIM, not the moment it was written.
+
+    Every other item type wants `item_id`'s uuid4, and for a good measured
+    reason (see below). Opportunities are the exception: they are generated
+    repeatedly from overlapping evidence, so uniqueness-by-construction meant
+    identical claims could never dedup. Measured on the live pending directory:
+    22 opportunities, XLE six times and MU five, with three byte-identical band
+    pairs from three separate muse runs - all entering ONE decide batch and one
+    prompt, where they read as five independent signals rather than one claim
+    made five times.
+
+    Keyed on (underlying, horizon, rounded bands) per source per UTC day. The
+    source stays in the id deliberately: two DIFFERENT generators reaching the
+    same claim is real corroboration and the decide cycle should see both.
+    The date keeps a claim re-made tomorrow, against tomorrow's quotes, a new
+    item rather than a duplicate of today's.
+    """
+    def _band(v: Any) -> str:
+        try:
+            return f"{float(v):.2f}"
+        except (TypeError, ValueError):
+            return "-"
+
+    key = _short_hash(
+        str(payload.get("underlying", "")).upper(),
+        str(payload.get("horizon", "")),
+        _band(payload.get("band_low")),
+        _band(payload.get("band_high")),
+        n=12,
+    )
+    return f"opp_{utc_stamp()[:8]}_{source}_{key}"
 
 
 def item_id(kind: str, source: str) -> str:
