@@ -39,7 +39,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from . import ids
+from . import health, ids
 from .coach_pkg.gauges import (  # noqa: E402,F401 - re-exported for callers
     GAUGE_WINDOW,
     SENTINELS,
@@ -212,9 +212,9 @@ async def pulse(cfg: Any, journal: Any, *, seed_override: dict[str, str] | None 
              "promotions_today": 0, "sentinels_active": [], "snapshotted": False,
              "opened": None, "closed": None}
     if not enabled(cfg):
-        journal.append("coach_run", experiments_open=0, trials_scored=0,
-                       trials_scored_today=0, promotions_today=0,
-                       sentinels_active=[], disabled=True)
+        health.heartbeat(journal, "coach_run", experiments_open=0, trials_scored=0,
+                         trials_scored_today=0, promotions_today=0,
+                         sentinels_active=[], disabled=True)
         return state
 
     rows: list[dict[str, Any]] = []
@@ -338,12 +338,12 @@ async def pulse(cfg: Any, journal: Any, *, seed_override: dict[str, str] | None 
             print(f"[coach] lever {lv.name} failed this pulse: {exc!r}")
 
     # 6. the heartbeat, LAST and unconditional
-    journal.append("coach_run",
-                   experiments_open=state["experiments_open"],
-                   trials_scored=state["trials_scored"],
-                   trials_scored_today=state["trials_scored_today"],
-                   promotions_today=state["promotions_today"],
-                   sentinels_active=state["sentinels_active"])
+    health.heartbeat(journal, "coach_run",
+                     experiments_open=state["experiments_open"],
+                     trials_scored=state["trials_scored"],
+                     trials_scored_today=state["trials_scored_today"],
+                     promotions_today=state["promotions_today"],
+                     sentinels_active=state["sentinels_active"])
     if verbose:
         print(f"[coach] open={state['experiments_open']} "
               f"trials={state['trials_scored']} (today {state['trials_scored_today']}) "

@@ -198,6 +198,12 @@ async def run(
         print(f"[discovery] nominated: {[n['ticker'] for n in nominees]}")
     journal.append("discovery_nominees", tickers=[n["ticker"] for n in nominees])
     if not nominees:
+        # The `discovery` row goes out even on the empty path. Without it a
+        # run that produced nothing was INVISIBLE to its own health probe -
+        # "ran, found nothing" and "stopped running" were the same
+        # observation, which is the null-path rule (D-038) broken by the
+        # subsystem sitting next to the detector that enforces it.
+        journal.append("discovery", nominees=[], wiki_written=[], opportunities=0)
         return {"nominees": 0, "opportunities": 0}
 
     # ---- deterministic layer per nominee ----

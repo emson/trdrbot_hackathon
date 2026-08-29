@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from . import attribution
+from . import attribution, health
 from .analytics import Snapshot, position_pnl_fraction
 from .config import Config
 from .elfmem_adapter import ElfmemAdapter
@@ -122,7 +122,8 @@ async def run(
     # reporting "ran 8x, produced 8" off eight rows written before that, for
     # two days and ~250 ticks. A subsystem that worked once and then stopped
     # must not read as healthy forever.
-    journal.append("interim_run", eligible=interim_eligible, scored=interim_scored)
+    health.heartbeat(journal, "interim_run", eligible=interim_eligible,
+                     scored=interim_scored)
 
     # Daily research cycle (D-032): regime + dossiers + opportunities. Once
     # per calendar day - it costs an LLM call and regime does not move hourly.

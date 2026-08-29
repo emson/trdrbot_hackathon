@@ -15,7 +15,7 @@ from __future__ import annotations
 from datetime import date
 from typing import Any
 
-from . import experiments, ids, mcp_client
+from . import experiments, health, ids, mcp_client
 from .elfmem_adapter import ElfmemAdapter
 from .journal import Journal
 from .positions import Position, PositionStore
@@ -193,8 +193,8 @@ async def run(
     # Heartbeat: always record that the subsystem ran and what it concluded,
     # including when it concluded nothing. The null path is the one that goes
     # wrong quietly, so it is the one that must leave evidence.
-    journal.append(
-        "attribution_run",
+    health.heartbeat(
+        journal, "attribution_run",
         pending=len(waiting),
         attributed=done,
         skipped_no_price=no_price,

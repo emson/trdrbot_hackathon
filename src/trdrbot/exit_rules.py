@@ -29,7 +29,7 @@ from dataclasses import dataclass
 from datetime import date
 from typing import Any
 
-from . import ids, learn, mcp_client
+from . import health, ids, learn, mcp_client
 from .analytics import Snapshot, _f, position_pnl_fraction
 from .calibration import CalibrationStore
 from .elfmem_adapter import ElfmemAdapter
@@ -328,8 +328,8 @@ async def run(
     # engine missing. An engine that evaluates and correctly holds must be
     # distinguishable from one that is not evaluating at all.
     if watched:
-        journal.append("exit_run", positions=watched, rules=rules_checked,
-                       triggered=len(triggered),
+        health.heartbeat(journal, "exit_run", positions=watched, rules=rules_checked,
+                         triggered=len(triggered),
                        # An unreadable rule is a commitment that can never be
                        # honoured, and an evaluation error is a position going
                        # unwatched. Both are silent otherwise.

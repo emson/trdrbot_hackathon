@@ -21,11 +21,12 @@ failure into a loud one.
 
 from __future__ import annotations
 
-import json
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+
+from . import store
 
 OK, WARN, BAD = "ok", "warn", "PROBLEM"
 
@@ -57,6 +58,16 @@ class Probe:
     #: a plausible steady state - never as a way to silence a probe that is
     #: genuinely dead.
     never_producing_is_ok: bool = False
+    #: The fields a row of this kind MUST carry, enforced at WRITE time by
+    #: `heartbeat()`. Only the `*_run` heartbeats declare it - output rows
+    #: (decision, execution, research, discovery) are wire formats this table
+    #: only reads.
+    #:
+    #: This closes the half of D-074/D-082 that kept coming back. Those probes
+    #: read journal fields BY NAME that five emitters wrote by hand, with
+    #: nothing tying the two together - and a probe reading a key nobody
+    #: writes reports a confident zero forever. It shipped twice.
+    heartbeat_fields: tuple[str, ...] = ()
     #: Distinct from the above, and NOT implied by it. Some subsystems fire
     #: once as a genuinely one-shot event (a triggered exit closes ITS
     #: position; nothing about that predicts the next 40 ticks), so staying
@@ -87,6 +98,7 @@ PROBES: tuple[Probe, ...] = (
         lambda rows: sum(int(r.get("attributed") or 0) for r in rows), 3,
         "the view-vs-structure loop is not turning - check skipped_no_price",
         work=lambda rows: sum(int(r.get("pending") or 0) for r in rows),
+        heartbeat_fields=("pending", "attributed", "skipped_no_price"),
     ),
     Probe(
         "research", ("research",),
@@ -111,6 +123,7 @@ PROBES: tuple[Probe, ...] = (
         "positions were watched and no rule ever fired - check that the "
         "thresholds are reachable against the net-cost base",
         work=lambda rows: sum(int(r.get("rules") or 0) for r in rows),
+        heartbeat_fields=("positions", "rules", "triggered"),
         never_producing_is_ok=True,
         stopping_after_output_is_ok=True,
     ),
@@ -145,7 +158,25 @@ PROBES: tuple[Probe, ...] = (
         "positions were eligible every cycle and none was ever scored - check "
         "the materiality bands against the units position_pnl_fraction returns",
         work=lambda rows: sum(int(r.get("eligible") or 0) for r in rows),
+        heartbeat_fields=("eligible", "scored"),
         never_producing_is_ok=True,
+    ),
+    # Learning is ADVISORY on the fast path (D-091 made it so, because an
+    # elfmem failure inside reconcile was disarming that tick's stop-losses) -
+    # and advisory means failures are survivable, not that they are acceptable.
+    # `produced` is events that actually completed, so "5 fills, 5 errors"
+    # reads as broken while "5 fills, 0 errors" reads as working. The row has
+    # existed since D-091 with nothing reading it, which is half of the very
+    # gap this work unit closes.
+    Probe(
+        "learning", ("learn_run",),
+        lambda rows: sum(int(r.get("fills") or 0) + int(r.get("resolutions") or 0)
+                         - int(r.get("errors") or 0) for r in rows), 2,
+        "fills and resolutions happened and every one of them failed to learn - "
+        "check the learn_error rows for the cause",
+        work=lambda rows: sum(int(r.get("fills") or 0) + int(r.get("resolutions") or 0)
+                              for r in rows),
+        heartbeat_fields=("fills", "resolutions", "errors"),
     ),
     # The improvement loop watching itself. `ran` is the heartbeat written
     # every pulse; `produced` is trials actually scored. The keys read here
@@ -169,29 +200,50 @@ PROBES: tuple[Probe, ...] = (
         "experiments are open but no trial is being scored - the muse is not "
         "running, or the challenger arm is not reaching record_trial",
         work=lambda rows: sum(int(r.get("experiments_open") or 0) for r in rows),
+        heartbeat_fields=("experiments_open", "trials_scored"),
         never_producing_is_ok=True,
     ),
 )
+
+def heartbeat(journal: Any, kind: str, **fields: Any) -> str:
+    """Emit a subsystem heartbeat THROUGH the module that reads it.
+
+    The probe table declares which fields each heartbeat must carry, and this
+    refuses a row that omits one - so "a probe reading a key nobody writes"
+    becomes a loud failure at the emitting call site, in the first test that
+    runs it, rather than a confident zero forever.
+
+    That drift has shipped twice. D-074: a scorer fired eight times, died, and
+    reported "ran 8x, produced 8" for two days. D-082: the exit probe read
+    trigger rows as evidence the engine had RUN, so an armed engine with a
+    populated debounce history reported "never ran". Both were read/write
+    disagreements that no test could catch, because the two halves were
+    written in different files by different hands.
+
+    Raises rather than degrades, deliberately. Every one of the five emitters
+    is exercised by the suite, so a violation cannot reach production green -
+    and a swallowed contract violation would be the original bug with extra
+    steps.
+
+    Extra fields are always fine; the contract is a floor, not a schema.
+    """
+    probe = next((p for p in PROBES if kind in p.ran_kinds and p.heartbeat_fields), None)
+    if probe is not None:
+        missing = [f for f in probe.heartbeat_fields if f not in fields]
+        if missing:
+            raise ValueError(
+                f"heartbeat {kind!r} is missing {missing} - probe {probe.name!r} reads "
+                f"{list(probe.heartbeat_fields)}, so those fields would read as zero "
+                f"forever. Add them at the emitting call site."
+            )
+    return str(journal.append(kind, **fields))
+
 
 #: A subsystem can produce for a while and then stop. Totals hide that
 #: perfectly - which is exactly how a dead interim scorer kept reporting
 #: "ran 8x, produced 8". Once this many runs have gone by since the last
 #: output, say so.
 STALE_AFTER_RUNS = 20
-
-
-def _rows(journal_path: Path) -> list[dict[str, Any]]:
-    if not journal_path.exists():
-        return []
-    out = []
-    for line in journal_path.read_text(encoding="utf-8").splitlines():
-        line = line.strip()
-        if line:
-            try:
-                out.append(json.loads(line))
-            except json.JSONDecodeError:
-                continue
-    return out
 
 
 def _runs_since_last_output(ran: list[dict[str, Any]], probe: Probe) -> int:
@@ -213,7 +265,7 @@ def _runs_since_last_output(ran: list[dict[str, Any]], probe: Probe) -> int:
 
 def check(journal_path: Path, positions: list[Any]) -> list[tuple[str, str, str]]:
     """Return (level, subject, detail). Pure - takes data, returns findings."""
-    rows = _rows(journal_path)
+    rows = store.read_jsonl(journal_path)[0]
     findings: list[tuple[str, str, str]] = []
 
     # --- 1. subsystems that run but never produce -----------------------

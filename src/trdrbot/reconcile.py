@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from . import learn
+from . import health, learn
 from .analytics import Snapshot
 from .calibration import CalibrationStore
 from .elfmem_adapter import ElfmemAdapter
@@ -121,9 +121,10 @@ async def reconcile(
     # visible - the failures are advisory now, which is exactly why they need
     # somewhere to be counted.
     if result["filled"] or result["phantom"]:
-        journal.append("learn_run",
-                       fills=len(result["filled"]), resolutions=len(result["phantom"]),
-                       errors=learn_errors)
+        health.heartbeat(journal, "learn_run",
+                         fills=len(result["filled"]),
+                         resolutions=len(result["phantom"]),
+                         errors=learn_errors)
 
     for symbol in held:
         if symbol not in claimed:
