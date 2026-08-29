@@ -506,7 +506,7 @@ async def run(
     concept_block = "\n\n".join(f"### {cid}\n{txt}" for cid, txt in concepts)
 
     news_block, odds_block = await evidence.gather(
-        tools, config, symbols=None, news_limit=30)
+        tools, config, symbols=None, news_limit=30, journal=journal)
     # Derived, not recalled (D-032's date discipline), and shared with every
     # other thesis source so the three cannot drift apart again.
     window = competence.forecast_window(config.deadline, ids.utc_now().date())

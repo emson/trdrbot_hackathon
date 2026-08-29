@@ -239,6 +239,31 @@ def heartbeat(journal: Any, kind: str, **fields: Any) -> str:
     return str(journal.append(kind, **fields))
 
 
+def degraded(journal: Any, subsystem: str, reason: str, **fields: Any) -> None:
+    """Record that a fail-open path was taken: the run continued on less.
+
+    Failing open is the right policy - advisory input must never take a tick
+    down (INV-8) - but it looks EXACTLY like working. That is not a theory:
+    the compactor shipped dead for its entire life because its unrecognised-
+    envelope branch printed a line and returned the original, and 28 option
+    chains went through uncompacted while every log read normal (D-074).
+
+    A print in an unattended run is a message to nobody. This leaves a row
+    that section 3.5 of `check` reads back, so the emitter and the reader are
+    the same module and cannot drift - the same reason `heartbeat` lives here.
+
+    Never raises and never blocks: instrumentation that can break the run it
+    instruments is worse than none.
+    """
+    print(f"[degraded] {subsystem}: {reason}")
+    if journal is None:
+        return
+    try:
+        journal.append("degraded", subsystem=subsystem, reason=reason, **fields)
+    except Exception as exc:  # noqa: BLE001 - see docstring
+        print(f"[degraded] could not journal {subsystem}: {exc!r}")
+
+
 #: A subsystem can produce for a while and then stop. Totals hide that
 #: perfectly - which is exactly how a dead interim scorer kept reporting
 #: "ran 8x, produced 8". Once this many runs have gone by since the last
@@ -317,10 +342,32 @@ def check(journal_path: Path, positions: list[Any]) -> list[tuple[str, str, str]
     causes: dict[str, int] = {}
     for r in rows:
         if r.get("kind") == "error":
-            causes[str(r.get("cause"))] = causes.get(str(r.get("cause")), 0) + 1
+            # Rows predating classification carry no cause; "unclassified" is
+            # what that is, and `error:None` is a Python repr leaking into a
+            # report a human is meant to read.
+            cause = str(r.get("cause") or "unclassified")
+            causes[cause] = causes.get(cause, 0) + 1
     for cause, n in causes.items():
         findings.append((WARN if n < 3 else BAD, f"error:{cause}",
                          f"{n} occurrences - a 'transient' seen repeatedly is permanent"))
+
+    # --- 3.5 fail-open paths that were actually taken --------------------
+    #
+    # An error row means something stopped. A degraded row means something
+    # CONTINUED, on worse input, which is the harder failure to see: the tick
+    # succeeded, the position opened, and the agent reasoned over bare
+    # headlines or an uncompacted chain. Same escalation as the errors above,
+    # because a fail-open path taken once is weather and taken repeatedly is
+    # a subsystem that is quietly no longer running.
+    degradations: dict[tuple[str, str], int] = {}
+    for r in rows:
+        if r.get("kind") == "degraded":
+            key = (str(r.get("subsystem")), str(r.get("reason")))
+            degradations[key] = degradations.get(key, 0) + 1
+    for (subsystem, reason), n in sorted(degradations.items(), key=lambda kv: -kv[1]):
+        findings.append((WARN if n < 3 else BAD, f"degraded:{subsystem}",
+                         f"{n}x fell back - {reason} - the run continued on "
+                         "reduced input, which reads as success everywhere else"))
 
     # --- 4. absence that quietly loosens a constraint --------------------
     from .exit_rules import watched_signals

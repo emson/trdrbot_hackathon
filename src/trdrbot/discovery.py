@@ -185,7 +185,7 @@ async def run(
 
     # ---- broad sweep: market-wide news (no symbol filter) + odds ----
     news_block, odds_block = await evidence.gather(
-        tools, config, symbols=None, news_limit=40)
+        tools, config, symbols=None, news_limit=40, journal=journal)
     # ---- LLM call 1: nominate from evidence ----
     text = text_of(await model.ainvoke(NOMINATE_PROMPT.format(
         deadline=deadline, exclude=", ".join(exclude),

@@ -38,6 +38,7 @@ from . import (
     competence,
     exit_rules,
     failures,
+    health,
     housekeeping,
     idle,
     ids,
@@ -267,8 +268,26 @@ async def run_tick(
                                force_decide=force_decide)
 
 
+def _usage_went_dark(model_served: list[str], llm_turns: int) -> bool:
+    """A cycle that certainly called an LLM but whose ledger recorded nothing.
+
+    `model_served` is read back FROM the usage ledger, so a failed ledger write
+    yields an empty list on the execution row - which is D-070's
+    mis-attribution returning through the back door, plus a Coach cost sentinel
+    reading low because the calls it prices are not there.
+
+    Detected at the consumer rather than at the write: the usage callback runs
+    sync-in-a-thread inside the agent loop and must not grow IO.
+
+    Deliberately quiet when `llm_turns` is 0. That means the message shapes
+    changed and the count is no longer evidence of anything - and a detector
+    that cries wolf gets ignored, which costs more than the miss.
+    """
+    return llm_turns > 0 and not model_served
+
+
 def _guarded_mcp_tools(tools_list: list[Any], config: Config, batch: str,
-                       store: PositionStore) -> list[Any]:
+                       store: PositionStore, journal: Any = None) -> list[Any]:
     """The MCP tools the decide agent may call, wrapped in the four guards.
 
     One coherent step, and the only part of the tool assembly that is one -
@@ -286,7 +305,7 @@ def _guarded_mcp_tools(tools_list: list[Any], config: Config, batch: str,
     """
     allow = set(config.decide_tools)
     tools = [t for t in tools_list if not allow or t.name in allow]
-    tools = compact.wrap_heavy_tools(tools, config)
+    tools = compact.wrap_heavy_tools(tools, config, journal)
     tools = tool_guard.enforce_order_ids(tools, batch)
     return tool_guard.redirect_whole_book_close(
         tools, lambda: len([p for p in store.open_positions() if p.status == "open"])
@@ -296,6 +315,7 @@ def _guarded_mcp_tools(tools_list: list[Any], config: Config, batch: str,
 async def _build_decide_prompt(
     *, snap: analytics.Snapshot, store: PositionStore, wiki: Wiki, config: Config,
     posture: Any, cal_now: Any, ctx: Any, items: list[Item], prior: Any, n: int,
+    journal: Any = None,
 ) -> str:
     """Everything the decide agent reads, assembled in priority order.
 
@@ -364,7 +384,7 @@ async def _build_decide_prompt(
     if news_items:
         try:
             payloads = [dict(i.payload, id=i.payload.get("id") or i.id) for i in news_items]
-            extracts = await news_extract.enrich(payloads, config)
+            extracts = await news_extract.enrich(payloads, config, journal)
             obs_lines.append(news_extract.render_block(extracts))
         except Exception as exc:  # noqa: BLE001 - fail open to the raw payloads
             print(f"[tick {n}] news enrichment failed, using raw payloads: {exc!r}")
@@ -552,7 +572,7 @@ async def _run_tick(
         # ~21k tokens per call and the agent has ever used 17; (2) compact
         # heavy results at the boundary so a 61k-char option chain enters
         # context as a ~4k table instead of being re-sent in full every turn.
-        guarded = _guarded_mcp_tools(tools_list, config, batch, store)
+        guarded = _guarded_mcp_tools(tools_list, config, batch, store, journal)
 
         open_pos = store.open_positions()
         query = _attention_query(items, open_pos, config)
@@ -633,6 +653,7 @@ async def _run_tick(
         prompt = await _build_decide_prompt(
             snap=snap, store=store, wiki=wiki, config=config, posture=posture,
             cal_now=cal_now, ctx=ctx, items=items, prior=prior, n=n,
+            journal=journal,
         )
 
         # Marks the start of THIS cycle's LLM calls, so the served model can be
@@ -685,17 +706,20 @@ async def _run_tick(
         orders = [tc for tc in calls if tc.get("name") in mcp_client.ORDER_TOOLS]
         recorded = [tc for tc in calls if tc.get("name") == "record_position"]
 
+        # `model` is the configured INTENT (chain head); `served` is what
+        # actually answered. They differ whenever the fallback fires, and
+        # recording only the former made the journal confidently wrong about
+        # who made 19 decisions (D-070).
+        served = usage.UsageLedger(
+            config.paths.state / "usage.jsonl").served_since("decide", decide_started_at)
+        llm_turns = sum(1 for m in messages if getattr(m, "type", "") == "ai")
+
         journal.append(
             "execution" if orders else "no_op",
             batch=batch,
             decision_ref=decision_id,
-            # `model` is the configured INTENT (chain head); `model_served` is
-            # what actually answered. They differ whenever the fallback fires,
-            # and recording only the former made the journal confidently wrong
-            # about who made 19 decisions (D-070).
             model=config.model,
-            model_served=usage.UsageLedger(
-                config.paths.state / "usage.jsonl").served_since("decide", decide_started_at),
+            model_served=served,
             tick=n,
             client_order_id=ids.client_order_id(batch) if orders else None,
             tool_calls=[tc.get("name") for tc in calls],
@@ -708,6 +732,10 @@ async def _run_tick(
             positions_recorded=len(recorded),
             summary=summary_text[:2000],
         )
+        if _usage_went_dark(served, llm_turns):
+            health.degraded(journal, "usage", "no calls recorded for this cycle",
+                            llm_turns=llm_turns, since=decide_started_at,
+                            decision_ref=decision_id)
 
         inbox.archive(items)
 

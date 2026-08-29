@@ -199,7 +199,7 @@ async def run(
 
     # ---- gather news + odds ----
     news_block, odds_block = await evidence.gather(
-        tools, config, symbols=universe, news_limit=25)
+        tools, config, symbols=universe, news_limit=25, journal=journal)
     prior = wiki.read("context/regime")
     prior_text = prior.body[:1500] if prior else "(none yet)"
 

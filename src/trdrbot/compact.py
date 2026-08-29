@@ -252,8 +252,27 @@ def _unpack(result: Any) -> tuple[Any, Any] | None:
     return None
 
 
-def wrap_heavy_tools(tools: list[Any], config: Any = None) -> list[Any]:
-    """Attach result compaction to the tools that need it. Interface unchanged."""
+def wrap_heavy_tools(tools: list[Any], config: Any = None,
+                     journal: Any = None) -> list[Any]:
+    """Attach result compaction to the tools that need it. Interface unchanged.
+
+    `journal` is optional so every existing caller and test keeps working; when
+    given, each fail-open branch leaves a `degraded` row instead of only a
+    print. Once per (tool, reason) per wrap - a chain fetched five times in one
+    tick is one row, not five, because the interesting fact is "this tool is
+    passing through uncompacted", not how often the agent asked.
+    """
+    from .health import degraded
+
+    seen: set[tuple[str, str]] = set()
+
+    def fell_open(name: str, reason: str, detail: str = "") -> None:
+        if (name, reason) in seen:
+            print(f"[compact] {name}: {reason}, passing original through")
+            return
+        seen.add((name, reason))
+        degraded(journal, "compact", reason, tool=name, detail=detail[:200])
+
     for t in tools:
         fn = COMPACTORS.get(getattr(t, "name", ""))
         if fn is None:
@@ -261,27 +280,26 @@ def wrap_heavy_tools(tools: list[Any], config: Any = None) -> list[Any]:
         original = t.coroutine
 
         async def _compacted(*args: Any, __orig=original, __fn=fn, __name=t.name,
-                              __config=config, **kw: Any) -> Any:
+                              __config=config, __fell=fell_open, **kw: Any) -> Any:
             result = await __orig(*args, **kw)
             try:
                 unpacked = _unpack(result)
                 if unpacked is None:
                     # Genuinely unrecognised envelope. Loud, because the silent
                     # version of this line cost us 28 uncompacted chains.
-                    print(f"[compact] {__name}: unrecognised result envelope "
-                          f"({type(result).__name__}), passing original through")
+                    __fell(__name, "unrecognised result envelope",
+                           type(result).__name__)
                     return result
                 payload, rewrap = unpacked
                 before = len(json.dumps(payload, default=str))
                 out = __fn(payload, __config)
                 if not isinstance(out, str):
-                    print(f"[compact] {__name}: compactor declined this payload, "
-                          f"passing original through")
+                    __fell(__name, "compactor declined this payload")
                     return result
                 print(f"[compact] {__name}: {before:,} -> {len(out):,} chars")
                 return rewrap(out)
             except Exception as exc:  # noqa: BLE001 - fail open, loudly
-                print(f"[compact] {__name} compaction failed, passing original through: {exc!r}")
+                __fell(__name, "compaction raised", repr(exc))
                 return result
 
         t.coroutine = _compacted

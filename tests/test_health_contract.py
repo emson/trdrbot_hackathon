@@ -114,3 +114,142 @@ async def test_a_discovery_run_that_nominates_nothing_still_says_so(paths, monke
     assert out["nominees"] == 0
     rows = [r for r in journal.read() if r.get("kind") == "discovery"]
     assert len(rows) == 1 and rows[0]["opportunities"] == 0
+
+
+# --- the other door: fail-open paths that were taken ----------------------
+
+
+def _check(tmp_path, rows):
+    """`check` is pure over a journal file, so a test is rows in, findings out."""
+    import json
+
+    path = tmp_path / "j.jsonl"
+    path.write_text("".join(json.dumps(r) + "\n" for r in rows), encoding="utf-8")
+    return health.check(path, [])
+
+
+def test_a_fail_open_path_leaves_a_row_the_detector_reads_back(tmp_path):
+    """Failing open is right and looks exactly like working. The compactor
+    shipped dead for its whole life on that resemblance (D-074)."""
+    journal = Journal(tmp_path / "journal.jsonl")
+
+    health.degraded(journal, "compact", "unrecognised result envelope",
+                    tool="get_option_chain", detail="str")
+
+    row = list(journal.read())[-1]
+    assert row["kind"] == "degraded"
+    assert row["subsystem"] == "compact" and row["tool"] == "get_option_chain"
+
+
+def test_the_degraded_door_never_takes_down_the_run_it_instruments():
+    """Instrumentation that can break the path it watches is worse than none -
+    the opposite policy to `heartbeat`, which raises deliberately because a
+    heartbeat is emitted on the happy path where a test will catch it."""
+
+    class Broken:
+        def append(self, *a, **k):
+            raise OSError("disk full")
+
+    health.degraded(Broken(), "compact", "compaction raised")  # must not raise
+    health.degraded(None, "compact", "compaction raised")  # journal-less caller
+
+
+@pytest.mark.parametrize(("n", "expected"), [(1, health.WARN), (3, health.BAD)])
+def test_a_repeated_degradation_escalates_from_warning_to_problem(tmp_path, n, expected):
+    """Once is weather. Three times is a subsystem quietly no longer running -
+    the same escalation the error-cause section makes, for the same reason."""
+    rows = [{"kind": "degraded", "subsystem": "news_extract",
+             "reason": "batch of 12 failed, falling back to headlines"}] * n
+
+    hit = [f for f in _check(tmp_path, rows) if f[1] == "degraded:news_extract"]
+
+    assert hit, f"a fail-open path taken {n}x is invisible in health"
+    assert hit[0][0] == expected
+    assert "reduced input" in hit[0][2]
+
+
+def test_two_subsystems_degrading_are_two_findings_not_one(tmp_path):
+    """Grouped by (subsystem, reason), because "something fell back 6 times" is
+    not actionable and "the compactor is passing chains through" is."""
+    rows = [{"kind": "degraded", "subsystem": "compact", "reason": "compaction raised"},
+            {"kind": "degraded", "subsystem": "usage",
+             "reason": "no calls recorded for this cycle"}]
+
+    subjects = {f[1] for f in _check(tmp_path, rows)}
+
+    assert {"degraded:compact", "degraded:usage"} <= subjects
+
+
+def test_a_clean_run_reports_no_degradation(tmp_path):
+    assert not [f for f in _check(tmp_path, [{"kind": "no_op", "tick": 1}])
+                if f[1].startswith("degraded:")]
+
+
+# --- the three emitters ----------------------------------------------------
+
+
+def test_the_compactor_journals_a_pass_through_once_per_tool_per_tick(tmp_path):
+    """D-074's actual failure: 28 chains went through uncompacted while every
+    log line read normal. One row per (tool, reason) per wrap, because the
+    interesting fact is "this tool is passing through", not how many times the
+    agent happened to ask for it."""
+    import asyncio
+
+    from trdrbot import compact
+
+    class T:
+        name = "get_option_chain"
+
+        async def coroutine(self, **kw):
+            return "not an envelope at all"
+
+    journal = Journal(tmp_path / "journal.jsonl")
+    tool = compact.wrap_heavy_tools([T()], None, journal)[0]
+
+    for _ in range(3):
+        assert asyncio.run(tool.coroutine()) == "not an envelope at all", "must fail OPEN"
+
+    rows = [r for r in journal.read() if r.get("kind") == "degraded"]
+    assert len(rows) == 1, f"three calls, one row - got {len(rows)}"
+    assert rows[0]["subsystem"] == "compact" and rows[0]["tool"] == "get_option_chain"
+
+
+def test_a_news_batch_falling_back_to_headlines_says_how_many(tmp_path, monkeypatch):
+    """The articles all survive as bare headlines, so every caller sees a full
+    list and nothing downstream can tell the structure is missing."""
+    import asyncio
+    from types import SimpleNamespace
+
+    from trdrbot import news_extract
+
+    def _boom(*a, **k):
+        raise RuntimeError("provider down")
+
+    monkeypatch.setattr(news_extract, "build_model", _boom)
+    journal = Journal(tmp_path / "journal.jsonl")
+    cfg = SimpleNamespace(paths=SimpleNamespace(state=tmp_path))
+    items = [{"id": i, "headline": f"h{i}", "summary": "s"} for i in range(4)]
+
+    out = asyncio.run(news_extract.enrich(items, cfg, journal))
+
+    assert len(out) == 4, "fail open: never lose the articles"
+    row = [r for r in journal.read() if r.get("kind") == "degraded"][-1]
+    assert row["subsystem"] == "news_extract" and row["articles"] == 4
+
+
+def test_a_cycle_that_called_an_llm_but_recorded_no_usage_is_degraded():
+    """A failed usage-ledger write yields an empty `model_served` on the
+    execution row - D-070's mis-attribution back through the front door, and a
+    Coach cost sentinel reading low because the calls are not there.
+
+    Detected at the consumer: the usage callback runs sync-in-a-thread inside
+    the agent loop and must not grow IO. Wiring is covered by review, not by a
+    test - the seam would need a whole tick to exercise three lines.
+    """
+    from trdrbot.tick import _usage_went_dark
+
+    assert _usage_went_dark([], llm_turns=3) is True
+    assert _usage_went_dark(["claude-fable-5"], llm_turns=3) is False
+    # Quiet when the count is not evidence: a detector that cries wolf gets
+    # ignored, which costs more than the miss.
+    assert _usage_went_dark([], llm_turns=0) is False

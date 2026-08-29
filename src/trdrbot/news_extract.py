@@ -262,7 +262,8 @@ def _coerce(raw: Any, item: dict[str, Any], model_name: str) -> Extract:
     )
 
 
-async def enrich(items: list[dict[str, Any]], config: Config) -> list[Extract]:
+async def enrich(items: list[dict[str, Any]], config: Config,
+                 journal: Any = None) -> list[Extract]:
     """Cached-or-extracted structured records for these raw Alpaca news items.
 
     One LLM call covers every uncached article (capped at MAX_BATCH - beyond
@@ -302,7 +303,13 @@ async def enrich(items: list[dict[str, Any]], config: Config) -> list[Extract]:
         served = (getattr(reply, "response_metadata", None) or {}).get("model_name", "news_extract")
         by_id = {str(r.get("id")): r for r in parse_json_array(text) if isinstance(r, dict)}
     except Exception as exc:  # noqa: BLE001 - fail open: bare extracts, never lose the articles
-        print(f"[news_extract] batch of {len(to_call)} failed, falling back to headlines: {exc!r}")
+        # The articles survive as bare headlines, so every caller sees a full
+        # list and nothing downstream can tell that the structure - claim type,
+        # regime, horizon, entities - is missing from all of them.
+        from .health import degraded
+        degraded(journal, "news_extract",
+                 f"batch of {len(to_call)} failed, falling back to headlines",
+                 articles=len(to_call), error=repr(exc)[:200])
         by_id, served = {}, ""
 
     fresh = [_coerce(by_id.get(str(it.get("id"))), it, served) for it in to_call]

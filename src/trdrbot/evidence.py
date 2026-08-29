@@ -26,7 +26,7 @@ ODDS_PER_QUERY = 2
 
 async def gather(
     tools: dict[str, Any], config: Config, *,
-    symbols: list[str] | None = None, news_limit: int = 30,
+    symbols: list[str] | None = None, news_limit: int = 30, journal: Any = None,
 ) -> tuple[str, str]:
     """(news_block, odds_block), ready for a prompt.
 
@@ -34,21 +34,30 @@ async def gather(
     muse want the broad tape, which is the point of them).
     """
     return (
-        await _news_block(tools, config, symbols=symbols, limit=news_limit),
+        await _news_block(tools, config, symbols=symbols, limit=news_limit,
+                          journal=journal),
         await _odds_block(config),
     )
 
 
 async def _news_block(tools: dict[str, Any], config: Config, *,
-                      symbols: list[str] | None, limit: int) -> str:
+                      symbols: list[str] | None, limit: int,
+                      journal: Any = None) -> str:
     kwargs: dict[str, Any] = {"limit": limit, "exclude_contentless": True, "sort": "desc"}
     if symbols:
         kwargs["symbols"] = ",".join(symbols)
     try:
         r = await mcp_client.call(tools, "get_news", **kwargs)
         items = (r.get("news") or []) if isinstance(r, dict) else []
-        return news_extract.render_block(await news_extract.enrich(items, config))
+        return news_extract.render_block(
+            await news_extract.enrich(items, config, journal))
     except Exception as exc:  # noqa: BLE001 - advisory input, never fatal (INV-8)
+        # A thesis source that reasons with NO news reads identically to one
+        # reasoning with news that happened to be quiet, so the substitution
+        # is recorded rather than only substituted.
+        from .health import degraded
+        degraded(journal, "evidence", f"news unavailable ({type(exc).__name__})",
+                 error=repr(exc)[:200])
         return f"(news unavailable: {type(exc).__name__})"
 
 
