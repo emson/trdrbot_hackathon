@@ -82,13 +82,24 @@ class Leg:
 
 
 def require_single_expiry(legs: Iterable[Leg]) -> None:
-    """Guard every payoff computation. Raises MultiExpiryError on a calendar."""
+    """Guard every payoff computation. Raises MultiExpiryError on a calendar.
+
+    A PARTIALLY dated set raises too. It used to be read as "assume shared",
+    which is the assumption this guard exists to refuse: the legs that do
+    carry a date are the evidence, and one of them differing is exactly the
+    case worth catching. All-blank is still allowed - that is the legitimate
+    shape of the `simulate_experiments` path, whose leg schema has no expiry
+    field and prices one horizon for the whole call.
+    """
+    legs = list(legs)
     expiries = {l.expiry for l in legs if l.expiry}
-    if len(expiries) > 1:
+    dated = sum(1 for l in legs if l.expiry)
+    if len(expiries) > 1 or (expiries and dated != len(legs)):
         raise MultiExpiryError(
-            f"legs span {len(expiries)} expiries ({sorted(expiries)}). Payoff-at-expiry "
-            f"maths assumes one shared expiry; a calendar/diagonal needs the far leg "
-            f"priced at the near expiry, which this module deliberately does not model."
+            f"legs span {len(expiries)} expiries ({sorted(expiries)}) across {len(legs)} "
+            f"legs, {dated} of them dated. Payoff-at-expiry maths assumes one shared "
+            f"expiry; a calendar/diagonal needs the far leg priced at the near expiry, "
+            f"which this module deliberately does not model."
         )
 
 

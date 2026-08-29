@@ -231,6 +231,19 @@ def book_greeks(positions: list[Any], underlying_prices: dict[str, float],
         if not legs:
             skipped += 1
             continue
+        # A calendar priced at legs[0]'s expiry comes out RISKLESS - measured
+        # on a real one (long 09-04 / short 10-16, same strike): delta, theta,
+        # vega and gamma all exactly 0.0, against an honest -$31.83/day of
+        # theta and -$71.97 per vol point. Zero is the worst possible wrong
+        # answer here, because it reads as "this position adds nothing to the
+        # book". Unpriceable is the truthful answer, and `positions_skipped`
+        # already reports it. The guard existed and was only ever called on a
+        # path the model cannot reach.
+        try:
+            optmath.require_single_expiry(legs)
+        except optmath.MultiExpiryError:
+            skipped += 1
+            continue
         days = None
         try:
             days = ( _date.fromisoformat(legs[0].expiry) - _date.today()).days

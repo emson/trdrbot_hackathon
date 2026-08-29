@@ -141,3 +141,52 @@ async def test_a_symbol_less_broker_row_does_not_kill_the_fast_path(paths, make_
                                        Wiki(paths.wiki), None)
 
     assert result["phantom"] == [], "the junk rows hid the legs that were really there"
+
+
+# ------------------------------------------------------------ book greeks
+
+
+def test_a_calendar_position_is_skipped_rather_than_priced_as_riskless(paths, make_position):
+    """`book_greeks` priced every leg at legs[0]'s days-to-expiry, so a
+    calendar came out with delta, theta, vega and gamma all exactly 0.0 -
+    against an honest -$31.83/day of theta and -$71.97 per vol point on a real
+    one. Zero is the worst possible wrong answer: it reads as "this position
+    adds nothing to the book", which is the one thing a calendar is not.
+
+    `require_single_expiry` existed the whole time and was only ever called on
+    the simulate path, which cannot even receive a per-leg expiry.
+    """
+    from trdrbot.analytics import book_greeks
+
+    vertical = make_position(position_id="pos_vertical")
+    calendar = make_position(position_id="pos_calendar", legs=[
+        {"symbol": "SPY260904C00770000", "side": "buy", "qty": 1},
+        {"symbol": "SPY261016C00770000", "side": "sell", "qty": 1},
+    ])
+
+    both = book_greeks([vertical, calendar], {"SPY": 770.0}, state_dir=paths.state,
+                       equity=100_000.0)
+    just_vertical = book_greeks([vertical], {"SPY": 770.0}, state_dir=paths.state,
+                                equity=100_000.0)
+
+    assert both["positions_skipped"] == 1, "the calendar was priced anyway"
+    assert both["positions_priced"] == 1
+    assert both["theta_dollars"] == just_vertical["theta_dollars"], \
+        "the calendar contributed to the book total"
+
+
+def test_a_partially_dated_leg_set_is_refused_not_assumed_shared():
+    """The guard read a blank expiry as "assume shared", which is precisely the
+    assumption it exists to refuse: the legs that DO carry a date are the
+    evidence, and one of them differing is the case worth catching."""
+    import pytest
+
+    from trdrbot import optmath
+
+    dated = optmath.Leg(right="C", strike=100.0, side="long", qty=1, price=1.0,
+                        expiry="2026-09-04")
+    blank = optmath.Leg(right="C", strike=105.0, side="short", qty=1, price=0.5)
+
+    optmath.require_single_expiry([blank, blank])  # the simulate path: legitimate
+    with pytest.raises(optmath.MultiExpiryError):
+        optmath.require_single_expiry([dated, blank])
