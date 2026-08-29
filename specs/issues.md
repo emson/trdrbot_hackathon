@@ -8,6 +8,27 @@ Sorted by severity.
 ## Open
 
 
+- **I-29 · The bootstrap base rate is overconfident by 15-18pp where credit spreads live**
+  ([notes/017](notes/017_learning_from_historic_data.md)). Measured offline over **21,280
+  historical band-forecasts** (56 tickers, horizons 3/5/10, 5 band shapes, history sliced before
+  every estimate so lookahead is structurally impossible). In the 0.7-0.9 predicted band the
+  bootstrap says 0.753 and reality delivers 0.572; it says 0.851 and reality delivers 0.700. The
+  gap grows with horizon (3d +0.020, 5d +0.033, 10d +0.041) and is shape-dependent: symmetric
+  bands are overstated ~12pp while BOTH one-sided bands are understated, so the modelled
+  distribution is too narrow at both tails. **This is not decoration** - `claimed_edge = stated -
+  base`, so an overstated base understates the agent's edge on every high-base-rate band (a
+  measured contributor to D-076's stacked conservatism), `BASE_PROB_CEIL = 0.90` rejects "vacuous"
+  bands using an optimistic number, and range structures are flattered by ~12pp, which is the
+  classic way to be carried out selling premium. **Two candidate fixes tested and REJECTED, both
+  recorded so nobody re-tries them blind:** a block bootstrap preserving volatility clustering
+  made it worse (Brier 0.2223 -> 0.2273 - at a 3-7 draw horizon a 5-day block collapses path
+  diversity), and feeding trailing realized drift narrows the gaps but worsens Brier (0.2225 ->
+  0.2255) because trailing drift is noisy. **Root cause NOT established; recorded without one.**
+  `bootstrap_factors`' own docstring already declared the limitation ("IID resampling destroys
+  autocorrelation and volatility clustering... still not truth") - the contribution here is the
+  magnitude. **Action due:** decide whether to shrink the base rate toward 0.5 in the high region,
+  widen the estimator, or (cheapest, and consistent with D-009) simply REPORT the measured
+  reliability alongside the base rate so the agent sees that its 75% is historically a 57%.
 - **I-27 · The Coach's gate reward is ASYMMETRIC, measured over 9 real paired runs** (D-088).
   Opened as "the reward may have a ceiling" after one 5/5-vs-5/5 trial; now measured properly and
   the answer is more useful than the worry. Over 9 live paired runs the incumbent scored **40/45
