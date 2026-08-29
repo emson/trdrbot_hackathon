@@ -197,9 +197,9 @@ code{font-family:ui-monospace,monospace;font-size:.85em}
             f'<td class="{cls}">{html.escape(flag)}</td></tr>')
     add("</table></div>")
     add('<p class="sub">Variants live in <code>data/state/levers/*.json</code>. '
-        'Set <code>"paused": true</code> to stop experimenting on a lever, or '
-        '<code>"pinned": true</code> to additionally stop the outcome audit '
-        're-matching it - one pin is how you freeze behaviour for a demo. '
+        'Set <code>"paused": true</code> to stop experimenting on a lever - it '
+        'closes any open experiment and freezes the incumbent, which is how you '
+        'hold behaviour still for a demo. '
         'Editing the incumbent text by hand is supported; the fingerprint is '
         'recomputed from the text on load. Nothing here can reach code, gate '
         'thresholds, sizing, or the constitution.</p>')

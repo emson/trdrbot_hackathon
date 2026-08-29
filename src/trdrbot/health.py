@@ -186,7 +186,7 @@ PROBES: tuple[Probe, ...] = (
     # key sets together.
     #
     # `never_producing_is_ok`: no open experiment is a legitimate steady state
-    # (nothing to trial yet, a sentinel is blocking, or a human pinned the
+    # (nothing to trial yet, a sentinel is blocking, or a human paused the
     # lever), and `work` reports open experiments so "0 trials, 0 experiments"
     # reads as idle rather than broken.
     #

@@ -143,12 +143,18 @@ def record_trial(cfg: Any, exp_id: str, *, run_nonce: int,
                  incumbent: dict[str, Any], challenger: dict[str, Any]) -> None:
     """Append one paired result. Never raises."""
     try:
-        t = tally(cfg, exp_id)
-        post = t.posterior if t else 0.5
+        # Fold THIS trial in before recording. The row decorates the trial it
+        # belongs to, so a posterior read off the tally BEFORE the append
+        # describes the state one trial ago (D-093). Rows written before that
+        # fix are one trial stale; the tally itself was always correct, because
+        # it replays the log rather than trusting the recorded number.
+        t = tally(cfg, exp_id) or Tally(exp_id=exp_id, lever="", incumbent="",
+                                        challenger="")
+        t.add(incumbent, challenger)
         _append(events_path(cfg), {
             "kind": "trial_result", "exp_id": exp_id, "run_nonce": run_nonce,
             "incumbent": incumbent, "challenger": challenger,
-            "posterior_p_challenger_better": round(post, 4),
+            "posterior_p_challenger_better": round(t.posterior, 4),
         })
     except Exception as exc:  # noqa: BLE001
         print(f"[coach] could not record trial: {exc!r}")
@@ -298,7 +304,7 @@ async def pulse(cfg: Any, journal: Any, *, seed_override: dict[str, str] | None 
                     _close(cfg, st, "operator_override",
                            "lever state no longer matches the open experiment", journal)
                     open_exp = False
-                elif (st.paused or st.pinned):
+                elif st.paused:
                     _close(cfg, st, "operator_override", st.blocked, journal)
                     open_exp = False
 
@@ -324,6 +330,12 @@ async def pulse(cfg: Any, journal: Any, *, seed_override: dict[str, str] | None 
                     if verbose:
                         print(f"[coach] not opening on {lv.name}: {clash}")
                 elif _minutes_since(st.last_mutation_at) >= MUTATE_COOLDOWN_MIN:
+                    # The timestamp is saved BEFORE the attempt, so a mutation
+                    # that fails validation three times burns the cooldown.
+                    # Deliberate: the failures are LLM calls that already cost
+                    # money, and a lever whose challengers keep failing would
+                    # otherwise retry every pulse forever. A wasted cooldown is
+                    # three hours; an unbounded retry loop is the bill.
                     st.last_mutation_at = ids.utc_now().isoformat()
                     save_state(cfg, st)
                     ch = await mutate(cfg, st, rows, journal)

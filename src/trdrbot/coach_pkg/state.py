@@ -168,7 +168,7 @@ class Variant:
     text: str
     fingerprint: str = ""
     since: str = ""
-    origin: str = "seed"  # seed | mutation | human | audit_rematch
+    origin: str = "seed"  # seed | mutation | human
 
     def __post_init__(self) -> None:
         # Recompute rather than trust: a human editing the state file by hand
@@ -193,7 +193,6 @@ class LeverState:
     challenger: Variant | None = None
     exp_id: str | None = None
     paused: bool = False
-    pinned: bool = False
     sentinel_block: dict[str, Any] | None = None
     next_variant_n: int = 1
     last_mutation_at: str = ""
@@ -203,8 +202,6 @@ class LeverState:
         """Why no new experiment may open. Empty string when clear."""
         if self.paused:
             return "paused by operator"
-        if self.pinned:
-            return "pinned by operator"
         if self.sentinel_block:
             return f"sentinel: {self.sentinel_block.get('name')}"
         return ""
@@ -247,7 +244,6 @@ def load_state(cfg: Any, lever_name: str, seed_text: str) -> LeverState:
             challenger=_variant(raw.get("challenger")),
             exp_id=raw.get("exp_id") or None,
             paused=bool(raw.get("paused")),
-            pinned=bool(raw.get("pinned")),
             sentinel_block=raw.get("sentinel_block") or None,
             next_variant_n=int(raw.get("next_variant_n") or 1),
             last_mutation_at=str(raw.get("last_mutation_at") or ""),
@@ -266,7 +262,6 @@ def save_state(cfg: Any, st: LeverState) -> None:
     body = {
         "lever": st.lever,
         "paused": st.paused,
-        "pinned": st.pinned,
         "incumbent": asdict(st.incumbent),
         "previous": asdict(st.previous) if st.previous else None,
         "challenger": asdict(st.challenger) if st.challenger else None,

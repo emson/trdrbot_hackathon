@@ -217,7 +217,8 @@ What makes that safe is that autonomy is bounded **by construction**, not by ask
 
 **Steering, not gating.** Read `trdrbot report` for the trajectory with the Coach's own actions
 overlaid. To intervene, edit the lever's state file: `"paused": true` stops experimentation,
-`"pinned": true` also stops the audit re-matching it — one pin freezes behaviour for a demo.
+which closes any open experiment and freezes the incumbent — that is how you hold behaviour
+still for a demo.
 Editing the incumbent prompt by hand is supported; the fingerprint is recomputed from the text.
 
 ## How a thesis is formed

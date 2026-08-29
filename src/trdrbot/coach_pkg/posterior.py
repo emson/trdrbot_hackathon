@@ -92,6 +92,25 @@ class Tally:
     def posterior(self) -> float:
         return p_challenger_better(self.s_c, self.f_c, self.s_i, self.f_i)
 
+    def add(self, inc: dict[str, Any], ch: dict[str, Any]) -> None:
+        """Fold one paired result in.
+
+        Used by the replay below AND by `record_trial`, so the posterior a row
+        RECORDS is computed by the same arithmetic that later reads it back.
+        It was not: `record_trial` tallied before appending the row it
+        decorates, so every `trial_result` carried the posterior of the
+        previous state and the first row of every experiment read exactly 0.5
+        no matter what it had just measured (D-093).
+        """
+        if ch.get("voided"):
+            self.voided += 1
+            return
+        self.runs += 1
+        self.s_i += int(inc.get("survived") or 0)
+        self.f_i += int(inc.get("failed") or 0)
+        self.s_c += int(ch.get("survived") or 0)
+        self.f_c += int(ch.get("failed") or 0)
+
 
 def tally(cfg: Any, exp_id: str) -> Tally | None:
     """Replay the event log for one experiment. The log is truth; lever state
@@ -122,15 +141,7 @@ def tally(cfg: Any, exp_id: str) -> Tally | None:
             t.voided += 1
             continue
         seen_nonces.add(nonce)
-        inc, ch = r.get("incumbent") or {}, r.get("challenger") or {}
-        if ch.get("voided"):
-            t.voided += 1
-            continue
-        t.runs += 1
-        t.s_i += int(inc.get("survived") or 0)
-        t.f_i += int(inc.get("failed") or 0)
-        t.s_c += int(ch.get("survived") or 0)
-        t.f_c += int(ch.get("failed") or 0)
+        t.add(r.get("incumbent") or {}, r.get("challenger") or {})
     return t
 
 

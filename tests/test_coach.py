@@ -665,6 +665,44 @@ def test_a_duplicate_run_nonce_is_counted_once(tmp_path):
     assert t.voided == 1, "the duplicate should be visible, not silently dropped"
 
 
+def test_the_recorded_posterior_includes_its_own_trial(tmp_path):
+    """The row decorates the trial it belongs to. Tallying before appending
+    made every `trial_result` carry the posterior of the PREVIOUS state, so
+    the first row of every experiment read exactly 0.5 no matter what it had
+    just measured - a number that looks like a real reading (D-093)."""
+    cfg = _cfg(tmp_path)
+    coach._append(coach.events_path(cfg), {
+        "kind": "experiment_opened", "exp_id": "exp_1", "lever": "muse.prompt",
+        "incumbent": "v0", "challenger": "v1"})
+
+    coach.record_trial(cfg, "exp_1", run_nonce=1,
+                       incumbent={"survived": 1, "failed": 4},
+                       challenger={"survived": 4, "failed": 1})
+
+    row = [r for r in coach.events(cfg) if r.get("kind") == "trial_result"][-1]
+    expected = coach.p_challenger_better(4, 1, 1, 4)
+    assert row["posterior_p_challenger_better"] == pytest.approx(round(expected, 4))
+    assert row["posterior_p_challenger_better"] > 0.5, "a decisive trial read as a coin flip"
+    # And it agrees with what a replay of the log will say afterwards.
+    assert coach.tally(cfg, "exp_1").posterior == pytest.approx(expected)
+
+
+def test_a_voided_trial_leaves_the_recorded_posterior_where_it_was(tmp_path):
+    """A void carries no evidence, so folding it in must move nothing - the
+    same rule the replay has always applied, now applied by the same code."""
+    cfg = _cfg(tmp_path)
+    coach._append(coach.events_path(cfg), {
+        "kind": "experiment_opened", "exp_id": "exp_1", "lever": "muse.prompt",
+        "incumbent": "v0", "challenger": "v1"})
+
+    coach.record_trial(cfg, "exp_1", run_nonce=1, incumbent={"survived": 2, "failed": 0},
+                       challenger={"voided": True})
+
+    row = [r for r in coach.events(cfg) if r.get("kind") == "trial_result"][-1]
+    assert row["posterior_p_challenger_better"] == pytest.approx(0.5)
+    assert coach.tally(cfg, "exp_1").runs == 0
+
+
 def test_distinct_nonces_still_accumulate(tmp_path):
     """The dedup must not collapse genuinely separate runs."""
     cfg = _cfg(tmp_path)
