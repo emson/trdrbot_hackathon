@@ -156,20 +156,6 @@ class Concept:
             })
         return sid
 
-    def verify(self, by: str) -> None:
-        """Append a verification event -> promotes trust tier (D-022)."""
-        self.frontmatter.setdefault("verified", []).append(
-            {"by": by, "at": ids.utc_now().isoformat()}
-        )
-
-    def trust_tier(self) -> str:
-        verified = self.frontmatter.get("verified") or []
-        if not verified:
-            return "unverified"
-        if any(str(v.get("by", "")).startswith("human:") for v in verified):
-            return "human-reviewed"
-        return "machine-confirmed"
-
 
 class Wiki:
     def __init__(self, root: Path) -> None:
@@ -330,16 +316,3 @@ class Wiki:
         else:
             text = ""
         store.write_atomic(log_path, f"## {today}\n{line}\n{text}")
-
-
-def should_mint(*, is_referenceable: bool, is_bundle_meta: bool, has_citation_sentence: bool,
-                reuse_count: int, is_load_bearing: bool = False) -> bool:
-    """The four-gate mint test (D-023, borrowed from OKF's reference agent).
-
-    Gate 4 (reuse) passes if >=2 existing concepts would cite this, OR it is
-    load-bearing background for at least one. All four gates must pass. When
-    in doubt, don't mint - a wiki full of one-off observations is noise, not
-    knowledge.
-    """
-    gate4 = reuse_count >= 2 or is_load_bearing
-    return is_referenceable and not is_bundle_meta and has_citation_sentence and gate4

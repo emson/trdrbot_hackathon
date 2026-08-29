@@ -981,9 +981,19 @@ def test_the_vol_clock_is_never_applied_on_top_of_a_quoted_iv():
 
     from trdrbot.optmath import bs_greeks, expected_move, year_fraction
 
-    fri, mon = datetime.date(2026, 8, 28), datetime.date(2026, 8, 31)
-    assert expected_move(770, 0.13, 3, fri) == expected_move(770, 0.13, 3, mon)
-    assert bs_greeks("C", 770, 770, 0.13, 3, fri) == bs_greeks("C", 770, 770, 0.13, 3, mon)
+    # The guard used to be "the `start` parameter is accepted and IGNORED",
+    # asserted by passing two different dates and comparing - a comment
+    # enforced by a test, and a landmine for whoever eventually supplied the
+    # argument in earnest. D-091 deleted the parameter from all three
+    # functions instead, so the property is now structural: there is no way to
+    # hand these a session date, and the double count is unrepresentable
+    # rather than merely untaken.
+    import inspect
+
+    for fn in (bs_greeks, expected_move):
+        assert "start" not in inspect.signature(fn).parameters, (
+            f"{fn.__name__} accepts a session date again - the weekend clock "
+            f"must not be applied on top of an IV that already prices it")
     assert abs(year_fraction(365) - 1.0) < 1e-12, "ACT/365, the clock IV is struck on"
 
 

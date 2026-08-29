@@ -184,12 +184,6 @@ def opportunity_defect(o: Any) -> str | None:
     return None
 
 
-def _valid_opportunity(o: Any) -> bool:
-    """An unscoreable opportunity is worse than none - it would occupy a slot
-    in the decide context while being immune to ever being judged wrong."""
-    return opportunity_defect(o) is None
-
-
 async def run(
     tools: dict[str, Any],
     config: Config,

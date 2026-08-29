@@ -306,6 +306,14 @@ async def _run_tick(
         if verbose:
             print(f"[tick {n}] market_open={snap.market_open} equity=${snap.equity:,.0f} "
                   f"holdings={len(snap.broker_positions)}")
+            # Sensors were the ONE fast-path subsystem whose output the tick
+            # discarded entirely - `sensed` was assigned and never read, so a
+            # collector emitting nothing looked identical to one emitting
+            # twenty. That is the shape `health` exists to catch, and there is
+            # no sensor heartbeat probe to catch it instead.
+            print(f"[tick {n}] sensors: "
+                  + (", ".join(f"{k}={v}" for k, v in sorted(sensed.items()) if v)
+                     or "nothing new"))
             print(f"[tick {n}] reconcile: {reconcile.summarise(recon)}")
             if triggered:
                 print(f"[tick {n}] exit rules closed: {triggered}")
@@ -317,14 +325,16 @@ async def _run_tick(
         # reasoning without waiting for the bell.
         if not snap.market_open and not force_decide:
             hk = await housekeeping.run(store, snap, mem, wiki, journal, tools=tools, verbose=verbose)
-            return {"status": "housekeeping", "tick": n, "market_open": snap.market_open, "exits": triggered, **hk}
+            return {"status": "housekeeping", "tick": n, "market_open": snap.market_open,
+                    "sensed": sensed, "exits": triggered, **hk}
 
         # ---------- slow path: every N ticks ----------
         if n % config.decide_every_n_ticks != 0:
             if verbose:
                 print(f"[tick {n}] fast path only (decide runs every "
                       f"{config.decide_every_n_ticks} ticks)")
-            return {"status": "fast_only", "tick": n, "market_open": snap.market_open, "exits": triggered}
+            return {"status": "fast_only", "tick": n, "market_open": snap.market_open,
+                    "sensed": sensed, "exits": triggered}
 
         items = inbox.pending()
 
@@ -408,7 +418,8 @@ async def _run_tick(
         if not items:
             if verbose:
                 print(f"[tick {n}] inbox empty - no decide cycle")
-            return {"status": "idle", "tick": n, "market_open": snap.market_open, "exits": triggered}
+            return {"status": "idle", "tick": n, "market_open": snap.market_open,
+                    "sensed": sensed, "exits": triggered}
 
         batch = ids.batch_id([i.id for i in items])
         prior = journal.unresolved_decision(batch)
@@ -478,7 +489,7 @@ async def _run_tick(
                        seed_fraction=posture.seed_fraction,
                        equity=equity_now, high_water=hw)
         size_tool = local_tools.build_size_position(
-            calib, equity_now, len(open_pos),
+            calib, equity_now,
             open_risk_usd=open_risk, open_risk_by_underlying=by_underlying,
             shared=shared, posture=posture, extra_forecasts=declined,
         )
@@ -686,8 +697,9 @@ async def _run_tick(
             print(f"[tick {n}] orders={len(orders)} positions_recorded={len(recorded)}")
             print(f'\n--- agent ---\n{summary_text}\n')
 
-        return {"status": "done", "tick": n, "market_open": snap.market_open, "batch": batch, "orders": len(orders),
-                "recorded": len(recorded), "exits": triggered}
+        return {"status": "done", "tick": n, "market_open": snap.market_open, "batch": batch,
+                "orders": len(orders), "recorded": len(recorded),
+                "sensed": sensed, "exits": triggered}
     finally:
         await mem.end()  # no dream() here - see module docstring
         await mem.close()

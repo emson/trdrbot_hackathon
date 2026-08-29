@@ -23,6 +23,7 @@ import math
 import re
 from collections.abc import Iterable
 from dataclasses import dataclass
+from datetime import date  # noqa: F401 - vol_days' annotation; see 019 s11.2
 from typing import Any
 
 CONTRACT_MULTIPLIER = 100
@@ -674,8 +675,8 @@ def gamma_breakeven(greeks: dict[str, float] | None) -> float | None:
     return math.sqrt(2.0 * abs(theta) / abs(gamma))
 
 
-def bs_greeks(right: str, strike: float, spot: float, iv: float, days: float,
-              start: date | None = None) -> dict[str, float] | None:
+def bs_greeks(right: str, strike: float, spot: float, iv: float,
+              days: float) -> dict[str, float] | None:
     """Per-share greeks for one contract. None when the model is undefined.
 
     At days <= 0 or iv <= 0 the formulas divide by zero - and the honest
@@ -702,8 +703,8 @@ def bs_greeks(right: str, strike: float, spot: float, iv: float, days: float,
     return {"delta": delta, "gamma": gamma, "theta": theta, "vega": vega}
 
 
-def net_greeks(legs: list[Leg], spot: float, iv: float, days: float,
-               start: date | None = None) -> dict[str, float] | None:
+def net_greeks(legs: list[Leg], spot: float, iv: float,
+               days: float) -> dict[str, float] | None:
     """Whole-position greeks in trader units, or None if any leg is undefined.
 
     delta_shares  equivalent stock shares (signed)
@@ -720,7 +721,7 @@ def net_greeks(legs: list[Leg], spot: float, iv: float, days: float,
     d_sh = g_sh = th = ve = 0.0
     for leg in legs:
         g = bs_greeks(leg.right, leg.strike, spot,
-                      leg.iv if leg.iv is not None else iv, days, start)
+                      leg.iv if leg.iv is not None else iv, days)
         if g is None:
             return None
         k = leg.sign * leg.qty * CONTRACT_MULTIPLIER
@@ -737,8 +738,7 @@ def net_greeks(legs: list[Leg], spot: float, iv: float, days: float,
     }
 
 
-def expected_move(spot: float, iv: float, days: float,
-                  start: date | None = None) -> float | None:
+def expected_move(spot: float, iv: float, days: float) -> float | None:
     """The market's own 1-sigma move by the horizon, in dollars.
 
     The first professional sanity check on any thesis: a band INSIDE the

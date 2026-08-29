@@ -135,7 +135,7 @@ async def on_resolution(
     else:
         hit = None
 
-    lesson = _write_lesson(wiki, pos, pnl_pct=pnl_pct, scored=scored)
+    _write_lesson(wiki, pos, pnl_pct=pnl_pct, scored=scored)
 
     journal.append(
         "reflection",

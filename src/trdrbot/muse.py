@@ -235,7 +235,7 @@ def _sample_concepts(wiki: Wiki, rng: random.Random, k: int) -> list[tuple[str, 
     not market theses. Companies, regimes and events are what collide into
     opportunities; a technique is allowed one slot as a lens.
     """
-    root = wiki.root if hasattr(wiki, "root") else wiki.dir
+    root = wiki.root
     all_paths = sorted(p for p in root.rglob("*.md")
                        if "positions/" not in str(p) and p.name not in ("log.md",))
     market = [p for p in all_paths if "technique/" not in str(p)]

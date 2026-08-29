@@ -285,7 +285,7 @@ async def _prompts() -> int:
     from . import local_tools, prompts
     shared: dict = {}
     tools = [local_tools.build_simulate_experiments(shared),
-             local_tools.build_size_position(None, 1.0, 0),
+             local_tools.build_size_position(None, 1.0),
              local_tools.build_record_position(None, "d")]
     print(prompts.render_inventory(prompts.inventory(tools)))
     return 0

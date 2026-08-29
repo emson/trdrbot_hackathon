@@ -117,7 +117,6 @@ async def run(
 
     # Daily research cycle (D-032): regime + dossiers + opportunities. Once
     # per calendar day - it costs an LLM call and regime does not move hourly.
-    researched = 0
     if tools:
         from . import ids as _ids
         from . import research
@@ -142,8 +141,9 @@ async def run(
                 from .inbox import Inbox as _Inbox
                 inbox = _Inbox(cfg.paths, max_retries=cfg.max_retries)
                 r = await research.run(tools, cfg, inbox, wiki, journal, verbose=verbose)
-                researched = r["opportunities"]
                 marker.write_text(today)
+                if verbose:
+                    print(f"[housekeeping] research: {r['opportunities']} opportunities")
             except Exception as exc:  # noqa: BLE001 - research is advisory (INV-8)
                 print(f"[housekeeping] research failed, continuing: {exc!r}")
 

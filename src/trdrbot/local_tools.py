@@ -488,7 +488,7 @@ def _matching_payoff_ratio(shared: dict[str, Any] | None,
 
 
 def build_size_position(
-    calibration: CalibrationStore, equity: float, open_count: int,
+    calibration: CalibrationStore, equity: float,
     open_risk_usd: float = 0.0,
     open_risk_by_underlying: dict[str, float] | None = None,
     shared: dict[str, Any] | None = None,
