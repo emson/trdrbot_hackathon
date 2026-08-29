@@ -31,8 +31,8 @@ from . import competence, ids, market_stats, mcp_client, news_extract, optmath
 from .config import Config
 from .inbox import Inbox
 from .journal import Journal
-from .llm import build_model
-from .research import _parse_json_block, opportunity_defect
+from .llm import build_model, parse_json_array, parse_json_object, text_of
+from .research import opportunity_defect
 from .wiki import Concept, Wiki
 
 NOMINATE_PROMPT = """You are scouting for an options trading agent (paper account, all positions \
@@ -205,14 +205,12 @@ async def run(
         odds_lines.append(f"(odds unavailable: {type(exc).__name__})")
 
     # ---- LLM call 1: nominate from evidence ----
-    reply = await model.ainvoke(NOMINATE_PROMPT.format(
+    text = text_of(await model.ainvoke(NOMINATE_PROMPT.format(
         deadline=deadline, exclude=", ".join(exclude),
         news_block="\n".join(news_lines) or "(none)",
         odds_block="\n".join(odds_lines) or "(none)",
-    ))
-    text = reply.content if isinstance(reply.content, str) else "\n".join(
-        b.get("text", "") for b in reply.content if isinstance(b, dict) and b.get("type") == "text")
-    nominees = _parse_json_block(text) or []
+    )))
+    nominees = parse_json_array(text)
     nominees = [n for n in nominees if isinstance(n, dict) and n.get("ticker")][:5]
     if verbose:
         print(f"[discovery] nominated: {[n['ticker'] for n in nominees]}")
@@ -278,14 +276,14 @@ async def run(
         candidates_block="\n\n".join(blocks), deadline=deadline,
         earliest=_earliest or "tomorrow", preferred=_preferred or "3 days out",
         latest=_latest or deadline))
-    text2 = reply2.content if isinstance(reply2.content, str) else "\n".join(
-        b.get("text", "") for b in reply2.content if isinstance(b, dict) and b.get("type") == "text")
+    text2 = text_of(reply2)
 
-    import re
-    m = re.search(r"FORECASTS_JSON:\s*\n(.*?)OPPORTUNITIES_JSON:", text2, re.DOTALL)
-    forecasts = _parse_json_block(m.group(1)) if m else {}
-    m2 = re.search(r"OPPORTUNITIES_JSON:\s*\n(.*)", text2, re.DOTALL)
-    raw_opps = _parse_json_block(m2.group(1)) if m2 else []
+    # `section` rather than two inline regexes: one parser for one LABEL:
+    # convention, so a change to the convention is one edit. The old inline
+    # form also hard-required the literal "OPPORTUNITIES_JSON:" terminator -
+    # a reply that omitted it lost the forecasts silently.
+    forecasts = parse_json_object(section(text2, "FORECASTS_JSON", ["OPPORTUNITIES_JSON"]))
+    raw_opps = parse_json_array(section(text2, "OPPORTUNITIES_JSON", ["\\Z"]))
 
     # ---- wiki dossiers for nominees worth keeping ----
     wrote = []

@@ -81,7 +81,7 @@ from typing import Any
 
 from . import ids, store
 from .config import Config
-from .llm import build_model
+from .llm import build_model, parse_json_array, text_of
 
 # Deferred import (not at module top level): research.py imports THIS module
 # to render its news block, so an eager import here would be circular. By
@@ -298,13 +298,9 @@ async def enrich(items: list[dict[str, Any]], config: Config) -> list[Extract]:
             articles=articles,
         )
         reply = await model.ainvoke(prompt)
-        text = reply.content if isinstance(reply.content, str) else "\n".join(
-            b.get("text", "") for b in reply.content if isinstance(b, dict) and b.get("type") == "text"
-        )
+        text = text_of(reply)
         served = (getattr(reply, "response_metadata", None) or {}).get("model_name", "news_extract")
-        from .research import _parse_json_block
-        parsed = _parse_json_block(text)
-        by_id = {str(r.get("id")): r for r in parsed if isinstance(r, dict)} if isinstance(parsed, list) else {}
+        by_id = {str(r.get("id")): r for r in parse_json_array(text) if isinstance(r, dict)}
     except Exception as exc:  # noqa: BLE001 - fail open: bare extracts, never lose the articles
         print(f"[news_extract] batch of {len(to_call)} failed, falling back to headlines: {exc!r}")
         by_id, served = {}, ""

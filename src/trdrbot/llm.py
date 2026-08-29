@@ -8,6 +8,10 @@ mid-competition swap.
 
 from __future__ import annotations
 
+import json
+import re
+from typing import Any
+
 from langchain.chat_models import init_chat_model
 
 from . import usage
@@ -81,6 +85,155 @@ def build_model(config: Config, role: str = "decide"):
         )
 
     return built[0] if len(built) == 1 else built[0].with_fallbacks(built[1:])
+
+
+#: Every role any code path may request. The one place a new role is declared,
+#: so `doctor` cannot drift from what production actually builds - it used to
+#: hardcode five under a comment claiming it probed "EVERY model in every
+#: configured chain", silently omitting coach_mutate and news_extract.
+ROLES: tuple[str, ...] = (
+    "decide", "research", "discovery", "muse", "doctor", "coach_mutate", "news_extract",
+)
+
+
+def text_of(message: Any) -> str:
+    """Readable text from a reply whose content may be a block list.
+
+    Extended-thinking responses return a list of blocks - a `thinking` block
+    carrying an opaque signature blob, then the actual `text`. Stringifying
+    the whole list dumped that blob into the journal and the console, burying
+    the agent's reasoning in base64 and wasting the 2000-char summary budget.
+
+    This existed SEVEN times: six inline copies at the call sites, each of
+    which raised TypeError on content that was neither str nor list, and one
+    good version in `tick` with the strip and the fallback. The good one won.
+    """
+    content = getattr(message, "content", "")
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return "\n".join(
+            b.get("text", "") for b in content
+            if isinstance(b, dict) and b.get("type") == "text"
+        ).strip()
+    return str(content)
+
+
+async def ask(config: Config, role: str, prompt: str) -> str:
+    """One prompt, one reply, as text. The plain-chat counterpart to the decide
+    agent - no tools, no loop.
+
+    Deliberately thin: retries live in `build_model` (LLM_MAX_RETRIES) and
+    timeouts belong to the caller that owns the tick's watchdog, so this adds
+    no policy of its own. A caller that needs the reply OBJECT - for
+    `response_metadata`, or to reuse one model across a retry loop - builds the
+    model itself and calls `text_of`.
+    """
+    return text_of(await build_model(config, role=role).ainvoke(prompt))
+
+
+def section(text: str, name: str, next_names: list[str]) -> str:
+    pattern = rf"{name}:\s*\n(.*?)(?=(?:{'|'.join(next_names)}):|\Z)"
+    m = re.search(pattern, text, re.DOTALL)
+    return m.group(1).strip() if m else ""
+
+
+def _salvage_truncated_array(raw: str, start: int) -> list[Any]:
+    """Complete elements from a JSON array that was cut off mid-flight.
+
+    The outer-bracket salvage below cannot help here: a truncated array has no
+    closing `]`, so `rfind` lands on an INNER one (a `suggested_structures`
+    list, say) and the fragment fails to parse - discarding four good
+    candidates because a fifth was half-written.
+
+    That is not hypothetical. The muse asks for five candidates each carrying a
+    causal chain and structure list, and gpt-5's reasoning tokens count against
+    the same completion budget as its output, so a run can spend most of an
+    8,000-token ceiling before it starts writing. Observed live: a 6,745-char
+    reply that opened with a perfectly good `[{"underlying":"S"...` and parsed
+    to nothing, one LLM call spent for zero candidates.
+
+    Uses the stdlib decoder's own incremental mode rather than counting
+    brackets, so a brace inside a string cannot fool it.
+    """
+    decoder = json.JSONDecoder()
+    out: list[Any] = []
+    i = start + 1
+    while i < len(raw):
+        while i < len(raw) and raw[i] in ", \t\r\n":
+            i += 1
+        if i >= len(raw) or raw[i] == "]":
+            break
+        try:
+            obj, i = decoder.raw_decode(raw, i)
+        except json.JSONDecodeError:
+            break  # the incomplete tail - everything before it is still good
+        out.append(obj)
+    return out
+
+
+def _parse_json_block(raw: str) -> Any:
+    raw = raw.strip()
+    raw = re.sub(r"^```(?:json)?\s*|\s*```$", "", raw, flags=re.MULTILINE).strip()
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        # An unterminated ARRAY is salvaged before the outer-bracket attempt
+        # when the reply opens with one. Order matters: with exactly one
+        # complete element written, `rfind("}")` lands on that element's own
+        # closer, so the object salvage succeeds and returns a DICT where the
+        # caller is unpacking a list - a truncated array quietly becoming a
+        # single candidate is worse than returning nothing.
+        if raw.startswith("["):
+            partial = _salvage_truncated_array(raw, 0)
+            if partial:
+                print(f"[parse] reply was truncated; salvaged {len(partial)} complete "
+                      f"element(s) from an unterminated array")
+                return partial
+        # Salvage the outermost JSON value if the model wrapped it in prose.
+        for opener, closer in (("{", "}"), ("[", "]")):
+            start, end = raw.find(opener), raw.rfind(closer)
+            if start != -1 and end > start:
+                try:
+                    return json.loads(raw[start : end + 1])
+                except json.JSONDecodeError:
+                    continue
+        # ...or an array that was wrapped in prose AND truncated.
+        start = raw.find("[")
+        if start != -1:
+            partial = _salvage_truncated_array(raw, start)
+            if partial:
+                print(f"[parse] reply was truncated; salvaged {len(partial)} complete "
+                      f"element(s) from an unterminated array")
+                return partial
+    return None
+
+
+
+def parse_json_array(raw: str) -> list[Any]:
+    """Model output -> a LIST, or [] if nothing usable came back.
+
+    The caller states the shape it expects, which is what kills three
+    per-caller fixups that each re-guessed it: the muse unwrapped
+    `{"candidates": [...]}`, news_extract guarded `isinstance(parsed, list)`,
+    and the coach took `parsed[0]`. A single-key object whose only value is a
+    list IS that list - models wrap arrays in a container unprompted, and
+    treating that as "no candidates" threw away a whole run's work.
+    """
+    parsed = _parse_json_block(raw)
+    if isinstance(parsed, list):
+        return parsed
+    if isinstance(parsed, dict):
+        values = [v for v in parsed.values() if isinstance(v, list)]
+        if len(values) == 1:
+            return values[0]
+    return []
+
+
+def parse_json_object(raw: str) -> dict[str, Any]:
+    """Model output -> a DICT, or {} if nothing usable came back."""
+    parsed = _parse_json_block(raw)
+    return parsed if isinstance(parsed, dict) else {}
 
 
 SYSTEM_PROMPT = """You are Theo (system name trdrbot) - an autonomous options trading agent named for theta, the greek your short-dated book lives on. You operate a \

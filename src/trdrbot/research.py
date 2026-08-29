@@ -23,15 +23,13 @@ odds, not model memory, which is stale by construction.
 
 from __future__ import annotations
 
-import json
-import re
 from typing import Any
 
 from . import market_stats, mcp_client, news_extract
 from .config import Config
 from .inbox import Inbox
 from .journal import Journal
-from .llm import build_model
+from .llm import ask, parse_json_array, parse_json_object, section
 from .wiki import Concept, Wiki
 
 RESEARCH_PROMPT = """You are the research desk for an options trading agent. Produce a daily \
@@ -75,83 +73,6 @@ band_low/band_high are the prices between which the claim HOLDS - at least
 one must be non-null or the thesis cannot be scored. horizon must be within
 the next 10 days. An empty array is a valid, often correct answer.)
 """
-
-
-def _section(text: str, name: str, next_names: list[str]) -> str:
-    pattern = rf"{name}:\s*\n(.*?)(?=(?:{'|'.join(next_names)}):|\Z)"
-    m = re.search(pattern, text, re.DOTALL)
-    return m.group(1).strip() if m else ""
-
-
-def _salvage_truncated_array(raw: str, start: int) -> list[Any]:
-    """Complete elements from a JSON array that was cut off mid-flight.
-
-    The outer-bracket salvage below cannot help here: a truncated array has no
-    closing `]`, so `rfind` lands on an INNER one (a `suggested_structures`
-    list, say) and the fragment fails to parse - discarding four good
-    candidates because a fifth was half-written.
-
-    That is not hypothetical. The muse asks for five candidates each carrying a
-    causal chain and structure list, and gpt-5's reasoning tokens count against
-    the same completion budget as its output, so a run can spend most of an
-    8,000-token ceiling before it starts writing. Observed live: a 6,745-char
-    reply that opened with a perfectly good `[{"underlying":"S"...` and parsed
-    to nothing, one LLM call spent for zero candidates.
-
-    Uses the stdlib decoder's own incremental mode rather than counting
-    brackets, so a brace inside a string cannot fool it.
-    """
-    decoder = json.JSONDecoder()
-    out: list[Any] = []
-    i = start + 1
-    while i < len(raw):
-        while i < len(raw) and raw[i] in ", \t\r\n":
-            i += 1
-        if i >= len(raw) or raw[i] == "]":
-            break
-        try:
-            obj, i = decoder.raw_decode(raw, i)
-        except json.JSONDecodeError:
-            break  # the incomplete tail - everything before it is still good
-        out.append(obj)
-    return out
-
-
-def _parse_json_block(raw: str) -> Any:
-    raw = raw.strip()
-    raw = re.sub(r"^```(?:json)?\s*|\s*```$", "", raw, flags=re.MULTILINE).strip()
-    try:
-        return json.loads(raw)
-    except json.JSONDecodeError:
-        # An unterminated ARRAY is salvaged before the outer-bracket attempt
-        # when the reply opens with one. Order matters: with exactly one
-        # complete element written, `rfind("}")` lands on that element's own
-        # closer, so the object salvage succeeds and returns a DICT where the
-        # caller is unpacking a list - a truncated array quietly becoming a
-        # single candidate is worse than returning nothing.
-        if raw.startswith("["):
-            partial = _salvage_truncated_array(raw, 0)
-            if partial:
-                print(f"[parse] reply was truncated; salvaged {len(partial)} complete "
-                      f"element(s) from an unterminated array")
-                return partial
-        # Salvage the outermost JSON value if the model wrapped it in prose.
-        for opener, closer in (("{", "}"), ("[", "]")):
-            start, end = raw.find(opener), raw.rfind(closer)
-            if start != -1 and end > start:
-                try:
-                    return json.loads(raw[start : end + 1])
-                except json.JSONDecodeError:
-                    continue
-        # ...or an array that was wrapped in prose AND truncated.
-        start = raw.find("[")
-        if start != -1:
-            partial = _salvage_truncated_array(raw, start)
-            if partial:
-                print(f"[parse] reply was truncated; salvaged {len(partial)} complete "
-                      f"element(s) from an unterminated array")
-                return partial
-    return None
 
 
 def opportunity_defect(o: Any) -> str | None:
@@ -243,14 +164,11 @@ async def run(
         odds_block="\n".join(odds_lines) or "(none)",
         prior_regime=prior_text,
     )
-    reply = await build_model(config, role="research").ainvoke(prompt)
-    text = reply.content if isinstance(reply.content, str) else "\n".join(
-        b.get("text", "") for b in reply.content if isinstance(b, dict) and b.get("type") == "text"
-    )
+    text = await ask(config, "research", prompt)
 
-    regime_md = _section(text, "REGIME_MARKDOWN", ["DOSSIERS_JSON", "OPPORTUNITIES_JSON"])
-    dossiers = _parse_json_block(_section(text, "DOSSIERS_JSON", ["OPPORTUNITIES_JSON"])) or {}
-    raw_opps = _parse_json_block(_section(text, "OPPORTUNITIES_JSON", ["\\Z"])) or []
+    regime_md = section(text, "REGIME_MARKDOWN", ["DOSSIERS_JSON", "OPPORTUNITIES_JSON"])
+    dossiers = parse_json_object(section(text, "DOSSIERS_JSON", ["OPPORTUNITIES_JSON"]))
+    raw_opps = parse_json_array(section(text, "OPPORTUNITIES_JSON", ["\\Z"]))
 
     # ---- write wiki (OKF, augmentation-guarded) ----
     wrote = []

@@ -39,8 +39,7 @@ from .discovery import _options_gate, _plausible_band
 from .inbox import Inbox
 from .journal import Journal
 from .ledger import Ledger
-from .llm import build_model
-from .research import _parse_json_block
+from .llm import ask, parse_json_array
 from .wiki import Wiki
 
 #: How many wiki concepts collide with the news per run.
@@ -271,17 +270,12 @@ async def _generate(prompt_text: str, fields: dict[str, Any], config: Config,
     seam the Coach's prompt lever moves, and the only thing that differs
     between the two arms of a trial."""
     prompt = prompt_text.format(**fields)
-    reply = await build_model(config, role="muse").ainvoke(prompt)
-    text = reply.content if isinstance(reply.content, str) else "\n".join(
-        b.get("text", "") for b in reply.content
-        if isinstance(b, dict) and b.get("type") == "text")
-    raw = _parse_json_block(text) or []
-    # The model sometimes wraps the array in an object ({"candidates": [...]}),
-    # and _parse_json_block salvages {} before [] - so `raw` arrives as a dict,
-    # the list-guard below silently skips everything, and the run reports "0
-    # candidates" with no evidence of why. Unwrap the first list found.
-    if isinstance(raw, dict):
-        raw = next((v for v in raw.values() if isinstance(v, list)), [])
+    text = await ask(config, "muse", prompt)
+    # A model wrapping the array in an object ({"candidates": [...]}) used to
+    # arrive here as a dict, be silently skipped by the list-guard below, and
+    # report "0 candidates" with no evidence of why. That unwrap is now
+    # `parse_json_array`'s stated contract rather than this caller's fixup.
+    raw = parse_json_array(text)
     if not raw:
         # Null-path evidence (D-038's own rule, nearly violated here): a parse
         # failure with no trace is undiagnosable. Keep enough of the reply to

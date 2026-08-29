@@ -126,11 +126,11 @@ class Variant:
 
 
 def fingerprint(text: str) -> str:
-    """Identical scheme to `prompts.PromptRef.fingerprint` - one hash, one
-    meaning. A second scheme is how two identities for one artefact begin."""
-    import hashlib
+    """Delegates to `prompts.fingerprint` - one hash, one meaning. Kept as a
+    name here because lever state files store its output and callers use it."""
+    from .prompts import fingerprint as _fp
 
-    return hashlib.sha256(text.encode("utf-8")).hexdigest()[:8]
+    return _fp(text)
 
 
 @dataclass
@@ -842,8 +842,7 @@ def _graveyard_digest(cfg: Any, lever_name: str, n: int = 4) -> str:
 async def mutate(cfg: Any, st: LeverState, rows: list[dict[str, Any]],
                  journal: Any) -> Variant | None:
     """One validated challenger, or None. Never raises."""
-    from .llm import build_model
-    from .research import _parse_json_block
+    from .llm import build_model, parse_json_array, parse_json_object, text_of
 
     try:
         prompt = MUTATE_PROMPT.format(
@@ -859,12 +858,13 @@ async def mutate(cfg: Any, st: LeverState, rows: list[dict[str, Any]],
         attempt_prompt, bad, parsed = prompt, "", None
         for attempt in range(1, MUTATE_ATTEMPTS + 1):
             reply = await model.ainvoke(attempt_prompt)
-            text = reply.content if isinstance(reply.content, str) else "\n".join(
-                b.get("text", "") for b in reply.content
-                if isinstance(b, dict) and b.get("type") == "text")
-            parsed = _parse_json_block(text)
-            if isinstance(parsed, list):
-                parsed = parsed[0] if parsed else None
+            text = text_of(reply)
+            # The mutation reply is ONE {rationale, prompt} object. Asking
+            # for the array and taking [0] was this caller re-guessing a shape
+            # the parser would not state; now the parser states it, and a
+            # model that wrapped it in a list is handled there.
+            candidates = parse_json_array(text)
+            parsed = candidates[0] if candidates else parse_json_object(text) or None
             if not isinstance(parsed, dict) or not parsed.get("prompt"):
                 bad = "reply did not parse to {rationale, prompt}"
             else:

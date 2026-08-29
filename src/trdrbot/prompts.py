@@ -32,6 +32,13 @@ from dataclasses import dataclass
 from typing import Any
 
 
+def fingerprint(text: str) -> str:
+    """THE prompt-identity hash. `coach.fingerprint` delegates here - a second
+    scheme is how two identities for one artefact begin, and lever state files
+    on disk already carry this one's output."""
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()[:8]
+
+
 @dataclass(frozen=True)
 class PromptRef:
     name: str
@@ -41,7 +48,7 @@ class PromptRef:
     @property
     def fingerprint(self) -> str:
         """Stable 8-hex digest of the exact text sent to the model."""
-        return hashlib.sha256(self.text.encode("utf-8")).hexdigest()[:8]
+        return fingerprint(self.text)
 
     @property
     def tokens(self) -> int:
@@ -86,6 +93,14 @@ def inventory(tools: list[Any] | None = None) -> list[PromptRef]:
         # a provenance record that names the wrong artefact is worse than none.
         PromptRef("muse.collide", "free_standing", _active_muse_prompt()),
     ]
+    # The two artefacts this inventory used to omit while its own docstring
+    # claimed eight. Neither is a lever: the mutation prompt is the Coach's own
+    # instrument and the extraction prompt is a fixed cheap-model contract.
+    from .coach import MUTATE_PROMPT
+    from .news_extract import EXTRACT_PROMPT
+
+    refs.append(PromptRef("coach.mutate", "free_standing", MUTATE_PROMPT))
+    refs.append(PromptRef("news.extract", "free_standing", EXTRACT_PROMPT))
     for t in tools or []:
         refs.append(PromptRef(f"tool.{t.name}", "tool_contract", t.description or ""))
     refs.append(PromptRef(

@@ -16,6 +16,7 @@ import sys
 
 from . import config as config_mod
 from . import ids, mcp_client
+from . import llm as llm_mod
 from .inbox import Inbox
 from .journal import Journal
 from .lock import tick_lock
@@ -64,7 +65,10 @@ async def _doctor() -> int:
         print("\n[doctor] probing every configured model...")
         seen: set[str] = set()
         reachable = 0
-        for role in ("decide", "research", "discovery", "muse", "doctor"):
+        # llm.ROLES, not a hardcoded five: the list used to omit coach_mutate
+        # and news_extract under a comment claiming it probed EVERY model, and
+        # their specs were covered only incidentally by other chains.
+        for role in llm_mod.ROLES:
             for spec in cfg.model_chain(role):
                 if spec in seen:
                     continue

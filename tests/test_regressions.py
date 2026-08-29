@@ -2856,12 +2856,12 @@ def test_a_truncated_json_array_still_yields_its_complete_elements():
     because the outer-bracket salvage found an INNER `]` from a nested list.
     gpt-5 reasoning tokens share the completion budget, so a long generation
     can be cut off after several good elements."""
-    from trdrbot.research import _parse_json_block
+    from trdrbot.llm import parse_json_array
 
     truncated = ('[{"underlying":"S","chain":["a","b"],"probability":0.4},'
                  '{"underlying":"MU","chain":["c"],"probability":0.6},'
                  '{"underlying":"BURL","cha')
-    got = _parse_json_block(truncated)
+    got = parse_json_array(truncated)
     assert isinstance(got, list) and len(got) == 2
     assert [g["underlying"] for g in got] == ["S", "MU"]
 
@@ -2870,13 +2870,18 @@ def test_a_truncated_json_array_still_yields_its_complete_elements():
     # one element written, `rfind("}")` lands on its own closer, so the object
     # salvage succeeds and silently returns a dict where a list was expected.
     tricky = '[{"claim":"a ] and a } inside","p":1},{"claim":"broke'
-    got2 = _parse_json_block(tricky)
+    got2 = parse_json_array(tricky)
     assert isinstance(got2, list) and len(got2) == 1, f"got {got2!r}"
 
     # Intact input is untouched, and genuine garbage still returns None.
-    assert _parse_json_block('[{"a":1}]') == [{"a": 1}]
-    assert _parse_json_block("not json at all") is None
-    assert _parse_json_block("[") is None
+    assert parse_json_array('[{"a":1}]') == [{"a": 1}]
+    # Nothing usable now returns the EMPTY SHAPE THE CALLER ASKED FOR rather
+    # than None (D-092): every caller was writing `... or []` after this, and
+    # the two that forgot re-guessed the shape instead.
+    assert parse_json_array("not json at all") == []
+    from trdrbot.llm import parse_json_object
+    assert parse_json_object("not json at all") == {}
+    assert parse_json_array("[") == []
 
 
 # ================================= D-078 wiki lifecycle
