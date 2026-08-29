@@ -196,7 +196,12 @@ tick:
   # Cheap deterministic work every tick; the LLM decide path every N ticks
   # (D-017). The skeleton runs decide every tick so it is easy to explore.
   decide_every_n_ticks: 1
-  watchdog_seconds: 300
+  # Bounds the decide call (tick.py), and x4 bounds the whole tick from the
+  # run loop (FM-26). Read by nothing at all until D-091, so a hung LLM call
+  # stalled an unattended run indefinitely. 600 rather than the original 300
+  # because measured decide cycles have reached 5:19 of wall clock (D-074) -
+  # a watchdog that kills legitimate work is worse than none.
+  watchdog_seconds: 600
 
 inbox:
   # Dead-letter after N attempts so one bad item cannot stall forever (D-018).

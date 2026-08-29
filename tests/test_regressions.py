@@ -676,49 +676,72 @@ def test_interim_marks_do_not_score_the_mind_prediction():
 
 # ------------------------------------- D-044 stray background processes
 
-def test_run_lock_refuses_a_second_live_loop():
+# These three used to test `cli._acquire_run_lock`, a SECOND locking mechanism
+# that guarded the run loop with a bare pid file at a relative path, no
+# timestamp, never unlinked on exit. D-091 deleted it and put the run loop
+# under `lock.tick_lock`, which already owned every property below and does
+# each of them better. The tests move rather than go: the D-044 incident is
+# the reason the property matters, and `lock.py` had no tests of its own.
+
+def test_the_tick_lock_refuses_a_second_live_holder():
     """A stray 5s smoke-test loop once hammered the broker API and burned LLM
     calls for half an hour. `kill %1` had killed the pipeline job, not the
     orphaned `uv run` child."""
-    import os
+    import json
+    import subprocess
     import tempfile
+    import time
     from pathlib import Path
 
-    from trdrbot.cli import _acquire_run_lock
+    from trdrbot.lock import tick_lock
 
-    pid_file = Path(tempfile.mkdtemp()) / "run.pid"
-    pid_file.write_text(str(os.getpid()))  # a definitely-alive process
-    # Our own pid is treated as ours (re-entrant), so use a live *other* pid:
-    import subprocess
-    proc = subprocess.Popen(["sleep", "30"])
+    lock_file = Path(tempfile.mkdtemp()) / "tick.lock"
+    proc = subprocess.Popen(["sleep", "30"])  # a definitely-live OTHER process
     try:
-        pid_file.write_text(str(proc.pid))
-        assert _acquire_run_lock(pid_file) is False
+        lock_file.write_text(json.dumps({"pid": proc.pid, "ts": time.time()}))
+        with pytest.raises(BlockingIOError, match="already running"):
+            with tick_lock(lock_file):
+                raise AssertionError("entered a lock another live process holds")
     finally:
         proc.terminate()
 
 
-def test_run_lock_takes_over_a_stale_lock():
-    """A crashed loop must not require manual cleanup before trading resumes."""
+def test_the_tick_lock_takes_over_a_stale_lock():
+    """A crashed loop must not require manual cleanup before trading resumes.
+
+    Two independent staleness signals, which is why this lock supersedes the
+    pid file it replaced: the holder is gone, OR the lock is older than the
+    window. Either is enough.
+    """
+    import json
+    import tempfile
+    import time
+    from pathlib import Path
+
+    from trdrbot.lock import tick_lock
+
+    lock_file = Path(tempfile.mkdtemp()) / "tick.lock"
+    lock_file.write_text(json.dumps({"pid": 999999, "ts": time.time()}))  # dead pid
+    with tick_lock(lock_file):
+        pass
+
+    import os
+    lock_file.write_text(json.dumps({"pid": os.getpid(), "ts": time.time() - 99999}))
+    with tick_lock(lock_file):  # alive, but far past the stale window
+        pass
+
+
+def test_the_tick_lock_survives_a_corrupt_lock_file():
     import tempfile
     from pathlib import Path
 
-    from trdrbot.cli import _acquire_run_lock
+    from trdrbot.lock import tick_lock
 
-    pid_file = Path(tempfile.mkdtemp()) / "run.pid"
-    pid_file.write_text("999999")  # not a live pid
-    assert _acquire_run_lock(pid_file) is True
-
-
-def test_run_lock_survives_a_corrupt_pid_file():
-    import tempfile
-    from pathlib import Path
-
-    from trdrbot.cli import _acquire_run_lock
-
-    pid_file = Path(tempfile.mkdtemp()) / "run.pid"
-    pid_file.write_text("not-a-pid")
-    assert _acquire_run_lock(pid_file) is True
+    lock_file = Path(tempfile.mkdtemp()) / "tick.lock"
+    lock_file.write_text("not-json-at-all")
+    with tick_lock(lock_file):
+        pass
+    assert not lock_file.exists(), "the lock must be released on exit"
 
 
 def test_interval_floor_is_above_any_legitimate_polling_rate():

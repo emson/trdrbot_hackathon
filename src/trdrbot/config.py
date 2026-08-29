@@ -85,8 +85,11 @@ class Config:
         return int(self.raw["inbox"]["max_retries"])
 
     @property
-    def watchdog_seconds(self) -> int:
-        return int(self.raw["tick"]["watchdog_seconds"])
+    def watchdog_seconds(self) -> float:
+        # float, not int: this bounds an `asyncio.wait_for`, and a test that
+        # wants a sub-second watchdog should not have it silently truncated
+        # to zero. Production values are whole seconds either way.
+        return float(self.raw["tick"]["watchdog_seconds"])
 
     def model_chain(self, role: str = "decide") -> list[str]:
         """Ordered fallback chain for a role (D-062).

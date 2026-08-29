@@ -94,3 +94,101 @@ async def test_the_unpatched_default_really_does_raise():
 
     with pytest.raises(RuntimeError, match="mcp pipe broke"):
         await agent.ainvoke({"messages": [("user", "go")]})
+async def test_a_hung_tick_does_not_stall_the_run_loop(monkeypatch, tmp_path):
+    """FM-26. `watchdog_seconds` was configured and read by NOTHING, so a hung
+    LLM call stalled an unattended run indefinitely - and because the loop held
+    no tick lock either, there was not even a stale-lock signal to notice it
+    by."""
+    from trdrbot import cli
+
+    cfg = _tmp_config(tmp_path, watchdog_seconds=0.05)
+    monkeypatch.setattr(cli.config_mod, "load", lambda *a, **k: cfg)
+
+    async def never_returns(*a: Any, **k: Any) -> dict[str, Any]:
+        await asyncio.sleep(30)
+        return {}
+
+    monkeypatch.setattr("trdrbot.tick.run_tick", never_returns)
+
+    async with asyncio.timeout(10):
+        rc = await cli._run_loop(interval=0, closed_interval=0, max_ticks=1,
+                                 allow_fast=True)
+    assert rc == 0
+
+
+async def test_the_run_loop_holds_the_tick_lock_around_each_tick(monkeypatch, tmp_path):
+    """INV-7 was enforced on `trdrbot tick` and NOT on `trdrbot run` - the only
+    path that runs unattended. A launchd-driven run.sh alongside a run loop
+    would interleave two ticks freely: two tick-counter writes, two elfmem
+    sessions on one SQLite file, two decide cycles on one inbox batch."""
+    from trdrbot import cli
+
+    cfg = _tmp_config(tmp_path)
+    monkeypatch.setattr(cli.config_mod, "load", lambda *a, **k: cfg)
+    seen: list[bool] = []
+
+    async def probe(*a: Any, **k: Any) -> dict[str, Any]:
+        seen.append((cfg.paths.state / "tick.lock").exists())
+        return {"market_open": False, "status": "housekeeping"}
+
+    monkeypatch.setattr("trdrbot.tick.run_tick", probe)
+
+    await cli._run_loop(interval=0, closed_interval=0, max_ticks=1, allow_fast=True)
+
+    assert seen == [True], "the tick ran without holding the lock"
+    assert not (cfg.paths.state / "tick.lock").exists(), "lock outlived the tick"
+
+
+async def test_a_held_lock_skips_the_tick_rather_than_ending_the_run(monkeypatch, tmp_path):
+    """A lock held by a live process means another tick is trading right now.
+    Skip and come back - never crash the loop, never break the lock."""
+    import json
+    import os
+    import time
+
+    from trdrbot import cli
+
+    cfg = _tmp_config(tmp_path)
+    monkeypatch.setattr(cli.config_mod, "load", lambda *a, **k: cfg)
+    (cfg.paths.state / "tick.lock").write_text(
+        json.dumps({"pid": os.getpid(), "ts": time.time()})
+    )
+    called: list[int] = []
+
+    async def probe(*a: Any, **k: Any) -> dict[str, Any]:
+        called.append(1)
+        return {"market_open": True, "status": "done"}
+
+    monkeypatch.setattr("trdrbot.tick.run_tick", probe)
+
+    rc = await cli._run_loop(interval=0, closed_interval=0, max_ticks=1, allow_fast=True)
+
+    assert rc == 0
+    assert called == [], "ran a second tick while another held the lock"
+
+
+def _tmp_config(tmp_path: Any, **tick_overrides: Any) -> Any:
+    """A real Config rooted at tmp_path, built by the real loader.
+
+    Copies the project's own config.yaml so the test cannot drift from the
+    shape production actually parses - the producer-derived rule applied to
+    configuration.
+    """
+    import shutil
+    from pathlib import Path
+
+    from trdrbot import config as config_mod
+
+    root = Path(__file__).resolve().parents[1]
+    shutil.copy(root / "config.yaml", tmp_path / "config.yaml")
+    (tmp_path / ".env").write_text("")
+    cfg = config_mod.load(tmp_path, quiet=True)
+    if tick_overrides:
+        cfg.raw["tick"].update(tick_overrides)
+    # Tomorrow, so the deadline loop condition is true regardless of when the
+    # suite runs. `max_ticks` is what actually stops these tests.
+    from datetime import timedelta
+
+    from trdrbot import ids
+    cfg.raw["trading"]["deadline"] = (ids.utc_now().date() + timedelta(days=1)).isoformat()
+    return cfg

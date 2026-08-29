@@ -25,6 +25,7 @@ manually and never calls dream() itself.
 
 from __future__ import annotations
 
+import asyncio
 import json
 from pathlib import Path
 from typing import Any
@@ -596,7 +597,17 @@ async def _run_tick(
         cached_prompt = [{"type": "text", "text": prompt,
                           "cache_control": {"type": "ephemeral"}}]
         try:
-            result = await agent.ainvoke({"messages": [("user", cached_prompt)]})
+            # The one call in a tick that can hang for minutes on end: a react
+            # agent looping over a provider that has stopped answering. Five
+            # retries per model times three models in the chain, with no bound
+            # of its own - and `tick_lock` does not help, because it makes
+            # LATER ticks skip rather than killing the holder (FM-26).
+            # TimeoutError classifies TRANSIENT, so the handler below journals
+            # it and retries the batch next cycle, which is the right policy.
+            result = await asyncio.wait_for(
+                agent.ainvoke({"messages": [("user", cached_prompt)]}),
+                timeout=config.watchdog_seconds,
+            )
         except Exception as exc:  # noqa: BLE001
             cause = failures.classify(exc)
             journal.append("error", batch=batch, decision_ref=decision_id,

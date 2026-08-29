@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import os
 import sys
 
 from . import config as config_mod
@@ -201,35 +202,11 @@ async def _discover() -> int:
 MIN_INTERVAL_SECONDS = 30
 
 
-def _acquire_run_lock(pid_path: Path) -> bool:
-    """One run loop per machine. Returns False if another is already alive.
-
-    A stale lock (the recorded process is gone) is taken over rather than
-    treated as fatal: a crashed loop must not require manual cleanup before
-    trading can resume.
-    """
-    import os
-
-    if pid_path.exists():
-        try:
-            other = int(pid_path.read_text().strip())
-        except (ValueError, OSError):
-            other = None
-        if other and other != os.getpid():
-            try:
-                os.kill(other, 0)  # signal 0 = liveness probe, no effect
-            except ProcessLookupError:
-                print(f"[run] stale lock from pid {other}, taking over")
-            except PermissionError:
-                print(f"[run] pid {other} is alive and not ours - refusing to start")
-                return False
-            else:
-                print(f"[run] another run loop is already alive (pid {other}). "
-                      f"Stop it first, or delete {pid_path} if you know it is dead.")
-                return False
-    pid_path.parent.mkdir(parents=True, exist_ok=True)
-    pid_path.write_text(str(os.getpid()))
-    return True
+#: The tick's own watchdog bounds the LLM call (tick.py). This one bounds
+#: EVERYTHING ELSE in a tick - a wedged MCP subprocess spawn, a stuck elfmem
+#: call, a hung broker read - so it has to sit well above the inner bound or
+#: it would fire first and mask it. 4x is a backstop, not a second policy.
+OUTER_WATCHDOG_FACTOR = 4
 
 
 async def _run_loop(interval: int, closed_interval: int, *,
@@ -244,9 +221,24 @@ async def _run_loop(interval: int, closed_interval: int, *,
     A failing tick NEVER stops the loop: an eight-day unattended run will meet
     provider transients, and a crash that halts trading is worse than a tick
     that is skipped and journalled (INV-8).
+
+    Two chassis guarantees this loop went without until D-091, both specified
+    long before and enforced only on the `tick` subcommand - which is to say,
+    not on the path that actually runs unattended:
+
+    - **The tick lock (INV-7).** This loop called `run_tick` directly, so a
+      launchd-driven `run.sh` alongside a `trdrbot run` would interleave two
+      ticks freely: two tick-counter read-modify-writes, two elfmem sessions
+      on one SQLite file, two decide cycles draining one inbox batch. There
+      was a second, weaker lock here (a bare pid file at a RELATIVE path, no
+      timestamp, never unlinked on exit) which `tick_lock` supersedes in every
+      respect - it carries a pid AND a timestamp, so a crashed run is
+      stale-breakable rather than fatal.
+    - **The watchdog (FM-26).** `tick.watchdog_seconds` was configured and
+      read by nothing, so a hung LLM call stalled the run indefinitely, with
+      no stale-lock signal to notice it by either.
     """
     from datetime import date
-    from pathlib import Path
 
     from .tick import run_tick
 
@@ -257,24 +249,31 @@ async def _run_loop(interval: int, closed_interval: int, *,
               f"this is never legitimate.", flush=True)
         return 2
 
-    pid_path = Path("logs/run.pid")
-    if not _acquire_run_lock(pid_path):
-        return 3
-
+    lock_path = cfg.paths.state / "tick.lock"
+    outer_timeout = cfg.watchdog_seconds * OUTER_WATCHDOG_FACTOR
     deadline = date.fromisoformat(cfg.deadline)
     n = 0
-    print(f"[run] pid {__import__('os').getpid()} looping until {deadline}; "
-          f"open={interval}s closed={closed_interval}s"
+    print(f"[run] pid {os.getpid()} looping until {deadline}; "
+          f"open={interval}s closed={closed_interval}s watchdog={outer_timeout}s"
           + (f"; stopping after {max_ticks} ticks" if max_ticks else ""), flush=True)
     while date.today() <= deadline:
         if max_ticks and n >= max_ticks:
             print(f"[run] reached --max-ticks {max_ticks}, stopping", flush=True)
             break
         n += 1
-        open_now = False
+        # A skipped tick means another process is actively trading right now,
+        # so check back on the OPEN cadence rather than sleeping half an hour.
+        open_now = True
         try:
-            r = await run_tick(cfg, verbose=True)
+            with tick_lock(lock_path):
+                r = await asyncio.wait_for(run_tick(cfg, verbose=True),
+                                           timeout=outer_timeout)
             open_now = bool(r.get("market_open", r.get("status") != "housekeeping"))
+        except BlockingIOError as exc:
+            print(f"[run] {exc}", flush=True)
+        except TimeoutError:
+            print(f"[run] tick {n} exceeded the {outer_timeout}s watchdog and was "
+                  f"cancelled - continuing", flush=True)
         except Exception as exc:  # noqa: BLE001 - a bad tick must not end the run
             print(f"[run] tick {n} failed, continuing: {exc!r}", flush=True)
         await asyncio.sleep(interval if open_now else closed_interval)
