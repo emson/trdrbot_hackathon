@@ -50,7 +50,13 @@ class Snapshot:
         return sum(_f(p.get("unrealized_pl")) for p in self.broker_positions)
 
     def by_symbol(self) -> dict[str, dict[str, Any]]:
-        return {p["symbol"]: p for p in self.broker_positions}
+        # A bare `p["symbol"]` here KeyErrored the whole fast path on one
+        # symbol-less broker row - and this is the first thing reconcile calls,
+        # so a single odd row from the broker took reconciliation AND exit-rule
+        # evaluation down for the tick. Every other broker field in this file
+        # is already read defensively through `_f`/`.get`.
+        return {p["symbol"]: p for p in self.broker_positions
+                if isinstance(p, dict) and p.get("symbol")}
 
     def render(self) -> str:
         lines = [

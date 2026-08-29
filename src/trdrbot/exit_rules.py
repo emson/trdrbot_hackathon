@@ -96,8 +96,20 @@ _PRIORITY = {"deadline": 0, "stop_loss": 1, "underlying_stop": 1,
              "time_stop": 2, "profit_target": 3}
 
 
-def _pct(v: Any) -> float:
-    return _f(str(v).rstrip("%")) / 100.0
+def _pct(v: Any) -> float | None:
+    """A "-65.0%" threshold as a fraction. None when it does not parse.
+
+    This used to lean on `_f`, whose default is 0.0 - so a threshold of "abc",
+    or an empty string, became a stop at EXACTLY BREAKEVEN. Any position
+    slightly underwater would then debounce into a close on the second check.
+    `_normalise`'s docstring already promised to return None "for anything
+    unrecognised or incomplete, which holds rather than guesses"; this is what
+    makes that true.
+    """
+    try:
+        return float(str(v).strip().rstrip("%")) / 100.0
+    except (TypeError, ValueError):
+        return None
 
 
 def _normalise(rule: dict[str, Any]) -> tuple[str, str, float, str] | None:
@@ -112,17 +124,40 @@ def _normalise(rule: dict[str, Any]) -> tuple[str, str, float, str] | None:
 
     if kind == "deadline":
         return ("days_to_deadline", "below", 0.0, kind)
-    if kind == "stop_loss" and rule.get("threshold") is not None:
-        return ("position_mark", "below", _pct(rule["threshold"]), kind)
-    if kind == "profit_target" and rule.get("threshold") is not None:
-        return ("position_mark", "above", _pct(rule["threshold"]), kind)
+    if kind in ("stop_loss", "profit_target") and rule.get("threshold") is not None:
+        thr = _pct(rule["threshold"])
+        if thr is None:
+            return None  # unparseable threshold: hold, never guess a level
+        direction = "below" if kind == "stop_loss" else "above"
+        return ("position_mark", direction, thr, kind)
     if kind == "time_stop":
-        return ("days_to_expiry", "below", float(rule.get("days_before_expiry", 0)), kind)
+        # An explicit 0 is a real rule ("close on expiry day") and the live
+        # book carries one. A MISSING day count is not a rule at all, and
+        # coercing it to 0 would arm a stop the agent never wrote - the
+        # absence-as-zero class (D-038). It used to raise TypeError instead,
+        # taking every other position's evaluation down with it.
+        raw = rule.get("days_before_expiry")
+        if raw is None:
+            return None
+        try:
+            return ("days_to_expiry", "below", float(raw), kind)
+        except (TypeError, ValueError):
+            return None
     if kind == "underlying_stop":
         level = _f(str(rule.get("level")), 0.0)
         if level > 0:
             return ("underlying", str(rule.get("direction", "below")), level, kind)
     return None
+
+
+def invalid_rules(pos: Position) -> int:
+    """How many of this position's rules cannot be read at all.
+
+    Reported on the `exit_run` heartbeat rather than silently skipped: a rule
+    the agent wrote and the evaluator cannot parse is a commitment that will
+    never be honoured, and the agent has no other way to find that out.
+    """
+    return sum(1 for rule in pos.exit_rules if _normalise(rule) is None)
 
 
 def _overshoot(x: float, thr: float, direction: str) -> float:
@@ -225,15 +260,25 @@ async def run(
 ) -> list[str]:
     """Evaluate every still-open position and close those that trigger."""
     triggered: list[str] = []
-    watched = rules_checked = 0
+    watched = rules_checked = unreadable = errors = 0
 
     for pos in store.open_positions():
         if pos.status != "open":
             continue  # only fully-open positions are candidates
         watched += 1
         rules_checked += len(watched_signals(pos)) + 1  # +1 for the implicit deadline
+        unreadable += invalid_rules(pos)
 
-        reason, why, pnl = evaluate(pos, snap, deadline)
+        # One position's bad data must not blind the evaluator to every OTHER
+        # position. `evaluate` reads model-authored YAML off disk, so a single
+        # malformed rule used to take capital protection offline for the whole
+        # book, every tick, until someone hand-fixed the file.
+        try:
+            reason, why, pnl = evaluate(pos, snap, deadline)
+        except Exception as exc:  # noqa: BLE001 - per-position isolation
+            errors += 1
+            print(f"[exit] {pos.position_id}: rule evaluation failed, holding: {exc!r}")
+            continue
         store.save(pos)  # persist debounce state either way
 
         if not reason:
@@ -281,6 +326,13 @@ async def run(
     # distinguishable from one that is not evaluating at all.
     if watched:
         journal.append("exit_run", positions=watched, rules=rules_checked,
-                       triggered=len(triggered))
+                       triggered=len(triggered),
+                       # An unreadable rule is a commitment that can never be
+                       # honoured, and an evaluation error is a position going
+                       # unwatched. Both are silent otherwise.
+                       invalid_rules=unreadable, errors=errors)
+        if unreadable or errors:
+            print(f"[exit] WARNING: {unreadable} unreadable rule(s), "
+                  f"{errors} position(s) failed evaluation - those are not being watched")
 
     return triggered
