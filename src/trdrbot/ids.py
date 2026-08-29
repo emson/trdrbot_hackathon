@@ -101,7 +101,7 @@ def journal_id(kind: str) -> str:
     return f"jrn_{utc_stamp()}_{kind[:3]}{uuid.uuid4().hex[:6]}"
 
 
-def opportunity_id(source: str, payload: dict) -> str:
+def opportunity_id(source: str, payload: dict[str, Any]) -> str:
     """Identity of an opportunity is the CLAIM, not the moment it was written.
 
     Every other item type wants `item_id`'s uuid4, and for a good measured
