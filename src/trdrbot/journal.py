@@ -31,13 +31,33 @@ class Journal:
         return entry["id"]
 
     def read(self) -> Iterator[dict[str, Any]]:
+        """Every entry, skipping any line that cannot be parsed.
+
+        This is the ground-truth store and it was the LEAST fault-tolerant
+        reader in the system: a bare `json.loads` per line, where `ledger` and
+        `health` already skipped bad ones. Appends are a buffered write and
+        rows carry a 2000-char summary plus the recalled block ids, so a crash
+        mid-flush really can leave a partial line - and one of those made
+        `last_decision_at`, `unresolved_decision`, the muse nonce, the muse
+        daily cap and `coach.pulse` all raise at once.
+
+        Skipping is right rather than raising, but silence is not: a corrupt
+        line means a lost event, so it is counted and printed.
+        """
         if not self.path.exists():
             return
+        skipped = 0
         with self.path.open() as f:
             for line in f:
                 line = line.strip()
-                if line:
+                if not line:
+                    continue
+                try:
                     yield json.loads(line)
+                except json.JSONDecodeError:
+                    skipped += 1
+        if skipped:
+            print(f"[journal] skipped {skipped} unparseable line(s) in {self.path.name}")
 
     def last_decision_at(self):
         """When the agent last actually reasoned. None if never.

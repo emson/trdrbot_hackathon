@@ -136,11 +136,28 @@ class CalibrationStore:
     def __init__(self, path: Path) -> None:
         self.path = path
         self._items: list[Forecast] = []
-        if path.exists():
-            for line in path.read_text().splitlines():
-                if line.strip():
-                    d = json.loads(line)
-                    self._items.append(Forecast(**d))
+        if not path.exists():
+            return
+        skipped = 0
+        for line in path.read_text().splitlines():
+            if not line.strip():
+                continue
+            try:
+                d = json.loads(line)
+                # Ignore unknown keys rather than raising on them: a field
+                # added to Forecast later must not make every OLD row
+                # unreadable, and `_flush` rewrites the whole file, so a row
+                # skipped on load is a row DELETED on the next write.
+                self._items.append(
+                    Forecast(**{k: v for k, v in d.items()
+                                if k in Forecast.__dataclass_fields__})
+                )
+            except (json.JSONDecodeError, TypeError, ValueError):
+                skipped += 1
+        if skipped:
+            # Loud, because these rows are the calibration record itself.
+            print(f"[calibration] skipped {skipped} unreadable forecast(s) "
+                  f"in {path.name} - they will be dropped on the next write")
 
     def _flush(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
