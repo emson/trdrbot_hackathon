@@ -244,6 +244,15 @@ is the distinctive part: **a profit on a wrong thesis is luck, and a book of luc
 competence however good the P&L looks.** Promotion past ESTABLISH requires that most resolved
 theses were actually explicable. Drawdown demotes immediately; recovery restores.
 
+**Every falsifiable claim is scored, not only the ones we trade.** A thesis passed to
+`simulate_experiments` is pre-registered automatically, traded or not, so the trial count N that a
+multiple-testing correction needs cannot be lost. `record_forecast` puts a view on the record at
+zero capital risk — and it takes `metric="realized_vol"` as well as a price band, so the
+realized-vol view the agent states every cycle ("I forecast 8.5%; the condors needed sub-7.5%") is
+resolved against the tape at its horizon and moves calibration like any other forecast. Resolution
+is deterministic and never guesses: a claim whose data is absent, stale or too short is skipped and
+tried again tomorrow.
+
 **Percentages mean what a trader means.** A stop or
 target is a percent of the net debit paid or credit received, not of the notional or the gross
 premium traded. Getting that wrong is not cosmetic: on the gross base, three of the four

@@ -170,7 +170,11 @@ already gone, but `research._valid_opportunity`, `wiki.should_mint`, `Concept.ve
 output the tick discards), and the three permanently-red OpenCode-Zen contract tests.
 Decide-and-delete: `implied_vs_realized`/`vol_days` (dead, tests-only) - either wire the I-14
 consumer (fixing the percent/fraction trap at `Stats.realized_vol`) or delete ~60 lines; wiring
-it is most of I-14 and the better move.
+it is most of I-14 and the better move. **RESOLVED (D-093, WU-3.6): both, one each.**
+`implied_vs_realized` was wired - and wiring it revealed the function was wrong by 20% in the
+direction that says sell (I-38), which is the argument for the "wire it" branch stated better
+than the plan managed. `vol_days` was deleted: its only stated purpose was the conversion that
+turned out to be the defect.
 
 ## 5. Phase 2 - foundations (structure; strictly behaviour-preserving)
 
@@ -316,6 +320,8 @@ only one day exists, do Phase 0.1 + Phase 1 rows 1.1-1.8.
 1. **1.9 (double crediting)** - the one semantic change. The fix implements the README's own
    table; the alternative (low-weight interim credit at close) preserves a "money teaches a
    little" signal the design explicitly rejects. Recommended: defer credit to attribution.
-2. **`implied_vs_realized`** - wire its consumer (≈ I-14, recommended) or delete it.
+2. ~~**`implied_vs_realized`** - wire its consumer (≈ I-14, recommended) or delete it.~~
+   **DONE (D-093):** wired into `render_comparison`, and the wiring found the function itself
+   defective (I-38). `vol_days` deleted.
 3. **Muse cap semantics** - should the CLI honour `MUSE_RUNS_PER_DAY`? Recommended: yes, with
    `--force` to override; the cap moves inside `muse.run` either way.

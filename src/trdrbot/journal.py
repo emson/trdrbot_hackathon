@@ -8,6 +8,7 @@ record and resume rather than re-decide, or write-ahead buys nothing.
 from __future__ import annotations
 
 from collections.abc import Iterator
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -26,7 +27,7 @@ class Journal:
             **fields,
         }
         store.append_jsonl(self.path, entry)  # advisory=False: ground truth
-        return entry["id"]
+        return str(entry["id"])
 
     def read(self) -> Iterator[dict[str, Any]]:
         """Every entry, skipping any line that cannot be parsed.
@@ -47,13 +48,12 @@ class Journal:
             print(f"[journal] skipped {skipped} unparseable line(s) in {self.path.name}")
         yield from rows
 
-    def last_decision_at(self):
+    def last_decision_at(self) -> datetime | None:
         """When the agent last actually reasoned. None if never.
 
         Used by the market pulse (D-042) to notice it has gone quiet while
         holding risk - the failure mode is silence that looks like calm.
         """
-        from datetime import datetime
         latest = None
         for row in self.read():
             if row.get("kind") not in ("decision",):
@@ -69,9 +69,8 @@ class Journal:
                 latest = dt
         return latest
 
-    def last_hunt_at(self):
+    def last_hunt_at(self) -> datetime | None:
         """When opportunity hunting last ran. Gates the hunt cooldown."""
-        from datetime import datetime
         latest = None
         for row in self.read():
             if row.get("kind") not in ("hunt", "discovery"):

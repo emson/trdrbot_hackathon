@@ -944,24 +944,21 @@ def test_reliability_is_never_negative():
 
 # --------------------------- D-051 vol clock and gamma breakeven
 
-def test_weekend_time_is_not_full_volatility_time():
-    """Friday->Monday is 2.25 calendar days but ~1.25 vol days. At 30 DTE that
-    is a rounding error; at 2-10 DTE it corrupts every greek and the expected
-    move the thesis band is checked against."""
-    import datetime
+def test_the_weekend_vol_clock_is_gone_rather_than_merely_unused():
+    """`vol_days` weighted weekends at half a day, to convert "an implied vol
+    against a realized one". D-093 derived that this comparison needs no clock
+    change at all - an annualised realized vol already carries the trading-day
+    count - so the function's only stated purpose was a conversion that must
+    not happen. It had no production callers and its docstring was an
+    instruction to reintroduce the double count D-051 removed.
 
-    from trdrbot.optmath import vol_days
-    friday = datetime.date(2026, 8, 28)
-    monday = datetime.date(2026, 8, 31)
-    assert vol_days(3, friday) < vol_days(3, monday)
-    assert abs(vol_days(3, monday) - 3.0) < 1e-9, "a midweek run is all trading days"
-    assert vol_days(3, friday) == 2.0, "Fri 1.0 + Sat 0.5 + Sun 0.5"
-    assert vol_days(0, friday) == 0.0
+    Deleted, not deprecated. Structural beats documented: there is no longer
+    anything to call."""
+    from trdrbot import optmath
 
-
-def test_vol_clock_degrades_honestly_without_a_start_date():
-    from trdrbot.optmath import vol_days
-    assert 0 < vol_days(7) < 7, "must discount weekends even when we cannot date them"
+    assert not hasattr(optmath, "vol_days")
+    assert not hasattr(optmath, "VOL_DAYS_PER_YEAR")
+    assert not hasattr(optmath, "WEEKEND_VOL_WEIGHT")
 
 
 def test_the_vol_clock_is_never_applied_on_top_of_a_quoted_iv():

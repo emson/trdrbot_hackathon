@@ -11,6 +11,7 @@ armed engine with a live debounce history reported "never ran").
 from __future__ import annotations
 
 import pytest
+from conftest import journal_rows
 
 from trdrbot import health
 from trdrbot.journal import Journal
@@ -136,7 +137,7 @@ def test_a_fail_open_path_leaves_a_row_the_detector_reads_back(tmp_path):
     health.degraded(journal, "compact", "unrecognised result envelope",
                     tool="get_option_chain", detail="str")
 
-    row = list(journal.read())[-1]
+    row = journal_rows(journal, "degraded")[-1]
     assert row["kind"] == "degraded"
     assert row["subsystem"] == "compact" and row["tool"] == "get_option_chain"
 
@@ -209,7 +210,7 @@ def test_the_compactor_journals_a_pass_through_once_per_tool_per_tick(tmp_path):
     for _ in range(3):
         assert asyncio.run(tool.coroutine()) == "not an envelope at all", "must fail OPEN"
 
-    rows = [r for r in journal.read() if r.get("kind") == "degraded"]
+    rows = journal_rows(journal, "degraded")
     assert len(rows) == 1, f"three calls, one row - got {len(rows)}"
     assert rows[0]["subsystem"] == "compact" and rows[0]["tool"] == "get_option_chain"
 
@@ -233,7 +234,7 @@ def test_a_news_batch_falling_back_to_headlines_says_how_many(tmp_path, monkeypa
     out = asyncio.run(news_extract.enrich(items, cfg, journal))
 
     assert len(out) == 4, "fail open: never lose the articles"
-    row = [r for r in journal.read() if r.get("kind") == "degraded"][-1]
+    row = journal_rows(journal, "degraded")[-1]
     assert row["subsystem"] == "news_extract" and row["articles"] == 4
 
 
@@ -253,3 +254,27 @@ def test_a_cycle_that_called_an_llm_but_recorded_no_usage_is_degraded():
     # Quiet when the count is not evidence: a detector that cries wolf gets
     # ignored, which costs more than the miss.
     assert _usage_went_dark([], llm_turns=0) is False
+
+
+def test_the_learning_heartbeat_fires_even_when_there_is_nothing_to_learn(tmp_path):
+    """It was guarded by "only if something filled or resolved", which writes
+    the row exactly when the probe least needs it: a quiet week and a dead
+    learning path then produce the same silence. That collapse is what every
+    heartbeat in this module exists to prevent."""
+    import asyncio
+    from types import SimpleNamespace
+
+    from trdrbot import reconcile
+
+    journal = Journal(tmp_path / "journal.jsonl")
+    store = SimpleNamespace(open_positions=lambda: [])
+    snap = SimpleNamespace(by_symbol=lambda: {}, open_orders=[])
+
+    asyncio.run(reconcile.reconcile(store, snap, journal, None, None))
+
+    row = journal_rows(journal, "learn_run")[-1]
+    assert (row["fills"], row["resolutions"], row["errors"]) == (0, 0, 0)
+    # And health reads that as idle, not as broken.
+    findings = _check(tmp_path, list(journal.read()) * 3)
+    learning = [f for f in findings if f[1] == "learning"]
+    assert learning and learning[0][0] == health.OK, learning

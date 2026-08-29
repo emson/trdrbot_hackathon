@@ -8,7 +8,7 @@ sources:
 generated:
   at: '2026-08-28T18:17:03.625993+00:00'
 stale_after: '2026-08-29T18:17:03.625997+00:00'
-status: stable
+status: deprecated
 ---
 
 # What it is

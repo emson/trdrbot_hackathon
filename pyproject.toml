@@ -87,6 +87,16 @@ python_version = "3.11"
 # is the point, not re-deriving theirs.
 ignore_missing_imports = true
 
+# `coach` is a facade: 55 names re-exported from the four coach_pkg modules so
+# every caller and test keeps saying `coach.X` unchanged after the split. Some
+# of those modules are strict, which turns each re-export into a "does not
+# explicitly export" error at 20 call sites. Those names ARE the public API -
+# that is what the facade is for - so it is said once here rather than
+# duplicated into an `__all__` that a sixth module would have to remember.
+[[tool.mypy.overrides]]
+module = ["trdrbot.coach"]
+implicit_reexport = true
+
 # The pure numeric core is held to strict. These are the modules where a
 # `float | None` handled as a zero becomes a wrong number rather than a
 # crash - the absence-as-zero class this project keeps re-finding (D-038).
@@ -100,6 +110,11 @@ module = [
     "trdrbot.opportunity",
     "trdrbot.evidence",
     "trdrbot.coach_pkg.posterior",
+    # Promoted in Phase 3: their surfaces were touched and typed here, and all
+    # three are places where a silently-wrong value reads as a healthy report.
+    "trdrbot.health",
+    "trdrbot.journal",
+    "trdrbot.coach_pkg.state",
 ]
 strict = true
 

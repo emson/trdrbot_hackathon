@@ -25,22 +25,24 @@ from trdrbot import market_stats
 from trdrbot.ledger import PRICE_BAND, REALIZED_VOL_PCT, Ledger
 
 
-def _series(days: int, daily_vol: float, seed: int = 7) -> tuple[list[str], list[float]]:
+def _series(days: int, daily_vol: float, seed: int = 7,
+            start: str = "2026-06-01") -> tuple[list[str], list[float]]:
     """A synthetic close series with a KNOWN per-day volatility.
 
     Built with a parameter and then measured, the `test_market_stats_beta`
     pattern - a test that measures its own hardcoded output measures nothing.
     """
+    from conftest import synthetic_dates
+
     rng = random.Random(seed)
     price = 100.0
-    dates, closes = [], []
-    for i in range(days):
+    closes = []
+    for _ in range(days):
         price *= math.exp(rng.gauss(0.0, daily_vol))
-        # Calendar dates, weekends included: the window filter is calendar
-        # based and must not care which days the tape actually traded.
-        dates.append(f"2026-{6 + i // 30:02d}-{1 + i % 30:02d}")
         closes.append(round(price, 4))
-    return dates, closes
+    # Consecutive calendar dates, weekends included: the window filter is
+    # calendar based and must not care which days the tape actually traded.
+    return synthetic_dates(days, start), closes
 
 
 # --- measuring realized vol over a window ---------------------------------
@@ -64,10 +66,9 @@ def test_the_window_is_the_window_and_nothing_outside_it():
     those days. Including the quiet month before it would score a different
     prediction from the one that was made."""
     dates, closes = _series(120, 0.004)
-    # A violent fortnight bolted onto the end of a calm series.
-    loud_dates, loud_closes = _series(30, 0.04, seed=99)
-    dates += [d.replace("2026-06", "2026-11").replace("2026-07", "2026-11")
-              for d in loud_dates]
+    # A violent month bolted onto the end of a calm series.
+    loud_dates, loud_closes = _series(30, 0.04, seed=99, start="2026-11-01")
+    dates += loud_dates
     closes += loud_closes
 
     calm = market_stats.realized_vol_between(dates, closes, "2026-06-01", "2026-09-30")

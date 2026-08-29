@@ -120,11 +120,17 @@ async def reconcile(
     # were the same observation. `errors` is what makes a degraded elfmem
     # visible - the failures are advisory now, which is exactly why they need
     # somewhere to be counted.
-    if result["filled"] or result["phantom"]:
-        health.heartbeat(journal, "learn_run",
-                         fills=len(result["filled"]),
-                         resolutions=len(result["phantom"]),
-                         errors=learn_errors)
+    # UNCONDITIONAL, and that is the whole point. Guarded by "only if something
+    # was learned", the row is written exactly when the probe least needs it -
+    # so a quiet week and a dead learning path produce the same silence, which
+    # is the collapse the paragraph above says this heartbeat exists to
+    # prevent. `work` reports fills+resolutions, so a run with nothing to learn
+    # from reads "ran Nx, nothing was due - idle, not stalled" rather than
+    # "never ran".
+    health.heartbeat(journal, "learn_run",
+                     fills=len(result["filled"]),
+                     resolutions=len(result["phantom"]),
+                     errors=learn_errors)
 
     for symbol in held:
         if symbol not in claimed:

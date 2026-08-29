@@ -4032,3 +4032,108 @@ trials, Brier 0.3844, the Coach still at 9 paired runs and posterior 0.379.
 misses this phase's own net-negative target. The consolidations really are negative; the
 surplus is new capability (`unchecked` reporting, the typed bus, the version stamp) plus the
 package's import ceremony. Recorded rather than rounded.
+
+## D-093: Phase 3 - the instrumentation becomes structural, and the vol view becomes evidence
+
+Phase 3 of the 019 refactor. Phases 1 and 2 fixed defects and shared seams; this phase went
+after the class of bug that survives both - **a report that is wrong in a way that reads as
+healthy.** Five of the seven work units are about making a subsystem's silence mean something
+specific, and the two that are not both turned out to be numbers that looked like readings and
+were not.
+
+**1. The heartbeat contract lives with its detector.** `health.PROBES` declared which journal
+fields each probe reads; five emitters wrote those fields by hand in five other files, with
+nothing joining the two. A probe reading a key nobody writes reports a confident zero forever,
+and that shipped twice - D-074 (a scorer fired eight times, died, and reported "ran 8x,
+produced 8" for two days) and D-082 (the exit probe read trigger rows as evidence the engine had
+RUN, so an armed engine with a live debounce history reported "never ran"). Now every heartbeat
+goes through `health.heartbeat(journal, kind, **fields)`, which REFUSES a row missing a declared
+field. It raises rather than degrades, deliberately: every emitter is exercised by the suite, so
+a violation cannot reach production green, and a swallowed contract violation would be the
+original bug with extra steps. A test scans src for the emission sites and fails if a probe
+declares heartbeat fields that nothing emits.
+
+The smoke test found the same class one layer out: `learn_run` was emitted only `if
+result["filled"] or result["phantom"]` - guarded to fire exactly when the probe least needs it,
+so a quiet week and a dead learning path produced the same silence. Unconditional now, with
+`work` reporting fills+resolutions so an idle run reads "nothing was due" instead of "never ran".
+
+**2. A lever is a declaration, not a code change.** The Coach was described as touching data
+rather than code, but registering a second lever meant editing its internals in four places:
+`mutate` formatted the muse's placeholders into its prompt, passed the muse's validator anchors
+as literals, read muse journal rows by kind for its rejection digest, and the seed text was a
+`{"muse.prompt": muse.MUSE_PROMPT}` dict copy-pasted at three call sites. `Lever` now carries
+`seed_ref`, `placeholders`, `must_contain` and `evidence_kind` as data, resolved lazily by
+import so the registry never pulls a subsystem in at module scope. The proof is a test that
+registers a synthetic lever by declaration alone and drives it through the whole cycle - seeds,
+arms, open, eight trials, tally, verdict, promotion, state swap - touching no Coach internals.
+
+**3. Every module the map names has a gauge.** The muse had three and the rest had none, so the
+report could say whether the muse was producing and nothing else. Added
+`research.opportunities_per_run`, `discovery.gauntlet_survival` and
+`attribution.attributable_rate`, all from journal rows already loaded. The third mirrors
+`competence.attributable_rate`, which GATES REAL POSITION SIZE and was computed live and never
+recorded; a test pins the journal-derived gauge to the store-derived original, because two
+copies of one definition drifting apart is this project's most familiar bug.
+
+**4. Fail-open paths leave evidence.** An error row means something stopped. Nothing recorded
+the other case: something CONTINUED, on worse input. The compactor shipped dead for its entire
+life on exactly that resemblance - its unrecognised-envelope branch printed a line and returned
+the original, and 28 option chains went through uncompacted while every log read normal (D-074).
+`health.degraded(journal, subsystem, reason, **fields)` sits beside `heartbeat` for the same
+reason - the module that reads a row owns the writing of it - but with the OPPOSITE policy: it
+never raises, because it fires on the already-broken path where instrumentation that can take
+down the run is worse than none. Four paths now leave a row (compact, news_extract, evidence,
+usage), and `health.check` groups them by (subsystem, reason) with the same escalation the error
+section uses: once is weather, three times is a subsystem quietly no longer running.
+
+**5. Two numbers that looked like readings.** `record_trial` computed the tally BEFORE appending
+the row it decorates, so every `trial_result` carried the posterior of the previous state and the
+first row of every experiment read exactly 0.5 - not a null, but the value that means "no
+preference", which is precisely the reading a decisive first trial deserved not to be given.
+Fixed by extracting the fold as `Tally.add` and using it in both places, so the number a row
+records and the number a replay reads back are one piece of arithmetic. And `pinned` was
+byte-identical to `paused` while the README and report both told an operator it "additionally
+stops the outcome audit re-matching it" - an audit that does not exist (I-28, designed and
+unbuilt). Deleted; the live state file's `"pinned": false` loads fine and sheds on its next save.
+
+**6. The stated vol forecast is scored (closes I-14).** The agent states a realized-vol claim in
+prose every cycle and nothing resolved it, so the most falsifiable thing it says moved no
+calibration and earned no size. `Entry.metric` carries `price_band` (what every historical row
+implicitly was) or `realized_vol_pct`; `record_forecast(metric="realized_vol")` records a band in
+the percent the agent states it in; `market_stats.realized_vol_between` measures it from the
+dated closes Phase 1 added; housekeeping's `_resolved_value` dispatches on the metric. `holds_at`
+needed no branch - a band is a band - and neither did `as_forecasts`, which is correct:
+calibration asks "when this agent says 70%, does it happen", a question indifferent to what the
+claim was about. Resolution SKIPS rather than guesses when the series is absent, stale or under
+five returns, because an unresolved forecast resolves tomorrow and a wrongly resolved one is in
+calibration for good.
+
+**7. Wiring a dead function found it was wrong (I-38).** `optmath.implied_vs_realized` - "the
+single most useful number a short-premium book has", by its own docstring - had zero callers.
+Giving it one exposed a defect in the function itself: it scaled the realized side by
+sqrt(252/365) before dividing, on the reasoning that implied annualises over 365 calendar days
+and realized over 252 sessions. That does not survive the derivation. A world with
+per-trading-day variance `sd^2` has annualised realized vol `sd*sqrt(252)`; an option there
+spanning `n_c` calendar days covers `n_t = n_c*252/365` sessions with total variance `n_t*sd^2`,
+which Black-Scholes charges as `sigma^2 * n_c/365` - so `sigma = sd*sqrt(252)`, the same number.
+The trading-day count is already inside both sides. **A market charging exactly fair value read
+1.20x**, a fifth of a premium that was not there, always in the direction that says sell. Now a
+plain quotient, and the number goes in front of the agent as one line in the comparison table.
+Its companion `vol_days` - a weekend-weighted clock whose only stated purpose was that
+conversion - is deleted rather than deprecated: a function documenting a conversion that must not
+happen is a trap with a docstring, and structural beats documented.
+
+**Deltas from the 019 plan.** The report needed no change to show the new gauges (it renders the
+snapshot dict generically, so a module-prefixed name groups itself); the seventh JSONL reader
+D-091 missed was in `report.py` and is now `store.read_jsonl` like the other six; and tests/ was
+never actually linted despite pyproject covering it, which had accumulated ten findings including
+two dead locals.
+
+**Honest on the ledger:** src is +674/-181 gross across the phase, roughly +442/-164 with comment
+and docstring lines stripped. Not net-negative, and the surplus is new capability rather than
+ceremony: two emission doors, three gauges, a claim type with its resolution path, and the lever
+registry's data fields. The deletions are real - `pinned`, `vol_days`, `VOL_DAYS_PER_YEAR`,
+`WEEKEND_VOL_WEIGHT`, a duplicated JSONL reader and a duplicated tally fold. `trdrbot.health`,
+`trdrbot.journal` and `trdrbot.coach_pkg.state` are promoted to mypy strict; the tree's total
+error count fell 89 -> 63.

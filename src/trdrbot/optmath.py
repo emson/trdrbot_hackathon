@@ -23,7 +23,6 @@ import math
 import re
 from collections.abc import Iterable
 from dataclasses import dataclass
-from datetime import date, timedelta
 from typing import Any
 
 CONTRACT_MULTIPLIER = 100
@@ -644,17 +643,6 @@ def _norm_pdf(x: float) -> float:
     return math.exp(-0.5 * x * x) / math.sqrt(2.0 * math.pi)
 
 
-#: Volatility does not accrue evenly across the calendar. A business day is a
-#: full unit; a weekend or holiday day contributes far less, because the
-#: underlying is not trading. Weighting them gives roughly a 308-day year.
-#:
-#: Corroborated independently: removing Friday->Monday positions from a 1DTE
-#: SPX put-write study (Mar 2018 - Sep 2025) cut cumulative return from 28.07%
-#: to 8.94% - about two thirds of all profit came from weekend-spanning trades,
-#: which is what over-counting weekend time looks like from the other side.
-WEEKEND_VOL_WEIGHT = 0.5
-VOL_DAYS_PER_YEAR = 308.0
-
 #: Sessions in a trading year. What a realized vol computed from daily closes
 #: is annualised by (`market_stats._rolling_vol` uses sqrt(252)).
 TRADING_DAYS_PER_YEAR = 252.0
@@ -692,41 +680,15 @@ def year_fraction(days: float) -> float:
     - within 1.6% of ACT/365, and a landmine for the first person to "fix" the
     missing argument.
 
-    `vol_days` survives for the one job it is genuinely right for: TIME TO
-    EXPIRY in years, which is what BS asks for and what every pricing call
-    here passes. It is NOT the conversion `implied_vs_realized` needs - see
-    that function for why an annualised realized vol is already comparable to
-    a quoted IV with no clock change at all (D-093).
+    Its counterpart `vol_days` - a weekend-weighted clock kept for "comparing
+    an implied vol against a realized one" - is GONE (D-093). That comparison
+    turns out to need no clock change at all: an annualised realized vol
+    already carries the trading-day count, so `implied_vs_realized` divides
+    the two figures directly. A conversion function whose only stated purpose
+    was a conversion that should not happen is not a tool, it is a trap with a
+    docstring.
     """
     return max(days, 0.0) / CALENDAR_DAYS_PER_YEAR
-
-
-def vol_days(days: float, start: date | None = None) -> float:
-    """Calendar days -> volatility-weighted days.
-
-    NOT the pricing clock (see `year_fraction`). This measures how much
-    TRADING time a calendar window contains, which is what you need to compare
-    an implied vol against a realized one - implied is annualised over 365
-    calendar days, realized over 252 sessions.
-
-    Without a start date we cannot know which days are weekends, so we scale
-    by the average weekday share - honest, and still better than counting
-    weekends at full weight.
-    """
-    if days <= 0:
-        return 0.0
-    if start is None:
-        return days * (5 + 2 * WEEKEND_VOL_WEIGHT) / 7.0
-    total = 0.0
-    whole = int(days)
-    for i in range(whole):
-        d = start + timedelta(days=i)
-        total += 1.0 if d.weekday() < 5 else WEEKEND_VOL_WEIGHT
-    frac = days - whole
-    if frac:
-        d = start + timedelta(days=whole)
-        total += frac * (1.0 if d.weekday() < 5 else WEEKEND_VOL_WEIGHT)
-    return total
 
 
 def implied_vs_realized(iv: float, realized_vol: float) -> float | None:
@@ -749,8 +711,8 @@ def implied_vs_realized(iv: float, realized_vol: float) -> float | None:
 
     The old adjustment therefore read 1.20 for a market charging exactly fair
     value - a fifth of a premium that was not there, always in the direction
-    that says sell. `vol_days` still does a real conversion, but for time to
-    expiry, which is a different question.
+    that says sell. The weekend-weighted `vol_days` clock that existed to
+    serve this comparison went with the adjustment.
     """
     if realized_vol is None or realized_vol <= 0 or iv is None or iv <= 0:
         return None
