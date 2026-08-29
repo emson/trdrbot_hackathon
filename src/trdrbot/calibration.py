@@ -26,6 +26,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 
 @dataclass
@@ -38,7 +39,7 @@ class Forecast:
     #: sample's concentration can be measured; never used for scoring.
     subject: str = ""
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "position_id": self.position_id,
             "probability": self.probability,

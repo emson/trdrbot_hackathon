@@ -28,9 +28,11 @@ packages = ["src/trdrbot"]
 
 [dependency-groups]
 dev = [
+    "mypy>=2.3.1",
     "pytest>=9.1.1",
     "pytest-asyncio>=1.4.0",
     "pytest-socket>=0.8.1",
+    "types-pyyaml>=6.0.12.20260815",
 ]
 
 
@@ -54,6 +56,25 @@ ignore = [
     # 16 sites. Deferred deliberately rather than swept.
     "B905",
 ]
+
+[tool.mypy]
+files = ["src/trdrbot"]
+python_version = "3.11"
+# langchain / langgraph / elfmem / yfinance ship no stubs; typing our own code
+# is the point, not re-deriving theirs.
+ignore_missing_imports = true
+
+# The pure numeric core is held to strict. These are the modules where a
+# `float | None` handled as a zero becomes a wrong number rather than a
+# crash - the absence-as-zero class this project keeps re-finding (D-038).
+[[tool.mypy.overrides]]
+module = [
+    "trdrbot.calibration",
+    "trdrbot.ids",
+    "trdrbot.failures",
+    "trdrbot.lock",
+]
+strict = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

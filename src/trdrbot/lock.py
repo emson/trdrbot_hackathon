@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import os
 import time
+from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -23,7 +24,7 @@ def _alive(pid: int) -> bool:
 
 
 @contextmanager
-def tick_lock(path: Path, stale_after: int = 600):
+def tick_lock(path: Path, stale_after: int = 600) -> Iterator[None]:
     path.parent.mkdir(parents=True, exist_ok=True)
     if path.exists():
         try:
