@@ -12,11 +12,10 @@ exit rule that exists only in prose is not an exit rule.
 from __future__ import annotations
 
 from datetime import date
+from pathlib import Path
 from typing import Any
 
 from langchain_core.tools import StructuredTool
-
-from pathlib import Path
 
 from . import experiments, ids, market_stats, optmath, sizing
 from .calibration import CalibrationStore
@@ -75,8 +74,8 @@ def _unreachable_rules(
     return out
 
 
-def build_simulate_experiments(shared: dict[str, Any], state_dir: "Path | None" = None,
-                               ledger: "Any" = None) -> StructuredTool:
+def build_simulate_experiments(shared: dict[str, Any], state_dir: Path | None = None,
+                               ledger: Any = None) -> StructuredTool:
     """Tool: score several expressions of one thesis before risking anything.
 
     Takes ALL candidates in a single call rather than one per call - that is
@@ -240,9 +239,9 @@ def build_record_position(
     store: PositionStore,
     decision_ref: str,
     *,
-    elfmem_blocks: "dict[str, list[str] | dict[str, float]] | None" = None,
+    elfmem_blocks: dict[str, list[str] | dict[str, float]] | None = None,
     generated_by: str = "",
-    calibration: "CalibrationStore | None" = None,
+    calibration: CalibrationStore | None = None,
     sources: list[dict[str, Any]] | None = None,
     shared: dict[str, Any] | None = None,
     ledger: Any = None,
@@ -489,12 +488,12 @@ def _matching_payoff_ratio(shared: dict[str, Any] | None,
 
 
 def build_size_position(
-    calibration: "CalibrationStore", equity: float, open_count: int,
+    calibration: CalibrationStore, equity: float, open_count: int,
     open_risk_usd: float = 0.0,
     open_risk_by_underlying: dict[str, float] | None = None,
     shared: dict[str, Any] | None = None,
     posture: Any = None,
-    extra_forecasts: "list[Any] | None" = None,
+    extra_forecasts: list[Any] | None = None,
 ) -> StructuredTool:
     """Tool: how many contracts, given edge, bankroll, and earned trust.
 
@@ -576,7 +575,7 @@ VACUITY_BASE = 0.90
 VACUITY_AGREE = 0.25
 
 
-def _vacuity_check(state_dir: "Path | None", underlying: str, probability: float,
+def _vacuity_check(state_dir: Path | None, underlying: str, probability: float,
                    horizon: str, band_low: float | None, band_high: float | None) -> str | None:
     """Refuse a forecast that history says is a near-certainty and the model agrees with.
 
@@ -624,7 +623,7 @@ def _vacuity_check(state_dir: "Path | None", underlying: str, probability: float
     return None
 
 
-def build_record_forecast(ledger: Any, state_dir: "Path | None" = None) -> StructuredTool:
+def build_record_forecast(ledger: Any, state_dir: Path | None = None) -> StructuredTool:
     """Tool: put a view on the record without trading it.
 
     The cheapest evidence available to this agent. Size is gated on measured

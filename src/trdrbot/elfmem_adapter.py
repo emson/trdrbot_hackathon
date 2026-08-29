@@ -62,7 +62,7 @@ class ElfmemAdapter:
     @classmethod
     async def build(
         cls, db_path: Path, config: dict[str, Any] | None = None, *, minds_path: Path | None = None
-    ) -> "ElfmemAdapter":
+    ) -> ElfmemAdapter:
         # setdefault, not overwrite: a caller passing its own project.agent_name
         # keeps the final say. Every trdrbot call site passes config=None today,
         # so this is where _DEFAULT_AGENT_NAME actually reaches elfmem in practice.

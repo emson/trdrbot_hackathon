@@ -201,7 +201,7 @@ async def _discover() -> int:
 MIN_INTERVAL_SECONDS = 30
 
 
-def _acquire_run_lock(pid_path: "Path") -> bool:
+def _acquire_run_lock(pid_path: Path) -> bool:
     """One run loop per machine. Returns False if another is already alive.
 
     A stale lock (the recorded process is gone) is taken over rather than
@@ -246,10 +246,9 @@ async def _run_loop(interval: int, closed_interval: int, *,
     that is skipped and journalled (INV-8).
     """
     from datetime import date
+    from pathlib import Path
 
     from .tick import run_tick
-
-    from pathlib import Path
 
     cfg = config_mod.load()
     if interval < MIN_INTERVAL_SECONDS and not allow_fast:
@@ -349,7 +348,7 @@ def _ledger() -> int:
     cfg = config_mod.load(quiet=True)
     book = ledger_mod.Ledger(cfg.paths.state / "ledger.jsonl")
     s = book.summary()
-    print(f"\n=== pre-registration ledger ===\n")
+    print("\n=== pre-registration ledger ===\n")
     print(f"  theses considered (N for multiple-testing): {s['trials']}")
     print(f"  traded {s['traded']} | declined {s['declined']} | "
           f"resolved {s['resolved']} | pending {s['pending']}")
@@ -448,7 +447,8 @@ async def _constitution(action: str) -> int:
 
 
 async def _muse() -> int:
-    from . import ledger as ledger_mod, muse
+    from . import ledger as ledger_mod
+    from . import muse
     from .journal import Journal
     from .wiki import Wiki
 

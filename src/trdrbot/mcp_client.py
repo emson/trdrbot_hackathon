@@ -47,7 +47,7 @@ async def get_tools(config: Config) -> list[Any]:
 
 
 @asynccontextmanager
-async def session_tools(config: Config) -> "AsyncIterator[list[Any]]":
+async def session_tools(config: Config) -> AsyncIterator[list[Any]]:
     """Tools bound to ONE session, so the whole tick shares one subprocess.
 
     `MultiServerMCPClient.get_tools()` returns tools that start a fresh session

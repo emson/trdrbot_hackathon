@@ -29,7 +29,6 @@ Discipline, because creativity without it is noise:
 
 from __future__ import annotations
 
-import json
 import random
 import re
 from typing import Any
@@ -143,7 +142,7 @@ class ShadowLedger:
         self.registered = 0
 
     def register(self, *, band_low: float | None = None,
-                 band_high: float | None = None, **_: Any) -> "_ShadowEntry | None":
+                 band_high: float | None = None, **_: Any) -> _ShadowEntry | None:
         if band_low is None and band_high is None:
             return None
         self.registered += 1
@@ -156,7 +155,7 @@ class ShadowLedger:
         return True
 
 
-def _reject(ledger: Ledger, entry: "Any", reason: str) -> None:
+def _reject(ledger: Ledger, entry: Any, reason: str) -> None:
     """Record the gate that refused a candidate, on its own ledger row.
 
     The reason used to live only in the journal, so "which gate rejects most,
@@ -172,7 +171,7 @@ def _reject(ledger: Ledger, entry: "Any", reason: str) -> None:
             print(f"[muse] could not record rejection: {exc!r}")
 
 
-def _bands_from_pct(cand: dict[str, Any], spot: "float | None") -> tuple[float | None, float | None]:
+def _bands_from_pct(cand: dict[str, Any], spot: float | None) -> tuple[float | None, float | None]:
     """Percent moves -> prices, computed against live closes.
 
     **The muse is never asked for an absolute price.** It was, and it answered
@@ -281,7 +280,7 @@ async def _generate(prompt_text: str, fields: dict[str, Any], config: Config,
 
 async def _evaluate(
     raw: list[dict[str, Any]], tools: dict[str, Any], config: Config,
-    ledger: "Ledger | ShadowLedger", *, latest: str, variant: str,
+    ledger: Ledger | ShadowLedger, *, latest: str, variant: str,
     cache: dict[str, Any],
 ) -> list[dict[str, Any]]:
     """The gate cascade. ONE copy, run by both arms of a trial.

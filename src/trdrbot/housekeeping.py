@@ -16,7 +16,6 @@ from .journal import Journal
 from .positions import PositionStore
 from .wiki import Wiki
 
-
 #: Interim scoring fires only when |unrealised P&L| first crosses one of
 #: these. Below the first band a mark is indistinguishable from bid/ask
 #: noise on a freshly opened spread, which is exactly what was being
@@ -112,8 +111,8 @@ async def run(
     # per calendar day - it costs an LLM call and regime does not move hourly.
     researched = 0
     if tools:
-        from . import ids as _ids, research
-        from .config import Config as _C  # narrow import to avoid a cycle
+        from . import ids as _ids
+        from . import research
         marker = store.dir.parent.parent / "state" / "last_research"
         today = _ids.utc_now().date().isoformat()
         # Research is the ONLY recurring LLM cost of the closed-market loop
@@ -142,7 +141,8 @@ async def run(
     # enough to mean anything.
     forecasts_resolved = 0
     if tools:
-        from . import ids as _i, ledger as _ledger
+        from . import ids as _i
+        from . import ledger as _ledger
         from .attribution import _spot
         cfg2 = _load_config()
         book = _ledger.Ledger(cfg2.paths.state / "ledger.jsonl")
@@ -191,7 +191,8 @@ async def run(
     # this call alone would defer every promotion to the following night.
     coached: dict[str, Any] = {}
     try:
-        from . import coach, muse as _muse
+        from . import coach
+        from . import muse as _muse
         cfg3 = _load_config()
         coach.reconcile(cfg3, seeds={"muse.prompt": _muse.MUSE_PROMPT})
         coached = await coach.pulse(cfg3, journal,

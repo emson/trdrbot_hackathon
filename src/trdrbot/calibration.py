@@ -53,7 +53,7 @@ class Forecast:
 CONCENTRATION_WARN = 0.6
 
 
-def effective_n(forecasts: list["Forecast"]) -> float | None:
+def effective_n(forecasts: list[Forecast]) -> float | None:
     """Independent-equivalent sample size: inverse-Herfindahl over subjects.
 
     `n` counts forecasts. This counts BETS. Seventeen SPY theses in one week

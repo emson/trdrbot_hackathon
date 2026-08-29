@@ -95,6 +95,7 @@ async def test_daily_bars_descending_are_anchored_to_today(cfg):
     six-week-stale data while every log line read healthy. `sort=desc` anchors
     the window to now by construction."""
     from datetime import date, timedelta
+
     from trdrbot import market_stats
     tools = await _tools(cfg)
 
@@ -113,6 +114,7 @@ async def test_daily_bars_descending_are_anchored_to_today(cfg):
 async def mcp_client_call_bars(tools):
     """Bar dates only, so the staleness check above reads clearly."""
     from datetime import date, timedelta
+
     from trdrbot import mcp_client
     start = (date.today() - timedelta(days=40)).isoformat()
     r = await mcp_client.call(tools, "get_stock_bars", symbols="SPY", timeframe="1Day",
@@ -130,6 +132,7 @@ async def test_option_chain_is_large_enough_to_matter_for_context_cost(cfg):
     this ever shrinks by an order of magnitude the context budget changed;
     if it grows, cost did (D-063)."""
     import json
+
     from trdrbot import mcp_client
     tools = await _tools(cfg)
     r = await mcp_client.call(tools, "get_option_chain", underlying_symbol="SPY")
@@ -215,6 +218,7 @@ async def test_langgraph_agent_records_usage_only_via_constructor_callbacks(cfg,
     from langchain.chat_models import init_chat_model
     from langchain_core.tools import tool
     from langgraph.prebuilt import create_react_agent
+
     from trdrbot.usage import UsageCallback, UsageLedger
 
     @tool
@@ -304,6 +308,7 @@ async def test_anthropic_serves_a_marked_prefix_from_the_prompt_cache():
     decide cycle silently costs ~3x more."""
     from langchain.chat_models import init_chat_model
     from langchain_core.messages import HumanMessage, SystemMessage
+
     from trdrbot.usage import _cache_split
 
     big = "You are a trading agent. " + "Standing rule to consider. " * 250
@@ -481,8 +486,8 @@ async def test_gpt_5_6_sol_calls_a_bound_tool_through_the_real_build_model_path(
     would 400 on the very first tool call, every single decide cycle."""
     from langchain_core.tools import tool
     from langgraph.prebuilt import create_react_agent
+
     from trdrbot.llm import build_model
-    from trdrbot.usage import UsageLedger
 
     @tool
     def get_ticker_price(ticker: str) -> str:

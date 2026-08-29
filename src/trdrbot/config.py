@@ -25,7 +25,7 @@ class Paths:
     state: Path
 
     @classmethod
-    def build(cls, root: Path) -> "Paths":
+    def build(cls, root: Path) -> Paths:
         data = root / "data"
         return cls(
             root=root,

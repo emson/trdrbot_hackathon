@@ -27,7 +27,7 @@ import json
 import re
 from typing import Any
 
-from . import ids, market_stats, mcp_client, news_extract
+from . import market_stats, mcp_client, news_extract
 from .config import Config
 from .inbox import Inbox
 from .journal import Journal

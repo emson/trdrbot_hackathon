@@ -153,7 +153,7 @@ def render() -> str:
     return "\n".join(lines)
 
 
-def block_text(p: "Principle") -> str:
+def block_text(p: Principle) -> str:
     """The principle as it renders in the SELF frame, name first.
 
     The frame numbers its blocks and orders them by how load-bearing each has

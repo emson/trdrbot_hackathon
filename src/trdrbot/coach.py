@@ -39,9 +39,10 @@ from __future__ import annotations
 import json
 import math
 import os
-from dataclasses import asdict, dataclass, field
+from collections.abc import Callable
+from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 from . import ids
 
@@ -547,7 +548,8 @@ def _cost_today(cfg: Any, roles: tuple[str, ...] = ("muse", "coach_mutate")) -> 
 
 def snapshot_gauges(cfg: Any, rows: list[dict[str, Any]]) -> dict[str, Any]:
     """All gauges, computed from one already-loaded pass over the journal."""
-    from . import calibration as _cal, ledger as _led
+    from . import calibration as _cal
+    from . import ledger as _led
 
     g: dict[str, Any] = {}
 
@@ -1076,7 +1078,7 @@ def _open(cfg: Any, st: LeverState, challenger: Variant, journal: Any) -> None:
 
 
 def _close(cfg: Any, st: LeverState, outcome: str, reason: str, journal: Any,
-           t: "Tally | None" = None) -> None:
+           t: Tally | None = None) -> None:
     """Close WITHOUT promoting. The challenger's full text goes into the event
     so the graveyard needs no second lookup, and so a good idea killed by an
     unrelated sentinel is recoverable by a human reading the log."""

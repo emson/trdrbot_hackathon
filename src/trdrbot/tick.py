@@ -32,24 +32,26 @@ from typing import Any
 from langgraph.prebuilt import create_react_agent
 
 from . import (
+    analytics,
     compact,
     competence,
-    idle,
-    ledger as ledger_mod,
-    prompts,
-    sizing,
-    analytics,
     exit_rules,
     failures,
     housekeeping,
+    idle,
     ids,
     local_tools,
     mcp_client,
     news_extract,
+    prompts,
     reconcile,
     sensors,
+    sizing,
     tool_guard,
     usage,
+)
+from . import (
+    ledger as ledger_mod,
 )
 from .calibration import CalibrationStore
 from .config import Config
@@ -104,7 +106,7 @@ ATTENTION_MAX_NAMES = 6
 MUSE_RUNS_PER_DAY = 3
 
 
-def _attention_query(items: "list[Item]", open_pos: list[Any], config: Config) -> str:
+def _attention_query(items: list[Item], open_pos: list[Any], config: Config) -> str:
     """What to ask MEMORY about, given what this cycle is actually deciding.
 
     Was `" ".join(config.watchlist) + " options setup"` - a constant. With
@@ -155,8 +157,8 @@ def _attention_query(items: "list[Item]", open_pos: list[Any], config: Config) -
     return " ".join(names[:ATTENTION_MAX_NAMES]) + " options setup"
 
 
-def _render_positions(store: PositionStore, snap: "analytics.Snapshot | None" = None,
-                      state_dir: "Path | None" = None, equity: float = 0.0) -> str:
+def _render_positions(store: PositionStore, snap: analytics.Snapshot | None = None,
+                      state_dir: Path | None = None, equity: float = 0.0) -> str:
     """Two-tier context (D-019): detail for what needs attention, one line for the rest."""
     positions = store.open_positions()
     if not positions:
@@ -262,8 +264,9 @@ async def _run_tick(
         # ---------- fast path: every tick, no LLM ----------
         sensed = await sensors.collect(tools, config, inbox, n, verbose=verbose)
         snap = await analytics.snapshot(
-        tools, underlyings=sorted({p.underlying for p in store.open_positions() if p.underlying})
-    )
+            tools,
+            underlyings=sorted({p.underlying for p in store.open_positions() if p.underlying}),
+        )
         recon = await reconcile.reconcile(store, snap, journal, mem, wiki, calib)
         triggered = await exit_rules.run(
             store, snap, tools, journal, config.deadline, mem, wiki,
@@ -308,8 +311,8 @@ async def _run_tick(
         if not items:
             # An empty inbox is several states, not one (D-043). The ladder
             # picks the cheapest rung that the situation actually justifies.
-            from datetime import datetime
             import zoneinfo
+            from datetime import datetime
             et = datetime.now(zoneinfo.ZoneInfo("America/New_York"))
             action = idle.decide(
                 market_open=snap.market_open,

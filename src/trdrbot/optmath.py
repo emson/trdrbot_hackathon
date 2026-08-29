@@ -21,8 +21,9 @@ from __future__ import annotations
 
 import math
 import re
+from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Any, Iterable
+from typing import Any
 
 CONTRACT_MULTIPLIER = 100
 
@@ -57,7 +58,7 @@ class Leg:
         return 1 if self.side == "long" else -1
 
     @classmethod
-    def parse(cls, d: dict[str, Any]) -> "Leg":
+    def parse(cls, d: dict[str, Any]) -> Leg:
         right = str(d.get("right", "")).upper()[:1]
         if right not in ("C", "P"):
             raise ValueError(f"leg right must be C or P, got {d.get('right')!r}")
@@ -371,7 +372,7 @@ class Breakeven:
                 else f"wins if {self.variable} between {lo} and {hi}")
 
 
-def _crossings(f, grid: "tuple[float, ...]", *, tol: float = 1e-4) -> tuple[float, ...]:
+def _crossings(f, grid: tuple[float, ...], *, tol: float = 1e-4) -> tuple[float, ...]:
     """Zeros of `f` over `grid`, by scan then bisection. Same shape as `breakevens`."""
     out: list[float] = []
     for a, b in zip(grid, grid[1:]):
@@ -577,7 +578,7 @@ def year_fraction(days: float) -> float:
     return max(days, 0.0) / CALENDAR_DAYS_PER_YEAR
 
 
-def vol_days(days: float, start: "date | None" = None) -> float:
+def vol_days(days: float, start: date | None = None) -> float:
     """Calendar days -> volatility-weighted days.
 
     NOT the pricing clock (see `year_fraction`). This measures how much
@@ -589,7 +590,7 @@ def vol_days(days: float, start: "date | None" = None) -> float:
     by the average weekday share - honest, and still better than counting
     weekends at full weight.
     """
-    from datetime import date as _date, timedelta
+    from datetime import timedelta
 
     if days <= 0:
         return 0.0
@@ -663,7 +664,7 @@ def gamma_breakeven(greeks: dict[str, float] | None) -> float | None:
 
 
 def bs_greeks(right: str, strike: float, spot: float, iv: float, days: float,
-              start: "date | None" = None) -> dict[str, float] | None:
+              start: date | None = None) -> dict[str, float] | None:
     """Per-share greeks for one contract. None when the model is undefined.
 
     At days <= 0 or iv <= 0 the formulas divide by zero - and the honest
@@ -691,7 +692,7 @@ def bs_greeks(right: str, strike: float, spot: float, iv: float, days: float,
 
 
 def net_greeks(legs: list[Leg], spot: float, iv: float, days: float,
-               start: "date | None" = None) -> dict[str, float] | None:
+               start: date | None = None) -> dict[str, float] | None:
     """Whole-position greeks in trader units, or None if any leg is undefined.
 
     delta_shares  equivalent stock shares (signed)
@@ -726,7 +727,7 @@ def net_greeks(legs: list[Leg], spot: float, iv: float, days: float,
 
 
 def expected_move(spot: float, iv: float, days: float,
-                  start: "date | None" = None) -> float | None:
+                  start: date | None = None) -> float | None:
     """The market's own 1-sigma move by the horizon, in dollars.
 
     The first professional sanity check on any thesis: a band INSIDE the

@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -113,7 +113,7 @@ class Concept:
                 return text
         return self.body.strip()
 
-    def is_stale(self, now: "datetime | None" = None) -> bool:
+    def is_stale(self, now: datetime | None = None) -> bool:
         """Has the perishable content passed its declared instant?"""
         raw = self.frontmatter.get("stale_after")
         if not raw:
@@ -123,7 +123,7 @@ class Concept:
         except (TypeError, ValueError):
             return False
         if when.tzinfo is None:
-            when = when.replace(tzinfo=timezone.utc)
+            when = when.replace(tzinfo=UTC)
         return (now or ids.utc_now()) >= when
 
     def add_source(self, resource: str, *, author: str = "", id_: str | None = None) -> str:
@@ -278,7 +278,7 @@ class Wiki:
         return out
 
     def sweep(self, *, protected: set[str] | None = None,
-              now: "datetime | None" = None) -> dict[str, list[str]]:
+              now: datetime | None = None) -> dict[str, list[str]]:
         """Tombstone expired concepts. **Marks, never deletes, never moves.**
 
         Deletion is refused on principle and archiving-by-move is refused on

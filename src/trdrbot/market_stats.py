@@ -412,6 +412,7 @@ async def fetch_daily_closes(tools: dict[str, Any], symbol: str, *, days: int = 
     recent present.
     """
     from datetime import date, timedelta
+
     from . import mcp_client
 
     start = (date.today() - timedelta(days=int(days * 1.6))).isoformat()

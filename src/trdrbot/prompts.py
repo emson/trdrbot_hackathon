@@ -29,7 +29,7 @@ from __future__ import annotations
 
 import hashlib
 from dataclasses import dataclass
-from typing import Any, Callable
+from typing import Any
 
 
 @dataclass(frozen=True)
@@ -59,7 +59,8 @@ def _active_muse_prompt() -> str:
     from .muse import MUSE_PROMPT
 
     try:
-        from . import coach, config as _cm
+        from . import coach
+        from . import config as _cm
 
         return coach.load_state(_cm.load(quiet=True), "muse.prompt", MUSE_PROMPT).incumbent.text
     except Exception:  # noqa: BLE001

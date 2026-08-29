@@ -18,7 +18,6 @@ from trdrbot import coach, muse
 from trdrbot.journal import Journal
 from trdrbot.ledger import Ledger
 
-
 # --- fixtures --------------------------------------------------------------
 
 

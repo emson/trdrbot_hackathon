@@ -31,7 +31,6 @@ from langchain_core.callbacks import BaseCallbackHandler
 
 from . import ids
 
-
 #: Anthropic's published cache multipliers against the base input rate: a
 #: cache WRITE costs 1.25x, a READ 0.1x. OpenAI's automatic caching discounts
 #: reads too and reports them the same way through LangChain, so the same
@@ -236,7 +235,7 @@ def render(summary: dict[str, Any]) -> str:
     if summary["unpriced_calls"]:
         lines.append(f"  WARNING: {summary['unpriced_calls']} call(s) UNPRICED "
                      f"(not counted in the total): {', '.join(summary['unpriced_models'])}")
-        lines.append(f"  -> add these to llm.pricing in config.yaml for a true total")
+        lines.append("  -> add these to llm.pricing in config.yaml for a true total")
     lines.append("")
     if summary["by_model"]:
         # `cached` is the share of `in` served from the prompt cache at a tenth

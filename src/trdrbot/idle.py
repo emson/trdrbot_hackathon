@@ -24,7 +24,7 @@ decision that has to be justified rather than defaulted into.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, time, timezone
+from datetime import UTC, datetime, time
 from typing import Any
 
 #: A move this large in a held underlying is worth a fresh look even with no
@@ -56,7 +56,7 @@ class IdleAction:
 def _minutes_since(ts: datetime | None) -> float | None:
     if ts is None:
         return None
-    return (datetime.now(timezone.utc) - ts).total_seconds() / 60.0
+    return (datetime.now(UTC) - ts).total_seconds() / 60.0
 
 
 def minutes_to_close(now_et: datetime) -> float:

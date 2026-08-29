@@ -25,7 +25,6 @@ with no step that rewards mere confidence.
 from __future__ import annotations
 
 from dataclasses import dataclass
-
 from typing import Any
 
 from .calibration import Calibration
@@ -127,7 +126,7 @@ def size_position(
     max_profit: float | None,
     max_loss: float | None,
     calibration: Calibration,
-    posture: "Any" = None,
+    posture: Any = None,
     underlying: str = "",
     open_risk_usd: float = 0.0,
     open_risk_by_underlying: dict[str, float] | None = None,

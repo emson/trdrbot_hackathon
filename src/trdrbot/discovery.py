@@ -24,7 +24,7 @@ to the inbox, where the decide cycle validates them against live quotes.
 from __future__ import annotations
 
 import json
-from datetime import date, datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from . import competence, ids, market_stats, mcp_client, news_extract
@@ -127,7 +127,7 @@ async def _fundamentals(ticker: str) -> dict[str, Any]:
             "industry": info.get("industry"),
             "analyst_target": info.get("targetMeanPrice"),
             "next_earnings": (
-                datetime.fromtimestamp(earnings, tz=timezone.utc).date().isoformat()
+                datetime.fromtimestamp(earnings, tz=UTC).date().isoformat()
                 if earnings else None
             ),
         }

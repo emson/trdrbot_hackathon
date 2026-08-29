@@ -24,9 +24,10 @@ Invariants preserved from the regression pass (D-019):
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import date
-from typing import Any, Callable
+from typing import Any
 
 from . import learn, mcp_client
 from .analytics import Snapshot, _f, position_pnl_pct

@@ -15,11 +15,10 @@ biased?" into a number: max/max Kelly reached -2.313 on bets with precisely
 zero edge.
 """
 from __future__ import annotations
-import math, itertools
-from trdrbot import optmath, sizing, experiments
-from trdrbot.optmath import Leg, _lognormal_grid, pnl_at
+
+from trdrbot import competence, experiments, optmath, sizing
 from trdrbot.calibration import Calibration
-from trdrbot import competence
+from trdrbot.optmath import Leg, _lognormal_grid
 
 SPOT, DAYS, IV = 100.0, 7.0, 0.25
 
@@ -180,6 +179,7 @@ print(f"swept {len(zoo())} structures x 9 sample sizes: {inversions} inversion(s
 # ---------------------------------------------------------------- INV-F
 report("INV-F  A stop the agent typically writes must be REACHABLE on the net-cost base")
 from trdrbot.local_tools import _unreachable_rules
+
 print(f"{'structure':<28} {'net':>8} {'maxP':>8} {'maxL':>8}  -50%/+50%   -100%/+100%")
 print("-" * 92)
 for name, legs in zoo().items():

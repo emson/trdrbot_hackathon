@@ -34,6 +34,27 @@ dev = [
 ]
 
 
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "B", "SIM", "UP", "I"]
+ignore = [
+    # Long rationale comments are house style - they carry measured incident
+    # history and reflowing them loses the shape a reader scans for.
+    "E501",
+    # `l` is this codebase's name for an option LEG, in a package where the
+    # domain word appears on nearly every line of the maths. 43 renames across
+    # functions that regression tests read by source is churn against zero
+    # correctness gain.
+    "E741",
+    # zip(strict=) would be a real decision per call site: strict=True changes
+    # behaviour on a length mismatch, strict=False is a no-op annotation across
+    # 16 sites. Deferred deliberately rather than swept.
+    "B905",
+]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 # Network is DISABLED by default. Our bugs live at integration seams, so a test

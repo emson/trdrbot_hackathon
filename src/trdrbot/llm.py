@@ -13,7 +13,6 @@ from langchain.chat_models import init_chat_model
 from . import usage
 from .config import Config
 
-
 #: Provider-side transients (429 rate limit, 529 overloaded, 5xx) are routine
 #: under load and WILL happen across an 8-day unattended run. Without retries a
 #: single 529 discards an entire decide cycle - the observations stay pending so

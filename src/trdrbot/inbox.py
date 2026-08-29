@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 import shutil
 from dataclasses import dataclass
+from datetime import UTC
 from pathlib import Path
 from typing import Any
 
@@ -80,13 +81,13 @@ class Inbox:
         repeatedly. Only `opportunity` items expire - news and fills are
         history and stay valid however old (D-043).
         """
-        from datetime import datetime, timezone
+        from datetime import datetime
         n = 0
         for item in self.pending():
             if item.type != "opportunity":
                 continue
             try:
-                age = (datetime.now(timezone.utc)
+                age = (datetime.now(UTC)
                        - datetime.fromisoformat(item.ts)).total_seconds() / 60.0
             except (ValueError, TypeError, AttributeError):
                 continue

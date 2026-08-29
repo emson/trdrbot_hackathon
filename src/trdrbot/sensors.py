@@ -20,9 +20,10 @@ others proceed.
 from __future__ import annotations
 
 import json
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Awaitable, Callable
+from typing import Any
 
 from .config import Config
 from .inbox import Inbox

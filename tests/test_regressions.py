@@ -14,7 +14,7 @@ from __future__ import annotations
 import math
 import random
 import tempfile
-from datetime import date, timedelta
+from datetime import UTC, date, timedelta
 from pathlib import Path
 
 import pytest
@@ -26,7 +26,6 @@ from trdrbot.housekeeping import _materiality_band
 from trdrbot.optmath import Leg
 from trdrbot.positions import Position, PositionStore
 from trdrbot.sizing import Calibration
-
 
 # --------------------------------------------------------------- helpers
 
@@ -406,6 +405,7 @@ def test_health_flags_a_position_with_no_thesis_at_all():
 
 def test_record_position_warns_when_simulate_was_skipped():
     import tempfile as tf
+
     from trdrbot.calibration import CalibrationStore
     d = Path(tf.mkdtemp())
     store = PositionStore(d)
@@ -561,10 +561,11 @@ def test_material_move_wakes_the_agent_through_the_idle_ladder():
     CALLED - `idle.decide` had absorbed the rung and kept its own copy of the
     two thresholds. The test passed for as long as the function was dead. It
     now exercises the path production actually takes."""
-    from datetime import datetime, timezone
+    from datetime import datetime
+
     from trdrbot import idle
 
-    just_now = datetime.now(timezone.utc)
+    just_now = datetime.now(UTC)
     pos = Position(position_id="p", status="open", underlying="SPY", entry_spot=766.5)
 
     def rung(price, positions=(pos,)):
@@ -588,9 +589,10 @@ def test_material_move_wakes_the_agent_through_the_idle_ladder():
 # -------------------------------------------- D-043 the idle ladder
 
 def _idle(**kw):
-    from datetime import datetime, timedelta, timezone
+    from datetime import datetime, timedelta
+
     from trdrbot import idle
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     base = dict(market_open=True, positions=[], underlying_prices={},
                 last_decision_at=now - timedelta(minutes=5),
                 last_hunt_at=now - timedelta(minutes=5),
@@ -617,34 +619,34 @@ def test_idle_reviews_on_a_material_move_under_a_held_position():
 
 
 def test_idle_reviews_after_too_long_without_looking():
-    from datetime import datetime, timedelta, timezone
+    from datetime import datetime, timedelta
     a = _idle(positions=[_held()], underlying_prices={"SPY": 766.9},
               open_risk_usd=14_500,
-              last_decision_at=datetime.now(timezone.utc) - timedelta(minutes=125))
+              last_decision_at=datetime.now(UTC) - timedelta(minutes=125))
     assert a.level == "review"
 
 
 def test_idle_hunts_when_capital_is_idle():
     """Idle capital is a position too - 100% cash at 0% expected return. With
     a deadline that is a decision, not a default."""
-    from datetime import datetime, timedelta, timezone
-    a = _idle(last_hunt_at=datetime.now(timezone.utc) - timedelta(minutes=200))
+    from datetime import datetime, timedelta
+    a = _idle(last_hunt_at=datetime.now(UTC) - timedelta(minutes=200))
     assert a.level == "hunt"
 
 
 def test_idle_does_not_hunt_when_the_risk_cap_is_full():
     """Do not hunt when you cannot shoot: candidates sizing will refuse are
     spend with no possible outcome."""
-    from datetime import datetime, timedelta, timezone
+    from datetime import datetime, timedelta
     a = _idle(positions=[_held()], underlying_prices={"SPY": 766.9},
               open_risk_usd=15_000,
-              last_hunt_at=datetime.now(timezone.utc) - timedelta(minutes=200))
+              last_hunt_at=datetime.now(UTC) - timedelta(minutes=200))
     assert a.level == "sleep"
 
 
 def test_idle_does_not_open_new_risk_into_the_close():
-    from datetime import datetime, timedelta, timezone
-    a = _idle(last_hunt_at=datetime.now(timezone.utc) - timedelta(minutes=300),
+    from datetime import datetime, timedelta
+    a = _idle(last_hunt_at=datetime.now(UTC) - timedelta(minutes=300),
               minutes_to_close_=15.0)
     assert a.level == "sleep" and "close" in a.reason
 
@@ -666,6 +668,7 @@ def test_interim_marks_do_not_score_the_mind_prediction():
     mark recorded a full miss: live, the SPY mind sat at confidence 0.34,
     hit/total 0/1, on a position that was PROFITABLE."""
     import inspect
+
     from trdrbot.elfmem_adapter import ElfmemAdapter
     src = inspect.getsource(ElfmemAdapter.resolve)
     assert "not interim" in src, "mind_outcome must be gated on a true resolution"
@@ -677,8 +680,10 @@ def test_run_lock_refuses_a_second_live_loop():
     """A stray 5s smoke-test loop once hammered the broker API and burned LLM
     calls for half an hour. `kill %1` had killed the pipeline job, not the
     orphaned `uv run` child."""
-    import os, tempfile
+    import os
+    import tempfile
     from pathlib import Path
+
     from trdrbot.cli import _acquire_run_lock
 
     pid_file = Path(tempfile.mkdtemp()) / "run.pid"
@@ -697,6 +702,7 @@ def test_run_lock_takes_over_a_stale_lock():
     """A crashed loop must not require manual cleanup before trading resumes."""
     import tempfile
     from pathlib import Path
+
     from trdrbot.cli import _acquire_run_lock
 
     pid_file = Path(tempfile.mkdtemp()) / "run.pid"
@@ -707,6 +713,7 @@ def test_run_lock_takes_over_a_stale_lock():
 def test_run_lock_survives_a_corrupt_pid_file():
     import tempfile
     from pathlib import Path
+
     from trdrbot.cli import _acquire_run_lock
 
     pid_file = Path(tempfile.mkdtemp()) / "run.pid"
@@ -726,6 +733,7 @@ def test_close_all_positions_is_refused_while_several_are_open():
     close ONE spread, then placed a separate sell on a leg the sweep had
     already closed. Only fill sequencing prevented a naked short."""
     import asyncio
+
     from trdrbot import tool_guard
 
     class FakeTool:
@@ -825,6 +833,7 @@ def test_the_ladder_has_no_calendar_in_it():
     """The previous design keyed on days-to-deadline and would have entered a
     no-new-risk phase permanently once the date passed."""
     import inspect
+
     from trdrbot import competence
     src = inspect.getsource(competence.assess)
     assert "date" not in src and "deadline" not in src
@@ -833,6 +842,7 @@ def test_the_ladder_has_no_calendar_in_it():
 def test_hard_stop_is_a_position_check_not_a_sizing_regime():
     import datetime
     from datetime import date
+
     from trdrbot import competence
     soon = (date.today() + datetime.timedelta(days=1)).isoformat()
     far = (date.today() + datetime.timedelta(days=30)).isoformat()
@@ -860,6 +870,7 @@ def test_next_tier_is_visible_to_the_agent():
 
 def _synthetic(kind, n, seed=11):
     import random
+
     from trdrbot.calibration import Forecast
     rng = random.Random(seed)
     out = []
@@ -914,6 +925,7 @@ def test_weekend_time_is_not_full_volatility_time():
     is a rounding error; at 2-10 DTE it corrupts every greek and the expected
     move the thesis band is checked against."""
     import datetime
+
     from trdrbot.optmath import vol_days
     friday = datetime.date(2026, 8, 28)
     monday = datetime.date(2026, 8, 31)
@@ -943,7 +955,8 @@ def test_the_vol_clock_is_never_applied_on_top_of_a_quoted_iv():
 
     So `start` is accepted and IGNORED, and this pins that."""
     import datetime
-    from trdrbot.optmath import expected_move, bs_greeks, year_fraction
+
+    from trdrbot.optmath import bs_greeks, expected_move, year_fraction
 
     fri, mon = datetime.date(2026, 8, 28), datetime.date(2026, 8, 31)
     assert expected_move(770, 0.13, 3, fri) == expected_move(770, 0.13, 3, mon)
@@ -954,6 +967,7 @@ def test_the_vol_clock_is_never_applied_on_top_of_a_quoted_iv():
 def test_greeks_and_probabilities_share_one_clock():
     """They did not, and the gap was rendered side by side in one table."""
     import math
+
     from trdrbot.optmath import Leg, bs_greeks, prob_profit, year_fraction
 
     # A far OTM call's delta and its P(profit) both key off the same sigma*sqrt(T).
@@ -974,6 +988,7 @@ def test_implied_vs_realized_converts_before_comparing():
     """252 sessions against 365 calendar days. Comparing raw understates
     implied by 17% - every time, in the direction that says do not sell."""
     import math
+
     from trdrbot.optmath import implied_vs_realized
 
     # Implied and realised describing the SAME world must read as 1.0.
@@ -988,7 +1003,7 @@ def test_gamma_breakeven_is_the_implied_daily_move_not_a_structure_score():
     """Sources claim it discriminates structures. It does not: theta/gamma is
     the same BS identity for every position at one spot and one vol. What it
     returns is the daily move implied by IV - useful against REALISED range."""
-    from trdrbot.optmath import Leg, net_greeks, gamma_breakeven
+    from trdrbot.optmath import Leg, gamma_breakeven, net_greeks
 
     def L(r, k, side, q=1):
         return Leg.parse({"right": r, "strike": k, "side": side, "qty": q, "price": 1.0})
@@ -1008,6 +1023,7 @@ def test_gamma_breakeven_is_the_implied_daily_move_not_a_structure_score():
 def _book():
     import tempfile
     from pathlib import Path
+
     from trdrbot.ledger import Ledger
     return Ledger(Path(tempfile.mkdtemp()) / "ledger.jsonl")
 
@@ -1027,10 +1043,11 @@ def test_declined_theses_still_score_calibration():
     never reach the ~50 needed for calibration to mean anything. Forecasts on
     setups we DECLINE cost nothing and score the same judgement."""
     import datetime
-    from trdrbot.calibration import CalibrationStore
-    from trdrbot.ledger import STANDALONE, as_forecasts
     import tempfile
     from pathlib import Path
+
+    from trdrbot.calibration import CalibrationStore
+    from trdrbot.ledger import STANDALONE, as_forecasts
 
     b = _book()
     past = (datetime.date.today() - datetime.timedelta(days=1)).isoformat()
@@ -1046,6 +1063,7 @@ def test_declined_theses_still_score_calibration():
 
 def test_resolution_checks_the_band_against_the_tape():
     import datetime
+
     from trdrbot.ledger import THESIS
     b = _book()
     past = (datetime.date.today() - datetime.timedelta(days=1)).isoformat()
@@ -1059,6 +1077,7 @@ def test_resolution_checks_the_band_against_the_tape():
 
 def test_a_forecast_is_not_resolved_before_its_horizon():
     import datetime
+
     from trdrbot.ledger import STANDALONE
     b = _book()
     future = (datetime.date.today() + datetime.timedelta(days=5)).isoformat()
@@ -1079,7 +1098,7 @@ def test_the_same_thesis_is_not_double_registered():
 
 
 def test_traded_and_declined_are_distinguishable():
-    from trdrbot.ledger import THESIS, STANDALONE
+    from trdrbot.ledger import STANDALONE, THESIS
     b = _book()
     b.register(kind=THESIS, underlying="NVDA", claim="a", probability=0.4,
                horizon="2099-01-01", band_low=220.0, band_high=245.0)
@@ -1120,6 +1139,7 @@ def test_a_reworded_lesson_replaces_rather_than_duplicates():
     lives on saying something subtly different. Measured: rewording one lesson
     produced 7 blocks for 6 lessons. Keys must be the handle, not content."""
     import inspect
+
     from trdrbot import lessons
     src = inspect.getsource(lessons.seed)
     assert "lesson/" in src, "must key on a per-lesson tag"
@@ -1133,7 +1153,9 @@ def test_beta_is_returned_with_its_fit_quality():
     Measured on real data: MU came out at -0.45 and NVDA at +1.85 over the
     same 120 sessions - both semiconductors. That is one estimate dominated by
     name-specific moves, not two market sensitivities."""
-    import math, random
+    import math
+    import random
+
     from trdrbot.market_stats import beta, shrunk_beta
     rng = random.Random(5)
     bench = [100.0]
@@ -1159,7 +1181,9 @@ def test_beta_is_returned_with_its_fit_quality():
 
 
 def test_beta_refuses_rather_than_guessing_on_thin_history():
-    import math, random
+    import math
+    import random
+
     from trdrbot.market_stats import beta
     rng = random.Random(3)
     short = [100.0 * math.exp(rng.gauss(0, 0.01)) for _ in range(30)]
@@ -1168,7 +1192,9 @@ def test_beta_refuses_rather_than_guessing_on_thin_history():
 
 def test_negative_beta_is_preserved_not_clamped():
     """An offsetting position is the whole point of measuring this."""
-    import math, random
+    import math
+    import random
+
     from trdrbot.market_stats import beta
     rng = random.Random(9)
     bench = [100.0]
@@ -1186,11 +1212,12 @@ def test_book_delta_is_beta_weighted_and_can_offset():
     own live book that understated market exposure by 85%."""
     import tempfile
     from pathlib import Path
-    from trdrbot.analytics import book_greeks, Snapshot
+
     from trdrbot import market_stats
 
     d = Path(tempfile.mkdtemp())
-    import math, random
+    import math
+    import random
     rng = random.Random(4)
     spy = [100.0]
     for _ in range(200):
@@ -1212,8 +1239,11 @@ def test_beta_weighting_reveals_a_hedge_that_raw_delta_hides():
     inverse-beta position RAISED raw book delta from $90k to $253k while
     beta-weighted delta FELL from $181k to $18k. Raw delta said "more
     exposed"; the truth was "almost flat"."""
-    import math, random, tempfile
+    import math
+    import random
+    import tempfile
     from pathlib import Path
+
     from trdrbot import market_stats
     from trdrbot.analytics import book_greeks
 
@@ -1255,6 +1285,7 @@ def test_attribution_scores_measured_profit_not_the_close_label():
     live: an NVDA spread the agent closed itself by repricing its profit target
     made +$1,290 and would have taught the loop the opposite of what happened."""
     import inspect
+
     from trdrbot import attribution, experiments
     src = inspect.getsource(attribution.run)
     assert "last_pnl_pct" in src, "profit must be measured, not inferred from a label"
@@ -1270,7 +1301,8 @@ def test_attribution_scores_measured_profit_not_the_close_label():
 def test_last_pnl_survives_a_position_leaving_the_broker():
     import tempfile
     from pathlib import Path
-    from trdrbot.positions import PositionStore, Position
+
+    from trdrbot.positions import Position, PositionStore
     st = PositionStore(Path(tempfile.mkdtemp()))
     st.save(Position(position_id="pos_x", status="open", last_pnl_pct=0.53))
     assert [p for p in st.all() if p.position_id == "pos_x"][0].last_pnl_pct == 0.53
@@ -1303,6 +1335,7 @@ def test_credit_gates_on_measured_pnl_not_the_close_label():
     because the agent manages its own exits through the broker. Found by the
     learning-loop simulation: the credited block ended with reinforcement=None."""
     import inspect
+
     from trdrbot import learn
     src = inspect.getsource(learn.on_resolution)
     assert "if pnl_pct is not None:\n        hit = pnl_pct > 0" in src
@@ -1317,6 +1350,7 @@ def test_resolve_self_heals_when_outcomes_hit_unconsolidated_blocks():
     profitable NVDA trade - lost its memory credit invisibly. Measured:
     updated=0 before consolidation, updated=1 after."""
     import inspect
+
     from trdrbot import attribution
     from trdrbot.elfmem_adapter import ElfmemAdapter
     # The retry lives in `credit_blocks` now - THE single door both resolve()
@@ -1341,6 +1375,7 @@ def test_resolution_falls_back_to_the_positions_own_last_pnl():
     failed to reach its consumer, so the fallback lives at the shared entry
     point rather than in each detector."""
     import inspect
+
     from trdrbot import learn
     src = inspect.getsource(learn.on_resolution)
     assert "pos.last_pnl_pct" in src
@@ -1358,6 +1393,7 @@ def test_remember_thesis_pins_tags_to_avoid_a_self_leak():
     were identity rather than a dated trade rationale. Position theses are
     evolving patterns, never identity, so tags are pinned at write time."""
     import inspect
+
     from trdrbot.elfmem_adapter import ElfmemAdapter
     src = inspect.getsource(ElfmemAdapter.remember_thesis)
     assert "host_analyses" in src, "must pin its own tags, not trust free consolidation"
@@ -1382,6 +1418,7 @@ def test_muse_sampler_is_stratified_toward_market_content():
     """An unstratified draw produced three technique/ rules, which collide into
     process talk, not market theses."""
     import inspect
+
     from trdrbot import muse
     src = inspect.getsource(muse._sample_concepts)
     assert "technique/" in src and "k - 1" in src
@@ -1392,6 +1429,7 @@ def test_muse_keeps_a_breakout_call_against_a_calm_base():
     claim. The naive ceiling gate rejected exactly the most interesting
     candidate on the first live run."""
     import inspect
+
     from trdrbot import muse
     # The gate cascade moved to `_evaluate` when the muse gained a
     # challenger arm (D-088): both arms run ONE copy of it, so the
@@ -1410,7 +1448,8 @@ def test_build_sets_agent_name_by_default():
     the SELF preamble render path), so the correct fix is setting the name
     once, at the source, not correcting the text every time it's read."""
     import inspect
-    from trdrbot.elfmem_adapter import ElfmemAdapter, _DEFAULT_AGENT_NAME
+
+    from trdrbot.elfmem_adapter import _DEFAULT_AGENT_NAME, ElfmemAdapter
     src = inspect.getsource(ElfmemAdapter.build)
     assert "agent_name" in src, "build() must set project.agent_name"
     assert _DEFAULT_AGENT_NAME == "Theo"
@@ -1420,6 +1459,7 @@ def test_build_does_not_clobber_an_explicit_agent_name():
     """setdefault, not overwrite - a future caller passing its own config
     must keep the final say over its own agent_name."""
     import inspect
+
     from trdrbot.elfmem_adapter import ElfmemAdapter
     src = inspect.getsource(ElfmemAdapter.build)
     assert "setdefault" in src, \
@@ -1430,8 +1470,9 @@ def test_build_does_not_clobber_an_explicit_agent_name():
 
 def test_model_chain_resolves_role_then_default_then_legacy():
     """A pre-existing config with only `llm.model` must keep working untouched."""
-    from trdrbot.config import Config
     from pathlib import Path
+
+    from trdrbot.config import Config
 
     class P:  # minimal paths stub
         state = Path("/tmp")
@@ -1452,6 +1493,7 @@ def test_unpriced_model_is_reported_not_counted_as_free():
     failure class in its most expensive form."""
     import tempfile
     from pathlib import Path
+
     from trdrbot.usage import UsageLedger
 
     led = UsageLedger(Path(tempfile.mkdtemp()) / "u.jsonl",
@@ -1480,6 +1522,7 @@ def test_usage_callback_never_raises_on_a_malformed_response():
     """Accounting that can halt trading is worse than no accounting."""
     import tempfile
     from pathlib import Path
+
     from trdrbot.usage import UsageCallback, UsageLedger
 
     cb = UsageCallback(UsageLedger(Path(tempfile.mkdtemp()) / "u.jsonl", {}), "decide")
@@ -1493,6 +1536,7 @@ def test_usage_callback_never_raises_on_a_malformed_response():
 def test_build_model_skips_unbuildable_models_rather_than_dying(capsys):
     """One uninstalled optional provider package must not stop all trading."""
     from pathlib import Path
+
     from trdrbot.config import Config
     from trdrbot.llm import build_model
 
@@ -1507,6 +1551,7 @@ def test_build_model_skips_unbuildable_models_rather_than_dying(capsys):
 
 def test_build_model_raises_clearly_when_nothing_is_usable():
     from pathlib import Path
+
     from trdrbot.config import Config
     from trdrbot.llm import build_model
 
@@ -1548,6 +1593,7 @@ def test_chain_compaction_keeps_near_atm_and_drops_far_strikes():
     decide cost was input. Compaction is 13x, and the near-ATM rows the
     decision actually needs survive with prices verbatim."""
     import json
+
     from trdrbot.compact import compact_option_chain
     payload = _chain_payload()
     out = compact_option_chain(payload)
@@ -1581,6 +1627,7 @@ def test_decide_tools_allowlist_empty_means_bind_everything():
     """A missing config section must degrade to working-but-expensive (all 72
     tools), never to broken (no tools)."""
     from pathlib import Path
+
     from trdrbot.config import Config
 
     class P:
@@ -1671,7 +1718,6 @@ def test_compact_news_uses_the_extract_cache_when_config_is_given(tmp_path):
     """The decide-facing compactor must surface the richer signal once an
     article has been extracted by research/discovery/muse - not just the
     headline it would fall back to."""
-    from pathlib import Path
 
     from trdrbot.compact import compact_news
     from trdrbot.config import Config
@@ -1769,9 +1815,8 @@ def test_served_model_is_read_from_the_ledger_not_the_config(tmp_path):
     journalled as claude-opus-5 while the usage ledger showed gpt-5 served
     every one. Fallback is not an error and leaves no error record, so
     nothing else would ever have contradicted it."""
-    from trdrbot.usage import UsageLedger
-
     from trdrbot import ids
+    from trdrbot.usage import UsageLedger
 
     led = UsageLedger(tmp_path / "u.jsonl", {})
     led.record("decide", "claude-opus-5", 10, 10)   # an EARLIER cycle
@@ -1790,9 +1835,8 @@ def test_served_since_reports_every_model_when_a_chain_fails_over_mid_cycle(tmp_
     """One decide cycle is several LLM calls; a chain that fails over halfway
     genuinely WAS served by two models. Collapsing that to one name would
     trade a known lie for a subtler one."""
-    from trdrbot.usage import UsageLedger
-
     from trdrbot import ids
+    from trdrbot.usage import UsageLedger
 
     led = UsageLedger(tmp_path / "u.jsonl", {})
     mark = ids.utc_now().isoformat()
@@ -1821,6 +1865,7 @@ def test_record_forecast_refuses_a_band_history_almost_always_holds(tmp_path):
     n-gate is a COUNT, so inflating the count is the cheapest way to earn
     size dishonestly and nothing else would have noticed."""
     from datetime import date, timedelta
+
     from trdrbot import market_stats
     from trdrbot.local_tools import _vacuity_check
 
@@ -1841,6 +1886,7 @@ def test_vacuity_guard_keeps_a_contrarian_call_against_an_extreme_base(tmp_path)
     27% against a 99% base - the single most interesting call it produced.
     Disagreeing with history IS the claim, so only AGREEMENT is vacuous."""
     from datetime import date, timedelta
+
     from trdrbot import market_stats
     from trdrbot.local_tools import _vacuity_check
 
@@ -1856,6 +1902,7 @@ def test_vacuity_guard_fails_open_without_price_history(tmp_path):
     """No anchor means no judgement. An invented one is worse than none -
     the same rule _plausible_band follows when it has no spot."""
     from datetime import date, timedelta
+
     from trdrbot.local_tools import _vacuity_check
 
     horizon = (date.today() + timedelta(days=3)).isoformat()
@@ -1870,9 +1917,10 @@ def test_health_separates_idle_attribution_from_a_stalled_one(tmp_path):
     reader to skip the one line that finally matters. The real signal must
     still fire when work genuinely was waiting."""
     import json
+
     from trdrbot.health import BAD, OK, check
 
-    def journal(pending: int) -> "object":
+    def journal(pending: int) -> object:
         p = tmp_path / f"j{pending}.jsonl"
         p.write_text("".join(
             json.dumps({"kind": "attribution_run", "pending": pending,
@@ -1917,6 +1965,7 @@ def test_network_failures_still_classify_as_transient_despite_being_oserrors():
 def test_a_code_bug_leaves_the_inbox_item_untouched(tmp_path):
     """The whole point: our bug must not consume the item's retries."""
     import json
+
     from trdrbot.failures import Cause
     from trdrbot.inbox import Inbox, Item
 
@@ -1963,6 +2012,7 @@ def _item(kind, payload, iid="i1"):
 
 def _cfg(watchlist):
     from pathlib import Path
+
     from trdrbot.config import Config
 
     class P:
@@ -2032,6 +2082,7 @@ def test_attribution_skips_the_outcome_call_entirely_on_a_none_signal():
     """`signal is None` must mean no Beta update reaches elfmem at all - not
     an update with a neutral-looking number."""
     import inspect
+
     from trdrbot import attribution
 
     src = inspect.getsource(attribution.run)
@@ -2134,6 +2185,7 @@ def test_attribution_groups_credit_by_weight():
     or two calls, not three, and the grouping is deterministic so the path can
     be replayed from the journal."""
     import inspect
+
     from trdrbot import attribution
 
     src = inspect.getsource(attribution.run)
@@ -2223,7 +2275,6 @@ def test_murphy_decomposition_identity_holds():
     """brier = reliability - resolution + uncertainty. It only holds when the
     reliability term uses each bin's mean FORECAST, so the identity is the
     cheapest possible guard against the bin-centre bug returning."""
-    import random
     from trdrbot.calibration import Forecast, score
 
     # Deterministic and deliberately BOTH discriminating and miscalibrated, so
@@ -2321,10 +2372,10 @@ def test_bootstrap_resamples_sessions_not_calendar_days():
     one per calendar day priced in weekends that never traded - variance 1.45x
     too high on a typical tenor, and a fifth of every 'the tails disagree'
     warning was the units rather than the tails."""
-    import statistics
-    from trdrbot import market_stats
-
     import math
+    import statistics
+
+    from trdrbot import market_stats
     closes = gbm(n=2000, seed=5)
     rets = market_stats._log_returns(closes)
     sd_session = statistics.pstdev(rets)
@@ -2350,6 +2401,7 @@ def test_compaction_understands_the_real_mcp_envelope():
     chains on the journal."""
     import asyncio
     import json as _json
+
     from trdrbot import compact
 
     payload = {"snapshots": {
@@ -2398,7 +2450,7 @@ def test_a_stated_forecast_is_not_swallowed_by_a_placeholder(tmp_path):
     """A pre-registered thesis carries an unstated 0.5. Matching a standalone
     forecast to it returned the PLACEHOLDER, so the agent's real number was
     never written and the row stayed invisible to calibration."""
-    from trdrbot.ledger import Ledger, STANDALONE, THESIS
+    from trdrbot.ledger import STANDALONE, THESIS, Ledger
 
     book = Ledger(tmp_path / "ledger.jsonl")
     book.register(kind=THESIS, underlying="SPY", claim="pre-reg", probability=0.5,
@@ -2420,6 +2472,7 @@ def test_health_sees_a_subsystem_that_produced_once_and_then_died(tmp_path):
     the probe was a tautology and eight rows from day one read as healthy for
     two days and ~250 ticks."""
     import json as _json
+
     from trdrbot import health
 
     rows = [{"kind": "interim_run", "eligible": 1, "scored": 1}]
@@ -2575,7 +2628,7 @@ def test_dominant_risk_separates_a_direction_bet_from_a_vol_bet():
 def test_the_needs_line_leads_with_the_dominant_risk():
     """A call spread's breakeven vol is nearly irrelevant; leading with it puts
     the least relevant number in the most prominent place."""
-    from trdrbot.experiments import Experiment, Thesis, simulate, _needs_line
+    from trdrbot.experiments import Experiment, Thesis, _needs_line, simulate
 
     th = Thesis("up", "SPY", "2026-09-02", drift=0.002)
     m = simulate(Experiment("call spread", CALL_SPREAD()), th, 770.61, 0.10, 5)
@@ -2675,6 +2728,7 @@ def test_forecast_window_leaves_room_to_act():
     """A thesis resolving ON the deadline can never inform a decision - that is
     the day everything is force-closed."""
     import datetime
+
     from trdrbot import competence
 
     today, deadline = datetime.date(2026, 8, 28), "2026-09-04"
@@ -2699,6 +2753,7 @@ def test_every_thesis_source_asks_the_same_question():
     in prose only. The muse's output then clustered at the far end - all five
     of its live forecasts landed on the last useful day."""
     import inspect
+
     from trdrbot import discovery, muse
 
     for mod in (muse, discovery):
@@ -2717,6 +2772,7 @@ def test_muse_rejects_a_horizon_that_resolves_too_late():
     """The muse had no deadline check: it could emit a thesis resolving AFTER
     the competition ends, which can never inform anything."""
     import inspect
+
     from trdrbot import muse
 
     # The gate cascade moved to `_evaluate` when the muse gained a
@@ -2776,6 +2832,7 @@ def test_a_new_document_type_cannot_be_written_without_a_lifecycle(tmp_path):
     policy - so the write path refuses one, the same way it already refuses a
     write that drops a heading."""
     import pytest
+
     from trdrbot.wiki import Concept, LifecycleError
 
     w = _wiki(tmp_path)
@@ -2814,6 +2871,7 @@ def test_the_durable_half_survives_expiry(tmp_path):
     it 'Closed 228.17, +5.2%' as collision material 15.8h after that stopped
     being true - measured, on this date's actual NVDA pick."""
     import datetime
+
     from trdrbot.wiki import Concept
 
     w = _wiki(tmp_path)
@@ -2825,7 +2883,7 @@ def test_the_durable_half_survives_expiry(tmp_path):
     assert "228.17" not in durable, "the perishable half must not ride along"
 
     # Long past expiry, the concept is still exactly as usable.
-    later = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(days=30)
+    later = datetime.datetime.now(datetime.UTC) + datetime.timedelta(days=30)
     assert c.is_stale(later)
     assert c.durable_text() == durable, "staleness must not change the durable text"
 
@@ -2850,6 +2908,7 @@ def test_sweep_tombstones_in_place_and_never_deletes(tmp_path):
     """Deletion is refused on principle, archive-by-move on mechanics: a file
     that moves can be missed mid-read, a frontmatter flag cannot."""
     import datetime
+
     from trdrbot.wiki import Concept
 
     w = _wiki(tmp_path)
@@ -2857,7 +2916,7 @@ def test_sweep_tombstones_in_place_and_never_deletes(tmp_path):
     path = w.write_concept(c, type_="CompanyDossier")
     generated_before = c.frontmatter["generated"]["at"]
 
-    later = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(days=2)
+    later = datetime.datetime.now(datetime.UTC) + datetime.timedelta(days=2)
     out = w.sweep(now=later)
     assert out["deprecated"] == ["research/WEN"]
 
@@ -2876,13 +2935,14 @@ def test_sweep_never_retires_a_ticker_we_are_holding(tmp_path):
     """A position outlives the research cadence, and retiring the page that
     explains why we are in a trade is the worst possible moment to do it."""
     import datetime
+
     from trdrbot.wiki import Concept
 
     w = _wiki(tmp_path)
     for t in ("HELD", "NOTHELD"):
         w.write_concept(Concept(concept_id=f"research/{t}", frontmatter={}, body=DOSSIER),
                         type_="CompanyDossier")
-    later = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(days=2)
+    later = datetime.datetime.now(datetime.UTC) + datetime.timedelta(days=2)
     out = w.sweep(protected={"research/HELD"}, now=later)
     assert out["deprecated"] == ["research/NOTHELD"]
     assert out["protected"] == ["research/HELD"]
@@ -2892,12 +2952,13 @@ def test_sweep_never_retires_a_ticker_we_are_holding(tmp_path):
 def test_re_researching_a_tombstoned_dossier_revives_it(tmp_path):
     """Reversible by construction - no separate un-archive path to forget."""
     import datetime
+
     from trdrbot.wiki import Concept
 
     w = _wiki(tmp_path)
     w.write_concept(Concept(concept_id="research/BURL", frontmatter={}, body=DOSSIER),
                     type_="CompanyDossier")
-    later = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(days=2)
+    later = datetime.datetime.now(datetime.UTC) + datetime.timedelta(days=2)
     w.sweep(now=later)
     assert w.read("research/BURL").frontmatter["status"] == "deprecated"
 
@@ -2934,6 +2995,7 @@ def test_discovery_no_longer_welds_perishable_text_into_the_durable_heading():
     with...beats' because the template concatenated a durable field and a
     perishable one into one sentence."""
     import inspect
+
     from trdrbot import discovery
 
     src = inspect.getsource(discovery.run)
@@ -2946,7 +3008,9 @@ def test_both_dossier_writers_keep_identical_headings():
     """discovery and research write the SAME file. The augmentation guard
     refuses a write that drops a heading, so if their templates diverge the
     second writer is refused and the dossier silently stops updating."""
-    import inspect, re
+    import inspect
+    import re
+
     from trdrbot import discovery, research
 
     DOSSIER_HEADINGS = {"What it is", "Bull case", "Bear case", "People", "Environment"}
@@ -2955,8 +3019,8 @@ def test_both_dossier_writers_keep_identical_headings():
         return set(re.findall(r'"# ([A-Za-z][^\\"]*)', inspect.getsource(fn)))
 
     d, r = headings(discovery.run), headings(research.run)
-    assert DOSSIER_HEADINGS <= d, f"discovery lost dossier heading(s) {DOSSIER_HEADINGS - d}"
-    assert DOSSIER_HEADINGS <= r, f"research lost dossier heading(s) {DOSSIER_HEADINGS - r}"
+    assert d >= DOSSIER_HEADINGS, f"discovery lost dossier heading(s) {DOSSIER_HEADINGS - d}"
+    assert r >= DOSSIER_HEADINGS, f"research lost dossier heading(s) {DOSSIER_HEADINGS - r}"
     # And the durable one is exactly what the policy names, so the split the
     # muse relies on cannot drift away from the template that produces it.
     from trdrbot.wiki import LIFECYCLE
@@ -3157,6 +3221,7 @@ def test_a_rejected_candidate_is_a_trial_not_a_claim(tmp_path):
 
 def test_muse_only_promotes_candidates_that_survive_every_gate():
     import inspect
+
     from trdrbot import muse
 
     # The gate cascade moved to `_evaluate` when the muse gained a
@@ -3204,6 +3269,7 @@ def test_effective_n_is_reported_never_gated():
     even when outcomes correlate. Concentration is a reason to distrust
     GENERALISING, which is the reader's judgement (D-009)."""
     import inspect
+
     from trdrbot import competence, sizing
 
     for mod in (sizing, competence):
@@ -3283,7 +3349,8 @@ def test_a_rejection_records_which_gate_refused_it(tmp_path):
 
 
 def test_every_muse_rejection_path_records_itself():
-    import inspect, re
+    import inspect
+
     from trdrbot import muse
 
     # The gate cascade moved to `_evaluate` when the muse gained a
@@ -3309,6 +3376,7 @@ def test_health_can_tell_an_armed_exit_engine_from_a_missing_one(tmp_path):
     debounce history reported `exit_rules never ran`, because nothing had
     breached. That is the engine working, not the engine missing."""
     import json as _json
+
     from trdrbot import health
 
     p = tmp_path / "journal.jsonl"
@@ -3370,6 +3438,7 @@ def test_resolve_model_spec_fails_loudly_without_the_key(monkeypatch):
     """A missing gateway key must raise with the fix named, not silently
     fall through to hitting the real openai.com with the wrong model id."""
     import pytest
+
     from trdrbot import config as cm
 
     cfg = cm.load(quiet=True)
@@ -3400,6 +3469,7 @@ def test_doctor_and_build_model_share_one_resolver():
     gateway model reachable while the real decide path can't build it, or the
     reverse)."""
     import inspect
+
     from trdrbot import cli
 
     src = inspect.getsource(cli._doctor)
@@ -3504,6 +3574,7 @@ def test_interim_scoring_does_not_cry_wolf_on_a_calm_young_position(tmp_path):
     before ever crossing 25%, which makes lifelong silence here the same
     legitimate, common outcome it is for an exit rule that never breaches."""
     import json as _json
+
     from trdrbot import health
 
     p = tmp_path / "journal.jsonl"
@@ -3534,9 +3605,9 @@ def test_inflation_widens_the_distribution_in_both_directions():
     understated - a too-narrow distribution. Widening must therefore LOWER
     P(inside a symmetric band) and RAISE P(beyond a tail), while keeping the
     martingale property (mean factor ~ 1)."""
-    from trdrbot import market_stats
-
     import random as _r
+
+    from trdrbot import market_stats
     rng = _r.Random(42)
     closes = [100.0]
     for _ in range(250):

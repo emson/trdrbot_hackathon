@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import hashlib
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 
 def _short_hash(*parts: str, n: int = 8) -> str:
@@ -27,7 +27,7 @@ def _short_hash(*parts: str, n: int = 8) -> str:
 
 
 def utc_now() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def utc_stamp(dt: datetime | None = None) -> str:

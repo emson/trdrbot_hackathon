@@ -88,7 +88,7 @@ class Snapshot:
 MIN_NET_COST_SHARE = 0.02
 
 
-def position_pnl_pct(symbols: list[str], snap: "Snapshot") -> float | None:
+def position_pnl_pct(symbols: list[str], snap: Snapshot) -> float | None:
     """Position-level P&L as a fraction of NET ENTRY COST (INV-19).
 
     Shared by C24 (exit rules) and housekeeping's interim scoring (INV-24) -
@@ -186,7 +186,7 @@ async def snapshot(tools: dict[str, Any], underlyings: list[str] | None = None) 
 
 
 def book_greeks(positions: list[Any], underlying_prices: dict[str, float],
-                state_dir: "Path | None" = None, equity: float = 0.0) -> dict[str, Any] | None:
+                state_dir: Path | None = None, equity: float = 0.0) -> dict[str, Any] | None:
     """Approximate net greeks of the whole book, re-priced now (D-040).
 
     Legs are re-derived from their OCC symbols and priced at the CURRENT spot

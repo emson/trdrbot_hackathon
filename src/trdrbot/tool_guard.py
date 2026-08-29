@@ -17,7 +17,8 @@ category as reconciliation: correctness plumbing, not policy.
 
 from __future__ import annotations
 
-from typing import Any, Sequence
+from collections.abc import Sequence
+from typing import Any
 
 from . import ids
 
@@ -34,7 +35,7 @@ _ID_BEARING = {"place_stock_order", "place_option_order", "place_crypto_order"}
 _WHOLE_BOOK = "close_all_positions"
 
 
-def redirect_whole_book_close(tools: Sequence[Any], count_open: "callable") -> list[Any]:
+def redirect_whole_book_close(tools: Sequence[Any], count_open: callable) -> list[Any]:
     """Refuse a whole-book liquidation while more than one position is open.
 
     NOT a judgment gate (D-009): it vetoes no view and blocks no strategy. It
