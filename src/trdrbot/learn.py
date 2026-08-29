@@ -8,6 +8,8 @@ duplicated or skipped depending on which path happened to notice first.
 
 from __future__ import annotations
 
+from typing import Any
+
 from . import ids
 from .calibration import CalibrationStore
 from .elfmem_adapter import ElfmemAdapter
@@ -20,6 +22,36 @@ from .wiki import Wiki
 # right - scoring it as a resolved trade would poison credit assignment by
 # blaming a good thesis for an exit it didn't choose.
 SELF_RESOLVED = {"thesis_resolved", "stop_triggered", "target_hit", "time_stop", "deadline"}
+
+
+async def guarded(coro: Any, journal: Journal, *, stage: str, position_id: str) -> bool:
+    """Run a learning step advisorily. Returns False if it failed.
+
+    Learning is advisory infrastructure and INV-8 says the decide path never
+    blocks on advisory input - but the two calls below sit on the FAST path,
+    inside `reconcile`, which runs BEFORE the exit-rule evaluator every tick.
+    Awaited bare, any failure in here (a corrupt minds.json, a locked SQLite
+    file, a full disk) propagated out of the tick and that tick's stop-losses
+    were never evaluated. A persistent one disarmed capital protection
+    indefinitely, and `health` could not see it: its probes compare rows that
+    EXIST, so a subsystem that stops emitting entirely moves no counter.
+
+    Every advisory subsystem around this one already degrades - sensors,
+    analytics, hunt, muse, research, the coach. This was the exception, and it
+    was the one place the exception cost the most.
+
+    Journalled as well as printed: a print in an unattended run is a message
+    to nobody, and `learn_error` is what makes the degradation visible to
+    `trdrbot health` and `trdrbot report` (D-038).
+    """
+    try:
+        await coro
+        return True
+    except Exception as exc:  # noqa: BLE001 - the advisory boundary itself
+        print(f"[learn] {stage} failed for {position_id}: {exc!r}")
+        journal.append("learn_error", stage=stage, position_id=position_id,
+                       error=repr(exc)[:300])
+        return False
 
 
 async def on_fill(pos: Position, store: PositionStore, mem: ElfmemAdapter, journal: Journal) -> None:

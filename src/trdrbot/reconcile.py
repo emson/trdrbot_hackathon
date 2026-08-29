@@ -47,6 +47,10 @@ async def reconcile(
 
     result: dict[str, list[str]] = {"phantom": [], "orphan": [], "drift": [], "filled": []}
     claimed: set[str] = set()
+    #: THIS tick's failures, not a lifetime count - a heartbeat that reports a
+    #: running total cannot show a rate, and the delta is what says whether
+    #: memory is failing right now (D-088).
+    learn_errors = 0
 
     for pos in ours:
         syms = pos.symbols
@@ -65,7 +69,10 @@ async def reconcile(
                 store.save(pos)
                 journal.append("reconciliation", position_id=pos.position_id,
                                finding="fill_confirmed", legs=present)
-                await learn.on_fill(pos, store, mem, journal)  # F2
+                ok = await learn.guarded(  # F2 - advisory, never aborts the fast path
+                    learn.on_fill(pos, store, mem, journal),
+                    journal, stage="on_fill", position_id=pos.position_id)
+                learn_errors += 0 if ok else 1
                 result["filled"].append(pos.position_id)
             elif pending:
                 pass  # still working - leave it alone
@@ -91,8 +98,11 @@ async def reconcile(
                 # F3: no P&L available - the position already vanished from
                 # holdings by the time we noticed. D-018 #9 skips credit
                 # assignment here rather than guessing a sign.
-                await learn.on_resolution(pos, store, mem, wiki, journal, pnl_pct=None,
-                                           calibration=calibration)
+                ok = await learn.guarded(
+                    learn.on_resolution(pos, store, mem, wiki, journal, pnl_pct=None,
+                                        calibration=calibration),
+                    journal, stage="on_resolution", position_id=pos.position_id)
+                learn_errors += 0 if ok else 1
                 result["phantom"].append(pos.position_id)
         elif present and len(present) != len(syms) and not pending:
             journal.append(
@@ -103,6 +113,17 @@ async def reconcile(
                 actual=present,
             )
             result["drift"].append(pos.position_id)
+
+    # Heartbeat, same reason as `exit_run` and `attribution_run` (D-074):
+    # learning was the only subsystem in this cluster with no record of its own
+    # activity, so "ran and had nothing to learn from" and "stopped running"
+    # were the same observation. `errors` is what makes a degraded elfmem
+    # visible - the failures are advisory now, which is exactly why they need
+    # somewhere to be counted.
+    if result["filled"] or result["phantom"]:
+        journal.append("learn_run",
+                       fills=len(result["filled"]), resolutions=len(result["phantom"]),
+                       errors=learn_errors)
 
     for symbol in held:
         if symbol not in claimed:

@@ -265,8 +265,10 @@ async def run(
         )
         if closed_ok:
             store.transition(pos, "closed")  # INV-17: terminal, exactly once
-            await learn.on_resolution(pos, store, mem, wiki, journal, pnl_pct=pnl,
-                                       calibration=calibration)  # F3
+            await learn.guarded(  # F3 - advisory, never aborts the evaluator
+                learn.on_resolution(pos, store, mem, wiki, journal, pnl_pct=pnl,
+                                    calibration=calibration),
+                journal, stage="on_resolution", position_id=pos.position_id)
         triggered.append(pos.position_id)
 
     # Heartbeat, same reason as housekeeping's `interim_run` (D-074): the health

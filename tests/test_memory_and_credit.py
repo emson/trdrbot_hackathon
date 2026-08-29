@@ -152,6 +152,58 @@ async def test_a_pending_order_is_not_mistaken_for_a_vanished_position(
     assert store.load(pos.position_id).status == "opening"
 
 
+# ------------------------------------------- learning must never disarm risk
+
+
+async def test_a_memory_failure_does_not_disarm_the_capital_protection_path(
+    paths, make_position
+):
+    """The highest-consequence failure in the cluster, both halves.
+
+    `learn.on_fill` / `on_resolution` were awaited bare inside `reconcile`,
+    which runs BEFORE the exit-rule evaluator every tick. Any elfmem failure -
+    a corrupt minds.json, a locked SQLite file - propagated out and that tick's
+    stop-losses were never evaluated. A persistent one disarmed capital
+    protection indefinitely, and `health` could not see it: its probes compare
+    rows that EXIST, so a subsystem that stops emitting entirely moves no
+    counter.
+    """
+    from trdrbot import exit_rules
+
+    store, journal, wiki, calib = _stores(paths)
+    broken = FakeMem(fail_with=RuntimeError("minds.json is corrupt"))
+
+    # Half one: reconcile still resolves the phantom and still returns.
+    gone = make_position(position_id="pos_gone", status="open", last_pnl_pct=0.2)
+    store.save(gone)
+    result = await reconcile.reconcile(store, Snapshot(broker_positions=[]),
+                                       journal, broken, wiki, calib)
+
+    assert result["phantom"] == ["pos_gone"]
+    assert store.load("pos_gone").status == "closed"
+    errors = _rows(journal, "learn_error")
+    assert [r["stage"] for r in errors] == ["on_resolution"]
+    assert _rows(journal, "learn_run")[0]["errors"] == 1
+
+    # Half two: a breached stop still closes, with memory still broken.
+    breached = make_position(position_id="pos_stop", status="open",
+                             exit_rules=[{"type": "stop_loss", "basis": "position_mark",
+                                          "threshold": "-10.0%"}])
+    store.save(breached)
+    snap = Snapshot(broker_positions=[
+        {"symbol": s, "cost_basis": 1000.0, "unrealized_pl": -900.0}
+        for s in breached.symbols
+    ])
+    closer = tools_for(close_position=lambda **kw: {"status": "ok"})
+
+    triggered = await exit_rules.run(store, snap, closer, journal, "2099-01-01",
+                                     broken, wiki, calibration=calib, verbose=False)
+
+    assert triggered == ["pos_stop"], "a broken memory stopped the stop-loss firing"
+    assert len(closer["close_position"].calls) == len(breached.symbols)  # INV-19: all legs
+    assert _rows(journal, "exit")[0]["close_reason"] == "stop_loss"
+
+
 # -------------------------------------------------------------- attribution
 
 
