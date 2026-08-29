@@ -516,6 +516,62 @@ def test_seed_entropy_counts_distinct_collision_pairs(tmp_path):
     assert coach.snapshot_gauges(cfg, rows)["muse.seed_entropy"] == 2
 
 
+def test_the_other_two_thesis_sources_and_the_ladder_are_measured_too(tmp_path):
+    """The module map names a metric per module; the muse had three and the
+    rest had none, so the report could not say whether research had stopped
+    producing or discovery's gauntlet had tightened."""
+    rows = [
+        {"kind": "research", "opportunities": 3},
+        {"kind": "research", "opportunities": 1},
+        {"kind": "discovery", "nominees": ["A", "B", "C", "D"], "opportunities": 1},
+        {"kind": "attribution", "verdict": "thesis_right_expression_right"},
+        {"kind": "attribution", "verdict": "thesis_wrong_expression_faithful"},
+        {"kind": "attribution", "verdict": "thesis_wrong_profited_anyway"},
+        {"kind": "attribution", "verdict": "unscoreable"},
+        # The subsystem heartbeat shares the kind and carries no verdict; it is
+        # a run record, not an outcome, and must not dilute the rate.
+        {"kind": "attribution", "pending": 0, "attributed": 4, "skipped_no_price": 0},
+    ]
+    g = coach.snapshot_gauges(_cfg(tmp_path), rows)
+    assert g["research.opportunities_per_run"] == pytest.approx(2.0)
+    assert g["discovery.gauntlet_survival"] == pytest.approx(0.25)
+    # Same definition as `competence.attributable_rate`: a lucky win and an
+    # unscoreable outcome both teach nothing and neither counts.
+    assert g["attribution.attributable_rate"] == pytest.approx(0.5)
+
+
+def test_the_new_gauges_are_omitted_rather_than_zeroed_when_there_is_no_data(tmp_path):
+    """Each of the three obeys the module's own rule. A research yield of 0.0
+    means "the cycle ran and found nothing", which is a real and alarming
+    reading - it must not be what "the cycle has not run" looks like."""
+    g = coach.snapshot_gauges(_cfg(tmp_path), [])
+    for name in ("research.opportunities_per_run", "discovery.gauntlet_survival",
+                 "attribution.attributable_rate"):
+        assert name not in g
+    # A run that genuinely produced nothing DOES read zero.
+    g2 = coach.snapshot_gauges(_cfg(tmp_path), [{"kind": "research", "opportunities": 0}])
+    assert g2["research.opportunities_per_run"] == 0.0
+
+
+def test_the_attributable_gauge_agrees_with_the_ladder_it_mirrors(tmp_path):
+    """It gates real position size in `competence.assess`. Two copies of one
+    definition drifting apart is this project's most familiar bug, so the
+    journal-derived gauge is checked against the store-derived original."""
+    from types import SimpleNamespace
+
+    from trdrbot import competence
+
+    verdicts = ["thesis_right_expression_right", "thesis_right_expression_wrong",
+                "thesis_wrong_expression_faithful", "thesis_wrong_profited_anyway",
+                "unscoreable"]
+    ladder, _ = competence.attributable_rate(
+        [SimpleNamespace(attribution=v) for v in verdicts])
+    gauge = coach.snapshot_gauges(
+        _cfg(tmp_path), [{"kind": "attribution", "verdict": v} for v in verdicts],
+    )["attribution.attributable_rate"]
+    assert gauge == pytest.approx(ladder)
+
+
 # --- scoring an arm --------------------------------------------------------
 
 

@@ -55,7 +55,7 @@ def survived(fate: Any) -> bool:
 
 
 def _muse_rows(rows: list[dict[str, Any]], n: int = GAUGE_WINDOW) -> list[dict[str, Any]]:
-    return [r for r in rows if r.get("kind") == "muse"][-n:]
+    return _kind_rows(rows, "muse", n)
 
 
 def _survival(rows: list[dict[str, Any]]) -> float | None:
@@ -73,6 +73,64 @@ def _candidates_per_run(rows: list[dict[str, Any]]) -> float | None:
     if not muse:
         return None
     return round(sum(int(r.get("candidates") or 0) for r in muse) / len(muse), 3)
+
+
+def _kind_rows(rows: list[dict[str, Any]], kind: str,
+               n: int = GAUGE_WINDOW) -> list[dict[str, Any]]:
+    """Recent rows of one journal kind. `_muse_rows` generalised, because
+    three of the module map's metrics needed the same slice of a different
+    kind and copying it three times is how `_muse_rows` became muse-shaped in
+    the first place."""
+    return [r for r in rows if r.get("kind") == kind][-n:]
+
+
+def _research_yield(rows: list[dict[str, Any]]) -> float | None:
+    """Opportunities per research run. The top-down source's own metric.
+
+    Named in the module map (019 s2.2) and measured nowhere, so a glance at
+    the report could not answer whether the daily cycle was still producing.
+    """
+    runs = _kind_rows(rows, "research")
+    if not runs:
+        return None
+    return round(sum(int(r.get("opportunities") or 0) for r in runs) / len(runs), 3)
+
+
+def _discovery_survival(rows: list[dict[str, Any]]) -> float | None:
+    """Share of nominees that survive the gauntlet to become opportunities.
+
+    Discovery's analogue of the muse's survival rate, and the number that says
+    whether its gates are getting stricter or its nominations worse - which
+    are opposite problems with the same symptom.
+    """
+    runs = _kind_rows(rows, "discovery")
+    nominated = sum(len(r.get("nominees") or []) for r in runs)
+    if not nominated:
+        return None
+    return round(sum(int(r.get("opportunities") or 0) for r in runs) / nominated, 4)
+
+
+def _attributable_rate(rows: list[dict[str, Any]]) -> float | None:
+    """Share of attributed theses the system could actually EXPLAIN.
+
+    The ladder's own promotion criterion past ESTABLISH, computed live in
+    `competence.assess` and never trended - so the one number that gates real
+    size had no history. Derived from the journal's `attribution` rows rather
+    than the position store, because gauges take `cfg` and a store coupling
+    here would be the wrong dependency for a measurement.
+
+    Same definition as `competence.attributable_rate`: a lucky win and an
+    unscoreable outcome both teach nothing and neither counts.
+    """
+    from ..experiments import THESIS_WRONG_PROFITED_ANYWAY, UNSCOREABLE
+
+    verdicts = [str(r.get("verdict") or "") for r in rows
+                if r.get("kind") == "attribution" and r.get("verdict")]
+    if not verdicts:
+        return None
+    useful = sum(1 for v in verdicts
+                 if v not in (UNSCOREABLE, THESIS_WRONG_PROFITED_ANYWAY))
+    return round(useful / len(verdicts), 4)
 
 
 def _seed_entropy(rows: list[dict[str, Any]]) -> int | None:
@@ -137,6 +195,12 @@ def snapshot_gauges(cfg: Any, rows: list[dict[str, Any]]) -> dict[str, Any]:
     put("muse.candidates_per_run", _candidates_per_run(rows))
     put("muse.seed_entropy", _seed_entropy(rows))
     put("muse.runs_total", sum(1 for r in rows if r.get("kind") == "muse") or None)
+    # The other two thesis sources and the ladder's own promotion criterion.
+    # Each omitted (never zeroed) when there is no data - a gauge reading 0 is
+    # indistinguishable from a collapse on a chart.
+    put("research.opportunities_per_run", _research_yield(rows))
+    put("discovery.gauntlet_survival", _discovery_survival(rows))
+    put("attribution.attributable_rate", _attributable_rate(rows))
 
     def _calibration_gauges() -> None:
         book = _led.Ledger(Path(cfg.paths.state) / "ledger.jsonl")

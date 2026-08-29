@@ -17,11 +17,10 @@ when something has gone wrong.
 from __future__ import annotations
 
 import html
-import json
 from pathlib import Path
 from typing import Any
 
-from . import coach, ids
+from . import coach, ids, store
 
 W, H, PAD = 260, 48, 4
 
@@ -50,17 +49,8 @@ def _num(v: Any) -> str:
 
 
 def _rows(path: Path) -> list[dict[str, Any]]:
-    if not path.exists():
-        return []
-    out = []
-    for line in path.read_text(encoding="utf-8").splitlines():
-        line = line.strip()
-        if line:
-            try:
-                out.append(json.loads(line))
-            except json.JSONDecodeError:
-                continue
-    return out
+    """The seventh JSONL reader, now the same one as the other six (D-091)."""
+    return store.read_jsonl(path)[0]
 
 
 def build(cfg: Any) -> str:
