@@ -894,14 +894,13 @@ async def pulse(cfg: Any, journal: Any, *, seeds: dict[str, str] | None = None,
     any step above still leaves evidence that the Coach ran.
     """
     seeds = seeds or {}
-    state = {"experiments_open": 0, "trials_scored_today": 0, "promotions_today": 0,
-             "sentinels_active": [], "snapshotted": False, "opened": None,
-             "closed": None}
+    state = {"experiments_open": 0, "trials_scored": 0, "trials_scored_today": 0,
+             "promotions_today": 0, "sentinels_active": [], "snapshotted": False,
+             "opened": None, "closed": None}
     if not enabled(cfg):
-        journal.append("coach_run", **{k: state[k] for k in
-                                       ("experiments_open", "trials_scored_today",
-                                        "promotions_today", "sentinels_active")},
-                       disabled=True)
+        journal.append("coach_run", experiments_open=0, trials_scored=0,
+                       trials_scored_today=0, promotions_today=0,
+                       sentinels_active=[], disabled=True)
         return state
 
     rows: list[dict[str, Any]] = []
@@ -912,6 +911,21 @@ async def pulse(cfg: Any, journal: Any, *, seeds: dict[str, str] | None = None,
 
     day = ids.utc_now().date().isoformat()
     evs = events(cfg)
+    # A heartbeat reports what happened SINCE THE LAST HEARTBEAT, not a running
+    # total - the same convention `interim_run` (scored) and `exit_run`
+    # (triggered) already use. It matters because `health` SUMS this field
+    # across every heartbeat row: a running total would be counted once per
+    # pulse, so three pulses over seven trials reported "produced 5". The
+    # verdict was right either way (the probe only tests > 0) but the number
+    # was not, and a health line nobody can trust is one nobody reads.
+    last_beat = ""
+    for r in reversed(rows):
+        if r.get("kind") == "coach_run":
+            last_beat = str(r.get("ts", ""))
+            break
+    state["trials_scored"] = sum(
+        1 for r in evs if r.get("kind") == "trial_result"
+        and str(r.get("ts", "")) > last_beat)
     state["trials_scored_today"] = sum(
         1 for r in evs if r.get("kind") == "trial_result" and str(r.get("ts", ""))[:10] == day)
     state["promotions_today"] = sum(
@@ -1012,12 +1026,13 @@ async def pulse(cfg: Any, journal: Any, *, seeds: dict[str, str] | None = None,
     # 6. the heartbeat, LAST and unconditional
     journal.append("coach_run",
                    experiments_open=state["experiments_open"],
+                   trials_scored=state["trials_scored"],
                    trials_scored_today=state["trials_scored_today"],
                    promotions_today=state["promotions_today"],
                    sentinels_active=state["sentinels_active"])
     if verbose:
         print(f"[coach] open={state['experiments_open']} "
-              f"trials_today={state['trials_scored_today']} "
+              f"trials={state['trials_scored']} (today {state['trials_scored_today']}) "
               f"sentinels={state['sentinels_active'] or 'none'}")
     return state
 

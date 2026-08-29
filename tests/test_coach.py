@@ -410,7 +410,18 @@ async def test_the_heartbeat_keys_match_exactly_what_the_health_probe_reads(tmp_
     # both callables must find their keys on a real heartbeat row
     assert probe.produced(rows) == 0
     assert probe.work is not None and probe.work(rows) == 0
-    assert "trials_scored_today" in rows[0] and "experiments_open" in rows[0]
+    assert "trials_scored" in rows[0] and "experiments_open" in rows[0]
+
+    # And the field the probe SUMS must be a per-heartbeat delta, not a running
+    # total - health adds it across every row, so a cumulative field would be
+    # counted once per pulse. Measured before this was fixed: three pulses over
+    # seven real trials reported "produced 5".
+    import inspect
+    src = inspect.getsource(coach.pulse)
+    assert '"trials_scored"] = sum' in src.replace("state[", '"').replace("'", '"') or \
+        'state["trials_scored"]' in src
+    assert "> last_beat" in src, (
+        "trials_scored must count only events since the previous heartbeat")
 
 
 @pytest.mark.asyncio

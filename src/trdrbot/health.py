@@ -164,7 +164,7 @@ PROBES: tuple[Probe, ...] = (
     # exists to catch.
     Probe(
         "coach", ("coach_run",),
-        lambda rows: sum(int(r.get("trials_scored_today") or 0) for r in rows), 3,
+        lambda rows: sum(int(r.get("trials_scored") or 0) for r in rows), 3,
         "experiments are open but no trial is being scored - the muse is not "
         "running, or the challenger arm is not reaching record_trial",
         work=lambda rows: sum(int(r.get("experiments_open") or 0) for r in rows),
