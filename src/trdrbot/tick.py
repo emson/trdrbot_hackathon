@@ -54,6 +54,9 @@ from . import (
 from . import (
     ledger as ledger_mod,
 )
+from . import (
+    store as store_mod,
+)
 from .calibration import CalibrationStore
 from .config import Config
 from .elfmem_adapter import ElfmemAdapter
@@ -67,7 +70,7 @@ from .wiki import Wiki
 def _tick_count(config: Config) -> int:
     p = config.paths.state / "tick_count"
     n = int(p.read_text().strip() or 0) + 1 if p.exists() else 1
-    p.write_text(str(n))
+    store_mod.write_atomic(p, str(n))
     return n
 
 

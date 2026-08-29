@@ -28,6 +28,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from . import store
+
 
 @dataclass
 class Forecast:
@@ -160,9 +162,11 @@ class CalibrationStore:
                   f"in {path.name} - they will be dropped on the next write")
 
     def _flush(self) -> None:
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.path.write_text(
-            "\n".join(json.dumps(f.to_dict()) for f in self._items) + "\n"
+        # Atomic: this rewrites the WHOLE calibration record on every
+        # record() and every resolve(), so a crash mid-write would truncate
+        # the earned forecast history rather than lose one row.
+        store.write_atomic(
+            self.path, "\n".join(json.dumps(f.to_dict()) for f in self._items) + "\n"
         )
 
     def record(self, position_id: str, probability: float, subject: str = "") -> None:

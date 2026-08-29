@@ -52,6 +52,8 @@ from datetime import date
 from pathlib import Path
 from typing import Any
 
+from . import store
+
 EXPLORE, ESTABLISH, SCALE, MATURE = "explore", "establish", "scale", "mature"
 _ORDER = (EXPLORE, ESTABLISH, SCALE, MATURE)
 
@@ -302,6 +304,5 @@ def update_high_water(state_dir: Path, equity: float) -> float:
             hw = 0.0
     if equity > hw:
         hw = equity
-        p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text(json.dumps({"high_water": hw}))
+        store.write_atomic(p, json.dumps({"high_water": hw}))
     return hw

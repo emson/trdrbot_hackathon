@@ -42,6 +42,8 @@ from datetime import date
 from pathlib import Path
 from typing import Any
 
+from . import store
+
 #: How a forecast came to exist. `thesis` rows are auto-registered from
 #: simulate_experiments; `standalone` rows are the agent putting a view on
 #: record without trading it.
@@ -109,15 +111,31 @@ class Ledger:
     def __init__(self, path: Path) -> None:
         self.path = path
         self._items: list[Entry] = []
+        skipped = 0
         if path.exists():
             for line in path.read_text().splitlines():
                 line = line.strip()
                 if not line:
                     continue
                 try:
-                    self._items.append(Entry(**json.loads(line)))
-                except (json.JSONDecodeError, TypeError):
-                    continue
+                    d = json.loads(line)
+                    # Unknown keys are IGNORED, not fatal. `_rewrite` rewrites
+                    # the whole file, so a row skipped on load is a row DELETED
+                    # on the next mark_stated - which made adding one field to
+                    # Entry a silent way to destroy the pre-registration
+                    # history the multiple-testing correction depends on.
+                    self._items.append(
+                        Entry(**{k: v for k, v in d.items()
+                                 if k in Entry.__dataclass_fields__})
+                    )
+                except (json.JSONDecodeError, TypeError, ValueError):
+                    skipped += 1
+        if skipped:
+            # Loud: every skipped row is a pre-registered trial that the next
+            # rewrite will delete, and the trial count N is what the
+            # multiple-testing correction rests on.
+            print(f"[ledger] skipped {skipped} unreadable row(s) in {path.name} - "
+                  f"they will be dropped on the next write")
 
     def _append(self, e: Entry) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -125,8 +143,11 @@ class Ledger:
             fh.write(json.dumps(asdict(e)) + "\n")
 
     def _rewrite(self) -> None:
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.path.write_text("".join(json.dumps(asdict(e)) + "\n" for e in self._items))
+        # Atomic: fires once per candidate per gate during a muse run, over
+        # the whole file. `ledger.jsonl.bak-before-repair` on disk is what this
+        # class of failure looks like when it lands.
+        store.write_atomic(
+            self.path, "".join(json.dumps(asdict(e)) + "\n" for e in self._items))
 
     def register(
         self, *, kind: str, underlying: str, claim: str, probability: float,

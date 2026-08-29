@@ -32,6 +32,7 @@ from typing import Any
 
 from elfmem import MemorySystem
 
+from . import store
 from .positions import Position
 
 #: This project's name for itself (`llm.SYSTEM_PROMPT`: "You are Theo").
@@ -220,8 +221,7 @@ class ElfmemAdapter:
         r = await self.mem.mind_create(subject, goals=[f"trade {underlying} options profitably"])
         minds[underlying] = r.block_id
         if self._minds_path:
-            self._minds_path.parent.mkdir(parents=True, exist_ok=True)
-            self._minds_path.write_text(json.dumps(minds, indent=2))
+            store.write_atomic(self._minds_path, json.dumps(minds, indent=2))
         return r.block_id
 
     async def predict(self, pos: Position) -> str:

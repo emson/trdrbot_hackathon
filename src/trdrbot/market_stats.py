@@ -23,7 +23,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from . import ids
+from . import ids, store
 
 TRADING_DAYS = 252
 
@@ -389,7 +389,7 @@ def save_closes(state_dir: Path, symbol: str, closes: list[float],
     }
     if dates is not None:
         body["dates"] = list(dates)
-    p.write_text(json.dumps(body))
+    store.write_atomic(p, json.dumps(body))
 
 
 def load_dated_closes(state_dir: Path, symbol: str, *,

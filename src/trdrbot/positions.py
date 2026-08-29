@@ -25,7 +25,7 @@ from typing import Any
 
 import yaml
 
-from . import ids
+from . import ids, store
 
 TERMINAL = {"closed", "expired", "assigned", "abandoned"}
 ACTIVE = {"proposed", "opening", "open", "adjusting", "closing"}
@@ -240,7 +240,7 @@ class PositionStore:
             f"---\n{yaml.safe_dump(pos.frontmatter(), sort_keys=False)}---\n\n"
             f"## Thesis\n\n{pos.thesis or '(none recorded)'}\n"
         )
-        p.write_text(body)
+        store.write_atomic(p, body)
         pos.path = p
         return p
 

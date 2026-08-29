@@ -21,7 +21,7 @@ from typing import Any
 
 import yaml
 
-from . import ids
+from . import ids, store
 
 
 class AugmentationError(ValueError):
@@ -259,7 +259,7 @@ class Wiki:
         fm_text = yaml.safe_dump(concept.frontmatter, sort_keys=False)
         path = self.path_for(concept.concept_id)
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(f"---\n{fm_text}---\n\n{concept.body}")
+        store.write_atomic(path, f"---\n{fm_text}---\n\n{concept.body}")
         concept.path = path
         return path
 
@@ -325,11 +325,11 @@ class Wiki:
             text = log_path.read_text()
             heading = f"## {today}\n"
             if text.startswith(heading):
-                log_path.write_text(text.replace(heading, heading + line, 1))
+                store.write_atomic(log_path, text.replace(heading, heading + line, 1))
                 return
         else:
             text = ""
-        log_path.write_text(f"## {today}\n{line}\n{text}")
+        store.write_atomic(log_path, f"## {today}\n{line}\n{text}")
 
 
 def should_mint(*, is_referenceable: bool, is_bundle_meta: bool, has_citation_sentence: bool,

@@ -79,7 +79,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
-from . import ids
+from . import ids, store
 from .config import Config
 from .llm import build_model
 
@@ -215,7 +215,7 @@ class ExtractCache:
             if not e.is_bare():  # never freeze a failure as permanent
                 self._items[e.id] = asdict(e)
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.path.write_text(json.dumps(self._items, indent=2, sort_keys=True))
+        store.write_atomic(self.path, json.dumps(self._items, indent=2, sort_keys=True))
 
 
 def _coerce(raw: Any, item: dict[str, Any], model_name: str) -> Extract:

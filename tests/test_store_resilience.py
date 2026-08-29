@@ -88,3 +88,76 @@ def test_an_empty_forecast_file_is_not_an_error(tmp_path):
     path = tmp_path / "forecasts.jsonl"
     path.write_text("\n\n")
     assert CalibrationStore(path).resolved() == []
+
+
+# ------------------------------------------------------------ atomic writes
+
+
+def test_write_atomic_leaves_the_original_intact_when_the_swap_fails(tmp_path, monkeypatch):
+    """The failure this prevents: a truncate-then-write that dies in the middle
+    leaves neither the old contents nor the new. `write_atomic` writes a
+    sibling and swaps, so the reader sees one or the other."""
+    from trdrbot import store
+
+    path = tmp_path / "ledger.jsonl"
+    path.write_text("original\n")
+
+    def boom(src, dst):
+        raise OSError("crash during swap")
+
+    monkeypatch.setattr(store.os, "replace", boom)
+    try:
+        store.write_atomic(path, "replacement\n")
+    except OSError:
+        pass
+
+    assert path.read_text() == "original\n", "the original was destroyed"
+
+
+def test_the_ledger_rewrite_is_atomic(tmp_path, monkeypatch):
+    """`_rewrite` fires once per candidate per gate during a muse run, over the
+    whole file. `data/state/ledger.jsonl.bak-before-repair` on disk is what
+    this class of failure looks like when it lands."""
+    from trdrbot import store
+    from trdrbot.ledger import Ledger
+
+    path = tmp_path / "ledger.jsonl"
+    book = Ledger(path)
+    e = book.register(kind="muse", underlying="SPY", claim="c", probability=0.4,
+                      horizon="2026-09-02", band_low=1.0, band_high=2.0)
+    before = path.read_text()
+
+    monkeypatch.setattr(store.os, "replace",
+                        lambda *a: (_ for _ in ()).throw(OSError("crash")))
+    try:
+        book.mark_rejected(e.id, "some gate")
+    except OSError:
+        pass
+
+    assert path.read_text() == before, "a crashed rewrite truncated the ledger"
+
+
+def test_a_ledger_row_with_an_unknown_field_survives_the_next_rewrite(tmp_path):
+    """`Entry(**json.loads(line))` raised TypeError on any key the dataclass had
+    not heard of, and the row was skipped on load - then DELETED by the next
+    `_rewrite`. Adding one field to Entry was therefore a silent way to destroy
+    the pre-registration history that the multiple-testing correction (D-052)
+    depends on."""
+    from trdrbot.ledger import Ledger
+
+    path = tmp_path / "ledger.jsonl"
+    book = Ledger(path)
+    kept = book.register(kind="muse", underlying="SPY", claim="c", probability=0.4,
+                         horizon="2026-09-02", band_low=1.0, band_high=2.0)
+    row = json.loads(path.read_text().splitlines()[0])
+    with path.open("a") as fh:
+        fh.write(json.dumps({**row, "id": "fc_from_the_future",
+                             "underlying": "QQQ",
+                             "a_field_added_in_a_later_version": 42}) + "\n")
+
+    reloaded = Ledger(path)
+    assert {e.id for e in reloaded.all()} == {kept.id, "fc_from_the_future"}
+
+    reloaded.mark_rejected(kept.id, "a gate")  # forces the full rewrite
+    survivors = {json.loads(x)["id"] for x in path.read_text().splitlines() if x}
+    assert survivors == {kept.id, "fc_from_the_future"}, "the drifted row was deleted"
