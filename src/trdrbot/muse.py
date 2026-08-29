@@ -40,6 +40,7 @@ from .inbox import Inbox
 from .journal import Journal
 from .ledger import Ledger
 from .llm import ask, parse_json_array
+from .opportunity import Opportunity, admit
 from .wiki import Wiki
 
 #: How many wiki concepts collide with the news per run.
@@ -572,7 +573,11 @@ async def run(
     emitted = 0
     for v in survivors[:EMIT_TOP]:
         c = v.pop("_cand")
-        inbox.write("opportunity", {
+        # Through the SAME door as research and discovery. The hand-built
+        # payload this replaces would have failed the shared field check it
+        # never called: `claim` came straight from `c.get("claim")` and is
+        # None whenever the model omitted the key.
+        o = Opportunity.from_payload({
             "underlying": v["underlying"], "claim": c.get("claim"),
             "direction": c.get("direction", "neutral"),
             "drift_pct": 0.0,
@@ -581,7 +586,17 @@ async def run(
             "why": ("MUSE domino chain: " + " -> ".join(str(x) for x in c.get("chain", []))
                     + f" | stated {v['stated']:.0%} vs history's base {v['base_prob']:.0%}"),
             "suggested_structures": c.get("suggested_structures", []),
-        }, source="muse", trust="primary")
+        })
+        # The muse's own gauntlet already proved spot, horizon and the options
+        # chain for this candidate, so admit() here is the field check plus a
+        # backstop - never a second opinion on gates already passed.
+        verdict = admit(o, latest_useful=latest or None) if o else None
+        if o is None or not verdict.ok:
+            v["fate"] = f"rejected: {verdict.defect if verdict else 'not_an_object'}"
+            journal.append("research_rejected", source="muse",
+                           reason=v["fate"], raw=str(c)[:300])
+            continue
+        inbox.write_opportunity(o, source="muse")
         v["fate"] = "EMITTED"
         emitted += 1
     for v in survivors[EMIT_TOP:]:

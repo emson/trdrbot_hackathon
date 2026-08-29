@@ -32,7 +32,7 @@ from .config import Config
 from .inbox import Inbox
 from .journal import Journal
 from .llm import build_model, parse_json_array, parse_json_object, text_of
-from .research import opportunity_defect
+from .opportunity import Opportunity, admit
 from .wiki import Concept, Wiki
 
 NOMINATE_PROMPT = """You are scouting for an options trading agent (paper account, all positions \
@@ -318,33 +318,31 @@ async def run(
     # ---- opportunities through the seam, options gate enforced in code ----
     ok_tickers = {n["ticker"].upper() for n in nominees if n.get("_options_ok")}
     emitted = 0
-    for o in raw_opps if isinstance(raw_opps, list) else []:
-        defect = opportunity_defect(o)
-        if defect:
-            journal.append("research_rejected", reason=f"unscoreable:{defect}", raw=str(o)[:300])
+    for raw in raw_opps:
+        o = Opportunity.from_payload(raw)
+        if o is None:
+            journal.append("research_rejected", source="discovery",
+                           reason="unscoreable:not_an_object", raw=str(raw)[:300])
             continue
-        if o["underlying"].upper() not in ok_tickers:
-            journal.append("research_rejected", reason="failed_options_gate", raw=str(o)[:300])
+        # One gate, four checks, and the band check no longer VANISHES when the
+        # close fetch failed - it reports itself unchecked instead, which is
+        # exactly when the data is worst and the silence cost most.
+        verdict = admit(
+            o,
+            spot=last_close.get(o.underlying),
+            latest_useful=_latest or None,
+            options_tradeable=o.underlying in ok_tickers,
+        )
+        if not verdict.ok:
+            journal.append("research_rejected", source="discovery",
+                           reason=verdict.defect, raw=str(raw)[:300],
+                           spot=last_close.get(o.underlying))
             continue
-        # Was `> deadline`, which admitted a thesis resolving ON the deadline -
-        # the day everything is force-closed, so its answer arrives after the
-        # last decision it could inform. `forecast_window` is the one rule all
-        # three thesis sources now share; they had each carried their own.
-        if _latest and str(o["horizon"]) > _latest:
-            journal.append("research_rejected", reason="horizon_too_late", raw=str(o)[:300])
-            continue
-        # Bands must be PRICES. Found live on the first run: the LLM emitted
-        # percentage moves ([-6.0, 8.0] on a $87 stock), which would make
-        # holds_at() always-False and attribution score every thesis as
-        # failed - silently corrupting the learning loop. Anchor plausibility
-        # to the computed close: a real band lives within [0.3x, 3x] of it.
-        spot = last_close.get(o["underlying"].upper())
-        if spot and not _plausible_band(o, spot):
-            journal.append("research_rejected", reason="band_not_a_price",
-                           raw=str(o)[:300], spot=spot)
-            continue
-        inbox.write("opportunity", o, source="discovery", trust="primary")
+        inbox.write_opportunity(o, source="discovery")
         emitted += 1
+        if verdict.unchecked:
+            journal.append("research_admitted_unchecked", source="discovery",
+                           underlying=o.underlying, unchecked=list(verdict.unchecked))
 
     journal.append("discovery", nominees=[n["ticker"] for n in nominees],
                    wiki_written=wrote, opportunities=emitted)

@@ -25,11 +25,12 @@ from __future__ import annotations
 
 from typing import Any
 
-from . import market_stats, mcp_client, news_extract
+from . import competence, ids, market_stats, mcp_client, news_extract
 from .config import Config
 from .inbox import Inbox
 from .journal import Journal
 from .llm import ask, parse_json_array, parse_json_object, section
+from .opportunity import Opportunity, admit
 from .wiki import Concept, Wiki
 
 RESEARCH_PROMPT = """You are the research desk for an options trading agent. Produce a daily \
@@ -118,6 +119,10 @@ async def run(
 
     # ---- deterministic layer: stats + persisted closes per ticker ----
     stats_lines = []
+    #: Spot per symbol, so the band-plausibility gate has the anchor it needs.
+    #: An LLM-supplied value cannot validate an LLM-supplied value, so this
+    #: must be a number the system computed itself (D-035).
+    last_close: dict[str, float] = {}
     for sym in universe:
         try:
             dates, closes = await market_stats.fetch_daily_series(tools, sym)
@@ -126,6 +131,7 @@ async def run(
                 # POSITION, which is only correct when both were fetched the
                 # same day (D-091).
                 market_stats.save_closes(config.paths.state, sym, closes, dates=dates)
+                last_close[sym.upper()] = closes[-1]
                 stats_lines.append("- " + market_stats.compute_stats(sym, closes).render())
             else:
                 stats_lines.append(f"- {sym}: insufficient history ({len(closes)} bars)")
@@ -208,13 +214,31 @@ async def run(
 
     # ---- emit opportunities through the existing seam ----
     emitted = 0
-    for o in raw_opps if isinstance(raw_opps, list) else []:
-        defect = opportunity_defect(o)
-        if defect:
-            journal.append("research_rejected", reason=f"unscoreable:{defect}", raw=str(o)[:300])
+    # Research had NONE of the gates discovery and the muse earned through
+    # shipped bugs - no horizon window, no band-plausibility check, no options
+    # gate - so the D-035 defect (percentage moves emitted as dollar bands,
+    # making holds_at always-False and scoring every thesis as failed) was
+    # still open on the path whose output the agent reads every morning.
+    latest = (competence.forecast_window(config.deadline, ids.today()) or ("", "", ""))[2]
+    for raw in raw_opps:
+        o = Opportunity.from_payload(raw)
+        if o is None:
+            journal.append("research_rejected", source="research",
+                           reason="unscoreable:not_an_object", raw=str(raw)[:300])
             continue
-        inbox.write("opportunity", o, source="research", trust="primary")
+        verdict = admit(o, spot=last_close.get(o.underlying),
+                        latest_useful=latest or None)
+        if not verdict.ok:
+            journal.append("research_rejected", source="research",
+                           reason=f"unscoreable:{verdict.defect}", raw=str(raw)[:300])
+            continue
+        inbox.write_opportunity(o, source="research")
         emitted += 1
+        if verdict.unchecked:
+            # Admitted on partial evidence, and the row says which gates could
+            # not run rather than letting an absent check read as a passed one.
+            journal.append("research_admitted_unchecked", source="research",
+                           underlying=o.underlying, unchecked=list(verdict.unchecked))
 
     journal.append(
         "research",

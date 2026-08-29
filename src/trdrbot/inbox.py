@@ -82,6 +82,12 @@ class Inbox:
         item.path = path
         return item
 
+    def write_opportunity(self, o: Any, *, source: str,
+                          trust: str = "primary") -> Item:
+        """The typed door onto the seam. Dedup (D-091) applies unchanged - the
+        payload keys it hashes are the ones `Opportunity.to_payload` writes."""
+        return self.write("opportunity", o.to_payload(), source=source, trust=trust)
+
     def _read(self, path: Path) -> Item | None:
         """One pending file as an Item, or None if it cannot be parsed."""
         try:

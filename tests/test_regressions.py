@@ -2834,20 +2834,32 @@ def test_every_thesis_source_asks_the_same_question():
     assert "{latest}" in discovery.SYNTH_PROMPT
 
 
-def test_muse_rejects_a_horizon_that_resolves_too_late():
+def test_a_horizon_that_resolves_too_late_is_refused():
     """The muse had no deadline check: it could emit a thesis resolving AFTER
-    the competition ends, which can never inform anything."""
+    the competition ends, which can never inform anything.
+
+    This used to assert on the SOURCE TEXT of two functions - the muse's gate
+    cascade and discovery's emission loop - because the rule lived in both. It
+    now lives once, in `opportunity.admit`, so the rule can be RUN instead of
+    read. The muse's own copy (which also rejects a horizon outside 1-10 days,
+    a stricter rule than the shared window) is still inspected below, because
+    that one genuinely has no other home yet.
+    """
     import inspect
 
     from trdrbot import muse
+    from trdrbot.opportunity import Opportunity, admit
 
-    # The gate cascade moved to `_evaluate` when the muse gained a
-    # challenger arm (D-088): both arms run ONE copy of it, so the
-    # invariant this test guards now lives there. Same rule, new home.
-    src = inspect.getsource(muse._evaluate)
-    assert "resolves too late" in src
-    assert "horizon_too_late" in inspect.getsource(__import__(
-        "trdrbot.discovery", fromlist=["run"]).run)
+    o = Opportunity(underlying="SPY", claim="c", horizon="2026-09-30",
+                    band_high=770.0)
+
+    assert admit(o, latest_useful="2026-09-02").defect == "horizon_too_late"
+    assert admit(o, latest_useful="2026-10-31").ok
+
+    # ...and an ABSENT window is reported, never silently treated as passed.
+    assert "horizon_window" in admit(o).unchecked
+
+    assert "resolves too late" in inspect.getsource(muse._evaluate)
 
 
 def test_a_truncated_json_array_still_yields_its_complete_elements():
