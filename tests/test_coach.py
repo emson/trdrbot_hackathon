@@ -32,6 +32,17 @@ def _cfg(tmp_path: Path, **coach_opts) -> SimpleNamespace:
     )
 
 
+def _floors_cfg(**coach_opts) -> SimpleNamespace:
+    """Config for the PURE verdict tests, which read only `cfg.coach`.
+
+    They used to build a config rooted at a hardcoded /tmp, which really did
+    create a `/tmp/state` directory
+    on the developer's machine - a shared mutable directory, against the
+    fresh-fixtures non-negotiable, for paths none of them ever read.
+    """
+    return SimpleNamespace(coach={"enabled": True, **coach_opts})
+
+
 def _journal(tmp_path: Path) -> Journal:
     p = tmp_path / "journal.jsonl"
     p.touch()
@@ -63,7 +74,7 @@ def test_a_challenger_that_is_merely_luckier_early_is_not_promoted():
     """
     t = coach.Tally("e", "muse.prompt", "v0", "v1", runs=5, s_c=4, f_c=1, s_i=1, f_i=4)
     assert t.posterior > 0.9  # the evidence really does point that way
-    outcome, _ = coach.verdict(t, coach.floors(_cfg(Path("/tmp"))))
+    outcome, _ = coach.verdict(t, coach.floors(_floors_cfg()))
     assert outcome == "", "promoted on 5 runs - the run floor is not binding"
 
 
@@ -72,7 +83,7 @@ def test_a_fair_coin_challenger_is_never_promoted_over_the_full_run_cap():
     promotion. This is the Coach's zero-EV property: with no real difference
     there is no verdict, the same shape as Kelly being exactly zero on a
     fairly priced structure (D-079)."""
-    cfg = _cfg(Path("/tmp"))
+    cfg = _floors_cfg()
     for runs in range(1, coach.CAP_RUNS + 1):
         t = coach.Tally("e", "muse.prompt", "v0", "v1", runs=runs,
                         s_c=2 * runs, f_c=3 * runs, s_i=2 * runs, f_i=3 * runs)
@@ -82,7 +93,7 @@ def test_a_fair_coin_challenger_is_never_promoted_over_the_full_run_cap():
 
 
 def test_promotion_needs_the_posterior_and_both_floors_together():
-    cfg = _cfg(Path("/tmp"))
+    cfg = _floors_cfg()
     fl = coach.floors(cfg)
     strong = dict(s_c=40, f_c=10, s_i=10, f_i=40)
 
@@ -103,14 +114,14 @@ def test_promotion_needs_the_posterior_and_both_floors_together():
 
 def test_a_hopeless_challenger_is_refuted_early_rather_than_run_to_the_cap():
     t = coach.Tally("e", "l", "v0", "v1", runs=7, s_c=1, f_c=40, s_i=30, f_i=11)
-    outcome, reason = coach.verdict(t, coach.floors(_cfg(Path("/tmp"))))
+    outcome, reason = coach.verdict(t, coach.floors(_floors_cfg()))
     assert outcome == "refuted" and "futile" in reason
 
 
 def test_the_incumbent_keeps_its_place_on_timeout():
     t = coach.Tally("e", "l", "v0", "v1", runs=coach.CAP_RUNS,
                     s_c=30, f_c=30, s_i=28, f_i=32)
-    outcome, _ = coach.verdict(t, coach.floors(_cfg(Path("/tmp"))))
+    outcome, _ = coach.verdict(t, coach.floors(_floors_cfg()))
     assert outcome == "timeout"
 
 

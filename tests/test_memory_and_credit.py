@@ -1,0 +1,232 @@
+"""The credit-assignment spine, tested by RUNNING it.
+
+This path - reconcile -> learn -> elfmem, and attribution -> elfmem at horizon -
+produced six decision records of bugs (D-056, D-057, D-058, D-059, D-072,
+D-073), the densest cluster in the project. Until now it was policed entirely
+by `inspect.getsource` string matches: eleven assertions about the TEXT of the
+code, which a behaviour-preserving refactor breaks and a behaviour-changing
+edit slips past.
+
+These tests run the real stores (Journal, PositionStore, Wiki, CalibrationStore)
+on tmp_path with a fake only at the elfmem boundary, and assert on what
+actually reaches memory. That is the loop-smoke shape, and loop smoke is what
+found two of the six bugs above in the first place.
+"""
+
+from __future__ import annotations
+
+from typing import Any
+
+from conftest import FakeMem, tools_for
+
+from trdrbot import attribution, experiments, learn, reconcile
+from trdrbot.analytics import Snapshot
+from trdrbot.calibration import CalibrationStore
+from trdrbot.journal import Journal
+from trdrbot.positions import PositionStore
+from trdrbot.wiki import Wiki
+
+
+def _stores(paths: Any) -> tuple[PositionStore, Journal, Wiki, CalibrationStore]:
+    return (
+        PositionStore(paths.wiki),
+        Journal(paths.journal),
+        Wiki(paths.wiki),
+        CalibrationStore(paths.state / "forecasts.jsonl"),
+    )
+
+
+def _rows(journal: Journal, kind: str) -> list[dict[str, Any]]:
+    return [r for r in journal.read() if r.get("kind") == kind]
+
+
+# ---------------------------------------------------------------- resolution
+
+
+async def test_a_close_with_known_pnl_resolves_calibration_and_records_the_lesson(
+    paths, make_position, mem: FakeMem
+):
+    """The happy path of F3, end to end through the real stores."""
+    store, journal, wiki, calib = _stores(paths)
+    pos = make_position(status="closed", close_reason="external", last_pnl_pct=0.5)
+    store.save(pos)
+    calib.record(pos.position_id, probability=0.6, subject="SPY")
+
+    await learn.on_resolution(pos, store, mem, wiki, journal, pnl_pct=None, calibration=calib)
+
+    # pnl_pct=None fell back to the position's own last observation (D-058:
+    # the same measured number failed to reach three consumers in a row).
+    resolved = calib.resolved()
+    assert len(resolved) == 1 and resolved[0].outcome is True
+
+    reflection = _rows(journal, "reflection")
+    assert len(reflection) == 1
+    assert reflection[0]["pnl_pct"] == 0.5
+
+    lesson = wiki.read("lessons")
+    assert lesson is not None and pos.position_id in lesson.body
+
+    # The mind's prediction is a binary claim and it genuinely resolves here.
+    assert mem.mind_outcomes == [("mind_dec_1", True)]
+
+    # CHARACTERIZATION, and this is the defect WU-1.9 removes: the creditable
+    # blocks are ALSO credited here, at full weight, on a signal derived from
+    # the MONEY (0.9 win / 0.1 loss) - and attribution will judge the very same
+    # blocks at horizon from the verdict. A lucky win therefore takes +0.9 here
+    # and "learn nothing" there, which installs precisely the superstition the
+    # design forbids. Pinned as-is so the change is visible in one diff.
+    assert [(bid, sig) for bid, sig, _, _ in mem.credited] == [("blk_a", 0.9), ("blk_b", 0.9)]
+
+
+async def test_a_close_with_no_pnl_anywhere_skips_credit_rather_than_guessing(
+    paths, make_position, mem: FakeMem
+):
+    """An unknown P&L is not evidence. Skipping is the honest answer; guessing
+    a sign would poison both calibration and credit."""
+    store, journal, wiki, calib = _stores(paths)
+    pos = make_position(status="closed", close_reason="external", last_pnl_pct=None)
+    store.save(pos)
+    calib.record(pos.position_id, probability=0.6, subject="SPY")
+
+    await learn.on_resolution(pos, store, mem, wiki, journal, pnl_pct=None, calibration=calib)
+
+    assert mem.credited == []
+    assert mem.mind_outcomes == []
+    assert calib.resolved() == []  # unresolved, not resolved-as-a-loss
+    assert _rows(journal, "reflection")[0]["credit_assigned"] is False
+
+
+# ---------------------------------------------------------------- reconcile
+
+
+async def test_reconcile_confirms_a_fill_and_remembers_the_thesis(
+    paths, make_position, mem: FakeMem
+):
+    """F2: `opening` + the legs present at the broker = a real position."""
+    store, journal, wiki, calib = _stores(paths)
+    pos = make_position(status="opening")
+    store.save(pos)
+    snap = Snapshot(broker_positions=[{"symbol": s} for s in pos.symbols])
+
+    result = await reconcile.reconcile(store, snap, journal, mem, wiki, calib)
+
+    assert result["filled"] == [pos.position_id]
+    assert store.load(pos.position_id).status == "open"
+    assert mem.remembered == [f"blk_{pos.position_id}"]
+    # The thesis block is the decision's own subject matter, so it enters at
+    # full credit weight regardless of what retrieval scored (D-073).
+    reloaded = store.load(pos.position_id)
+    assert reloaded.elfmem_blocks["attention"][f"blk_{pos.position_id}"] == 1.0
+
+
+async def test_a_phantom_close_resolves_exactly_once(paths, make_position, mem: FakeMem):
+    """INV-17 through the real transition guard: two detectors, one resolution.
+    Double credit assignment is the failure this guard exists to prevent."""
+    store, journal, wiki, calib = _stores(paths)
+    pos = make_position(status="open", last_pnl_pct=0.2)
+    store.save(pos)
+    empty_broker = Snapshot(broker_positions=[])
+
+    await reconcile.reconcile(store, empty_broker, journal, mem, wiki, calib)
+    await reconcile.reconcile(store, empty_broker, journal, mem, wiki, calib)
+
+    assert store.load(pos.position_id).status == "closed"
+    assert store.load(pos.position_id).close_reason == "external"
+    assert len(_rows(journal, "reflection")) == 1, "resolved twice - INV-17 breached"
+
+
+async def test_a_pending_order_is_not_mistaken_for_a_vanished_position(
+    paths, make_position, mem: FakeMem
+):
+    """A working limit order looks exactly like a phantom unless open orders
+    are consulted - and killing a position that is merely waiting to fill is
+    the expensive direction of that mistake."""
+    store, journal, wiki, calib = _stores(paths)
+    pos = make_position(status="opening")
+    store.save(pos)
+    snap = Snapshot(broker_positions=[],
+                    open_orders=[{"legs": [{"symbol": s} for s in pos.symbols]}])
+
+    await reconcile.reconcile(store, snap, journal, mem, wiki, calib)
+
+    assert store.load(pos.position_id).status == "opening"
+
+
+# -------------------------------------------------------------- attribution
+
+
+def _snapshot_tool(price: float):
+    return tools_for(get_stock_snapshot=lambda **kw: {"latestTrade": {"p": price}})
+
+
+async def test_attribution_credits_by_verdict_and_weights_by_retrieval_similarity(
+    paths, make_position, mem: FakeMem
+):
+    """A thesis that HELD and made money reinforces both, at the weight each
+    block earned by how well it matched the query that produced the decision
+    (D-073)."""
+    store, journal, wiki, _ = _stores(paths)
+    pos = make_position(status="closed", close_reason="external", last_pnl_pct=0.4,
+                        thesis_horizon="2020-01-01")  # long past
+    store.save(pos)
+
+    out = await attribution.run(store, _snapshot_tool(700.0), mem, wiki, journal, verbose=False)
+
+    assert out["attributed"] == 1
+    assert store.load(pos.position_id).attribution == experiments.THESIS_RIGHT_EXPRESSION_RIGHT
+    signal = experiments.ATTRIBUTION_SIGNAL[experiments.THESIS_RIGHT_EXPRESSION_RIGHT]
+    credited = {bid: (sig, w) for bid, sig, w, _ in mem.credited}
+    assert credited["blk_a"] == (signal, 0.93)   # credit_weight(0.9)
+    assert credited["blk_b"] == (signal, 0.55)   # credit_weight(0.4)
+
+
+async def test_a_lucky_win_teaches_nothing_at_all(paths, make_position, mem: FakeMem):
+    """The row the whole design turns on: thesis wrong, profited anyway.
+
+    P&L-based scoring treats this as strong confirmation. Here it must move
+    NOTHING - and "nothing" means applying no signal, not applying 0.5.
+    Measured with elfmem's own function (D-072): a 0.5 "neutral" signal moved
+    the constitution -0.250 and moved an already-missed prediction +0.018.
+    """
+    store, journal, wiki, _ = _stores(paths)
+    pos = make_position(status="closed", close_reason="external", last_pnl_pct=0.4,
+                        thesis_horizon="2020-01-01")
+    store.save(pos)
+
+    # Spot ABOVE the 766 band ceiling: the view was wrong, the money was good.
+    await attribution.run(store, _snapshot_tool(800.0), mem, wiki, journal, verbose=False)
+
+    assert store.load(pos.position_id).attribution == experiments.THESIS_WRONG_PROFITED_ANYWAY
+    assert mem.credited == [], "a lucky win must move no memory at all"
+    assert _rows(journal, "attribution")[0]["signal"] is None
+
+
+async def test_attribution_without_a_price_says_so_rather_than_guessing(
+    paths, make_position, mem: FakeMem
+):
+    """The `continue` that ran attribution dead for days while every log line
+    read healthy: no journal entry meant "never ran" and "ran, found nothing"
+    were the same observation (D-038)."""
+    store, journal, wiki, _ = _stores(paths)
+    pos = make_position(status="closed", last_pnl_pct=0.4, thesis_horizon="2020-01-01")
+    store.save(pos)
+    no_price = tools_for(get_stock_snapshot=lambda **kw: {},
+                         get_stock_latest_trade=lambda **kw: {})
+
+    out = await attribution.run(store, no_price, mem, wiki, journal, verbose=False)
+
+    assert out == {"attributed": 0, "pending": 1, "skipped_no_price": 1}
+    assert _rows(journal, "attribution_run")[0]["skipped_no_price"] == 1
+    assert mem.credited == []
+
+
+async def test_an_open_position_is_never_attributed(paths, make_position, mem: FakeMem):
+    """Attribution waits for the horizon AND for the position to be over. A
+    stop on day 2 of a 10-day thesis says nothing about the view."""
+    store, journal, wiki, _ = _stores(paths)
+    store.save(make_position(status="open", thesis_horizon="2020-01-01"))
+
+    out = await attribution.run(store, _snapshot_tool(700.0), mem, wiki, journal, verbose=False)
+
+    assert out["pending"] == 0
+    assert mem.credited == []
