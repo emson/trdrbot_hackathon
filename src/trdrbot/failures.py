@@ -21,10 +21,10 @@ up until you go looking for the signal that should have been there.
 from __future__ import annotations
 
 import json
-from enum import Enum
+from enum import StrEnum
 
 
-class Cause(str, Enum):
+class Cause(StrEnum):
     PERMANENT = "permanent"
     TRANSIENT = "transient"
     CONFIG = "config"

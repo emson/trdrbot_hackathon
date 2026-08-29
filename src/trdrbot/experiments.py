@@ -44,13 +44,8 @@ class Thesis:
     band_high: float | None = None
 
     def holds_at(self, price: float) -> bool | None:
-        if self.band_low is None and self.band_high is None:
-            return None  # unfalsifiable - deliberately not guessed
-        if self.band_low is not None and price < self.band_low:
-            return False
-        if self.band_high is not None and price > self.band_high:
-            return False
-        return True
+        """None means unfalsifiable - deliberately not guessed."""
+        return optmath.band_holds(price, self.band_low, self.band_high)
 
     def summary(self) -> str:
         band = ""

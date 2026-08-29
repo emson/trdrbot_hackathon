@@ -17,7 +17,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from conftest import FakeMem, tools_for
+from conftest import FakeMem, journal_rows, tools_for
 
 from trdrbot import attribution, experiments, learn, reconcile
 from trdrbot.analytics import Snapshot
@@ -34,10 +34,6 @@ def _stores(paths: Any) -> tuple[PositionStore, Journal, Wiki, CalibrationStore]
         Wiki(paths.wiki),
         CalibrationStore(paths.state / "forecasts.jsonl"),
     )
-
-
-def _rows(journal: Journal, kind: str) -> list[dict[str, Any]]:
-    return [r for r in journal.read() if r.get("kind") == kind]
 
 
 # ---------------------------------------------------------------- resolution
@@ -59,7 +55,7 @@ async def test_a_close_with_known_pnl_resolves_calibration_and_records_the_lesso
     resolved = calib.resolved()
     assert len(resolved) == 1 and resolved[0].outcome is True
 
-    reflection = _rows(journal, "reflection")
+    reflection = journal_rows(journal, "reflection")
     assert len(reflection) == 1
     assert reflection[0]["pnl_pct"] == 0.5
 
@@ -92,7 +88,7 @@ async def test_a_close_with_no_pnl_anywhere_skips_credit_rather_than_guessing(
     assert mem.credited == []
     assert mem.mind_outcomes == []
     assert calib.resolved() == []  # unresolved, not resolved-as-a-loss
-    assert _rows(journal, "reflection")[0]["credit_assigned"] is False
+    assert journal_rows(journal, "reflection")[0]["credit_assigned"] is False
 
 
 # ---------------------------------------------------------------- reconcile
@@ -131,7 +127,7 @@ async def test_a_phantom_close_resolves_exactly_once(paths, make_position, mem: 
 
     assert store.load(pos.position_id).status == "closed"
     assert store.load(pos.position_id).close_reason == "external"
-    assert len(_rows(journal, "reflection")) == 1, "resolved twice - INV-17 breached"
+    assert len(journal_rows(journal, "reflection")) == 1, "resolved twice - INV-17 breached"
 
 
 async def test_a_pending_order_is_not_mistaken_for_a_vanished_position(
@@ -180,9 +176,9 @@ async def test_a_memory_failure_does_not_disarm_the_capital_protection_path(
 
     assert result["phantom"] == ["pos_gone"]
     assert store.load("pos_gone").status == "closed"
-    errors = _rows(journal, "learn_error")
+    errors = journal_rows(journal, "learn_error")
     assert [r["stage"] for r in errors] == ["on_resolution"]
-    assert _rows(journal, "learn_run")[0]["errors"] == 1
+    assert journal_rows(journal, "learn_run")[0]["errors"] == 1
 
     # Half two: a breached stop still closes, with memory still broken.
     breached = make_position(position_id="pos_stop", status="open",
@@ -200,7 +196,7 @@ async def test_a_memory_failure_does_not_disarm_the_capital_protection_path(
 
     assert triggered == ["pos_stop"], "a broken memory stopped the stop-loss firing"
     assert len(closer["close_position"].calls) == len(breached.symbols)  # INV-19: all legs
-    assert _rows(journal, "exit")[0]["close_reason"] == "stop_loss"
+    assert journal_rows(journal, "exit")[0]["close_reason"] == "stop_loss"
 
 
 # -------------------------------------------------------------- attribution
@@ -249,7 +245,7 @@ async def test_a_lucky_win_teaches_nothing_at_all(paths, make_position, mem: Fak
 
     assert store.load(pos.position_id).attribution == experiments.THESIS_WRONG_PROFITED_ANYWAY
     assert mem.credited == [], "a lucky win must move no memory at all"
-    assert _rows(journal, "attribution")[0]["signal"] is None
+    assert journal_rows(journal, "attribution")[0]["signal"] is None
 
 
 async def test_a_lucky_win_moves_no_memory_end_to_end(paths, make_position, mem: FakeMem):
@@ -298,7 +294,7 @@ async def test_attribution_without_a_price_says_so_rather_than_guessing(
     out = await attribution.run(store, no_price, mem, wiki, journal, verbose=False)
 
     assert out == {"attributed": 0, "pending": 1, "skipped_no_price": 1}
-    assert _rows(journal, "attribution_run")[0]["skipped_no_price"] == 1
+    assert journal_rows(journal, "attribution_run")[0]["skipped_no_price"] == 1
     assert mem.credited == []
 
 

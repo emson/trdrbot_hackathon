@@ -23,7 +23,7 @@ import math
 import re
 from collections.abc import Iterable
 from dataclasses import dataclass
-from datetime import date  # noqa: F401 - vol_days' annotation; see 019 s11.2
+from datetime import date, timedelta
 from typing import Any
 
 CONTRACT_MULTIPLIER = 100
@@ -102,6 +102,30 @@ def require_single_expiry(legs: Iterable[Leg]) -> None:
             f"expiry; a calendar/diagonal needs the far leg priced at the near expiry, "
             f"which this module deliberately does not model."
         )
+
+
+def band_holds(price: float, low: float | None, high: float | None) -> bool | None:
+    """Is `price` inside the claimed band? None when there is no band at all.
+
+    ONE definition of what a forecast band means, because there were two:
+    `experiments.Thesis.holds_at` and `ledger.Entry.holds_at` implemented the
+    same rule separately - and DISAGREED on the empty case, Thesis returning
+    None ("unfalsifiable, do not guess") and Entry returning True ("vacuously
+    holds"). Only `Ledger.register` refusing band-less rows kept that
+    divergence from ever being reached, which is a guarantee held by an
+    unrelated function rather than by the rule itself.
+
+    Bounds are INCLUSIVE: a price exactly on the edge holds the claim. That
+    convention now lives in one place, so changing it is one edit rather than
+    two that must be remembered together.
+    """
+    if low is None and high is None:
+        return None
+    if low is not None and price < low:
+        return False
+    if high is not None and price > high:
+        return False
+    return True
 
 
 def entry_cost(legs: Iterable[Leg]) -> float:
@@ -602,8 +626,6 @@ def vol_days(days: float, start: date | None = None) -> float:
     by the average weekday share - honest, and still better than counting
     weekends at full weight.
     """
-    from datetime import timedelta
-
     if days <= 0:
         return 0.0
     if start is None:

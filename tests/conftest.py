@@ -181,3 +181,21 @@ def tools_for(**handlers: Any) -> dict[str, FakeTool]:
     """{tool_name: FakeTool} for `mcp_client.call`. A handler is either a
     literal response or a callable taking the tool's kwargs."""
     return {name: FakeTool(name, h) for name, h in handlers.items()}
+
+
+def journal_rows(journal: Any, kind: str) -> list[dict[str, Any]]:
+    """Every journal row of one kind. Two test files had grown their own copy."""
+    return [r for r in journal.read() if r.get("kind") == kind]
+
+
+def synthetic_dates(n: int, start: str = "2026-01-01") -> list[str]:
+    """Consecutive dates for a synthetic close series.
+
+    Beta aligns two series on their SHARED dates (D-091) rather than pairing
+    them by array position, so a synthetic series needs dates to be estimable
+    at all - the same requirement the real cache now meets.
+    """
+    from datetime import date, timedelta
+
+    d0 = date.fromisoformat(start)
+    return [(d0 + timedelta(days=i)).isoformat() for i in range(n)]

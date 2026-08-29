@@ -8,6 +8,7 @@ critical ones - raised on the first bad byte.
 
 from __future__ import annotations
 
+import contextlib
 import json
 
 from trdrbot.calibration import CalibrationStore
@@ -106,10 +107,8 @@ def test_write_atomic_leaves_the_original_intact_when_the_swap_fails(tmp_path, m
         raise OSError("crash during swap")
 
     monkeypatch.setattr(store.os, "replace", boom)
-    try:
+    with contextlib.suppress(OSError):
         store.write_atomic(path, "replacement\n")
-    except OSError:
-        pass
 
     assert path.read_text() == "original\n", "the original was destroyed"
 
@@ -129,10 +128,8 @@ def test_the_ledger_rewrite_is_atomic(tmp_path, monkeypatch):
 
     monkeypatch.setattr(store.os, "replace",
                         lambda *a: (_ for _ in ()).throw(OSError("crash")))
-    try:
+    with contextlib.suppress(OSError):
         book.mark_rejected(e.id, "some gate")
-    except OSError:
-        pass
 
     assert path.read_text() == before, "a crashed rewrite truncated the ledger"
 

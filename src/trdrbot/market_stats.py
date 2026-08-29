@@ -48,7 +48,9 @@ class Stats:
     max_drawdown_1y: float | None
 
     def render(self) -> str:
-        f = lambda v, fmt: (fmt % v) if v is not None else "n/a"
+        def f(v: float | None, fmt: str) -> str:
+            return (fmt % v) if v is not None else "n/a"
+
         return (
             f"{self.symbol}: close {self.last_close:.2f} | "
             f"5d {f(self.ret_5d, '%+.1f%%')} 21d {f(self.ret_21d, '%+.1f%%')} "
@@ -305,11 +307,15 @@ def fit_band_inflation(
                 row = (S, var, closes[i], closes[i + h])
                 (test if i >= cutoff else train).append(row)
 
+        # B023: `brier` closes over this iteration's `draws` and is CALLED
+        # within the same iteration (see `scored` below), so late binding
+        # cannot bite. noqa'd rather than restructured - hoisting it would
+        # mean threading `draws` through every call for no behaviour change.
         def brier(pts: list, k: float) -> float | None:
             tot = n = 0
             for S, var, spot, fut in pts:
                 tm = -0.5 * var * k * k
-                facs = [math.exp(k * s + draws * tm) for s in S]
+                facs = [math.exp(k * s + draws * tm) for s in S]  # noqa: B023
                 for lo_p, hi_p in _FIT_BANDS:
                     lo = spot * (1 + lo_p) if lo_p is not None else None
                     hi = spot * (1 + hi_p) if hi_p is not None else None

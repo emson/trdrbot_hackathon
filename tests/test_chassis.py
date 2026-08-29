@@ -33,7 +33,7 @@ class ScriptedModel(BaseChatModel):
     responses: list[AIMessage] = []
     i: int = 0
 
-    def bind_tools(self, tools: Any, **kw: Any) -> "ScriptedModel":
+    def bind_tools(self, tools: Any, **kw: Any) -> ScriptedModel:
         return self
 
     def _generate(self, messages: Any, stop: Any = None, run_manager: Any = None,

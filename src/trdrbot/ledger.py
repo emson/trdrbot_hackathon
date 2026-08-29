@@ -42,7 +42,7 @@ from datetime import date
 from pathlib import Path
 from typing import Any
 
-from . import ids, store
+from . import ids, optmath, store
 
 #: How a forecast came to exist. `thesis` rows are auto-registered from
 #: simulate_experiments; `standalone` rows are the agent putting a view on
@@ -92,11 +92,10 @@ class Entry:
         return self.band_low is not None or self.band_high is not None
 
     def holds_at(self, price: float) -> bool:
-        if self.band_low is not None and price < self.band_low:
-            return False
-        if self.band_high is not None and price > self.band_high:
-            return False
-        return True
+        """Whether the claim held. Only ever called on a `scoreable()` entry,
+        so a band-less row (which the shared rule reports as None) resolves
+        FALSE rather than vacuously true - it made no checkable claim."""
+        return optmath.band_holds(price, self.band_low, self.band_high) is True
 
     def matured(self, today: date | None = None) -> bool:
         try:

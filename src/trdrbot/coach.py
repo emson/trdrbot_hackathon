@@ -36,6 +36,7 @@ assumption holds everywhere else here too.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import math
 import os
@@ -571,12 +572,30 @@ def snapshot_gauges(cfg: Any, rows: list[dict[str, Any]]) -> dict[str, Any]:
         if value is not None:
             g[name] = value
 
+    def guarded(name: str, compute: Any) -> None:
+        """Run one gauge's computation. A failure OMITS the gauge and says so.
+
+        This module's own rule is that a gauge with no data must be omitted
+        rather than written as zero, because on a chart those are
+        indistinguishable. An exception used to omit it identically and
+        SILENTLY - so "the calibration store is broken" and "there is no
+        calibration data yet" produced the same empty slot, which is D-038's
+        absence-as-zero defect reappearing inside the module that preaches
+        against it. The gauge is still never worth an exception; it is worth
+        a line saying which one went missing and why.
+        """
+        try:
+            compute()
+        except Exception as exc:  # noqa: BLE001 - a gauge never breaks a pulse
+            print(f"[coach] gauge {name} unavailable: {exc!r}")
+            g.setdefault("gauges_failed", []).append(name)
+
     put("muse.survival_rate", _survival(rows))
     put("muse.candidates_per_run", _candidates_per_run(rows))
     put("muse.seed_entropy", _seed_entropy(rows))
     put("muse.runs_total", sum(1 for r in rows if r.get("kind") == "muse") or None)
 
-    try:
+    def _calibration_gauges() -> None:
         book = _led.Ledger(Path(cfg.paths.state) / "ledger.jsonl")
         resolved = book.resolved()
         stated = [e for e in book.all() if e.probability_stated]
@@ -586,22 +605,21 @@ def snapshot_gauges(cfg: Any, rows: list[dict[str, Any]]) -> dict[str, Any]:
             cal = _cal.score(_led.as_forecasts(resolved))
             put("calibration.brier", round(cal.brier, 4) if cal.brier is not None else None)
             put("calibration.n_eff", round(cal.n_eff, 2) if cal.n_eff else None)
-    except Exception:  # noqa: BLE001 - a gauge is never worth an exception
-        pass
 
-    try:
-        put("coach.cost_usd_today", _cost_today(cfg))
-    except Exception:  # noqa: BLE001
-        pass
+    guarded("calibration", _calibration_gauges)
+    guarded("coach.cost_usd_today", lambda: put("coach.cost_usd_today", _cost_today(cfg)))
 
     # The model layer's calibration (D-089): the fitted inflation and how old
     # the fit is. A drifting inflation across refits, or a fit going stale
     # while the market moves regimes, is exactly the trajectory the report
     # exists to make visible.
-    try:
+    def _model_gauges() -> None:
         from . import market_stats as _ms
 
-        art = json.loads(_ms.model_cal_path(Path(cfg.paths.state)).read_text())
+        path = _ms.model_cal_path(Path(cfg.paths.state))
+        if not path.exists():
+            return  # no fit yet is the NORMAL case, and no gauge is the answer
+        art = json.loads(path.read_text())
         per_h = art.get("per_horizon") or {}
         if "5" in per_h:
             put("model.inflation_5d", float(per_h["5"]))
@@ -611,8 +629,10 @@ def snapshot_gauges(cfg: Any, rows: list[dict[str, Any]]) -> dict[str, Any]:
 
             age = (ids.utc_now() - datetime.fromisoformat(fitted)).days
             put("model.cal_age_days", age)
-    except Exception:  # noqa: BLE001 - no artifact -> no gauge, never a zero
-        pass
+
+    # "No artifact" and "the artifact is corrupt" both used to produce silence.
+    # The first is expected and handled above; the second now reports.
+    guarded("model_calibration", _model_gauges)
 
     opens = 0
     for l in LEVERS:
@@ -884,11 +904,9 @@ async def mutate(cfg: Any, st: LeverState, rows: list[dict[str, Any]],
         return None
     except Exception as exc:  # noqa: BLE001 - a failed mutation costs one pulse
         print(f"[coach] mutation failed: {exc!r}")
-        try:
+        with contextlib.suppress(Exception):
             journal.append("coach_mutation_rejected", lever=st.lever,
                            reason=f"{type(exc).__name__}: {exc}"[:200])
-        except Exception:  # noqa: BLE001
-            pass
         return None
 
 

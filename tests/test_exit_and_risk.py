@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from conftest import FakeMem, tools_for
+from conftest import FakeMem, journal_rows, tools_for
 
 from trdrbot import exit_rules, reconcile
 from trdrbot.analytics import Snapshot
@@ -40,7 +40,7 @@ async def _run(store: PositionStore, snap: Snapshot, journal: Journal, paths: An
 
 
 def _exit_run(journal: Journal) -> dict[str, Any]:
-    rows = [r for r in journal.read() if r.get("kind") == "exit_run"]
+    rows = journal_rows(journal, "exit_run")
     assert rows, "the evaluator left no heartbeat"
     return rows[-1]
 

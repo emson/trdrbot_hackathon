@@ -651,3 +651,34 @@ def test_open_appends_the_event_before_it_swaps_state(tmp_path):
     assert [r["exp_id"] for r in opened] == [st.exp_id]
     assert coach.reconcile(cfg, seeds={"muse.prompt": "seed"}) == [], \
         "a freshly opened experiment must not look orphaned"
+
+
+def test_a_broken_gauge_is_reported_rather_than_silently_omitted(tmp_path, monkeypatch):
+    """This module's own rule is that a gauge with no data must be OMITTED, not
+    written as zero - on a chart those are indistinguishable. But an exception
+    omitted it identically and silently, so "the calibration store is broken"
+    and "there is no calibration data yet" produced the same empty slot. That
+    is D-038's absence-as-zero defect reappearing inside the module that
+    preaches against it."""
+    cfg = _cfg(tmp_path)
+    (tmp_path / "state" / "ledger.jsonl").write_text("{ this will not parse\n")
+
+    def explode(*a, **k):
+        raise RuntimeError("ledger unreadable")
+
+    # Patched at the source module, not on coach: `snapshot_gauges` imports
+    # ledger locally, so there is no coach attribute to patch - and the real
+    # module is the honest boundary anyway.
+    monkeypatch.setattr("trdrbot.ledger.Ledger", explode)
+    g = coach.snapshot_gauges(cfg, rows=[])
+
+    assert "calibration.n" not in g, "a broken gauge must not be written as a value"
+    assert "calibration" in g.get("gauges_failed", []), "the failure is invisible"
+
+
+def test_gauges_that_simply_have_no_data_yet_report_no_failure(tmp_path):
+    """The distinction has to cut both ways, or `gauges_failed` becomes noise
+    and stops meaning anything."""
+    g = coach.snapshot_gauges(_cfg(tmp_path), rows=[])
+
+    assert "gauges_failed" not in g

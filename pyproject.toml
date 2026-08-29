@@ -56,6 +56,14 @@ ignore = [
     # functions that regression tests read by source is churn against zero
     # correctness gain.
     "E741",
+    # SIM103/SIM108 fight this project's own stated style: "guard clauses and
+    # early returns" and explicit branches for domain distinctions
+    # (principles_coding.md pattern 2). `return not (high is not None and
+    # price > high)` and a ternary over C-vs-P are both harder to read than
+    # what they replace, so the rule loses to the principle rather than being
+    # worked around per-line.
+    "SIM103",
+    "SIM108",
     # zip(strict=) would be a real decision per call site: strict=True changes
     # behaviour on a length mismatch, strict=False is a no-op annotation across
     # 16 sites. Deferred deliberately rather than swept.

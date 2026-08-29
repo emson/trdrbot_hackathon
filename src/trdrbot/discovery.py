@@ -245,7 +245,9 @@ async def run(
             fac = market_stats.bootstrap_factors(closes, 5, seed=t)
             if fac:
                 fac.sort()
-                q = lambda p: fac[int(p * (len(fac) - 1))]
+                def q(pct: float, _f: list[float] = fac) -> float:
+                    return _f[int(pct * (len(_f) - 1))]
+
                 up5 = sum(1 for f in fac if f >= 1.05) / len(fac)
                 dn5 = sum(1 for f in fac if f <= 0.95) / len(fac)
                 section.append(

@@ -16,6 +16,8 @@ from __future__ import annotations
 import math
 import random
 
+from conftest import synthetic_dates
+
 from trdrbot import market_stats
 
 
@@ -31,16 +33,9 @@ def _series(n: int = 200, beta: float = 1.5, seed: int = 7) -> tuple[list[float]
     return bench, sym
 
 
-def _dates(n: int) -> list[str]:
-    from datetime import date, timedelta
-
-    start = date(2026, 1, 1)
-    return [(start + timedelta(days=i)).isoformat() for i in range(n)]
-
-
 def test_beta_recovers_a_known_value_when_the_series_are_aligned(tmp_path):
     bench, sym = _series()
-    dates = _dates(len(bench))
+    dates = synthetic_dates(len(bench))
     market_stats.save_closes(tmp_path, "SPY", bench, dates=dates)
     market_stats.save_closes(tmp_path, "QQQ", sym, dates=dates)
 
@@ -56,7 +51,7 @@ def test_a_one_session_offset_does_not_destroy_the_estimate(tmp_path):
     Monday's move against Tuesday's. On a series with a true beta of 1.50 and
     an R-squared of 1.000, that returns -0.087 at R-squared 0.003."""
     bench, sym = _series()
-    dates = _dates(len(bench))
+    dates = synthetic_dates(len(bench))
     market_stats.save_closes(tmp_path, "SPY", bench, dates=dates)
     # QQQ's cache is one session behind: same history, stopped a day earlier.
     market_stats.save_closes(tmp_path, "QQQ", sym[:-1], dates=dates[:-1])
@@ -98,7 +93,7 @@ def test_too_little_overlap_is_assumed_rather_than_estimated(tmp_path):
     """Two dated series that barely overlap cannot support an estimate, and
     MIN_BETA_SAMPLE is what says so."""
     bench, sym = _series()
-    dates = _dates(len(bench))
+    dates = synthetic_dates(len(bench))
     market_stats.save_closes(tmp_path, "SPY", bench, dates=dates)
     keep = market_stats.MIN_BETA_SAMPLE // 2
     market_stats.save_closes(tmp_path, "QQQ", sym[:keep], dates=dates[:keep])
@@ -111,7 +106,7 @@ def test_too_little_overlap_is_assumed_rather_than_estimated(tmp_path):
 
 def test_the_benchmark_is_never_estimated_against_itself(tmp_path):
     bench, _ = _series()
-    market_stats.save_closes(tmp_path, "SPY", bench, dates=_dates(len(bench)))
+    market_stats.save_closes(tmp_path, "SPY", bench, dates=synthetic_dates(len(bench)))
 
     betas, assumed = market_stats.betas_for(tmp_path, ["SPY"])
 

@@ -8,6 +8,7 @@ cannot see.
 
 from __future__ import annotations
 
+import contextlib
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -244,10 +245,8 @@ def book_greeks(positions: list[Any], underlying_prices: dict[str, float],
             skipped += 1
             continue
         days = None
-        try:
+        with contextlib.suppress(ValueError):
             days = (_date.fromisoformat(legs[0].expiry) - ids.market_today()).days
-        except ValueError:
-            pass
         g = optmath.net_greeks(legs, spot, iv, days) if days and days > 0 else None
         if g is None:
             skipped += 1
