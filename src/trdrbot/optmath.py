@@ -180,6 +180,48 @@ def pnl_at(legs: Iterable[Leg], spot: float) -> float:
     return sum(intrinsic(l, spot) for l in legs) - entry_cost(legs)
 
 
+class _Priced:
+    """A structure whose CONSTANTS are computed once.
+
+    `pnl_at` rebuilt the leg list, re-validated the expiry set and recomputed
+    `entry_cost` on every single call - and one two-leg candidate makes 726,544
+    of them, because the breakeven grid searches sweep a whole EV curve per
+    trial value. All three are invariant across the sweep.
+
+    The arithmetic is byte-identical by construction: `pnl` sums the same
+    generator in the same order and subtracts the same cost. `_Priced` is
+    private and `pnl_at` keeps its public behaviour, so nothing outside this
+    module can tell the difference - which is what the golden test asserts.
+    """
+
+    __slots__ = ("legs", "cost", "_terms")
+
+    def __init__(self, legs: Iterable[Leg]) -> None:
+        self.legs = list(legs)
+        require_single_expiry(self.legs)
+        self.cost = entry_cost(self.legs)
+        #: (is_call, strike, sign, qty) - every per-leg constant `intrinsic`
+        #: re-derives from attribute lookups on each of 1.4M calls.
+        self._terms = tuple((l.right == "C", l.strike, l.sign, l.qty) for l in self.legs)
+
+    def pnl(self, spot: float) -> float:
+        """Identical arithmetic to `sum(intrinsic(l, spot)) - cost`.
+
+        Inlined rather than calling `intrinsic`, which profiling showed as the
+        single largest cost (1.4M calls for ONE candidate). The operand order
+        is preserved exactly - `sign * per_share * qty * CONTRACT_MULTIPLIER` -
+        because reassociating float multiplication can move the last ulp, and
+        the golden test asserts exact equality on purpose.
+        """
+        total = 0.0
+        for is_call, strike, sign, qty in self._terms:
+            per_share = (spot - strike) if is_call else (strike - spot)
+            if per_share < 0.0:
+                per_share = 0.0
+            total += sign * per_share * qty * CONTRACT_MULTIPLIER
+        return total - self.cost
+
+
 def _critical_points(legs: list[Leg]) -> list[float]:
     """Strikes are where the payoff curve bends; sample around and between."""
     strikes = sorted({l.strike for l in legs})
@@ -208,8 +250,9 @@ def max_profit_loss(legs: Iterable[Leg]) -> tuple[float | None, float | None]:
     call_slope = sum(l.sign * l.qty for l in legs if l.right == "C")
     put_slope = sum(l.sign * l.qty for l in legs if l.right == "P")
 
-    samples = [pnl_at(legs, s) for s in _critical_points(legs)]
-    floor_pnl = pnl_at(legs, 0.01)  # spot cannot go below zero
+    priced = _Priced(legs)
+    samples = [priced.pnl(s) for s in _critical_points(legs)]
+    floor_pnl = priced.pnl(0.01)  # spot cannot go below zero
 
     # Upside is unbounded iff net long calls; that verdict is final and must
     # not be overwritten by the bounded downside. An earlier version let the
@@ -237,20 +280,25 @@ def max_profit_loss(legs: Iterable[Leg]) -> tuple[float | None, float | None]:
 def breakevens(legs: Iterable[Leg], *, tol: float = 0.01) -> list[float]:
     """Terminal prices where P&L crosses zero. Bisection between sign changes."""
     legs = list(legs)
+    priced = _Priced(legs)
     pts = _critical_points(legs)
     out: list[float] = []
     for a, b in zip(pts, pts[1:]):
-        fa, fb = pnl_at(legs, a), pnl_at(legs, b)
+        fa, fb = priced.pnl(a), priced.pnl(b)
         if fa == 0:
             out.append(a)
         if fa * fb < 0:
             lo, hi = a, b
+            # `f(lo)` was recomputed on every bisection iteration; it only
+            # changes when `lo` does. Identical values, half the evaluations.
+            f_lo = fa
             for _ in range(60):
                 mid = (lo + hi) / 2
-                if pnl_at(legs, lo) * pnl_at(legs, mid) <= 0:
+                f_mid = priced.pnl(mid)
+                if f_lo * f_mid <= 0:
                     hi = mid
                 else:
-                    lo = mid
+                    lo, f_lo = mid, f_mid
                 if hi - lo < tol:
                     break
             out.append(round((lo + hi) / 2, 2))
@@ -296,7 +344,8 @@ def prob_profit(legs: Iterable[Leg], spot: float, iv: float, days: float) -> flo
     legs = list(legs)
     if not legs or spot <= 0:
         return None
-    return sum(w for s, w in _lognormal_grid(spot, iv, days) if pnl_at(legs, s) > 0)
+    priced = _Priced(legs)
+    return sum(w for s, w in _lognormal_grid(spot, iv, days) if priced.pnl(s) > 0)
 
 
 def expected_value(legs: Iterable[Leg], spot: float, iv: float, days: float,
@@ -317,7 +366,8 @@ def expected_value(legs: Iterable[Leg], spot: float, iv: float, days: float,
     legs = list(legs)
     if not legs or spot <= 0:
         return None
-    return sum(w * pnl_at(legs, s) for s, w in _lognormal_grid(spot, iv, days, drift=drift))
+    priced = _Priced(legs)
+    return sum(w * priced.pnl(s) for s, w in _lognormal_grid(spot, iv, days, drift=drift))
 
 
 #: A conditional expectation needs something to condition ON. When the model
@@ -450,15 +500,19 @@ def _crossings(f, grid: tuple[float, ...], *, tol: float = 1e-4) -> tuple[float,
             out.append(a)
         elif fa * fb < 0:
             lo, hi = a, b
+            # `f(lo)` was recomputed on EVERY iteration, and here `f` is a
+            # whole EV sweep over the lognormal grid - so the bisection cost
+            # twice what it needed to. It only changes when `lo` does.
+            f_lo = fa
             for _ in range(60):
                 mid = (lo + hi) / 2
                 fm = f(mid)
                 if fm is None:
                     break
-                if f(lo) * fm <= 0:
+                if f_lo * fm <= 0:
                     hi = mid
                 else:
-                    lo = mid
+                    lo, f_lo = mid, fm
                 if hi - lo < tol:
                     break
             out.append((lo + hi) / 2)
