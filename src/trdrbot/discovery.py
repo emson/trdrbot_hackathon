@@ -27,7 +27,7 @@ import json
 from datetime import UTC, datetime
 from typing import Any
 
-from . import competence, ids, market_stats, mcp_client, news_extract, optmath
+from . import competence, evidence, ids, market_stats, mcp_client, optmath
 from .config import Config
 from .inbox import Inbox
 from .journal import Journal
@@ -183,32 +183,13 @@ async def run(
     model = build_model(config, role="discovery")
 
     # ---- broad sweep: market-wide news (no symbol filter) + odds ----
-    news_lines: list[str] = []
-    try:
-        r = await mcp_client.call(tools, "get_news", limit=40, exclude_contentless=True, sort="desc")
-        items = (r.get("news") or []) if isinstance(r, dict) else []
-        news_lines.append(news_extract.render_block(await news_extract.enrich(items, config)))
-    except Exception as exc:  # noqa: BLE001
-        news_lines.append(f"(news unavailable: {type(exc).__name__})")
-
-    odds_lines: list[str] = []
-    try:
-        from . import polymarket
-        for q in config.polymarket_queries:
-            for m in await polymarket.search(q, limit=2):
-                odds_lines.append(f"- {m['probability']:.0%} {m['question']}")
-    except Exception as exc:  # noqa: BLE001
-        # Rendered, not swallowed: an empty odds block reads to the model as
-        # "no prediction markets exist", which is a different claim from "the
-        # API failed". research.py already got this right; these two told the
-        # model something untrue.
-        odds_lines.append(f"(odds unavailable: {type(exc).__name__})")
-
+    news_block, odds_block = await evidence.gather(
+        tools, config, symbols=None, news_limit=40)
     # ---- LLM call 1: nominate from evidence ----
     text = text_of(await model.ainvoke(NOMINATE_PROMPT.format(
         deadline=deadline, exclude=", ".join(exclude),
-        news_block="\n".join(news_lines) or "(none)",
-        odds_block="\n".join(odds_lines) or "(none)",
+        news_block=news_block,
+        odds_block=odds_block,
     )))
     nominees = parse_json_array(text)
     nominees = [n for n in nominees if isinstance(n, dict) and n.get("ticker")][:5]

@@ -25,7 +25,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from . import competence, ids, market_stats, mcp_client, news_extract
+from . import competence, evidence, ids, market_stats
 from .config import Config
 from .inbox import Inbox
 from .journal import Journal
@@ -140,34 +140,16 @@ async def run(
     stats_block = "## Computed statistics (from real daily closes)\n" + "\n".join(stats_lines)
 
     # ---- gather news + odds ----
-    news_lines = []
-    try:
-        r = await mcp_client.call(
-            tools, "get_news", symbols=",".join(universe), limit=25,
-            exclude_contentless=True, sort="desc",
-        )
-        items = (r.get("news") or []) if isinstance(r, dict) else []
-        news_lines.append(news_extract.render_block(await news_extract.enrich(items, config)))
-    except Exception as exc:  # noqa: BLE001
-        news_lines.append(f"(news unavailable: {type(exc).__name__})")
-
-    odds_lines = []
-    try:
-        from . import polymarket
-        for q in config.polymarket_queries:
-            for m in await polymarket.search(q, limit=2):
-                odds_lines.append(f"- {m['probability']:.0%} {m['question']}")
-    except Exception as exc:  # noqa: BLE001
-        odds_lines.append(f"(odds unavailable: {type(exc).__name__})")
-
+    news_block, odds_block = await evidence.gather(
+        tools, config, symbols=universe, news_limit=25)
     prior = wiki.read("context/regime")
     prior_text = prior.body[:1500] if prior else "(none yet)"
 
     # ---- LLM synthesis: one call for the whole cycle ----
     prompt = RESEARCH_PROMPT.format(
         stats_block=stats_block,
-        news_block="\n".join(news_lines) or "(none)",
-        odds_block="\n".join(odds_lines) or "(none)",
+        news_block=news_block,
+        odds_block=odds_block,
         prior_regime=prior_text,
     )
     text = await ask(config, "research", prompt)

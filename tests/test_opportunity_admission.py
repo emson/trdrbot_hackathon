@@ -182,15 +182,16 @@ async def test_research_now_rejects_the_percentage_band_it_used_to_admit(
     monkeypatch.setattr(research.market_stats, "fetch_daily_series",
                         lambda *a, **k: _async((["2026-08-28"] * 120,
                                                 [766.0 + i % 3 for i in range(120)])))
-    monkeypatch.setattr(research.news_extract, "enrich", lambda *a, **k: _async([]))
+    monkeypatch.setattr(research.evidence, "gather",
+                        lambda *a, **k: _async(("(none)", "(none)")))
 
     cfg = SimpleNamespace(paths=paths, deadline="2026-09-04",
                           research_universe=["SPY"], watchlist=["SPY"],
                           polymarket_queries=[])
     journal = Journal(paths.journal)
 
-    out = await research.run(tools_for(get_news=lambda **k: {"news": []}), cfg,
-                             Inbox(paths), Wiki(paths.wiki), journal, verbose=False)
+    out = await research.run(tools_for(), cfg, Inbox(paths), Wiki(paths.wiki),
+                             journal, verbose=False)
 
     assert out["opportunities"] == 1, "the percentage-move band was admitted"
     rejected = [r for r in journal.read() if r.get("kind") == "research_rejected"]

@@ -204,10 +204,13 @@ async def test_the_shadow_arm_writes_nothing_at_all(tmp_path, monkeypatch):
 
     monkeypatch.setattr(muse, "_generate", fake_generate)
 
-    async def _news(*a, **k):
-        raise RuntimeError("no news in this test")
+    # Patched at `evidence.gather`, the seam the muse actually calls now -
+    # rather than at mcp_client, which was reaching two layers down into how
+    # the news happened to be fetched.
+    async def _no_evidence(*a, **k):
+        return "(none)", "(none)"
 
-    monkeypatch.setattr(muse.mcp_client, "call", _news)
+    monkeypatch.setattr(muse.evidence, "gather", _no_evidence)
 
     inbox = Inbox(paths, max_retries=3)
     journal = Journal(paths.journal)

@@ -33,7 +33,7 @@ import random
 import re
 from typing import Any
 
-from . import coach, competence, ids, market_stats, mcp_client, news_extract
+from . import coach, competence, evidence, ids, market_stats
 from .config import Config
 from .discovery import _options_gate, _plausible_band
 from .inbox import Inbox
@@ -499,26 +499,8 @@ async def run(
     concepts = _sample_concepts(wiki, rng, CONCEPTS_PER_RUN)
     concept_block = "\n\n".join(f"### {cid}\n{txt}" for cid, txt in concepts)
 
-    news_lines: list[str] = []
-    try:
-        r = await mcp_client.call(tools, "get_news", limit=30,
-                                  exclude_contentless=True, sort="desc")
-        items = (r.get("news") or []) if isinstance(r, dict) else []
-        news_lines.append(news_extract.render_block(await news_extract.enrich(items, config)))
-    except Exception as exc:  # noqa: BLE001
-        news_lines.append(f"(news unavailable: {type(exc).__name__})")
-
-    odds_lines: list[str] = []
-    try:
-        from . import polymarket
-        for q in config.polymarket_queries:
-            for m in await polymarket.search(q, limit=2):
-                odds_lines.append(f"- {m['probability']:.0%} {m['question']}")
-    except Exception as exc:  # noqa: BLE001
-        # See discovery._options_gate's sibling comment: "(none)" claims the
-        # markets are quiet; an API failure is not evidence of quiet.
-        odds_lines.append(f"(odds unavailable: {type(exc).__name__})")
-
+    news_block, odds_block = await evidence.gather(
+        tools, config, symbols=None, news_limit=30)
     # Derived, not recalled (D-032's date discipline), and shared with every
     # other thesis source so the three cannot drift apart again.
     window = competence.forecast_window(config.deadline, ids.utc_now().date())
@@ -528,7 +510,7 @@ async def run(
         earliest=earliest or "tomorrow", preferred=preferred or "3 days out",
         latest=latest or "10 days out",
         n=len(concepts), k=CANDIDATES, concepts=concept_block,
-        news="\n".join(news_lines) or "(none)", odds="\n".join(odds_lines) or "(none)",
+        news=news_block, odds=odds_block,
     )
 
     # Shared across BOTH arms so the challenger is judged on identical data.
