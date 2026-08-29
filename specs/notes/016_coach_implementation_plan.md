@@ -1,5 +1,20 @@
 # Coach implementation plan - a build-ready handoff
 
+> **BUILT 2026-08-29 (D-088).** Phases 1 and 2 are implemented and live; phase 3's audit and
+> sampling lever are deferred (I-28). This document is kept as the design record, not as an
+> outstanding to-do. **Where the build diverged from this plan, the build is right** - the plan's
+> own closing rule, applied to itself:
+>
+> | Plan said | Built instead | Why |
+> |---|---|---|
+> | pulse from housekeeping | pulse from housekeeping **and** after every muse run | housekeeping runs only while the market is CLOSED and the muse only while it is OPEN, so promotions would have waited for the next night |
+> | `min_runs=12`, `min_candidates=30` | 8 and 24, config-driven | the evidence unit is the candidate (~5/run x ~8 gates), and the window is 6 days |
+> | `shadow=True` flag through `_evaluate` | `ShadowLedger` null object, one shared gate cascade | a flag puts a branch in every gate; two arms running near-identical code is this project's most familiar bug |
+> | `calibration.evaluate` | `calibration.score` | the function is named `score` |
+> | gauge reward reads `candidate` fates | shared `coach.survived()` used by gauge **and** reward | `_score_arm` missed `EMITTED`; harmless today, but it would have biased promotions toward the challenger |
+> | (not anticipated) | `coach.clean_prompt` | the first live mutation echoed the harness's own delimiters into the challenger text |
+
+
 Audience: an LLM implementer with full repo access. This document is self-contained: the
 problem, the design, exact schemas, module-by-module specs, the edge cases with their required
 handling, the tests that must exist, and the project conventions that are not optional. The
