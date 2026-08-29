@@ -171,6 +171,13 @@ class Config:
         return (self.raw.get("llm") or {}).get("pricing") or {}
 
     @property
+    def coach(self) -> dict[str, Any]:
+        """Self-improvement loop settings (D-088). An ABSENT block means
+        defaults, never OFF - a missing config section that silently disables a
+        subsystem is the absence-as-zero class this project keeps finding."""
+        return dict(self.raw.get("coach") or {})
+
+    @property
     def decide_tools(self) -> list[str]:
         """MCP tools bound to the decide agent. Empty list = bind everything
         (the pre-D-065 behaviour, kept as the fallback so a missing config

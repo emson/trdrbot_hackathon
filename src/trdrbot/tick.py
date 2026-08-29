@@ -97,6 +97,12 @@ BETA_DELTA_FLAG_PCT = 1.5
 #: tickers cannot drown out the name actually being traded.
 ATTENTION_MAX_NAMES = 6
 
+#: Muse runs per UTC day, on the hunt rung. The Coach's trials need repetition
+#: to accumulate evidence - at this cadence a promotion needs ~3 days of
+#: trading, which fits the window. Each run is one LLM call, or two while an
+#: experiment is open, and the Coach's cost sentinel bounds the total.
+MUSE_RUNS_PER_DAY = 3
+
 
 def _attention_query(items: "list[Item]", open_pos: list[Any], config: Config) -> str:
     """What to ask MEMORY about, given what this cycle is actually deciding.
@@ -335,6 +341,31 @@ async def _run_tick(
                 except Exception as exc:  # noqa: BLE001 - hunting is advisory
                     print(f"[tick {n}] hunt failed, continuing: {exc!r}")
                     journal.append("hunt", opportunities=0, error=repr(exc))
+
+                # The muse rides the same rung (D-088). It was CLI-only, so its
+                # A/B trials had no runs to feed on - a lever nothing exercises
+                # improves nothing. Capped per UTC day because each run is one
+                # LLM call, or two while a trial is open.
+                try:
+                    from . import coach, muse
+                    today = ids.utc_now().date().isoformat()
+                    ran_today = sum(1 for r in journal.read()
+                                    if r.get("kind") == "muse"
+                                    and str(r.get("ts", ""))[:10] == today)
+                    if ran_today < MUSE_RUNS_PER_DAY:
+                        book = ledger_mod.Ledger(config.paths.state / "ledger.jsonl")
+                        await muse.run(tools, config, inbox, wiki, journal, book,
+                                       verbose=verbose)
+                        items = inbox.pending()
+                        # Pulse immediately: the trial result just landed, and
+                        # housekeeping (the other pulse site) only runs while
+                        # the market is CLOSED - so waiting for it would defer
+                        # every promotion to the following night.
+                        await coach.pulse(config, journal,
+                                          seeds={"muse.prompt": muse.MUSE_PROMPT},
+                                          verbose=verbose)
+                except Exception as exc:  # noqa: BLE001 - the muse is advisory
+                    print(f"[tick {n}] muse failed, continuing: {exc!r}")
             elif action.level == "review":
                 inbox.write("position_review", {
                     "reason": action.reason, **action.detail,

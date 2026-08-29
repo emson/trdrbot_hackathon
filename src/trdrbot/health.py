@@ -146,6 +146,30 @@ PROBES: tuple[Probe, ...] = (
         work=lambda rows: sum(int(r.get("eligible") or 0) for r in rows),
         never_producing_is_ok=True,
     ),
+    # The improvement loop watching itself. `ran` is the heartbeat written
+    # every pulse; `produced` is trials actually scored. The keys read here
+    # MUST match what `coach.pulse` writes - a probe reading a key nobody
+    # writes reports a confident zero forever, which is how `_market_pulse`
+    # stayed dead with a passing test (D-074). There is a test pinning the two
+    # key sets together.
+    #
+    # `never_producing_is_ok`: no open experiment is a legitimate steady state
+    # (nothing to trial yet, a sentinel is blocking, or a human pinned the
+    # lever), and `work` reports open experiments so "0 trials, 0 experiments"
+    # reads as idle rather than broken.
+    #
+    # `stopping_after_output_is_ok` is deliberately NOT set: scoring trials and
+    # then falling silent WHILE an experiment is still open is exactly the
+    # shape of a broken assignment path, and that is the failure this probe
+    # exists to catch.
+    Probe(
+        "coach", ("coach_run",),
+        lambda rows: sum(int(r.get("trials_scored_today") or 0) for r in rows), 3,
+        "experiments are open but no trial is being scored - the muse is not "
+        "running, or the challenger arm is not reaching record_trial",
+        work=lambda rows: sum(int(r.get("experiments_open") or 0) for r in rows),
+        never_producing_is_ok=True,
+    ),
 )
 
 #: A subsystem can produce for a while and then stop. Totals hide that

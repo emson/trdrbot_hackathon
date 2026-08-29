@@ -48,6 +48,24 @@ class PromptRef:
         return len(self.text) // 4
 
 
+def _active_muse_prompt() -> str:
+    """The muse prompt variant currently live, falling back to the seed.
+
+    Never raises: an inventory that cannot be produced would take `trdrbot
+    prompts` and every journalled decision's provenance down with it, and the
+    seed is always a truthful answer to "what would run if the Coach were not
+    here".
+    """
+    from .muse import MUSE_PROMPT
+
+    try:
+        from . import coach, config as _cm
+
+        return coach.load_state(_cm.load(quiet=True), "muse.prompt", MUSE_PROMPT).incumbent.text
+    except Exception:  # noqa: BLE001
+        return MUSE_PROMPT
+
+
 def inventory(tools: list[Any] | None = None) -> list[PromptRef]:
     """Everything authored that a model reads. Tools passed in when available."""
     from .constitution import PRINCIPLES
@@ -60,6 +78,12 @@ def inventory(tools: list[Any] | None = None) -> list[PromptRef]:
         PromptRef("research.daily", "free_standing", RESEARCH_PROMPT),
         PromptRef("discovery.nominate", "free_standing", NOMINATE_PROMPT),
         PromptRef("discovery.synthesise", "free_standing", SYNTH_PROMPT),
+        # The muse's prompt is a Coach LEVER, so the artefact actually in play
+        # is whatever variant is currently incumbent - not the in-code default,
+        # which after one promotion is merely the seed it started from. Reading
+        # the constant here would fingerprint a prompt nothing is running, and
+        # a provenance record that names the wrong artefact is worse than none.
+        PromptRef("muse.collide", "free_standing", _active_muse_prompt()),
     ]
     for t in tools or []:
         refs.append(PromptRef(f"tool.{t.name}", "tool_contract", t.description or ""))

@@ -463,6 +463,77 @@ async def _muse() -> int:
     return 0
 
 
+async def _coach(action: str) -> int:
+    from . import coach, ids, muse
+    from .journal import Journal
+
+    cfg = config_mod.load()
+    seeds = {"muse.prompt": muse.MUSE_PROMPT}
+    journal = Journal(cfg.paths.journal)
+
+    if action == "pulse":
+        applied = coach.reconcile(cfg, seeds=seeds)
+        for a in applied:
+            print(f"reconciled a logged-but-unapplied promotion: {a}")
+        r = await coach.pulse(cfg, journal, seeds=seeds, verbose=True)
+        print(f"pulse: open={r['experiments_open']} opened={r['opened'] or '-'} "
+              f"closed={r['closed'] or '-'} sentinels={r['sentinels_active'] or 'none'}")
+        return 0
+
+    if not coach.enabled(cfg):
+        print("coach: DISABLED in config.yaml (coach.enabled: false)\n")
+
+    evs = coach.events(cfg)
+    print("\n=== the Coach: what it is improving, and on what evidence ===\n")
+    for lv in coach.LEVERS:
+        st = coach.load_state(cfg, lv.name, seeds.get(lv.name, ""))
+        print(f"{lv.name}  ({lv.subsystem}, scored by {', '.join(lv.reward_modules)})")
+        print(f"  incumbent   {st.incumbent.id} {st.incumbent.fingerprint} "
+              f"({st.incumbent.origin}, since {st.incumbent.since[:16] or 'seed'})")
+        if st.previous:
+            print(f"  previous    {st.previous.id} {st.previous.fingerprint}")
+        print(f"  state       {st.blocked or 'running'}")
+
+        if st.exp_id and not coach.is_closed(cfg, st.exp_id):
+            t = coach.tally(cfg, st.exp_id)
+            if t:
+                fl = coach.floors(cfg)
+                outcome, reason = coach.verdict(t, fl)
+                print(f"  EXPERIMENT  {t.challenger} vs {t.incumbent}  "
+                      f"P(better)={t.posterior:.3f}")
+                print(f"              {t.runs} paired run(s): challenger "
+                      f"{t.s_c}/{t.n_c}, incumbent {t.s_i}/{t.n_i}"
+                      + (f", {t.voided} voided" if t.voided else ""))
+                print(f"              {'-> ' + outcome + ': ' + reason if outcome else 'still gathering evidence'}")
+        else:
+            print("  experiment  none open")
+
+        hist = [r for r in evs if r.get("kind") == "experiment_closed"
+                and r.get("lever") == lv.name][-3:]
+        for r in reversed(hist):
+            print(f"  past        {r.get('challenger')} {r.get('outcome'):<18} "
+                  f"{str(r.get('reason', ''))[:70]}")
+        print()
+
+    day = ids.utc_now().date().isoformat()
+    trials = sum(1 for r in evs if r.get("kind") == "trial_result"
+                 and str(r.get("ts", ""))[:10] == day)
+    proms = sum(1 for r in evs if r.get("kind") == "experiment_closed"
+                and r.get("outcome") == "promoted")
+    print(f"{trials} trial(s) scored today, {proms} promotion(s) all time. "
+          f"`trdrbot report` charts the trajectory.\n")
+    return 0
+
+
+def _report() -> int:
+    from . import report
+
+    cfg = config_mod.load()
+    out = report.write(cfg)
+    print(f"wrote {out}")
+    return 0
+
+
 def main() -> None:
     p = argparse.ArgumentParser(prog="trdrbot")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -490,6 +561,9 @@ def main() -> None:
     sub.add_parser("ledger", help="every thesis ever formed, traded or declined")
     les = sub.add_parser("lessons", help="measured lessons in evolving memory")
     les.add_argument("action", choices=["show", "seed", "verify"], default="show", nargs="?")
+    coa = sub.add_parser("coach", help="the self-improvement loop: levers, trials, promotions")
+    coa.add_argument("action", choices=["status", "pulse"], default="status", nargs="?")
+    sub.add_parser("report", help="write data/report.html - gauges, experiments, actions")
     run = sub.add_parser("run", help="loop ticks continuously until the deadline")
     run.add_argument("--interval", type=int, default=300,
                      help="seconds between ticks while the market is open (default 300)")
@@ -532,6 +606,10 @@ def main() -> None:
         sys.exit(_ledger())
     elif args.cmd == "lessons":
         sys.exit(asyncio.run(_lessons(args.action)))
+    elif args.cmd == "coach":
+        sys.exit(asyncio.run(_coach(args.action)))
+    elif args.cmd == "report":
+        sys.exit(_report())
     elif args.cmd == "run":
         sys.exit(asyncio.run(_run_loop(args.interval, args.closed_interval,
                                        max_ticks=args.max_ticks,

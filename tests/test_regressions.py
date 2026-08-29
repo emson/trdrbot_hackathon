@@ -1393,7 +1393,10 @@ def test_muse_keeps_a_breakout_call_against_a_calm_base():
     candidate on the first live run."""
     import inspect
     from trdrbot import muse
-    src = inspect.getsource(muse.run)
+    # The gate cascade moved to `_evaluate` when the muse gained a
+    # challenger arm (D-088): both arms run ONE copy of it, so the
+    # invariant this test guards now lives there. Same rule, new home.
+    src = inspect.getsource(muse._evaluate)
     assert "disagrees" in src
     assert "not disagrees" in src, "ceiling must only reject when the model AGREES"
 
@@ -2716,7 +2719,10 @@ def test_muse_rejects_a_horizon_that_resolves_too_late():
     import inspect
     from trdrbot import muse
 
-    src = inspect.getsource(muse.run)
+    # The gate cascade moved to `_evaluate` when the muse gained a
+    # challenger arm (D-088): both arms run ONE copy of it, so the
+    # invariant this test guards now lives there. Same rule, new home.
+    src = inspect.getsource(muse._evaluate)
     assert "resolves too late" in src
     assert "horizon_too_late" in inspect.getsource(__import__(
         "trdrbot.discovery", fromlist=["run"]).run)
@@ -3153,7 +3159,10 @@ def test_muse_only_promotes_candidates_that_survive_every_gate():
     import inspect
     from trdrbot import muse
 
-    src = inspect.getsource(muse.run)
+    # The gate cascade moved to `_evaluate` when the muse gained a
+    # challenger arm (D-088): both arms run ONE copy of it, so the
+    # invariant this test guards now lives there. Same rule, new home.
+    src = inspect.getsource(muse._evaluate)
     assert "probability_stated=False" in src, "candidates register as TRIALS"
     promote = src.index("ledger.mark_stated")
     # Every rejection path must come BEFORE the promotion, or a reject is scored.
@@ -3277,7 +3286,10 @@ def test_every_muse_rejection_path_records_itself():
     import inspect, re
     from trdrbot import muse
 
-    src = inspect.getsource(muse.run)
+    # The gate cascade moved to `_evaluate` when the muse gained a
+    # challenger arm (D-088): both arms run ONE copy of it, so the
+    # invariant this test guards now lives there. Same rule, new home.
+    src = inspect.getsource(muse._evaluate)
     # Checked per-path, not by counting: a multi-line fate string slipped
     # through a count-based check, and that path really was missing its record.
     lines = src.splitlines()

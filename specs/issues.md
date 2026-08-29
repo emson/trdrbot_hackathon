@@ -8,6 +8,23 @@ Sorted by severity.
 ## Open
 
 
+- **I-27 · The Coach's proximate reward may have a ceiling** (D-088). The first live paired trial
+  came back **5/5 against 5/5** - both arms cleared every gate, so the run carried no information
+  and the posterior stayed at exactly 0.500. That is the machinery behaving correctly (a tie is a
+  tie, and the fair-coin test says it will time out rather than promote noise), but it points at a
+  real asymmetry: since D-081 fixed band anchoring, gauntlet survival runs high, so the reward can
+  still detect a variant that **degrades** while having little headroom to detect one that
+  **improves**. One run is not evidence of a ceiling - the base rate was ~80% at D-081, which
+  leaves room. **Action due:** watch the next ~8 trials; if incumbent survival sits at or near
+  100% throughout, add a secondary reward with more headroom (candidates per run, |claimed_edge|
+  among survivors, or emission rate) rather than replacing the gate reward, which is the one that
+  cannot be gamed.
+- **I-28 · The Coach's outcome audit is designed but unbuilt** (D-088, notes/016 phase 3).
+  Promotion currently rests on the proximate reward alone (surviving the gauntlet); nothing yet
+  checks a promoted variant against what its theses actually DID at horizon, or re-matches it
+  against the previous incumbent when they degrade. Blocked on resolutions, which do not exist
+  yet - `Entry.variant` is stamped from D-088 onward specifically so the join is possible when
+  they land. **Action due:** build the audit once a promoted variant has ~10 resolved entries.
 - **I-25 · Grok-4.6 on OpenCode Zen was down at time of testing, now demoted** (D-084, D-085).
   Confirmed live: Zen's own `/v1/models` lists `grok-4.6` correctly and the same key serves
   `glm-5.2`, but grok-4.6 itself returned HTTP 500 (reproduced 3x) and grok-4.5 (same family)

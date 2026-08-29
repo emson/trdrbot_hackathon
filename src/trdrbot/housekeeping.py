@@ -184,6 +184,22 @@ async def run(
     except Exception as exc:  # noqa: BLE001 - housekeeping is advisory (INV-8)
         print(f"[housekeeping] wiki sweep failed, continuing: {exc!r}")
 
+    # The Coach's overnight pulse (D-088): snapshot gauges, check sentinels,
+    # settle any experiment whose evidence is in, and open the next one. It is
+    # also pulsed straight after every muse run, because housekeeping only runs
+    # while the market is CLOSED and the muse only runs while it is OPEN - so
+    # this call alone would defer every promotion to the following night.
+    coached: dict[str, Any] = {}
+    try:
+        from . import coach, muse as _muse
+        cfg3 = _load_config()
+        coach.reconcile(cfg3, seeds={"muse.prompt": _muse.MUSE_PROMPT})
+        coached = await coach.pulse(cfg3, journal,
+                                    seeds={"muse.prompt": _muse.MUSE_PROMPT},
+                                    verbose=verbose)
+    except Exception as exc:  # noqa: BLE001 - the Coach is advisory (INV-8)
+        print(f"[housekeeping] coach pulse failed, continuing: {exc!r}")
+
     dreamed = await mem.housekeeping_dream()
 
     wiki.append_log(
@@ -197,4 +213,5 @@ async def run(
 
     return {"interim_scored": interim_scored, "dream_ok": dreamed, "attributed": attributed,
             "forecasts_resolved": forecasts_resolved,
-            "wiki_deprecated": len(swept["deprecated"])}
+            "wiki_deprecated": len(swept["deprecated"]),
+            "coach_experiments_open": int(coached.get("experiments_open") or 0)}

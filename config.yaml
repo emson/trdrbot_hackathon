@@ -84,6 +84,10 @@ llm:
     discovery: ["openai:gpt-5.6-sol", "openai:gpt-5-mini", "anthropic:claude-opus-5"]
     muse: ["openai:gpt-5.6-sol", "openai:gpt-5-mini", "anthropic:claude-opus-5"]
     doctor: ["openai:gpt-4o-mini"]
+    # Generates challenger prompt variants for the Coach (D-088). Synthesis
+    # against a deterministic scorer it cannot influence, not judgement - so
+    # the cheap tier, with the synthesis tier behind it.
+    coach_mutate: ["openai:gpt-5-mini", "anthropic:claude-opus-5"]
     # High-volume, low-difficulty (structured extraction, not judgement) - the
     # cheapest tier, with the synthesis tier as fallback (D-066).
     news_extract: ["openai:gpt-4o-mini", "openai:gpt-5-mini"]
@@ -197,3 +201,37 @@ tick:
 inbox:
   # Dead-letter after N attempts so one bad item cannot stall forever (D-018).
   max_retries: 3
+
+coach:
+  # The autonomous self-improvement loop (D-088). It runs paired A/B trials on
+  # DECLARED levers (currently only the muse's collision prompt), scores them
+  # with the subsystem's own deterministic gates, and promotes a winner without
+  # asking. That is the intended trade for a paper-trading hackathon: human
+  # approval gates block the feedback loop, and every change it makes is data
+  # under data/state/levers/ that reverts by editing one file.
+  #
+  # STEERING, not gating: set `paused: true` or `pinned: true` inside a lever's
+  # own state file to stop experimentation on it (demo day is one pin), and
+  # read `trdrbot report` for the trajectory. Nothing here can touch code, gate
+  # thresholds, sizing, or elfmem's constitution - those are outside the lever
+  # space by construction, not by policy.
+  enabled: true
+
+  # Promotion evidence. The unit is a CANDIDATE (~5 per muse run through ~8
+  # gates), so 8 runs is ~40 Bernoulli trials per arm. The RUN floor stops one
+  # freak run carrying a promotion; the CANDIDATE floor stops 8 runs of one
+  # candidate each from counting as 8 runs' worth of evidence.
+  min_runs: 8
+  min_candidates: 24
+  promote_at: 0.90        # P(challenger better) required to swap
+  futility_at: 0.05       # stop paying for a loser this far behind
+  futility_min_runs: 6
+  cap_runs: 40            # no verdict by here: the incumbent keeps its place
+
+  # Sentinels - the autonomic brake. Deterministic, checked every pulse.
+  cost_ceiling_usd_per_day: 10.0   # muse + coach_mutate roles, this UTC day
+  churn_max_promotions_per_day: 2
+  # The muse's mandate is RANDOM collision. A sampling policy optimised purely
+  # for gate survival could converge on one productive pair and quietly stop
+  # being a muse, so the diversity of what it collides is measured and floored.
+  entropy_min_type_pairs: 3

@@ -3620,3 +3620,120 @@ install. `specs/architecture.md` (C19) and `specs/charter.md` updated to describ
 source; historical branch/commit citations elsewhere (issues.md, elfmem_adapter.py,
 test_regressions.py) left as-is since they name where a past fix landed, not the current
 dependency.
+
+## D-088: The Coach - subsystems that improve themselves, on evidence, without asking
+**Date:** 2026-08-29
+**Status:** accepted
+**Context:** Every subsystem here improves only when a human-led session finds a defect - D-074's
+shakedown, D-076's critique. Designed in [notes/015](notes/015_self_review_loop_brainstorm.md)
+(optimize simulation, 10 frozen scenarios, 5 iterations), specified in
+[notes/016](notes/016_coach_implementation_plan.md), built here. The first draft of notes/015
+routed every finding through human ratification and was rejected on direction: **human approval
+gates block the feedback loop this hackathon needs, and paper trading tolerates the risk.** So the
+question was never "should it be autonomous" but "what makes autonomy safe to run against a live
+system", and the answer is bounded by construction rather than by asking.
+
+**The mechanism: gauges, levers, trials, sentinels - one protocol, registered per subsystem.**
+A lever is a DECLARED choice the Coach may change (currently one: the muse's collision prompt).
+Variants live as data in `data/state/levers/*.json`, so there is no code path from Coach state to
+a gate threshold, sizing math, a sentinel, or its own reward function. The human pre-authorises
+the SPACE, not each move - that is the whole replacement for an approval step, and it is
+enforceable rather than promised.
+
+**Rewards are computed, never asked.** The muse's own gauntlet already scores its candidates
+deterministically, and D-081 measured that reward moving 13-of-15-rejected to 1-of-5 on a single
+prompt fix - so prompt quality is known to be visible in it. `p_challenger_better` is Beta
+posteriors compared by deterministic grid integration using `math` only (no numpy, no sampling),
+so identical evidence returns exactly 0.5 and a test can pin it.
+
+**The critical design decision, and the one a naive build gets wrong: the challenger arm is a
+SHADOW.** Running `muse.run` twice - once per variant - would register challenger candidates in
+the thesis ledger (inflating D-052's trial count with experiment artefacts and feeding rejected
+material into calibration, which is **D-080's exact defect rebuilt by the machinery meant to
+improve things**), emit them to the inbox, and double every journal row. The obvious fix - a
+`shadow=True` flag threaded through the gate cascade - was rejected because it puts a branch in
+every gate, and two arms running subtly different code is this project's most familiar bug (two
+EV loops, two clocks, two calibration numbers). **Instead the arms share ONE gate cascade byte for
+byte and only the ledger object differs**: `ShadowLedger` is a ledger-shaped null object.
+
+The subtlety that makes it correct: `Ledger.register` returning None **is a gate** in production
+("unfalsifiable - no band"). A shadow arm that simply skipped the ledger would skip that gate too
+and score the challenger against an easier gauntlet - an unfair trial that would read as genuine
+improvement. `ShadowLedger.register` reproduces exactly that one piece of real logic and nothing
+else. Both properties are tests.
+
+**Three review findings corrected before the build, each from reading the code rather than the
+plan.** (1) `housekeeping` runs only while the market is CLOSED and the muse only while it is
+OPEN, so pulsing from housekeeping alone would defer every promotion to the following night - the
+Coach now pulses after every muse run as well. (2) The plan's 12-run floor was too slow for the
+window; the evidence unit is the CANDIDATE (~5 per run through ~8 gates), so 8 runs is ~40
+Bernoulli trials per arm and the floors are config-driven. (3) The muse's per-day RNG seed made
+every run in a day collide the SAME concepts - correct at one run per day, but it would have made
+every paired trial a repeat of one sample. A derived per-run nonce fixes it without putting a
+clock in the seed.
+
+**Fairness across arms is a real failure mode and is handled explicitly.** Both arms share a
+per-run memo of the two network-dependent gate inputs (daily closes, options chain), because a
+quote moving between the two calls would score as a variant difference - invisible in the results,
+and it would slowly promote noise. A challenger LLM call that RAISES is a VOID trial rather than a
+loss (D-084's distinction: an HTTP 500 says nothing about variant quality). A challenger that
+"succeeds" and parses to NOTHING is scored as full failures - that is GLM-5.2's exact failure mode
+and nothing else in the stack penalises it, so a variant that always produced nothing would
+otherwise be unfalsifiable by its own reward.
+
+**Two defects found by the tests while writing them, both of the class this project keeps
+hitting.** `_score_arm` counted only fates starting `candidate`, missing `EMITTED` - currently
+harmless because the trial is recorded before the muse relabels survivors, but moving that call
+one line later would have silently under-counted the INCUMBENT and biased every promotion toward
+the challenger. Fixed with one shared `coach.survived()` used by both the reward and the gauge.
+And the first live mutation echoed the harness's own delimiter lines into the challenger text -
+it still formatted, still validated, and would have gone to production carrying two lines of
+scaffolding; `clean_prompt` strips it.
+
+**Mutation is validated deterministically before a challenger may enter an experiment**, because
+a mutated prompt is a `.format()` template and a stray brace from a JSON example is a live crash
+on the next muse run. Checks: every placeholder formats (an unknown one raises here rather than in
+production), the schema contract tokens survive, not identical to the incumbent, and a length cap.
+**Verified live**: given the real rejection digest, gpt-5-mini read that 10 of 17 recent rejections
+were `base probability 0%/100%` and proposed a change targeting exactly that - directed by real
+failure data, which is the point. Whether it actually helps is what the A/B test is for.
+
+**Rule 3, enforced by the scheduler, not by sequencing:** a lever's experiment may never be scored
+by machinery that same experiment can move. The muse's gates score muse-prompt trials, so a gates
+lever cannot run an experiment concurrently. The failure would otherwise be invisible - both
+experiments would look healthy while each quietly rewrote the other's ruler.
+
+**elfmem's blocks and the constitution are NOT levers and will not become ones.** elfmem's own
+ADR 0003 simulated four architectures for automatic constitutional evolution and none beat
+baseline. That is measured evidence, and it is the only thing carved out of the lever space -
+everything else is fair game, which is the difference between a bounded design and a timid one.
+
+**Crash safety:** the `experiment_closed` event is appended BEFORE the state swap, so a crash
+between them leaves a promoted experiment whose lever state still shows the old incumbent.
+`reconcile` re-applies it, idempotently, on the next housekeeping pass - the append-only log is
+truth and the state file is a cache of it, the same relationship the journal has with everything
+else here.
+
+**Observability replaces the approval gate.** `trdrbot report` writes a self-contained HTML page
+(inline SVG sparklines, no external request of any kind - a report that needs the network is blank
+exactly when something has gone wrong) leading with what changed, then open experiments with their
+posteriors and remaining floors, then every gauge's trajectory with the Coach's own promotions and
+sentinel fires overlaid as markers. Steering is by editing state: `paused` stops experimentation
+on a lever, `pinned` additionally stops the audit re-matching it, and one pin freezes behaviour
+for a demo.
+
+**The muse now runs on the hunt rung**, capped at 3 per UTC day. It was CLI-only, so its lever had
+nothing exercising it - a lever nothing runs improves nothing.
+
+**Verified:** 258 default tests (33 new) + 18 contract tests. Live: a real experiment opened
+(`v1`, mutation-generated, validated); a full lifecycle driven end to end through 8 paired trials
+plus one void to an applied promotion that survived a reload, with the void correctly excluded
+from the counts; `trdrbot coach status` and `trdrbot report` both rendering from empty and from
+populated stores.
+
+**Deliberately deferred, and recorded rather than half-built:** the outcome audit (proximate
+reward promotes, resolved bands audit) needs resolutions that do not exist yet - `Entry.variant`
+is stamped from today so the join will be possible when they land, which is the part with a
+deadline (D-045's own reasoning). The sampling lever (Thompson over concept-type pairs) is
+designed in notes/016 phase 3 and unbuilt; the test that matters for it is that it needs no
+protocol change.

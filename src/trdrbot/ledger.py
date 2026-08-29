@@ -77,6 +77,14 @@ class Entry:
     #: never the agent; the reject is not a claim anybody made, which is why
     #: `probability_stated` stays False (D-080).
     rejected_by: str = ""
+    #: Which prompt/policy VARIANT produced this thesis (D-088). Empty for
+    #: everything written before the Coach existed, and for every source that
+    #: has no lever. This is the join the outcome audit needs: a variant
+    #: promoted on a fast proximate reward (surviving the gates) still has to
+    #: be checked against what its theses actually did at horizon, and that
+    #: comparison is impossible unless the variant is stamped at registration
+    #: time. Provenance is the part of A/B testing with a deadline (D-045).
+    variant: str = ""
 
     def scoreable(self) -> bool:
         return self.band_low is not None or self.band_high is not None
@@ -123,7 +131,7 @@ class Ledger:
     def register(
         self, *, kind: str, underlying: str, claim: str, probability: float,
         horizon: str, band_low: float | None, band_high: float | None,
-        notes: str = "", probability_stated: bool = True,
+        notes: str = "", probability_stated: bool = True, variant: str = "",
     ) -> Entry | None:
         """Record a forecast. Returns None if it could never be scored.
 
@@ -140,7 +148,7 @@ class Ledger:
             id=ids.journal_id("fc"), kind=kind, created=ids.utc_now().isoformat(),
             underlying=underlying.upper(), claim=claim[:400],
             probability=max(0.0, min(1.0, probability)), horizon=horizon,
-            probability_stated=probability_stated,
+            probability_stated=probability_stated, variant=variant,
             band_low=band_low, band_high=band_high, notes=notes[:400],
         )
         # Do not double-register the same thesis on repeated simulate calls in

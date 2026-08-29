@@ -1,0 +1,516 @@
+"""The Coach: promotion math, trial fairness, and the shadow-arm contract (D-088).
+
+The load-bearing test in this file is
+`test_the_shadow_arm_writes_nothing_at_all` - everything else guards a
+threshold, but that one guards the property that makes autonomous
+experimentation safe to run against a live system at all.
+"""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
+
+from trdrbot import coach, muse
+from trdrbot.journal import Journal
+from trdrbot.ledger import Ledger
+
+
+# --- fixtures --------------------------------------------------------------
+
+
+def _cfg(tmp_path: Path, **coach_opts) -> SimpleNamespace:
+    (tmp_path / "state").mkdir(parents=True, exist_ok=True)
+    return SimpleNamespace(
+        paths=SimpleNamespace(state=tmp_path / "state", data=tmp_path,
+                              journal=tmp_path / "journal.jsonl"),
+        coach={"enabled": True, **coach_opts},
+        pricing={},
+        deadline="2026-09-04",
+    )
+
+
+def _journal(tmp_path: Path) -> Journal:
+    p = tmp_path / "journal.jsonl"
+    p.touch()
+    return Journal(p)
+
+
+# --- promotion math (pure) -------------------------------------------------
+
+
+def test_p_challenger_better_is_exactly_half_when_the_evidence_is_identical():
+    # Two arms with the same record cannot prefer either. Anything else here
+    # means the integration is skewed and every close call would inherit it.
+    assert coach.p_challenger_better(5, 5, 5, 5) == pytest.approx(0.5, abs=1e-6)
+    assert coach.p_challenger_better(0, 0, 0, 0) == pytest.approx(0.5, abs=1e-6)
+    assert coach.p_challenger_better(30, 12, 30, 12) == pytest.approx(0.5, abs=1e-6)
+
+
+def test_p_challenger_better_is_symmetric_under_swapping_the_arms():
+    a = coach.p_challenger_better(18, 6, 9, 15)
+    b = coach.p_challenger_better(9, 15, 18, 6)
+    assert a + b == pytest.approx(1.0, abs=1e-6)
+
+
+def test_a_challenger_that_is_merely_luckier_early_is_not_promoted():
+    """4-1 up after 5 runs is a streak, not evidence.
+
+    The floors exist for exactly this shape: the posterior alone would already
+    favour the challenger, and promoting on it would install noise as policy.
+    """
+    t = coach.Tally("e", "muse.prompt", "v0", "v1", runs=5, s_c=4, f_c=1, s_i=1, f_i=4)
+    assert t.posterior > 0.9  # the evidence really does point that way
+    outcome, _ = coach.verdict(t, coach.floors(_cfg(Path("/tmp"))))
+    assert outcome == "", "promoted on 5 runs - the run floor is not binding"
+
+
+def test_a_fair_coin_challenger_is_never_promoted_over_the_full_run_cap():
+    """Two identical arms, run to the cap, must end in `timeout` - never a
+    promotion. This is the Coach's zero-EV property: with no real difference
+    there is no verdict, the same shape as Kelly being exactly zero on a
+    fairly priced structure (D-079)."""
+    cfg = _cfg(Path("/tmp"))
+    for runs in range(1, coach.CAP_RUNS + 1):
+        t = coach.Tally("e", "muse.prompt", "v0", "v1", runs=runs,
+                        s_c=2 * runs, f_c=3 * runs, s_i=2 * runs, f_i=3 * runs)
+        outcome, _ = coach.verdict(t, coach.floors(cfg))
+        assert outcome != "promoted", f"promoted an identical arm at {runs} runs"
+    assert outcome == "timeout"
+
+
+def test_promotion_needs_the_posterior_and_both_floors_together():
+    cfg = _cfg(Path("/tmp"))
+    fl = coach.floors(cfg)
+    strong = dict(s_c=40, f_c=10, s_i=10, f_i=40)
+
+    ok = coach.Tally("e", "l", "v0", "v1", runs=10, **strong)
+    assert coach.verdict(ok, fl)[0] == "promoted"
+
+    # enough candidates, not enough runs
+    few_runs = coach.Tally("e", "l", "v0", "v1", runs=3, **strong)
+    assert coach.verdict(few_runs, fl)[0] == ""
+
+    # enough runs, not enough candidates: 10 runs of 2 candidates each is 20
+    # Bernoulli trials wearing 10 runs' clothing.
+    few_cands = coach.Tally("e", "l", "v0", "v1", runs=10,
+                            s_c=10, f_c=0, s_i=0, f_i=10)
+    assert min(few_cands.n_i, few_cands.n_c) < fl["min_candidates"]
+    assert coach.verdict(few_cands, fl)[0] == ""
+
+
+def test_a_hopeless_challenger_is_refuted_early_rather_than_run_to_the_cap():
+    t = coach.Tally("e", "l", "v0", "v1", runs=7, s_c=1, f_c=40, s_i=30, f_i=11)
+    outcome, reason = coach.verdict(t, coach.floors(_cfg(Path("/tmp"))))
+    assert outcome == "refuted" and "futile" in reason
+
+
+def test_the_incumbent_keeps_its_place_on_timeout():
+    t = coach.Tally("e", "l", "v0", "v1", runs=coach.CAP_RUNS,
+                    s_c=30, f_c=30, s_i=28, f_i=32)
+    outcome, _ = coach.verdict(t, coach.floors(_cfg(Path("/tmp"))))
+    assert outcome == "timeout"
+
+
+# --- the shadow arm: the contract that makes this safe --------------------
+
+
+def test_the_shadow_ledger_still_refuses_a_candidate_with_no_band():
+    """`register` returning None IS a gate in production ("unfalsifiable").
+
+    A shadow arm that skipped the ledger entirely would skip that gate too, and
+    the challenger would be scored against an easier gauntlet than the
+    incumbent - an unfair trial that would read as a genuine improvement.
+    """
+    sl = muse.ShadowLedger()
+    assert sl.register(band_low=None, band_high=None) is None
+    assert sl.register(band_low=100.0, band_high=None) is not None
+    assert sl.register(band_low=None, band_high=200.0) is not None
+    assert sl.registered == 2
+
+
+def test_the_shadow_ledger_is_shaped_like_the_real_one():
+    """Both arms call the SAME gate cascade, so the stand-in must accept every
+    call the real ledger accepts. A missing method would only surface on the
+    live run that first reached that gate."""
+    for name in ("register", "mark_rejected", "mark_stated"):
+        assert hasattr(muse.ShadowLedger(), name)
+    sl = muse.ShadowLedger()
+    e = sl.register(kind="muse", underlying="SPY", claim="c", probability=0.4,
+                    probability_stated=False, horizon="2026-09-02",
+                    band_low=1.0, band_high=2.0, variant="v1", notes="n")
+    assert e is not None and sl.mark_stated(e.id) and sl.mark_rejected(e.id, "why")
+
+
+@pytest.mark.asyncio
+async def test_the_shadow_arm_writes_nothing_at_all(tmp_path, monkeypatch):
+    """THE contract. A paired run must leave the ledger, the inbox and the
+    thesis journal rows byte-identical to an unpaired one.
+
+    A challenger arm that registered its candidates would inflate D-052's trial
+    count with experiment artefacts and feed rejected material into
+    calibration - D-080's exact defect, rebuilt by the machinery meant to
+    improve things.
+    """
+    from trdrbot.inbox import Inbox
+
+    cand = {"underlying": "SPY", "claim": "c", "chain": ["a"], "direction": "bullish",
+            "probability": 0.4, "band_low_pct": -3.0, "band_high_pct": 3.0,
+            "horizon": "2026-09-02", "suggested_structures": []}
+
+    paths = SimpleNamespace(state=tmp_path / "state", data=tmp_path,
+                            journal=tmp_path / "journal.jsonl",
+                            wiki=tmp_path / "wiki",
+                            inbox_pending=tmp_path / "inbox" / "pending",
+                            inbox_processed=tmp_path / "inbox" / "processed",
+                            inbox_failed=tmp_path / "inbox" / "failed")
+    for p in (paths.state, paths.wiki, paths.inbox_pending, paths.inbox_processed,
+              paths.inbox_failed):
+        Path(p).mkdir(parents=True, exist_ok=True)
+    cfg = SimpleNamespace(paths=paths, coach={"enabled": True}, pricing={},
+                          deadline="2026-09-04", polymarket_queries=[],
+                          max_retries=3)
+
+    closes = [100.0 + (i % 7) * 0.5 for i in range(120)]
+    monkeypatch.setattr(muse.market_stats, "load_closes", lambda *a, **k: closes)
+    monkeypatch.setattr(muse, "_options_gate",
+                        lambda *a, **k: _async({"tradeable": True}))
+    monkeypatch.setattr(muse, "_plausible_band", lambda *a, **k: True)
+    monkeypatch.setattr(muse, "_sample_concepts", lambda *a, **k: [("c/a", "text")])
+
+    async def fake_generate(prompt_text, fields, config, journal, *, variant, verbose):
+        return [dict(cand)]
+
+    monkeypatch.setattr(muse, "_generate", fake_generate)
+
+    async def _news(*a, **k):
+        raise RuntimeError("no news in this test")
+
+    monkeypatch.setattr(muse.mcp_client, "call", _news)
+
+    inbox = Inbox(paths, max_retries=3)
+    journal = Journal(paths.journal)
+    journal.path.touch()
+    book = Ledger(paths.state / "ledger.jsonl")
+
+    from trdrbot.wiki import Wiki
+
+    # 1. unpaired baseline
+    monkeypatch.setattr(coach, "arms", lambda *a, **k: coach.Arms(
+        incumbent=coach.Variant("v0", muse.MUSE_PROMPT)))
+    await muse.run({}, cfg, inbox, Wiki(paths.wiki), journal, book, verbose=False)
+    base_ledger = len(book.all())
+    base_inbox = len(list(Path(paths.inbox_pending).glob("*")))
+    base_muse_rows = sum(1 for r in journal.read() if r.get("kind") == "muse")
+
+    # 2. the same run, with a challenger being trialled
+    monkeypatch.setattr(coach, "arms", lambda *a, **k: coach.Arms(
+        incumbent=coach.Variant("v0", muse.MUSE_PROMPT),
+        challenger=coach.Variant("v1", muse.MUSE_PROMPT + "\nvariant"),
+        exp_id="exp_test"))
+    book2 = Ledger(paths.state / "ledger.jsonl")
+    await muse.run({}, cfg, inbox, Wiki(paths.wiki), journal, book2, verbose=False)
+
+    added_ledger = len(book2.all()) - base_ledger
+    added_inbox = len(list(Path(paths.inbox_pending).glob("*"))) - base_inbox
+    added_muse_rows = sum(1 for r in journal.read() if r.get("kind") == "muse") - base_muse_rows
+
+    assert added_ledger == base_ledger, (
+        f"the paired run wrote {added_ledger} ledger rows against a baseline of "
+        f"{base_ledger} - the challenger arm is writing theses")
+    assert added_inbox == base_inbox, "the challenger arm emitted to the inbox"
+    assert added_muse_rows == 1, "the challenger arm wrote its own muse journal row"
+
+    trials = [r for r in coach.events(cfg) if r.get("kind") == "trial_result"]
+    assert len(trials) == 1, "the paired run recorded no trial result"
+    assert trials[0]["challenger"]["candidates"] == 1
+
+
+def _async(value):
+    async def _inner(*a, **k):
+        return value
+    return _inner()
+
+
+# --- state, promotion, crash safety ---------------------------------------
+
+
+def test_a_promotion_swaps_the_incumbent_and_survives_a_reload(tmp_path):
+    cfg, journal = _cfg(tmp_path), _journal(tmp_path)
+    st = coach.load_state(cfg, "muse.prompt", "SEED TEXT " * 30)
+    ch = coach.Variant("v1", "CHALLENGER TEXT " * 30, origin="mutation")
+    coach._open(cfg, st, ch, journal)
+    t = coach.Tally("e", "muse.prompt", "v0", "v1", runs=10,
+                    s_c=40, f_c=10, s_i=10, f_i=40)
+    coach._promote(cfg, st, t, "because", journal)
+
+    fresh = coach.load_state(cfg, "muse.prompt", "SEED TEXT " * 30)
+    assert fresh.incumbent.id == "v1"
+    assert fresh.previous is not None and fresh.previous.id == "v0"
+    assert fresh.challenger is None and fresh.exp_id is None
+    assert fresh.incumbent.text.startswith("CHALLENGER")
+
+
+def test_a_promotion_logged_but_never_applied_is_reconciled_on_restart(tmp_path):
+    """The close is appended BEFORE the state swap, so a crash between them
+    leaves a promoted experiment whose lever state still shows the old
+    incumbent. The event log is truth; the state file is a cache of it."""
+    cfg, journal = _cfg(tmp_path), _journal(tmp_path)
+    seed = "SEED TEXT " * 30
+    st = coach.load_state(cfg, "muse.prompt", seed)
+    coach._open(cfg, st, coach.Variant("v1", "NEW TEXT " * 30, origin="mutation"), journal)
+    # simulate the crash: append the close, never swap
+    coach._append(coach.events_path(cfg), {
+        "kind": "experiment_closed", "exp_id": st.exp_id, "lever": "muse.prompt",
+        "outcome": "promoted", "reason": "r", "runs": 10, "final_posterior": 0.95,
+        "challenger": "v1", "challenger_text": "NEW TEXT " * 30})
+    assert coach.load_state(cfg, "muse.prompt", seed).incumbent.id == "v0"
+
+    applied = coach.reconcile(cfg, seeds={"muse.prompt": seed})
+    assert applied and "v0 -> v1" in applied[0]
+    assert coach.load_state(cfg, "muse.prompt", seed).incumbent.id == "v1"
+    # and it is idempotent - a second pass must not re-promote
+    assert coach.reconcile(cfg, seeds={"muse.prompt": seed}) == []
+
+
+def test_corrupt_lever_state_degrades_to_the_seed_and_keeps_the_broken_file(tmp_path):
+    cfg = _cfg(tmp_path)
+    path = coach._state_path(cfg, "muse.prompt")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("{ this is not json")
+
+    st = coach.load_state(cfg, "muse.prompt", "SEED")
+    assert st.incumbent.id == "v0" and st.incumbent.text == "SEED"
+    # the unreadable file is NOT silently overwritten - a human may need it
+    assert path.read_text() == "{ this is not json"
+
+
+def test_a_hand_edited_incumbent_gets_a_recomputed_fingerprint(tmp_path):
+    """Editing the state file is a supported steering move. A stale
+    fingerprint beside edited text would mislabel every trial that variant
+    runs in."""
+    cfg = _cfg(tmp_path)
+    st = coach.load_state(cfg, "muse.prompt", "SEED")
+    coach.save_state(cfg, st)
+    raw = json.loads(coach._state_path(cfg, "muse.prompt").read_text())
+    raw["incumbent"]["text"] = "EDITED BY A HUMAN"
+    raw["incumbent"]["fingerprint"] = "staleval"
+    coach._state_path(cfg, "muse.prompt").write_text(json.dumps(raw))
+
+    reloaded = coach.load_state(cfg, "muse.prompt", "SEED")
+    assert reloaded.incumbent.text == "EDITED BY A HUMAN"
+    assert reloaded.incumbent.fingerprint == coach.fingerprint("EDITED BY A HUMAN")
+
+
+def test_arms_returns_no_challenger_once_the_experiment_is_closed(tmp_path):
+    cfg, journal = _cfg(tmp_path), _journal(tmp_path)
+    st = coach.load_state(cfg, "muse.prompt", "SEED")
+    coach._open(cfg, st, coach.Variant("v1", "NEW"), journal)
+    assert coach.arms(cfg, "muse.prompt", seed_text="SEED").paired
+
+    st2 = coach.load_state(cfg, "muse.prompt", "SEED")
+    coach._close(cfg, st2, "refuted", "worse", journal)
+    assert not coach.arms(cfg, "muse.prompt", seed_text="SEED").paired
+
+
+def test_a_disabled_coach_runs_the_seed_and_opens_nothing(tmp_path):
+    cfg = _cfg(tmp_path)
+    cfg.coach = {"enabled": False}
+    a = coach.arms(cfg, "muse.prompt", seed_text="SEED")
+    assert a.incumbent.text == "SEED" and not a.paired
+
+
+# --- mutation validation ---------------------------------------------------
+
+
+def test_a_mutated_prompt_missing_a_placeholder_is_rejected():
+    inc = muse.MUSE_PROMPT
+    broken = inc.replace("{concepts}", "the concepts")
+    why = coach.validate_prompt(broken, inc, coach.MUSE_PLACEHOLDERS)
+    assert why == "", "a MISSING placeholder is only a problem if code needs it"
+    # ...but an UNKNOWN one is a live KeyError on the next muse run
+    unknown = inc.replace("{news}", "{nonexistent_field}")
+    assert "not a safe format template" in coach.validate_prompt(
+        unknown, inc, coach.MUSE_PLACEHOLDERS)
+
+
+def test_a_mutated_prompt_with_unescaped_json_braces_is_rejected():
+    """The prompt is a `.format()` template, so a JSON example written with
+    single braces raises at format time - on a live muse run, not here, unless
+    this check catches it first."""
+    inc = muse.MUSE_PROMPT
+    bad = inc.replace('[{{"underlying"', '[{"underlying"')
+    assert "not a safe format template" in coach.validate_prompt(
+        bad, inc, coach.MUSE_PLACEHOLDERS)
+
+
+def test_a_mutation_identical_to_the_incumbent_is_rejected():
+    inc = muse.MUSE_PROMPT
+    assert "identical" in coach.validate_prompt(inc, inc, coach.MUSE_PLACEHOLDERS)
+
+
+def test_a_mutation_that_drops_the_schema_contract_is_rejected():
+    inc = muse.MUSE_PROMPT
+    bad = inc.replace("band_low_pct", "band_bottom")
+    why = coach.validate_prompt(bad, inc, coach.MUSE_PLACEHOLDERS,
+                                must_contain=("band_low_pct", "JSON array"))
+    assert "band_low_pct" in why
+
+
+def test_a_bloated_mutation_is_rejected():
+    inc = muse.MUSE_PROMPT
+    assert "bloat" in coach.validate_prompt(inc * 3, inc, coach.MUSE_PLACEHOLDERS)
+
+
+def test_the_real_muse_prompt_passes_its_own_validator():
+    """The incumbent must satisfy the rules its challengers are held to, or
+    the validator is measuring something the system does not actually do."""
+    other = muse.MUSE_PROMPT + "\n\nOne extra instruction line for difference."
+    assert coach.validate_prompt(other, muse.MUSE_PROMPT, coach.MUSE_PLACEHOLDERS,
+                                 must_contain=("band_low_pct", "band_high_pct",
+                                               "JSON array")) == ""
+
+
+# --- rule 3: the ruler may not be moved by what it measures ---------------
+
+
+def test_a_lever_cannot_experiment_while_its_own_scorer_is_being_tested(tmp_path, monkeypatch):
+    cfg, journal = _cfg(tmp_path), _journal(tmp_path)
+    gates = coach.Lever("muse.gates", "muse", ("muse.gates",), "policy")
+    monkeypatch.setattr(coach, "LEVERS", (coach.LEVERS[0], gates))
+
+    st = coach.load_state(cfg, "muse.prompt", "SEED")
+    coach._open(cfg, st, coach.Variant("v1", "NEW"), journal)
+
+    clash = coach._disjoint(cfg, gates)
+    assert "muse.gates" in clash and "muse.prompt" in clash
+    # and the reverse holds once the roles swap
+    assert coach._disjoint(cfg, coach.LEVERS[0]) == ""
+
+
+# --- the heartbeat ---------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_the_heartbeat_keys_match_exactly_what_the_health_probe_reads(tmp_path):
+    """A probe reading a key nobody writes reports a confident zero forever.
+    That is how `_market_pulse` stayed dead with a passing test (D-074)."""
+    from trdrbot import health
+
+    cfg, journal = _cfg(tmp_path), _journal(tmp_path)
+    await coach.pulse(cfg, journal, seeds={})
+    rows = [r for r in journal.read() if r.get("kind") == "coach_run"]
+    assert rows, "pulse wrote no heartbeat"
+
+    probe = next(p for p in health.PROBES if p.name == "coach")
+    assert probe.ran_kinds == ("coach_run",)
+    # both callables must find their keys on a real heartbeat row
+    assert probe.produced(rows) == 0
+    assert probe.work is not None and probe.work(rows) == 0
+    assert "trials_scored_today" in rows[0] and "experiments_open" in rows[0]
+
+
+@pytest.mark.asyncio
+async def test_the_heartbeat_is_written_even_when_the_coach_is_disabled(tmp_path):
+    cfg, journal = _cfg(tmp_path), _journal(tmp_path)
+    cfg.coach = {"enabled": False}
+    await coach.pulse(cfg, journal, seeds={})
+    assert [r for r in journal.read() if r.get("kind") == "coach_run"]
+
+
+@pytest.mark.asyncio
+async def test_an_operator_pause_closes_the_open_experiment_without_promoting(tmp_path):
+    cfg, journal = _cfg(tmp_path), _journal(tmp_path)
+    seed = "SEED " * 60
+    st = coach.load_state(cfg, "muse.prompt", seed)
+    coach._open(cfg, st, coach.Variant("v1", "NEW " * 60), journal)
+    st = coach.load_state(cfg, "muse.prompt", seed)
+    st.paused = True
+    coach.save_state(cfg, st)
+
+    await coach.pulse(cfg, journal, seeds={"muse.prompt": seed})
+    after = coach.load_state(cfg, "muse.prompt", seed)
+    assert after.incumbent.id == "v0", "a paused lever was promoted"
+    assert after.exp_id is None
+    closes = [r for r in coach.events(cfg) if r.get("kind") == "experiment_closed"]
+    assert closes and closes[-1]["outcome"] == "operator_override"
+
+
+# --- gauges ----------------------------------------------------------------
+
+
+def test_a_gauge_with_no_data_is_omitted_rather_than_written_as_zero(tmp_path):
+    """A zero meaning "no data" is indistinguishable on a chart from a real
+    collapse to zero - the absence-as-zero class (notes/012)."""
+    cfg = _cfg(tmp_path)
+    g = coach.snapshot_gauges(cfg, [])
+    assert "muse.survival_rate" not in g
+    assert "muse.candidates_per_run" not in g
+    assert g["coach.open_experiments"] == 0  # genuinely measured, genuinely zero
+
+
+def test_the_survival_gauge_counts_every_fate_that_survived_the_gauntlet(tmp_path):
+    cfg = _cfg(tmp_path)
+    rows = [{"kind": "muse", "candidates": 4, "fates": [
+        {"fate": "EMITTED"}, {"fate": "candidate, not emitted (rank)"},
+        {"fate": "rejected: base probability 3% - a lottery ticket"},
+        {"fate": "rejected: no usable price history"}]}]
+    assert coach.snapshot_gauges(cfg, rows)["muse.survival_rate"] == pytest.approx(0.5)
+
+
+def test_seed_entropy_counts_distinct_collision_pairs(tmp_path):
+    cfg = _cfg(tmp_path)
+    rows = [{"kind": "muse", "candidates": 1, "concepts": ["a", "b"], "fates": []},
+            {"kind": "muse", "candidates": 1, "concepts": ["a", "b"], "fates": []},
+            {"kind": "muse", "candidates": 1, "concepts": ["a", "c"], "fates": []}]
+    assert coach.snapshot_gauges(cfg, rows)["muse.seed_entropy"] == 2
+
+
+# --- scoring an arm --------------------------------------------------------
+
+
+def test_a_reply_that_parses_to_nothing_scores_as_failures_not_as_silence():
+    """GLM-5.2 burned an entire 8,000-token budget and returned zero characters
+    (D-084) - a "successful" call nothing else penalises. If an empty reply
+    scored nothing, a variant that always produced nothing would be
+    unfalsifiable by its own reward."""
+    r = muse._score_arm([], muse.CANDIDATES)
+    assert r["survived"] == 0 and r["failed"] == muse.CANDIDATES
+
+
+def test_scoring_counts_emitted_and_ranked_out_candidates_as_survivors():
+    """Emission rank is not a gate - a candidate that cleared every gate and
+    then lost a rank cut still proves the prompt produced a good thesis."""
+    ev = [{"fate": "EMITTED"}, {"fate": "candidate, not emitted (rank)"},
+          {"fate": "candidate"}, {"fate": "rejected: no usable price history"}]
+    r = muse._score_arm(ev, muse.CANDIDATES)
+    assert r["survived"] == 3 and r["failed"] == 1
+
+
+# --- the report ------------------------------------------------------------
+
+
+def test_the_report_renders_from_completely_empty_stores(tmp_path):
+    from trdrbot import report
+
+    cfg = _cfg(tmp_path)
+    html = report.build(cfg)
+    assert "<title>" in html and "The Coach" in html
+    assert "http://" not in html and "https://" not in html, (
+        "the report must be self-contained - it is read exactly when something "
+        "has gone wrong, which is the worst time to need the network")
+
+
+def test_echoed_delimiters_are_stripped_from_a_generated_prompt():
+    """Measured on the first live mutation: the model copied the harness's own
+    delimiter lines into the challenger text. Nothing downstream would have
+    caught it - the result still formats and still validates - so a prompt
+    carrying two lines of this module's scaffolding would have gone live."""
+    assert coach.clean_prompt("<<<PROMPT\nreal content here\nPROMPT") == "real content here"
+    assert coach.clean_prompt("```\nreal content here\n```") == "real content here"
+    assert coach.clean_prompt("- - - - - - - - - -\nbody\n- - - - - - - - - -") == "body"
+    # content that merely CONTAINS a fence-like line is untouched in the middle
+    assert coach.clean_prompt("a\n---\nb") == "a\n---\nb"

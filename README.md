@@ -188,6 +188,36 @@ uv run trdrbot usage          # spend by model and role, with cached share
 | `constitution show\|seed\|verify` | the epistemic principles in memory |
 | `lessons show\|seed\|verify` | measured lessons, and whether they still recall |
 | `prompts` | every prompt the models read, with fingerprints |
+| `coach status\|pulse` | the self-improvement loop: levers, open trials, promotions |
+| `report` | write `data/report.html` - gauges over time, experiments, what the Coach did |
+
+## The Coach — subsystems that improve themselves
+
+Everything above improves when a human finds a defect. The Coach makes improvement a runtime
+behaviour: it runs paired A/B trials on the muse's collision prompt, scores each variant by the
+**fraction of its candidates that survive the muse's own deterministic gauntlet**, and promotes a
+winner without asking.
+
+It is autonomous on purpose — approval gates block the feedback loop, and this is paper trading.
+What makes that safe is that autonomy is bounded **by construction**, not by asking:
+
+- **It touches data, never code.** Variants live in `data/state/levers/*.json`. There is no code
+  path from Coach state to a gate threshold, sizing math, or a sentinel.
+- **The challenger is a shadow.** During a trial the incumbent runs production exactly as before;
+  the challenger reaches the same verdicts through the *same gate code* but writes nothing — no
+  ledger row, no inbox item. Both arms share one memo of closes and option chains, so a moving
+  quote cannot masquerade as a variant difference.
+- **Promotion needs real evidence.** `P(challenger better) ≥ 0.90` on Beta posteriors, plus floors
+  of 8 paired runs and 24 candidates per arm. Identical arms return exactly 0.5 and time out.
+- **Sentinels revert.** Daily cost ceiling, promotion churn, and a seed-entropy floor that stops
+  the muse being optimised out of colliding diverse concepts — its whole mandate.
+- **elfmem's constitution is not a lever** and will not become one: its own ADR 0003 measured
+  automatic constitutional evolution as no better than baseline.
+
+**Steering, not gating.** Read `trdrbot report` for the trajectory with the Coach's own actions
+overlaid. To intervene, edit the lever's state file: `"paused": true` stops experimentation,
+`"pinned": true` also stops the audit re-matching it — one pin freezes behaviour for a demo.
+Editing the incumbent prompt by hand is supported; the fingerprint is recomputed from the text.
 
 ## How a thesis is formed
 

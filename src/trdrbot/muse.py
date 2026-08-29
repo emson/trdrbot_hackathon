@@ -34,7 +34,7 @@ import random
 import re
 from typing import Any
 
-from . import competence, ids, market_stats, mcp_client, news_extract
+from . import coach, competence, ids, market_stats, mcp_client, news_extract
 from .config import Config
 from .discovery import _options_gate, _plausible_band
 from .inbox import Inbox
@@ -109,6 +109,51 @@ Respond with ONLY a JSON array:
 #: Beyond this it is not a thesis, it is a typo - and a band 3x from spot is
 #: exactly what absolute-price bands produced.
 MAX_BAND_PCT = 60.0
+
+
+class _ShadowEntry:
+    """Stands in for a `ledger.Entry` on the challenger arm."""
+
+    __slots__ = ("id",)
+
+    def __init__(self) -> None:
+        self.id = "shadow"
+
+
+class ShadowLedger:
+    """A Ledger-shaped no-op, for scoring a challenger variant without writing.
+
+    The challenger arm of an A/B trial must reach exactly the same verdicts as
+    production while touching NOTHING - no ledger row, no inbox item, no
+    `mark_stated`. The obvious implementation (a `shadow=True` flag threaded
+    through the gate cascade) would put a branch inside every gate, and two
+    arms running subtly different code is precisely the failure this project
+    keeps finding: two EV loops (D-074), two clocks (D-074), two calibration
+    numbers (D-076). So the arms share ONE gate cascade byte for byte, and only
+    the ledger object differs.
+
+    `register` mirrors the one piece of real gate logic the ledger owns:
+    returning None when a candidate carries no band at all, which production
+    reads as "unfalsifiable" and refuses. Getting that wrong would let the
+    challenger past a gate the incumbent must pass, which is an unfair trial
+    that would look like a genuine improvement.
+    """
+
+    def __init__(self) -> None:
+        self.registered = 0
+
+    def register(self, *, band_low: float | None = None,
+                 band_high: float | None = None, **_: Any) -> "_ShadowEntry | None":
+        if band_low is None and band_high is None:
+            return None
+        self.registered += 1
+        return _ShadowEntry()
+
+    def mark_rejected(self, *_a: Any, **_k: Any) -> bool:
+        return True
+
+    def mark_stated(self, *_a: Any, **_k: Any) -> bool:
+        return True
 
 
 def _reject(ledger: Ledger, entry: "Any", reason: str) -> None:
@@ -206,45 +251,12 @@ def _sample_concepts(wiki: Wiki, rng: random.Random, k: int) -> list[tuple[str, 
     return out
 
 
-async def run(
-    tools: dict[str, Any], config: Config, inbox: Inbox, wiki: Wiki,
-    journal: Journal, ledger: Ledger, *, verbose: bool = True,
-) -> dict[str, Any]:
-    # Seeded per-day: a day's collisions are reproducible, tomorrow's differ.
-    rng = random.Random(f"muse|{ids.utc_now().date().isoformat()}")
-
-    concepts = _sample_concepts(wiki, rng, CONCEPTS_PER_RUN)
-    concept_block = "\n\n".join(f"### {cid}\n{txt}" for cid, txt in concepts)
-
-    news_lines: list[str] = []
-    try:
-        r = await mcp_client.call(tools, "get_news", limit=30,
-                                  exclude_contentless=True, sort="desc")
-        items = (r.get("news") or []) if isinstance(r, dict) else []
-        news_lines.append(news_extract.render_block(await news_extract.enrich(items, config)))
-    except Exception as exc:  # noqa: BLE001
-        news_lines.append(f"(news unavailable: {type(exc).__name__})")
-
-    odds_lines: list[str] = []
-    try:
-        from . import polymarket
-        for q in config.polymarket_queries:
-            for m in await polymarket.search(q, limit=2):
-                odds_lines.append(f"- {m['probability']:.0%} {m['question']}")
-    except Exception:  # noqa: BLE001
-        pass
-
-    # Derived, not recalled (D-032's date discipline), and shared with every
-    # other thesis source so the three cannot drift apart again.
-    window = competence.forecast_window(config.deadline, ids.utc_now().date())
-    earliest, preferred, latest = window or ("", "", "")
-    prompt = MUSE_PROMPT.format(
-        today=ids.utc_now().date().isoformat(),
-        earliest=earliest or "tomorrow", preferred=preferred or "3 days out",
-        latest=latest or "10 days out",
-        n=len(concepts), k=CANDIDATES, concepts=concept_block,
-        news="\n".join(news_lines) or "(none)", odds="\n".join(odds_lines) or "(none)",
-    )
+async def _generate(prompt_text: str, fields: dict[str, Any], config: Config,
+                    journal: Journal, *, variant: str, verbose: bool) -> list[dict[str, Any]]:
+    """Format, invoke, parse. The prompt arrives as a PARAMETER - this is the
+    seam the Coach's prompt lever moves, and the only thing that differs
+    between the two arms of a trial."""
+    prompt = prompt_text.format(**fields)
     reply = await build_model(config, role="muse").ainvoke(prompt)
     text = reply.content if isinstance(reply.content, str) else "\n".join(
         b.get("text", "") for b in reply.content
@@ -261,12 +273,27 @@ async def run(
         # failure with no trace is undiagnosable. Keep enough of the reply to
         # see WHY next time.
         journal.append("muse_parse_failure", reply_head=text[:400],
-                       reply_len=len(text))
+                       reply_len=len(text), variant=variant)
         if verbose:
             print(f"[muse] reply did not parse ({len(text)} chars): {text[:160]!r}")
+    return raw if isinstance(raw, list) else []
 
+
+async def _evaluate(
+    raw: list[dict[str, Any]], tools: dict[str, Any], config: Config,
+    ledger: "Ledger | ShadowLedger", *, latest: str, variant: str,
+    cache: dict[str, Any],
+) -> list[dict[str, Any]]:
+    """The gate cascade. ONE copy, run by both arms of a trial.
+
+    `cache` memoises the two network-dependent gate inputs (daily closes and
+    the options chain) for the length of a run, so the challenger is judged on
+    IDENTICAL data to the incumbent. Without it a quote moving between the two
+    arms' calls would score as a variant difference - an unfairness that would
+    be invisible in the results and would slowly promote noise.
+    """
     evaluated: list[dict[str, Any]] = []
-    for cand in raw if isinstance(raw, list) else []:
+    for cand in raw:
         if not isinstance(cand, dict) or not cand.get("underlying"):
             continue
         u = str(cand["underlying"]).upper()
@@ -278,14 +305,19 @@ async def run(
         # and cannot become a price without one. This is data availability, not
         # a judgement gate - a candidate that gets this far is still registered
         # below whatever happens next.
-        closes = market_stats.load_closes(config.paths.state, u)
-        if closes is None:
-            try:
-                closes = await market_stats.fetch_daily_closes(tools, u)
-                if len(closes) >= 60:
-                    market_stats.save_closes(config.paths.state, u, closes)
-            except Exception:  # noqa: BLE001
-                closes = None
+        ckey = f"closes|{u}"
+        if ckey in cache:
+            closes = cache[ckey]
+        else:
+            closes = market_stats.load_closes(config.paths.state, u)
+            if closes is None:
+                try:
+                    closes = await market_stats.fetch_daily_closes(tools, u)
+                    if len(closes) >= 60:
+                        market_stats.save_closes(config.paths.state, u, closes)
+                except Exception:  # noqa: BLE001
+                    closes = None
+            cache[ckey] = closes
         usable = bool(closes) and len(closes) >= 60
         spot = closes[-1] if usable else None
         band_low, band_high = _bands_from_pct(cand, spot)
@@ -304,6 +336,7 @@ async def run(
             probability_stated=False,
             horizon=str(cand.get("horizon", "")),
             band_low=band_low, band_high=band_high,
+            variant=variant,
             notes="muse: " + " -> ".join(str(c) for c in cand.get("chain", []))[:300],
         )
         if not usable:
@@ -377,7 +410,10 @@ async def run(
             evaluated.append(verdict)
             continue
 
-        gate = await _options_gate(tools, u, config.deadline)
+        gkey = f"gate|{u}"
+        if gkey not in cache:
+            cache[gkey] = await _options_gate(tools, u, config.deadline)
+        gate = cache[gkey]
         if not gate.get("tradeable"):
             verdict["fate"] = "rejected: no options chain inside the deadline"
             _reject(ledger, entry, verdict["fate"])
@@ -390,6 +426,108 @@ async def run(
         verdict["fate"] = "candidate"
         verdict["_cand"] = cand
         evaluated.append(verdict)
+    return evaluated
+
+
+def _score_arm(evaluated: list[dict[str, Any]], asked: int) -> dict[str, Any]:
+    """One arm's paired-trial reward: candidates that survived every gate.
+
+    A reply that parses to NOTHING is scored as `asked` failures rather than as
+    an empty result. GLM-5.2 spent an entire 8,000-token budget on invisible
+    reasoning and returned zero characters (D-084) - a "successful" call that
+    no other mechanism penalises. If an empty reply scored nothing, a variant
+    that always produced nothing would be unfalsifiable by its own reward.
+    """
+    hits = sum(1 for v in evaluated if coach.survived(v.get("fate")))
+    total = len(evaluated) or asked
+    return {"candidates": len(evaluated), "survived": hits,
+            "failed": max(0, total - hits),
+            "fates": [str(v.get("fate", ""))[:80] for v in evaluated]}
+
+
+async def run(
+    tools: dict[str, Any], config: Config, inbox: Inbox, wiki: Wiki,
+    journal: Journal, ledger: Ledger, *, verbose: bool = True,
+) -> dict[str, Any]:
+    # Which prompt variant is live, and is a challenger being trialled?
+    arms = coach.arms(config, "muse.prompt", seed_text=MUSE_PROMPT)
+
+    # Seeded per-day PLUS a per-run nonce. The day-only seed made every run in
+    # a day collide the SAME concepts - correct when the muse ran once a day,
+    # but it would have made every paired trial a repeat of one sample rather
+    # than a fresh draw. The nonce is derived (today's muse rows), never a
+    # clock, so a run stays reproducible from the journal alone.
+    nonce = sum(1 for r in journal.read()
+                if r.get("kind") == "muse"
+                and str(r.get("ts", ""))[:10] == ids.utc_now().date().isoformat())
+    rng = random.Random(f"muse|{ids.utc_now().date().isoformat()}|{nonce}")
+
+    concepts = _sample_concepts(wiki, rng, CONCEPTS_PER_RUN)
+    concept_block = "\n\n".join(f"### {cid}\n{txt}" for cid, txt in concepts)
+
+    news_lines: list[str] = []
+    try:
+        r = await mcp_client.call(tools, "get_news", limit=30,
+                                  exclude_contentless=True, sort="desc")
+        items = (r.get("news") or []) if isinstance(r, dict) else []
+        news_lines.append(news_extract.render_block(await news_extract.enrich(items, config)))
+    except Exception as exc:  # noqa: BLE001
+        news_lines.append(f"(news unavailable: {type(exc).__name__})")
+
+    odds_lines: list[str] = []
+    try:
+        from . import polymarket
+        for q in config.polymarket_queries:
+            for m in await polymarket.search(q, limit=2):
+                odds_lines.append(f"- {m['probability']:.0%} {m['question']}")
+    except Exception:  # noqa: BLE001
+        pass
+
+    # Derived, not recalled (D-032's date discipline), and shared with every
+    # other thesis source so the three cannot drift apart again.
+    window = competence.forecast_window(config.deadline, ids.utc_now().date())
+    earliest, preferred, latest = window or ("", "", "")
+    fields = dict(
+        today=ids.utc_now().date().isoformat(),
+        earliest=earliest or "tomorrow", preferred=preferred or "3 days out",
+        latest=latest or "10 days out",
+        n=len(concepts), k=CANDIDATES, concepts=concept_block,
+        news="\n".join(news_lines) or "(none)", odds="\n".join(odds_lines) or "(none)",
+    )
+
+    # Shared across BOTH arms so the challenger is judged on identical data.
+    cache: dict[str, Any] = {}
+
+    raw = await _generate(arms.incumbent.text, fields, config, journal,
+                          variant=arms.incumbent.id, verbose=verbose)
+    evaluated = await _evaluate(raw, tools, config, ledger, latest=latest,
+                                variant=arms.incumbent.id, cache=cache)
+
+    # --- the challenger arm: scored, never acted on ------------------------
+    # It writes NOTHING - no ledger row (the shadow ledger), no inbox item (the
+    # emission below is incumbent-only), no thesis journal row. A challenger
+    # that registered candidates would inflate D-052's trial count with
+    # experiment artefacts and re-pollute calibration, which is D-080's exact
+    # defect rebuilt by the mechanism meant to improve things.
+    trial_result: dict[str, Any] | None = None
+    if arms.paired and arms.challenger is not None:
+        try:
+            ch_raw = await _generate(arms.challenger.text, fields, config, journal,
+                                     variant=arms.challenger.id, verbose=False)
+            ch_eval = await _evaluate(ch_raw, tools, config, ShadowLedger(),
+                                      latest=latest, variant=arms.challenger.id,
+                                      cache=cache)
+            trial_result = _score_arm(ch_eval, CANDIDATES)
+        except Exception as exc:  # noqa: BLE001
+            # A raised call is a VOID trial, not a loss: an HTTP 500 says
+            # nothing about the variant's quality, and scoring it as failure
+            # would let one provider outage refute a good challenger (D-084's
+            # distinction between a loud external failure and a silent bad one).
+            trial_result = {"voided": type(exc).__name__}
+            print(f"[muse] challenger arm voided: {exc!r}")
+        coach.record_trial(
+            config, arms.exp_id or "", run_nonce=nonce,
+            incumbent=_score_arm(evaluated, CANDIDATES), challenger=trial_result)
 
     # 3. rank survivors by |claimed edge| - the size of the disagreement with
     # the underlying's own history is the size of the claim being made, and a
@@ -418,6 +556,9 @@ async def run(
     journal.append("muse", concepts=[c for c, _ in concepts],
                    candidates=len(raw) if isinstance(raw, list) else 0,
                    emitted=emitted,
+                   prompt_variant=arms.incumbent.id,
+                   prompt_fp=arms.incumbent.fingerprint,
+                   exp_id=arms.exp_id,
                    fates=[{k: v[k] for k in ("underlying", "fate", "stated")
                            if k in v} for v in evaluated])
     if verbose:
