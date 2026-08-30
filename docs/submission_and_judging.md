@@ -1,194 +1,135 @@
 # Submission & Judging Guide
 
+> **RE-VERIFIED 2026-08-30 directly against the live event page** (`lablab.ai/ai-hackathons/
+> alpaca-ai-trading-agents-hackathon`) and the team's own submission page. This supersedes the
+> 2026-08-26 version of this document, whose "four dimensions" judging claim was itself a
+> correction of an earlier guess — and turns out to have been **wrong**, not just superseded.
+> Read the whole file; the judging-criteria section below is the load-bearing correction.
+
 ## Submission Timeline
 
 | Date/Time | Event |
 |-----------|-------|
-| August 28, 2026 | Hackathon Begins |
-| September 4, 2026 15:00 UTC | **SUBMISSION DEADLINE** |
-| September 4-5, 2026 | Judging Period Begins |
+| August 28, 2026, 16:00 BST | Hackathon Kick-off |
+| September 4, 2026, 16:00 BST = **15:00 UTC** | **SUBMISSION DEADLINE** ("End of Submissions!") |
+| After Sept 4 | Judging Period |
 | TBD | Winner Announcement |
 
-## Submission Requirements
+As of 2026-08-30 (checked live): **5 days, 0 hours left.** Team `trdrbot`'s own page confirms:
+**"Team Leader hasn't made a submission yet."**
 
-### Mandatory Items
+## Core requirements (verified, verbatim from the challenge page)
 
-- [ ] **Dedicated Alpaca Paper Trading Account**
-  - Must be a NEW account created specifically for this hackathon
-  - Not a shared or existing account
-  - Account must be linked to hackathon profile
+- **Autonomous agents** — must build autonomous AI trading agents using Alpaca's Trading API.
+- **MCP or CLI** — the project must use either Alpaca's MCP server or its CLI tools.
+- **Options trading** — all strategies must incorporate options trading.
 
-- [ ] **Working Trading Agent**
-  - Functional AI-powered trading agent
-  - Integrates with Alpaca Trading API/MCP Server/CLI
-  - Executes trades in paper trading environment
+## Account requirements (verified — stricter than earlier drafts of this doc assumed)
 
-- [ ] **Options Trading Implementation**
-  - Must demonstrate options trading capability
-  - Examples:
-    - Options spreads (bull call, bear put, etc.)
-    - Straddles or strangles
-    - Single options leg trades
-    - Multi-leg options strategies
+- Explore/prototype freely on **any** paper account during development.
+- **The final submission must run on a brand-new Alpaca paper account created specifically for
+  this hackathon.** Verbatim: *"Projects run on an existing or reused account will not be
+  eligible for judging."*
+- **Starting balance must be set to $100,000.**
+- **The Alpaca paper trading account ID itself is a required submission field** — not just an
+  account "linked to profile". Verbatim: *"Your final submission must include the Alpaca paper
+  trading account ID used for the hackathon. This allows the judging team to identify your
+  trading activity and evaluate your P&L performance."*
+- **Action needed:** confirm the account currently trading is (a) actually new/dedicated to this
+  hackathon and (b) was started at exactly $100,000. If the account in use predates the
+  hackathon or was reused from earlier prototyping, a fresh one is needed before submission.
 
-- [ ] **Submission on lablab.ai**
-  - Project submitted through lablab.ai platform
-  - Before 15:00 UTC deadline on September 4
+## What the submission form asks for (verified — the platform's own "What to submit" list)
 
-### Recommended Deliverables
+**Basic information**
+- Project title
+- Short description
+- Long description
+- Technology & category tags
 
-- [ ] **Project Repository**
-  - GitHub or similar code hosting
-  - Clear documentation
-  - Setup instructions
-  - README with overview
+**Cover image and presentation**
+- Cover image
+- Video presentation
+- **Slide presentation** — a separate asset from the video; not previously documented here
 
-- [ ] **Demo/Documentation**
-  - Video walkthrough
-  - Screenshots of trading activity
-  - Documentation of strategy
+**App hosting and repository**
+- Public GitHub repository
+- Demo application platform
+- Application URL — a live/hosted demo URL, not just the repo
+- **Alpaca paper trading account ID** (see above — explicitly required for judging)
 
-- [ ] **Strategy Description**
-  - Trading logic explanation
-  - Why options trading was chosen
-  - Risk management approach
-  - Market conditions tested
+**Social engagement (optional, but scored — see prize section)**
+- Up to 5 links to posts on X or LinkedIn, tagging both `@lablabai` / lablab.ai and `@AlpacaHQ` /
+  Alpaca
 
-## Judging Process
+**Additional mandatory item, stated separately on the challenge page (not part of the form list
+above, but required):**
+- **A one-page write-up covering: your AI logic, your risk gates, and your Alpaca infrastructure
+  implementation.** This is the closest match to what this repo already calls `SUBMISSION.md` —
+  it does not yet exist and needs to be written to this exact brief (one page, three named
+  topics).
 
-### Overview
-- Judges review every finalist submission
-- Winners are selected based on evaluation criteria
-- All winners highlighted across lablab.ai channels
+## Judging Criteria — VERIFIED, REPLACING THE EARLIER "FOUR DIMENSIONS" CLAIM
 
-### Judging Criteria
+The 2026-08-26 correction in this file claimed judging uses "Application of Technology,
+Presentation, Business Value, Originality" and stated **"Raw P&L is not one of them."** Read
+directly off the live page on 2026-08-30, that is wrong. The actual five categories, verbatim:
 
-> **CORRECTED 2026-08-26.** The criteria below were originally written as *inferred* from
-> typical hackathon evaluation and were never verified. Researched against lablab.ai's
-> published material: **lablab.ai scores across four dimensions — Application of
-> Technology, Presentation, Business Value, Originality.** Raw P&L is *not* one of them.
-> A comparable AI-trading hackathon states rankings use "risk-adjusted profitability,
-> drawdown control, and validation quality, not just raw PnL".
->
-> This matters for how the agent is tuned — see D-029. Optimising this week's P&L
-> optimises variance: over ~20 trades a zero-skill agent lands between -8% and +8%, so a
-> good week proves nothing and a blow-up costs marks on all four real dimensions.
+1. **P&L Performance** — "The trading performance of the submitted agent in the Alpaca paper
+   trading environment. Judges will consider the project's P&L and how effectively the strategy
+   performs through its trading activity."
+2. **Technology Implementation** — how effectively the project uses Alpaca's Trading API, MCP
+   server, CLI, and other required technologies to build an autonomous trading agent.
+3. **Creativity & Originality** — originality of the concept, trading strategy, agent behavior,
+   and overall approach. Judges value thoughtful and creative use of the technology.
+4. **Presentation & Execution** — how clearly and effectively the project communicates its idea,
+   demonstrates the agent in action, and presents the reasoning behind its strategy and results.
+5. **Social engagement** — quality of build-in-public content AND the engagement it generates
+   (likes, comments, shares).
 
-#### lablab.ai's four dimensions (verified)
+**What this means for trdrbot specifically.** P&L genuinely is judged directly — the
+"P&L doesn't matter over one week" thesis this whole project is built on is a real, measured, and
+still-correct statistical fact (D-029, the 60%-edge-agent-beats-a-coinflip-69%-of-the-time
+result), but it is not a reason to *omit* the P&L number from the submission; it is the reasoning
+that should accompany it. The honest move given both truths at once: report the actual P&L
+plainly (whatever it is), and use the calibration/attribution machinery to argue *why* a
+short-window P&L number alone would be a bad way to judge trading skill — turning "Creativity &
+Originality" and "Presentation & Execution" into the categories where the project's actual
+differentiator (a system that knows the difference between being right and being lucky) does the
+work P&L can't. Chasing P&L variance in the remaining days to look better on category 1 would
+undermine categories 3 and 4, which this project has spent five phases earning honestly.
 
-1. **Application of Technology** — effective, innovative use of the core technology
-2. **Presentation** — how clearly the solution is explained and demonstrated
-3. **Business Value** — commercial viability and market potential
-4. **Originality** — novelty versus existing approaches
+## Prizes (verified, corrects the earlier "estimated" breakdown)
 
-#### Originally inferred (unverified — retained for contrast)
+**Total pool: $6,300** (not the $6,000 headline figure once stated elsewhere — Featherless
+credits are counted in).
 
-Based on typical hackathon evaluation, judges likely assess:
+- 🥇 1st: **$2,500** + $300 in Featherless AI credits
+- 🥈 2nd: **$1,500**
+- 🥉 3rd: **$1,000**
+- **Social Engagement Prize — 2 winning teams**, independent of the main placings: $500 USD per
+  team + 1 month of Algo Trader Plus for every team member.
 
-#### Innovation & Creativity
-- Novel use of AI for trading decisions
-- Unique strategy approach
-- Creative options trading implementations
+Prizes are paid to **individuals**, not teams — a team win requires designating one member to
+receive payment, or confirming a split with lablab's finance team in advance. W-9 (US) or W-8BEN
+(non-US) plus government photo ID and bank details are required before payment; paid within 90
+days of event end once documents clear.
 
-#### Technical Execution
-- Code quality and architecture
-- Proper integration with Alpaca API/MCP
-- Reliability and error handling
-- Use of AI capabilities effectively
+**Submissions must be original and MIT-compliant.** This repo currently has no `LICENSE` file —
+needs one before submission if this term is to be satisfied cleanly.
 
-#### Trading Strategy Quality
-- Sound trading logic
-- Risk management implementation
-- Options strategy sophistication
-- Market data analysis
+## Best practices (unchanged, still sound)
 
-#### Presentation & Communication
-- Clear project description
-- Good documentation
-- Demo quality
-- Ability to explain approach
-
-#### Results & Performance
-- Paper trading account performance
-- Strategy backtesting (if provided)
-- Options trading execution quality
-- Risk-adjusted returns
-
-## Prize Distribution
-
-**Total Prize Pool:** $6,000 USD
-
-Prize breakdown (estimated based on typical lablab.ai hackathons):
-- 1st Place: ~$3,000
-- 2nd Place: ~$1,500
-- 3rd Place: ~$1,000
-- Potential additional prizes for specific achievements
-
-*Note: Exact distribution to be confirmed by lablab.ai*
-
-## What Happens After Submission
-
-### After Judging Closes
-1. Judges review all submissions
-2. Scoring and deliberation
-3. Winner selection
-4. Winners announced across lablab.ai channels
-5. Prize distribution coordinated with winners
-
-### Visibility
-- Winning projects featured on lablab.ai
-- Teams highlighted in community channels
-- Possible press coverage/blog features
-- Builds portfolio/credibility in AI trading space
-
-## Best Practices for Submission
-
-### Code Quality
-- Use version control (Git)
-- Include proper documentation
-- Add setup instructions
-- Include requirements.txt or package.json
-- Write clear commit messages
-
-### Documentation
-- README with project overview
-- Architecture diagram
-- Setup and run instructions
-- Strategy explanation
-- Known limitations
-
-### Demo Preparation
-- Test everything before submission
-- Prepare screenshots or video
-- Document trading results
-- Be ready to explain design decisions
-
-### Deadline Management
-- Submit well before deadline (not last minute)
-- Verify all links and resources work
-- Test submission form thoroughly
-- Keep backup of submission materials
-
-## Important Notes
-
-### Account Requirements
-- **NEW ACCOUNT ONLY:** Must register a new Alpaca paper trading account specifically for this hackathon
-- Do not use an existing account
-- Account linking must be verified before deadline
-
-### Trading Environment
-- All trades execute in **PAPER TRADING ONLY**
-- No real money involved
-- No financial risk
-- Simulated $100,000 starting capital
-
-### Intellectual Property
-- Teams retain IP rights to their project
-- May be showcased on lablab.ai and in community
-- Check lablab.ai terms for any attribution requirements
+- Submit well before the deadline, not at the last minute — the form itself may have quirks
+  worth discovering with time to fix them.
+- Verify every link (GitHub, demo URL, video) actually resolves before submitting.
+- Keep a backup of everything submitted.
 
 ---
 
-**Last Updated:** August 26, 2026
+**Verified:** 2026-08-30, against the live event page and the team's own `/trdrbot` submission
+page (both rendered via authenticated browser session, not a cached fetch — the event page
+blocks the plain HTTP fetch this doc's earlier version relied on).
 
-**Submission URL:** https://lablab.ai/ai-hackathons/alpaca-ai-trading-agents-hackathon
+**Event page:** https://lablab.ai/ai-hackathons/alpaca-ai-trading-agents-hackathon
+**Team page:** https://lablab.ai/ai-hackathons/alpaca-ai-trading-agents-hackathon/trdrbot
