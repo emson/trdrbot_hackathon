@@ -161,6 +161,22 @@ code{font-family:ui-monospace,monospace;font-size:.85em}
 
     # --- gauges ----------------------------------------------------------
     add("<h2>Gauges</h2>")
+    # What to read first, and in what order. Without this the panel is a wall of
+    # equally-weighted numbers, and a reader steering the system has no way to
+    # know which one improvement is FOR. One north star, few guardrails: each
+    # extra guardrail measurably inflates false alarms, so the list stops at
+    # three deliberately (notes/023).
+    add('<p class="sub"><strong>North star:</strong> <code>calibration.brier</code> '
+        'with its sample count - the one number improvement is for, because a '
+        'lucky week cannot move it and a well-calibrated view can. '
+        '<strong>Guardrails</strong> (must not degrade, both directions): '
+        '<code>sizing.refused_rate</code> and <code>exit.uncorroborated_decisives</code> '
+        '(rule compliance - a seam losing the conditional payoff, or a stop firing on '
+        'quote noise), the trade/decline balance behind '
+        '<code>attribution.attributable_rate</code> (always-trading and never-trading '
+        'are both drift, and this book has measured both), and '
+        '<code>coach.cost_usd_today</code> with <code>model.cal_age_days</code> '
+        '(cost and staleness). Everything else here is diagnostic.</p>')
     if not series:
         add('<p class="empty">No snapshots yet.</p>')
     else:

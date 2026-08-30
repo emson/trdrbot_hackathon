@@ -133,6 +133,58 @@ def _attributable_rate(rows: list[dict[str, Any]]) -> float | None:
     return round(useful / len(verdicts), 4)
 
 
+def _sizing_refused_rate(rows: list[dict[str, Any]]) -> float | None:
+    """Share of recent sizing calls that REFUSED rather than returned a size.
+
+    The production-visible face of I-40. A refusal here means the tool could not
+    identify which simulated structure it was sizing, or the structure's whole
+    expected win was eaten by friction - and before WU-4.2 every one of those
+    cases silently became a frictionless max/max fallback instead. A rising
+    share is either the model losing the habit of naming its structures or the
+    seam losing the conditional payoff again; both are worth seeing early, and
+    neither is visible anywhere else.
+    """
+    calls = _kind_rows(rows, "sizing")
+    if not calls:
+        return None
+    refused = sum(1 for r in calls if str(r.get("result")) == "refused")
+    return round(refused / len(calls), 4)
+
+
+def _uncorroborated_decisives(rows: list[dict[str, Any]]) -> int | None:
+    """Mark breaches past the immediate threshold that the underlying did not
+    confirm, over the recent window.
+
+    These close NOTHING, so they leave no exit row - the count is the only
+    trace they exist. It is also the data that will eventually tune
+    `CORROBORATION_FRACTION` against real artifacts rather than taste: a
+    persistent stream of suppressions beside no confirmed gaps says the
+    threshold is too loose, and none at all over a volatile stretch says it is
+    too tight.
+    """
+    beats = _kind_rows(rows, "exit_run")
+    if not beats:
+        return None
+    return sum(int(r.get("mark_breach_suppressed") or 0) for r in beats)
+
+
+def _book_risk(rows: list[dict[str, Any]], field: str) -> float | None:
+    """The latest book-level exposure reading, in dollars.
+
+    Trended rather than capped, deliberately. The per-underlying cap counts
+    NAMES and cannot see that three positions on correlated names are one bet
+    (the `correlated-names-are-one-bet` lesson measured SPY/QQQ at 0.92); a
+    vega or beta-delta CAP would see it, and would also be a gate nobody has
+    yet measured the need for. So this is the trajectory that has to justify
+    one first - measure, then gate, never the other way round.
+    """
+    beats = _kind_rows(rows, "book_risk", 1)
+    if not beats:
+        return None
+    v = beats[-1].get(field)
+    return round(float(v), 2) if v is not None else None
+
+
 def _seed_entropy(rows: list[dict[str, Any]]) -> int | None:
     """Distinct concept PAIRS sampled recently.
 
@@ -201,6 +253,13 @@ def snapshot_gauges(cfg: Any, rows: list[dict[str, Any]]) -> dict[str, Any]:
     put("research.opportunities_per_run", _research_yield(rows))
     put("discovery.gauntlet_survival", _discovery_survival(rows))
     put("attribution.attributable_rate", _attributable_rate(rows))
+    # The three seams WU-4.1..4.8 closed, watched where they would reopen.
+    # Every one reads a row the system already writes - a gauge needing new
+    # instrumentation is the wrong gauge.
+    put("sizing.refused_rate", _sizing_refused_rate(rows))
+    put("exit.uncorroborated_decisives", _uncorroborated_decisives(rows))
+    put("book.vega_dollars", _book_risk(rows, "vega_dollars"))
+    put("book.beta_delta_dollars", _book_risk(rows, "beta_weighted_delta"))
 
     def _calibration_gauges() -> None:
         book = _led.Ledger(Path(cfg.paths.state) / "ledger.jsonl")

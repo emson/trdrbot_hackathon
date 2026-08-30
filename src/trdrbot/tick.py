@@ -181,10 +181,15 @@ def _attention_query(items: list[Item], open_pos: list[Any], config: Config) -> 
     return " ".join(names[:ATTENTION_MAX_NAMES]) + " options setup"
 
 
-def _render_positions(store: PositionStore, snap: analytics.Snapshot | None = None,
-                      state_dir: Path | None = None, equity: float = 0.0) -> str:
-    """Two-tier context (D-019): detail for what needs attention, one line for the rest."""
-    positions = store.open_positions()
+def _render_positions(positions: list[Any], bg: dict[str, Any] | None = None) -> str:
+    """Two-tier context (D-019): detail for what needs attention, one line for the rest.
+
+    Takes what it renders. It used to take the store, the snapshot, a state
+    directory and an equity figure - four parameters, three of them present
+    only so that a RENDERER could compute book greeks internally, where nothing
+    else could see the result. The caller computes them now and journals them
+    on the way past (WU-4.10), which is how they became a gauge at all.
+    """
     if not positions:
         return "## Our positions\n\n(none)"
 
@@ -193,36 +198,33 @@ def _render_positions(store: PositionStore, snap: analytics.Snapshot | None = No
     # bullish put spreads on three tickers LOOK diversified and ARE one
     # +delta/-vega/+theta position - this line is where that becomes
     # visible before a fourth one gets added (D-040).
-    if snap is not None:
-        bg = analytics.book_greeks(positions, snap.underlying_prices,
-                                   state_dir=state_dir, equity=equity)
-        if bg:
-            skip = f" ({bg['positions_skipped']} unpriced)" if bg["positions_skipped"] else ""
+    if bg:
+        skip = f" ({bg['positions_skipped']} unpriced)" if bg["positions_skipped"] else ""
+        lines.append(
+            f"Book greeks (est., entry IV): delta ${bg['delta_dollars']:+,.0f}"
+            f" | theta ${bg['theta_dollars']:+,.0f}/day"
+            f" | vega ${bg['vega_dollars']:+,.0f}/IVpt{skip}. Before adding a"
+            f" position, check whether it grows or offsets these."
+        )
+        if "beta_weighted_delta" in bg:
+            pct = bg.get("pct_equity_per_1pct_spy")
+            flag = ""
+            if pct is not None and abs(pct) >= BETA_DELTA_FLAG_PCT:
+                flag = ("  <- CONCENTRATED: this book is a directional market bet, "
+                        "whatever the names suggest")
+            assumed = bg.get("betas_assumed") or []
+            note = (f" ({len(assumed)} beta assumed - poor fit or no history: "
+                    f"{', '.join(assumed)})" if assumed else "")
             lines.append(
-                f"Book greeks (est., entry IV): delta ${bg['delta_dollars']:+,.0f}"
-                f" | theta ${bg['theta_dollars']:+,.0f}/day"
-                f" | vega ${bg['vega_dollars']:+,.0f}/IVpt{skip}. Before adding a"
-                f" position, check whether it grows or offsets these."
+                f"Beta-weighted to SPY: ${bg['beta_weighted_delta']:+,.0f} delta"
+                + (f", i.e. {pct:+.2f}% of equity per 1% SPY move" if pct is not None else "")
+                + f". Betas {bg['betas']}{note}.{flag}"
             )
-            if "beta_weighted_delta" in bg:
-                pct = bg.get("pct_equity_per_1pct_spy")
-                flag = ""
-                if pct is not None and abs(pct) >= BETA_DELTA_FLAG_PCT:
-                    flag = ("  <- CONCENTRATED: this book is a directional market bet, "
-                            "whatever the names suggest")
-                assumed = bg.get("betas_assumed") or []
-                note = (f" ({len(assumed)} beta assumed - poor fit or no history: "
-                        f"{', '.join(assumed)})" if assumed else "")
-                lines.append(
-                    f"Beta-weighted to SPY: ${bg['beta_weighted_delta']:+,.0f} delta"
-                    + (f", i.e. {pct:+.2f}% of equity per 1% SPY move" if pct is not None else "")
-                    + f". Betas {bg['betas']}{note}.{flag}"
-                )
-                lines.append(
-                    "Names are not exposures: three positions on correlated names are one "
-                    "bet. Judge a new position by whether it offsets this number or grows it."
-                )
-            lines.append("")
+            lines.append(
+                "Names are not exposures: three positions on correlated names are one "
+                "bet. Judge a new position by whether it offsets this number or grows it."
+            )
+        lines.append("")
     for p in positions:
         rules = ", ".join(
             # `level` for underlying stops, `threshold` for mark-based ones.
@@ -326,7 +328,25 @@ async def _build_decide_prompt(
     inline, because scattering those would lose the plot this module exists to
     keep straight.
     """
-    prompt_parts = [snap.render(), _render_positions(store, snap, config.paths.state, snap.equity or 0.0)]
+    open_now = store.open_positions()
+    book_greeks = analytics.book_greeks(
+        open_now, snap.underlying_prices,
+        state_dir=config.paths.state, equity=snap.equity or 0.0)
+    if book_greeks and journal is not None:
+        # The book's risk SHAPE, on the record once per decide cycle. Computed
+        # here already for the prompt; journalling it costs nothing and is what
+        # turns "the book drifted into one big directional bet" from something
+        # a reader might notice into a trajectory (WU-4.10). A vega CAP has to
+        # earn its existence from this series - measure first, gate later.
+        journal.append(
+            "book_risk", positions=len(open_now),
+            delta_dollars=round(book_greeks["delta_dollars"], 2),
+            vega_dollars=round(book_greeks["vega_dollars"], 2),
+            theta_dollars=round(book_greeks["theta_dollars"], 2),
+            beta_weighted_delta=book_greeks.get("beta_weighted_delta"),
+            pct_equity_per_1pct_spy=book_greeks.get("pct_equity_per_1pct_spy"),
+            skipped=book_greeks.get("positions_skipped", 0))
+    prompt_parts = [snap.render(), _render_positions(open_now, book_greeks)]
     _ok, _why = competence.can_open(config.deadline, None)
     prompt_parts.append(
         f"## Competence tier: {posture.tier.upper()}\n"

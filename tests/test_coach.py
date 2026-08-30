@@ -887,3 +887,57 @@ def test_a_lever_with_no_evidence_stream_still_mutates():
     assert "no rejection evidence" in coach._rejection_digest([], "")
     assert coach._rejection_digest([{"kind": "widget", "fates": [
         {"fate": "rejected: too wide"}]}], "widget").startswith("- rejected: too wide")
+
+
+# ==================================================================== PILLAR-4
+# LEARNING INTEGRITY - the drift line (WU-4.10, notes/023-024)
+#
+# The three seams phase 4 closed, watched where they would reopen. Every gauge
+# reads a row the system already writes; a gauge needing new instrumentation is
+# the wrong gauge. And a gauge with no data is OMITTED, never zeroed - on a
+# chart those are indistinguishable (D-038, absence-as-zero).
+
+def _cfg(tmp_path):
+    from types import SimpleNamespace
+
+    (tmp_path / "state").mkdir(exist_ok=True)
+    return SimpleNamespace(
+        paths=SimpleNamespace(state=tmp_path / "state", data=tmp_path,
+                              journal=tmp_path / "journal.jsonl"),
+        coach={"enabled": True}, pricing={})
+
+
+def test_the_new_drift_gauges_are_omitted_when_nothing_has_happened(tmp_path):
+    from trdrbot import coach
+
+    g = coach.snapshot_gauges(_cfg(tmp_path), [])
+
+    for name in ("sizing.refused_rate", "exit.uncorroborated_decisives",
+                 "book.vega_dollars", "book.beta_delta_dollars"):
+        assert name not in g, f"{name} was reported with no data behind it"
+
+
+def test_the_drift_gauges_read_the_rows_the_system_already_writes(tmp_path):
+    """Producer-derived: the rows are written by `Journal.append` exactly as
+    local_tools, exit_rules and the decide path write them."""
+    from trdrbot import coach
+    from trdrbot.journal import Journal
+
+    journal = Journal(tmp_path / "journal.jsonl")
+    journal.append("sizing", result="sized", contracts=3)
+    journal.append("sizing", result="refused", contracts=0, reason="REFUSED: ...")
+    journal.append("sizing", result="no_position", contracts=0)
+    journal.append("sizing", result="refused", contracts=0, reason="REFUSED: ...")
+    journal.append("exit_run", positions=2, mark_breach_suppressed=2,
+                   mark_breach_confirmed=1)
+    journal.append("exit_run", positions=2, mark_breach_suppressed=1,
+                   mark_breach_confirmed=0)
+    journal.append("book_risk", delta_dollars=1000.0, vega_dollars=-250.0,
+                   beta_weighted_delta=4200.0)
+
+    g = coach.snapshot_gauges(_cfg(tmp_path), list(journal.read()))
+
+    assert g["sizing.refused_rate"] == 0.5
+    assert g["exit.uncorroborated_decisives"] == 3
+    assert g["book.vega_dollars"] == -250.0
+    assert g["book.beta_delta_dollars"] == 4200.0
