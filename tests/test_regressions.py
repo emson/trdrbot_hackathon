@@ -3823,3 +3823,70 @@ def test_model_gauges_are_omitted_when_no_artifact_exists(tmp_path):
     g = coach.snapshot_gauges(cfg, [])
     assert "model.inflation_5d" not in g
     assert "model.cal_age_days" not in g
+
+
+# ==================================================================== PILLAR-2
+# ONE MEASURE, AND SEAMS THAT REFUSE  (WU-4.1..4.2; issues I-40, notes/023-024)
+#
+# The class these guard: two layers computing one decision quantity under
+# different assumptions - two clocks (D-074), two calibration numbers (D-076),
+# two cost views (D-079), and now a seam that DROPS the cost view entirely.
+# The invariant is not a level, it is a relationship: every probability, EV and
+# payoff ratio feeding one gate/size decision comes from one declared measure,
+# friction included, and a seam that loses any part of it refuses rather than
+# substitutes.
+#
+# Governance (notes/023): rows are added, never edited to make a candidate
+# pass; each test names the incident it traces to; each was verified by
+# reverting its fix and watching it fail.
+
+def _fair(right: str, strike: float, spot: float = 100.0,
+          iv: float = 0.25, days: float = 7.0) -> float:
+    """Expected intrinsic under the SAME grid the stack prices with.
+
+    The D-079 scaffold method: a structure built from these prices is fair BY
+    CONSTRUCTION, so any edge the stack reports on one is an artefact of the
+    stack rather than of the market.
+    """
+    grid = optmath._lognormal_grid(spot, iv, days)
+    if right == "C":
+        return sum(w * max(0.0, s - strike) for s, w in grid)
+    return sum(w * max(0.0, strike - s) for s, w in grid)
+
+
+def test_long_call_sizes_on_its_conditional_payoff_despite_unbounded_profit():
+    """G6: 'unbounded max loss OR profit' banned cheap convexity at any edge.
+
+    A long call's LOSS is bounded at the debit and its conditional payoff is
+    finite (measured 1.96 on a fair-priced ATM call) - E[win|win] exists even
+    though max profit does not. Refusing it treated the good direction of
+    unboundedness as though it were the dangerous one.
+    """
+    legs = [Leg(right="C", strike=100.0, side="long", qty=1, price=_fair("C", 100.0))]
+    mp, ml = optmath.max_profit_loss(legs)
+    assert mp is None and ml is not None, "the shape under test: upside unbounded"
+    pr = optmath.payoff_ratio(legs, 100.0, 0.25, 7.0)
+    assert pr is not None, "a conditional payoff exists precisely because E[win|win] is finite"
+
+    d = _size(max_profit=mp, max_loss=ml, payoff_ratio=pr[2], stated_confidence=0.60)
+
+    assert d.contracts >= 1, d.reason
+    assert d.kelly_full is not None and d.kelly_full > 0
+
+
+def test_unbounded_loss_is_refused_even_when_a_conditional_payoff_is_supplied():
+    """The asymmetry is the whole point: Kelly divides by the worst case, and
+    an unbounded loss does not have one. No ratio rescues that."""
+    d = _size(max_profit=500.0, max_loss=None, payoff_ratio=1.5)
+    assert d.contracts == 0
+    assert "unbounded max loss" in d.reason
+
+
+def test_unbounded_profit_without_a_ratio_refuses_for_the_MISSING_RATIO():
+    """The refusal must name what is actually missing. Blaming the
+    unboundedness is what made the long call permanently unsizeable - the
+    repair is 'simulate it', not 'pick another structure'."""
+    d = _size(max_profit=None, max_loss=-260.0)
+    assert d.contracts == 0
+    assert "conditional payoff" in d.reason
+    assert "simulate" in d.reason.lower()

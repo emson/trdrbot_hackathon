@@ -93,11 +93,22 @@ def shrink_probability(stated: float, cal: Calibration) -> float:
     return 0.5 + (stated - 0.5) * (0.5 + 0.5 * trust)
 
 
-def kelly_fraction(prob: float, max_profit: float, max_loss: float,
+def kelly_fraction(prob: float, max_profit: float | None, max_loss: float,
                    *, payoff_ratio: float | None = None) -> float | None:
-    """Full-Kelly fraction for a bounded bet. None if it is not computable.
+    """Full-Kelly fraction for a bet with a bounded LOSS. None if not computable.
 
     f* = p - (1-p)/b  where b = win/loss payoff ratio.
+
+    **The two unbounded directions are not symmetric, and treating them alike
+    banned a whole class of trade.** Kelly divides by the worst case, so an
+    unbounded LOSS genuinely has no fraction - refuse it. An unbounded PROFIT
+    has a perfectly well-defined `b` whenever the CONDITIONAL ratio is
+    available: `E[win|win]` is finite for a long call even though its max
+    profit is not, because the lognormal grid weights the tail it lives in.
+    Requiring both bounds therefore refused cheap convexity at any edge - a
+    plain long call priced fair at a conditional payoff of 1.96 was unsizeable,
+    which is the good direction of unboundedness being punished for the
+    bad one's crime (measured, `tests/scaffold_trader_gauntlet.py` G6).
 
     `payoff_ratio` overrides b with the CONDITIONAL one - E[win|win] over
     E[loss|loss] from the same lognormal grid the probabilities come off. The
@@ -111,9 +122,14 @@ def kelly_fraction(prob: float, max_profit: float, max_loss: float,
     by 43% - so the formula quietly preferred buying premium to selling it, at
     every sample size (see `optmath.payoff_ratio`).
     """
-    if max_loss >= 0 or max_profit <= 0:
+    if max_loss >= 0:
         return None
-    b = payoff_ratio if payoff_ratio is not None else max_profit / abs(max_loss)
+    if payoff_ratio is not None:
+        b = payoff_ratio
+    elif max_profit is None or max_profit <= 0:
+        return None  # no conditional ratio and no bounded upside: nothing to divide
+    else:
+        b = max_profit / abs(max_loss)
     if b <= 0:
         return None
     return prob - (1 - prob) / b
@@ -143,13 +159,25 @@ def size_position(
     """
     adj = shrink_probability(stated_confidence, calibration)
 
-    # An unbounded loss has no Kelly fraction - the formula divides by a
-    # worst case that does not exist. Refuse rather than substitute a number.
-    if max_loss is None or max_profit is None:
+    # An unbounded LOSS has no Kelly fraction - the formula divides by a worst
+    # case that does not exist. Refuse rather than substitute a number.
+    if max_loss is None:
         return SizingDecision(
             0, 0.0, None, 0.0, adj,
-            "REFUSED: unbounded max loss or profit - Kelly is undefined without a "
-            "bounded worst case. Use a defined-risk structure.",
+            "REFUSED: unbounded max loss - Kelly is undefined without a bounded "
+            "worst case. Use a defined-risk structure.",
+        )
+    # An unbounded PROFIT is the other direction and is not the same refusal
+    # (see `kelly_fraction`): it needs the conditional payoff, which only a
+    # simulated structure carries. Refuse for the ABSENT RATIO, and say so -
+    # the old message blamed the unboundedness and made long options unsizeable
+    # at any edge.
+    if max_profit is None and payoff_ratio is None:
+        return SizingDecision(
+            0, 0.0, None, 0.0, adj,
+            "REFUSED: unbounded max profit and no conditional payoff to size on. "
+            "E[win|win] is finite even here, but only simulate_experiments computes "
+            "it - simulate this structure and size against its payoff ratio.",
         )
 
     full = kelly_fraction(adj, max_profit, max_loss, payoff_ratio=payoff_ratio)
@@ -290,10 +318,13 @@ def size_position(
             f"(Kelly {full:+.3f}), so the size is the exploration allocation, not an "
             f"earned one. If you take it, take it as a test of the view"
         )
+    # The max/max branch is reachable only when `payoff_ratio` is None, and the
+    # guard above then guarantees `max_profit` is not - the two None cases
+    # cannot meet here.
     payoff = (f"payoff {payoff_ratio:.2f} (conditional E[win]/E[loss])"
               if payoff_ratio is not None
-              else f"payoff {max_profit / abs(max_loss):.2f} (max/max - no simulated "
-                   f"structure matched, so this pairs a tail ratio with a "
+              else f"payoff {(max_profit or 0.0) / abs(max_loss):.2f} (max/max - no "
+                   f"simulated structure matched, so this pairs a tail ratio with a "
                    f"whole-region probability)")
     return SizingDecision(
         contracts, actual, full, frac, adj,
