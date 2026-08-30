@@ -4436,3 +4436,49 @@ def test_a_flat_board_records_no_per_leg_iv(tmp_path):
 
     saved = store.load(store.all()[0].position_id)
     assert all("iv_pct" not in l for l in saved.legs)
+
+
+def test_the_lock_verifies_its_own_claim_and_loses_a_race_it_did_not_win(tmp_path):
+    """I-51: acquisition was read-check-write with nothing between the check
+    and the write, so two processes arriving in the same instant could both
+    pass the check, both write, and both proceed - concurrent ticks
+    double-processing the inbox or double-submitting an order.
+
+    Simulated at the only point where it matters: a rival's claim is on disk by
+    the time we read back what we wrote."""
+    import json as _json
+
+    from trdrbot.lock import tick_lock
+
+    path = tmp_path / "tick.lock"
+    original_write = Path.write_text
+
+    def rival_wins(self, *a, **kw):
+        original_write(self, *a, **kw)
+        if self == path:  # the rival lands between our write and our read-back
+            original_write(self, _json.dumps({"pid": 999999, "ts": 9e9}),
+                           encoding="utf-8")
+
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(Path, "write_text", rival_wins)
+        with pytest.raises(BlockingIOError, match="999999"):
+            with tick_lock(path):
+                pytest.fail("proceeded while another process held the lock")
+
+    assert _json.loads(path.read_text())["pid"] == 999999, "the rival's lock was clobbered"
+
+
+def test_the_single_shot_tick_classifies_its_failure_instead_of_crashing(tmp_path):
+    """I-52: `run.sh` points cron/launchd at this path, where a raw traceback
+    is the least useful thing an operator can be handed. The run loop has
+    classified-and-continued since it existed."""
+    import asyncio
+
+    from trdrbot import cli
+
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(cli, "run_tick",
+                   lambda *a, **k: (_ for _ in ()).throw(RuntimeError("broker exploded")))
+        code = asyncio.run(cli._tick())
+
+    assert code == 1, "a failed tick must signal failure to cron, not exit 0"

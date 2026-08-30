@@ -187,20 +187,25 @@ Sorted by severity.
   is byte-identical. The structure match is now computed ONCE and reused by both consumers
   (the IVs and the exit-rule reachability warnings) rather than twice. Verified by reverting
   optmath.py and local_tools.py and watching the round-trip test fail.
-- **I-51 · The tick lock's write is the one non-atomic state write left** (2026-08-30 review).
-  `lock.py` is read-check-write with a bare `path.write_text` - two processes racing acquisition
-  within the same instant (stale-lock breaking, or two `trdrbot run` loops started by accident)
-  can BOTH proceed, and concurrent ticks double-process the inbox or double-submit orders. Narrow
-  trigger, capital-relevant consequence; the I-36 atomic-writers sweep reached every writer except
-  the lock that guards them all.
-- **I-52 · The single-shot tick path crashes raw where the loop degrades** (2026-08-30 review).
-  `cli.py::_tick` (what `run.sh` points cron/launchd at) catches only `BlockingIOError`; any other
-  exception exits via traceback with no classification, while `_run_loop` prints-and-continues.
-  The `failures.classify`/`advice` machinery exists and is not consulted on this path.
-- **I-53 · `doctor` cannot see a typo'd role key in `llm.roles`** (2026-08-30 review). It iterates
-  the CODE's role list and probes each chain; it never reads config.yaml's `roles:` keys, so a
-  misspelled override (e.g. `reserach:`) silently falls through to the default chain - degradation
-  by design, but invisible to the one command built to catch config problems.
+- ~~**I-51 · The tick lock's write is the one non-atomic state write left**~~ **FIXED
+  2026-08-30 (WU-6.6).** Acquisition now READS BACK what it wrote and raises `BlockingIOError`
+  if the pid on disk is not ours, collapsing the read-check-write window from the length of a
+  whole tick to one filesystem read. Deliberately not flock/O_EXCL: the pid+timestamp file is
+  what makes a stale lock breakable and human-readable (D-018 #5), and the residual race after a
+  read-back is proportionate to a collision requiring two processes within microseconds. Verified
+  by reverting lock.py and watching the race test fail.
+- ~~**I-52 · The single-shot tick path crashes raw where the loop degrades**~~ **FIXED
+  2026-08-30 (WU-6.7).** `cli._tick` - the path `run.sh` points cron/launchd at - now classifies
+  any non-`BlockingIOError` failure through the existing `failures.classify`/`advice` machinery,
+  prints one line, and exits 1 so a scheduler sees a real failure signal instead of a traceback.
+  No journalling from the handler: the journal write may be the very thing that failed. Verified
+  by reverting cli.py and watching the test fail.
+- ~~**I-53 · `doctor` cannot see a typo'd role key in `llm.roles`**~~ **FIXED 2026-08-30
+  (WU-6.8).** `doctor` now prints the set difference between the config's `llm.roles` keys and
+  the code's `ROLES`, warning per unknown key and naming the known ones. Never fatal -
+  degradation to the default chain stays the design; invisibility was the defect. Confirmed
+  silent against the live config. The `cli.py` module docstring, which enumerated four commands
+  while the parser grew to seventeen, now points at `trdrbot --help` so it cannot drift again.
 - **I-29 · The bootstrap base rate is overconfident by 15-18pp where credit spreads live**
   ([notes/017](notes/017_learning_from_historic_data.md)). Measured offline over **21,280
   historical band-forecasts** (56 tickers, horizons 3/5/10, 5 band shapes, history sliced before

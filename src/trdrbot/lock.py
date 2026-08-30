@@ -39,6 +39,29 @@ def tick_lock(path: Path, stale_after: int = 600) -> Iterator[None]:
             print("[lock] breaking unreadable lock")
 
     path.write_text(json.dumps({"pid": os.getpid(), "ts": time.time()}), encoding="utf-8")
+
+    # VERIFY THE CLAIM. Everything above is read-check-write, and two processes
+    # arriving in the same instant - two `trdrbot run` loops started by
+    # accident, or both breaking one stale lock - can each pass the check and
+    # each write, after which both proceed and concurrent ticks double-process
+    # the inbox or double-submit an order. Reading back collapses that window
+    # from the length of a whole tick to a single filesystem read.
+    #
+    # Deliberately not flock or O_EXCL: the pid+timestamp file is what makes a
+    # stale lock breakable and human-readable, both of which this project has
+    # needed (D-018 #5), and the residual race after a read-back is
+    # proportionate to a same-machine collision that requires two processes
+    # within microseconds of each other.
+    try:
+        holder = json.loads(path.read_text(encoding="utf-8")).get("pid")
+    except (OSError, json.JSONDecodeError, KeyError):
+        holder = os.getpid()  # unreadable: fall back to proceeding, as before
+    if holder != os.getpid():
+        raise BlockingIOError(
+            f"lost the lock race to pid {holder} - another tick claimed it in the "
+            f"same instant; skipping"
+        )
+
     try:
         yield
     finally:

@@ -1,9 +1,9 @@
-"""CLI - the exploration surface for the walking skeleton.
+"""CLI - every command the system exposes to a human.
 
-    trdrbot doctor    # verify config, secrets, and the Alpaca MCP connection
-    trdrbot inject    # drop an observation into the inbox by hand
-    trdrbot tick      # run one tick end to end
-    trdrbot journal   # show what happened
+`trdrbot --help` is the list, and it is generated from the parser below rather
+than restated here: this docstring enumerated four commands for most of the
+project's life while the parser grew to seventeen, and the first thing anyone
+reads should not be the thing most likely to be stale.
 """
 
 from __future__ import annotations
@@ -16,6 +16,7 @@ import sys
 from typing import Any
 
 from . import config as config_mod
+from . import failures
 from . import ids, mcp_client
 from . import llm as llm_mod
 from .inbox import Inbox
@@ -83,14 +84,23 @@ async def _doctor() -> int:
                     reachable += 1
                 except Exception as exc:  # noqa: BLE001
                     print(f"  DEAD {spec:<34} {type(exc).__name__}: {str(exc)[:80]}")
+        # A role key the CODE does not have is silently ignored by
+        # `model_chain` - that role just runs the default chain, which is the
+        # intended degradation but is invisible. `doctor` exists to catch
+        # exactly this class, and it was iterating the code's roles, so it
+        # could never see a typo in the config's (I-53).
+        unknown_roles = sorted(set((cfg.raw.get("llm") or {}).get("roles") or {})
+                               - set(llm_mod.ROLES))
+        for key in unknown_roles:
+            print(f"  WARN llm.roles.{key} is not a role this code has - it is "
+                  f"ignored, and that role runs the default chain. Known: "
+                  f"{', '.join(llm_mod.ROLES)}")
         print(f"  {reachable}/{len(seen)} configured models reachable")
         if reachable == 0:
             print("  NO MODEL IS REACHABLE - the system cannot make a decision.")
             return 1
         print(f"  reachable - replied {str(reply.content)[:40]!r}")
     except Exception as exc:  # noqa: BLE001
-        from . import failures
-
         cause = failures.classify(exc)
         print(f"  FAILED ({cause.value}): {type(exc).__name__}: {exc}")
         print(f"\n  {failures.advice(cause, exc)}")
@@ -121,6 +131,15 @@ async def _tick(force: bool = False) -> int:
     except BlockingIOError as exc:
         print(f"[tick] {exc}")
         return 0
+    except Exception as exc:  # noqa: BLE001 - the loop degrades; so does this
+        # `run.sh` points cron/launchd at this path, where a raw traceback is
+        # the least useful thing an operator can be handed. The run loop has
+        # classified-and-continued since it existed; this classifies and exits
+        # non-zero, which is the single-shot equivalent. No journalling from
+        # here - the journal write may be the very thing that failed.
+        cause = failures.classify(exc)
+        print(f"[tick] failed ({cause}): {failures.advice(cause, exc)}")
+        return 1
     return 0
 
 
