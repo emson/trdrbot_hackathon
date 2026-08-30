@@ -52,6 +52,17 @@ NEEDED = 2  # N
 #: rule (INV-26), which is the point: a default nobody has to remember.
 IMPLICIT_TIME_STOP_DAYS = 1
 
+#: Consecutive reconcile passes that must see a leg missing at the broker
+#: before the remainder is closed. 2 = one confirmation tick, which on the open
+#: cadence is five minutes of exposure - chosen to survive a single stale or
+#: mid-fill snapshot, which is the only false positive this signal has.
+#:
+#: Tune it from the journal, never from taste: `leg_divergence` rows carry
+#: `consecutive`, and a recovery writes `leg_divergence_cleared`. A stream of
+#: cleared-at-1 rows says 2 is too tight; a real assignment sitting at 2 for
+#: several ticks before anyone notices says it is too loose.
+LEG_DIVERGENCE_CONFIRM = 2
+
 
 def _days_to(day: str) -> int | None:
     try:
@@ -181,14 +192,26 @@ EXIT_SIGNALS: dict[str, ExitSignal] = {
         "days_to_deadline", lambda p, s, d: _days_to(d),
         0.0, lambda v: f"{v:.0f}d",
     ),
+    # The structure itself is gone, not merely moving. Reconcile counts
+    # consecutive passes where a leg was missing at the broker (early
+    # assignment, a partial external close), and this reads that count.
+    #
+    # `immediate_overshoot=0.0` because the COUNT IS the debounce - reaching
+    # the threshold already means several independent broker snapshots agreed,
+    # which is a stronger confirmation than N-of-M over one noisy signal. And
+    # no `corroborate`: the broker's own holdings are the corroboration.
+    "leg_divergence": ExitSignal(
+        "leg_divergence", lambda p, s, d: float(p.leg_divergence_count),
+        0.0, lambda v: f"{v:.0f} consecutive",
+    ),
 }
 
 #: Lower fires first when several rules trigger in one tick. Risk before
 #: reward: a position simultaneously at its stop and its target (a crazy
 #: quote, or a gap through both) must exit as a stop, not book a fictional
 #: win. Previously this was list order, i.e. accidental.
-_PRIORITY = {"deadline": 0, "stop_loss": 1, "underlying_stop": 1,
-             "time_stop": 2, "profit_target": 3}
+_PRIORITY = {"deadline": 0, "leg_divergence": 0, "stop_loss": 1,
+             "underlying_stop": 1, "time_stop": 2, "profit_target": 3}
 
 
 def _pct_string_to_fraction(v: Any) -> float | None:
@@ -222,6 +245,8 @@ def _normalise(rule: dict[str, Any]) -> tuple[str, str, float, str] | None:
 
     if kind == "deadline":
         return ("days_to_deadline", "below", 0.0, kind)
+    if kind == "leg_divergence":
+        return ("leg_divergence", "above", float(LEG_DIVERGENCE_CONFIRM), kind)
     if kind in ("stop_loss", "profit_target") and rule.get("threshold") is not None:
         thr = _pct_string_to_fraction(rule["threshold"])
         if thr is None:
@@ -313,7 +338,11 @@ def evaluate(pos: Position, snap: Snapshot, deadline: str,
     # The deadline is an implicit rule on every position (INV-26): without it
     # a conventional-DTE position never resolves inside the competition and
     # the learning loop produces nothing at all.
-    implicit: list[dict[str, Any]] = [{"type": "deadline"}]
+    # Two rules belong to the SYSTEM, not to the agent: the deadline (INV-26)
+    # and leg divergence. Neither is the agent's to override, and for the same
+    # reason - the agent's exit rules all describe a position that, in these
+    # two cases, either cannot resolve in time or no longer exists.
+    implicit: list[dict[str, Any]] = [{"type": "deadline"}, {"type": "leg_divergence"}]
     # A gamma-wall time stop is the second, unless the agent wrote a USABLE one
     # of its own. Keyed on whether the rule PARSES rather than on whether one
     # is present: a time_stop the evaluator cannot read is a typo, not a

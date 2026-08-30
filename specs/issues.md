@@ -146,15 +146,21 @@ Sorted by severity.
   `dataclasses.fields(Position)` and fails on any field that does not survive, unless it is on an
   exclusion list carrying a stated reason. Verified by reverting the frontmatter/_parse additions
   and watching the invariant name the exact missing field.
-- **I-48 · `leg_divergence` is journalled and nothing corrects the position** (2026-08-30
-  review). When one leg of a multi-leg position vanishes at the broker (early assignment, partial
-  external close), reconcile journals a `leg_divergence` finding and moves on - `pos.status` and
-  `pos.legs` are never touched. Downstream, `position_pnl_fraction` and `exit_rules.evaluate`
-  silently filter to the legs still present and keep pricing the position indefinitely on that
-  partial view: book greeks, `max_loss_usd` and every mark rule now describe a spread that no
-  longer exists, and the remainder can be an UNDEFINED-RISK naked leg - the exact shape INV-19
-  refuses to create via its own close path, arriving via the broker instead. D-091's sweep
-  hardened the exit-rule spine, not reconcile's state-mutation completeness.
+- ~~**I-48 · `leg_divergence` is journalled and nothing corrects the position**~~ **FIXED
+  2026-08-30 (WU-6.3).** Reconcile now COUNTS consecutive divergences on `Position.
+  leg_divergence_count` (and writes `leg_divergence_cleared` when the full set returns, so a
+  transient leaves a trace instead of silently un-counting); the exit registry ACTUATES on that
+  count via a `leg_divergence` signal at `LEG_DIVERGENCE_CONFIRM = 2`, implicit on every position
+  like the deadline and at the same priority. Reconcile runs immediately before `exit_rules.run`
+  in the same tick, so confirmation costs one tick - five minutes on the open cadence - and the
+  existing close path does the rest: INV-19 closes ALL remaining legs, which is the point, since
+  the remainder of a broken spread can be an undefined-risk naked short. No tools threaded into
+  reconcile, no new mechanism: one registry entry plus one `_normalise` clause, the D-037 recipe.
+  **Stated limitation:** the `pnl_fraction` learning sees at that close covers the SURVIVING legs
+  only - the vanished leg took its P&L with it, the same honest gap as D-056's external closes.
+  Assigned stock appearing at the broker remains out of scope here; it surfaces through
+  reconcile's existing "at the broker with no story of ours" branch. Verified by reverting
+  reconcile.py and exit_rules.py and watching all three fail.
 - **I-49 · Two muse accounting gaps: funnel overlap unmeasured, malformed candidates evade the
   trial count** (2026-08-30 review). (a) The muse may spend its 2 daily emission slots on names
   research/discovery already cover - nothing measures how often, though the journal's `muse` rows

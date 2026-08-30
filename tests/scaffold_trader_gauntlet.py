@@ -412,6 +412,20 @@ run_path("P5b same bleed, now 1 day from expiry",
          mkpos([{"type": "stop_loss", "threshold": "-50%"}], expiry=_soon),
          [snap(-0.49, 100)], 1, "time_stop")
 
+# CHANGED (WU-6.3): the structure itself going missing, not merely moving.
+# Reconcile counts consecutive divergences at the broker; this is the exit
+# engine reading that count. One snapshot holds (a stale page must not
+# liquidate a healthy spread), the confirmed second closes ALL remaining legs -
+# because the remainder of a broken spread can be a naked short.
+run_path("P7 leg vanished once (a stale snapshot)",
+         mkpos([{"type": "profit_target", "threshold": "+50%"}],
+               leg_divergence_count=1),
+         [snap(0.0, 100)], None)
+run_path("P7b leg vanished twice - confirmed, outranks every other rule",
+         mkpos([{"type": "profit_target", "threshold": "+50%"}],
+               leg_divergence_count=2),
+         [snap(+2.00, 100)], 1, "leg_divergence")
+
 blind = mkpos([{"type": "stop_loss", "threshold": "-50%"},
                {"type": "profit_target", "threshold": "+50%"}])
 r, _, _ = evaluate(blind, snap(-0.90, 100, basis=(500.0, -495.0)), DEADLINE)

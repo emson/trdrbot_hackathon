@@ -105,14 +105,40 @@ async def reconcile(
                 learn_errors += 0 if ok else 1
                 result["phantom"].append(pos.position_id)
         elif present and len(present) != len(syms) and not pending:
+            # COUNT, do not close. The remainder of a broken spread can be an
+            # undefined-risk naked leg - exactly what INV-19 refuses to create
+            # via our own close path, arriving through the broker instead - so
+            # it cannot be left priced on the legs it still has. But one stale
+            # snapshot must not liquidate a healthy position either, and
+            # reconcile has no tools and should not grow them.
+            #
+            # So the count is the signal and the exit registry is the actuator
+            # (WU-6.3). `exit_rules.run` is the very next thing this tick does,
+            # so confirmation costs one tick of exposure.
+            pos.leg_divergence_count += 1
+            store.save(pos)
             journal.append(
                 "reconciliation",
                 position_id=pos.position_id,
                 finding="leg_divergence",
                 intended=syms,
                 actual=present,
+                consecutive=pos.leg_divergence_count,
             )
             result["drift"].append(pos.position_id)
+        elif present and len(present) == len(syms) and pos.leg_divergence_count:
+            # It came back. A transient - a slow broker page, a snapshot taken
+            # mid-fill - leaves a trace rather than silently un-counting, so
+            # the tuning question ("is the confirm threshold right?") can be
+            # answered from the journal instead of from taste.
+            pos.leg_divergence_count = 0
+            store.save(pos)
+            journal.append(
+                "reconciliation",
+                position_id=pos.position_id,
+                finding="leg_divergence_cleared",
+                intended=syms,
+            )
 
     # Heartbeat, same reason as `exit_run` and `attribution_run` (D-074):
     # learning was the only subsystem in this cluster with no record of its own

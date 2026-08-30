@@ -377,3 +377,97 @@ def test_a_position_with_no_expiry_is_unaffected():
     pos = _spread(expiry="")
 
     assert exit_rules.evaluate(pos, _mark(-0.49, 100.0), "2099-01-01")[0] is None
+
+
+# ---- PILLAR-3 continued: the structure itself going missing (WU-6.3, I-48)
+
+def test_a_confirmed_leg_divergence_closes_at_deadline_priority():
+    """I-48: the remainder of a broken spread can be an undefined-risk naked
+    leg - the exact thing INV-19 refuses to create through our own close path,
+    arriving via the broker instead. It outranks every rule about the intact
+    position, because those rules describe something that no longer exists."""
+    pos = _spread(leg_divergence_count=exit_rules.LEG_DIVERGENCE_CONFIRM,
+                  exit_rules=[{"type": "profit_target", "threshold": "+50%"}])
+
+    reason, why, _ = exit_rules.evaluate(pos, _mark(+2.00, 100.0), "2099-01-01")
+
+    assert reason == "leg_divergence", why
+    assert "consecutive" in why
+
+
+def test_one_divergent_snapshot_is_not_enough_to_close():
+    """A slow broker page or a snapshot taken mid-fill must not liquidate a
+    healthy spread. The count IS the debounce."""
+    pos = _spread(leg_divergence_count=1)
+
+    assert exit_rules.evaluate(pos, _mark(0.0, 100.0), "2099-01-01")[0] is None
+
+
+def test_an_intact_position_never_sees_the_rule():
+    pos = _spread(leg_divergence_count=0)
+
+    assert exit_rules.evaluate(pos, _mark(0.0, 100.0), "2099-01-01")[0] is None
+
+
+async def test_reconcile_counts_divergence_and_the_exit_engine_closes_it(
+    paths, make_position
+):
+    """The seam, across two ticks, driven by the real pair in the real order -
+    reconcile counts, the registry closes. Producer-derived throughout: the
+    position is written by PositionStore and re-read from disk between ticks,
+    because "the counter persisted" is half of what is under test."""
+    store, journal = PositionStore(paths.wiki), Journal(paths.journal)
+    pos = make_position(status="open")
+    store.save(pos)
+    assert len(pos.symbols) > 1, "the fixture must be a multi-leg position"
+
+    # The broker shows every leg but one - an early assignment's signature.
+    partial = Snapshot(broker_positions=[
+        {"symbol": s, "cost_basis": 500.0, "unrealized_pl": 0.0}
+        for s in pos.symbols[:-1]
+    ])
+    closed_legs: list[str] = []
+    closer = tools_for(close_position=lambda **kw: closed_legs.append(
+        kw.get("symbol_or_asset_id")) or {"status": "ok"})
+
+    # Tick 1: counted, not closed.
+    await reconcile.reconcile(store, partial, journal, FakeMem(), Wiki(paths.wiki), None)
+    triggered = await _run(store, partial, journal, paths, closer)
+
+    assert store.load(pos.position_id).leg_divergence_count == 1
+    assert triggered == [] and closed_legs == []
+
+    # Tick 2: confirmed, and ALL remaining legs close (INV-19).
+    await reconcile.reconcile(store, partial, journal, FakeMem(), Wiki(paths.wiki), None)
+    triggered = await _run(store, partial, journal, paths, closer)
+
+    assert triggered == [pos.position_id]
+    assert store.load(pos.position_id).status == "closed"
+    assert sorted(closed_legs) == sorted(pos.symbols), "INV-19: all legs, not the survivors"
+    assert store.load(pos.position_id).close_reason == "leg_divergence"
+
+
+async def test_a_transient_divergence_clears_and_leaves_a_trace(paths, make_position):
+    """A glitch must un-count - and say so, so the confirm threshold can be
+    tuned from the journal instead of from taste."""
+    store, journal = PositionStore(paths.wiki), Journal(paths.journal)
+    pos = make_position(status="open")
+    store.save(pos)
+
+    partial = Snapshot(broker_positions=[
+        {"symbol": s, "cost_basis": 500.0, "unrealized_pl": 0.0}
+        for s in pos.symbols[:-1]
+    ])
+    whole = Snapshot(broker_positions=[
+        {"symbol": s, "cost_basis": 500.0, "unrealized_pl": 0.0} for s in pos.symbols
+    ])
+
+    await reconcile.reconcile(store, partial, journal, FakeMem(), Wiki(paths.wiki), None)
+    assert store.load(pos.position_id).leg_divergence_count == 1
+
+    await reconcile.reconcile(store, whole, journal, FakeMem(), Wiki(paths.wiki), None)
+
+    assert store.load(pos.position_id).leg_divergence_count == 0
+    findings = [r.get("finding") for r in journal_rows(journal, "reconciliation")]
+    assert "leg_divergence_cleared" in findings
+    assert store.load(pos.position_id).status == "open", "a glitch closes nothing"
