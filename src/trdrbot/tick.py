@@ -459,6 +459,9 @@ async def _run_tick(
         snap = await analytics.snapshot(
             tools,
             underlyings=sorted({p.underlying for p in store.open_positions() if p.underlying}),
+            # So an unreadable broker leaves a `degraded` row health reads back,
+            # rather than a print in an unattended run (I-55).
+            journal=journal,
         )
         recon = await reconcile.reconcile(store, snap, journal, mem, wiki, calib)
         triggered = await exit_rules.run(

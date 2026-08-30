@@ -206,6 +206,20 @@ Sorted by severity.
   degradation to the default chain stays the design; invisibility was the defect. Confirmed
   silent against the live config. The `cli.py` module docstring, which enumerated four commands
   while the parser grew to seventeen, now points at `trdrbot --help` so it cannot drift again.
+- ~~**I-55 · A dead MCP session made reconcile close every live position**~~ **FIXED 2026-08-30
+  (WU-6.9/6.10, found by tracing rather than by reading).** `analytics.snapshot` degrades on a
+  failed broker read and leaves `broker_positions == []` - which is indistinguishable from "the
+  broker holds nothing", the one conclusion the failure cannot support. Reconcile treated it as
+  proof: **every open position was marked `closed`/`external`, scored through learning, and left
+  running at the broker with no exit rules watching it**, because a terminal position is never
+  evaluated again. An `opening` position was marked `abandoned` the same way. Reproduced end to
+  end before the fix (`phantom=['pos_live']`, status `closed`), and contained after.
+  The same absence-as-evidence shape as D-038 and I-46 one seam over, so the fix is the same
+  shape: `Snapshot.broker_readable` (defaulting FALSE - fail-closed on a capital guard), set only
+  where the read actually succeeds, and reconcile draws no absence conclusions without it. The
+  failed read now goes through `health.degraded`, which already exists precisely so a fail-open
+  path leaves a row rather than a print in an unattended run. Verified by reverting analytics.py
+  and reconcile.py and watching both tests fail.
 - **I-29 · The bootstrap base rate is overconfident by 15-18pp where credit spreads live**
   ([notes/017](notes/017_learning_from_historic_data.md)). Measured offline over **21,280
   historical band-forecasts** (56 tickers, horizons 3/5/10, 5 band shapes, history sliced before

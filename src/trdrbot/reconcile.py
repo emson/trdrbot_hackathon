@@ -58,6 +58,18 @@ async def reconcile(
         if not syms:
             continue
 
+        # EVERY conclusion in this loop reasons from what is MISSING at the
+        # broker, and missing means nothing when the read itself failed. A dead
+        # MCP session returns an empty holdings list indistinguishable from an
+        # empty account - and acting on it marked live positions `closed`
+        # (or `abandoned`, one branch up), scored them, and left the real
+        # exposure unwatched, because a terminal position is no longer
+        # evaluated by the exit engine (I-55). Nothing here is safe without a
+        # readable broker, and nothing here is LOST by waiting a tick: the
+        # presence-based branches cannot fire on an empty list anyway.
+        if not snap.broker_readable:
+            continue
+
         present = [s for s in syms if s in held]
         pending = [s for s in syms if s in working]
 

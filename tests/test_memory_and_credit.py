@@ -103,7 +103,8 @@ async def test_reconcile_confirms_a_fill_and_remembers_the_thesis(
     store, journal, wiki, calib = _stores(paths)
     pos = make_position(status="opening")
     store.save(pos)
-    snap = Snapshot(broker_positions=[{"symbol": s} for s in pos.symbols])
+    snap = Snapshot(broker_positions=[{"symbol": s} for s in pos.symbols],
+                    broker_readable=True)
 
     result = await reconcile.reconcile(store, snap, journal, mem, wiki, calib)
 
@@ -122,7 +123,7 @@ async def test_a_phantom_close_resolves_exactly_once(paths, make_position, mem: 
     store, journal, wiki, calib = _stores(paths)
     pos = make_position(status="open", last_pnl_pct=0.2)
     store.save(pos)
-    empty_broker = Snapshot(broker_positions=[])
+    empty_broker = Snapshot(broker_positions=[], broker_readable=True)
 
     await reconcile.reconcile(store, empty_broker, journal, mem, wiki, calib)
     await reconcile.reconcile(store, empty_broker, journal, mem, wiki, calib)
@@ -173,7 +174,8 @@ async def test_a_memory_failure_does_not_disarm_the_capital_protection_path(
     # Half one: reconcile still resolves the phantom and still returns.
     gone = make_position(position_id="pos_gone", status="open", last_pnl_pct=0.2)
     store.save(gone)
-    result = await reconcile.reconcile(store, Snapshot(broker_positions=[]),
+    result = await reconcile.reconcile(store,
+                                       Snapshot(broker_positions=[], broker_readable=True),
                                        journal, broken, wiki, calib)
 
     assert result["phantom"] == ["pos_gone"]
@@ -316,3 +318,61 @@ async def test_an_open_position_is_never_attributed(paths, make_position, mem: F
 
     assert out["pending"] == 0
     assert mem.credited == []
+
+
+async def test_an_unreadable_broker_closes_nothing(paths, make_position, mem: FakeMem):
+    """I-55, found by WU-6.9's trace of a mid-tick MCP death.
+
+    `broker_positions == []` means two irreconcilable things - the broker holds
+    nothing, or we could not ask - and reconcile treated the first as proof.
+    A dead MCP session therefore marked every live position `closed`/`external`,
+    scored it through learning, and left the real exposure running with NO exit
+    rules watching it, because a terminal position is no longer evaluated.
+
+    The same absence-as-evidence shape as D-038 and I-46, one seam over: the
+    fix is that an unreadable broker draws no conclusions from what is missing.
+    """
+    store, journal, wiki, calib = _stores(paths)
+    live = make_position(position_id="pos_live", status="open")
+    opening = make_position(position_id="pos_opening", status="opening")
+    store.save(live)
+    store.save(opening)
+
+    # Exactly what `analytics.snapshot` returns when every MCP call failed.
+    dead = Snapshot(broker_positions=[], broker_readable=False)
+
+    result = await reconcile.reconcile(store, dead, journal, mem, wiki, calib)
+
+    assert result["phantom"] == [], "a failed read was treated as proof of absence"
+    assert store.load("pos_live").status == "open"
+    assert store.load("pos_opening").status == "opening", "nor abandoned"
+    assert journal_rows(journal, "reflection") == [], "and nothing was scored"
+
+
+async def test_a_dead_mcp_session_degrades_one_tick_and_says_so(paths):
+    """WU-6.9's pin: the containment story, asserted rather than assumed.
+
+    A dead stdio transport raises out of `mcp_client.call`; `analytics.snapshot`
+    catches per-call and degrades; the tick continues on what it has. What must
+    NOT happen is silence - an empty snapshot that reads as a real one is the
+    input that made I-55 dangerous.
+    """
+    from trdrbot import analytics
+
+    class Dead:
+        def __init__(self, name): self.name = name
+        async def ainvoke(self, kwargs):
+            raise ConnectionError("stdio transport closed: broken pipe")
+
+    tools = {n: Dead(n) for n in
+             ("get_clock", "get_account_info", "get_all_positions", "get_orders")}
+    journal = Journal(paths.journal)
+
+    snap = await analytics.snapshot(tools, journal=journal)
+
+    assert snap.broker_readable is False, "a failed read must not look successful"
+    assert snap.broker_positions == []
+    # health.degraded leaves the row `check()` reads back, so a fail-open path
+    # taken repeatedly becomes visible instead of looking like success.
+    rows = journal_rows(journal, "degraded")
+    assert any(r["subsystem"] == "analytics.positions" for r in rows)

@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from . import ids, mcp_client
+from . import health, ids, mcp_client
 
 
 def _f(v: Any, default: float = 0.0) -> float:
@@ -36,6 +36,16 @@ class Snapshot:
     #: underlying prints far more reliably than a wide option mark.
     underlying_prices: dict[str, float] = field(default_factory=dict)
     as_of: str = ""
+    #: Did we actually SUCCEED in reading the broker's holdings this tick?
+    #:
+    #: `broker_positions == []` means two irreconcilable things - the broker
+    #: holds nothing, or we could not ask - and reconcile treats the first as
+    #: proof a position is gone. Absence-as-evidence (D-038's class, and I-46's
+    #: twin one seam over): a dead MCP session made every open position look
+    #: phantom, closed it in our records, scored it, and left the real exposure
+    #: live and unwatched because a terminal position is no longer evaluated.
+    #: False means "no conclusions may be drawn from what is missing here".
+    broker_readable: bool = False
 
     @property
     def equity(self) -> float:
@@ -137,7 +147,8 @@ def position_pnl_fraction(symbols: list[str], snap: Snapshot) -> float | None:
     return sum(_f(l.get("unrealized_pl")) for l in legs) / net
 
 
-async def snapshot(tools: dict[str, Any], underlyings: list[str] | None = None) -> Snapshot:
+async def snapshot(tools: dict[str, Any], underlyings: list[str] | None = None,
+                   journal: Any = None) -> Snapshot:
     """Gather deterministic state. A failing call degrades, never aborts."""
     snap = Snapshot(as_of=ids.market_today().isoformat())
 
@@ -158,8 +169,15 @@ async def snapshot(tools: dict[str, Any], underlyings: list[str] | None = None) 
         pos = await mcp_client.call(tools, "get_all_positions")
         if isinstance(pos, list):
             snap.broker_positions = pos
+            snap.broker_readable = True
     except Exception as exc:  # noqa: BLE001
-        print(f"[analytics] positions unavailable: {exc!r}")
+        # NOT just a print: everything downstream reads an empty list as "the
+        # broker holds nothing", which is the one conclusion this failure
+        # cannot support. `broker_readable` stays False and reconcile refuses
+        # to draw it.
+        health.degraded(journal, "analytics.positions",
+                        "could not read broker holdings - no absence conclusions "
+                        "may be drawn this tick", error=repr(exc)[:200])
 
     for u in underlyings or []:
         try:

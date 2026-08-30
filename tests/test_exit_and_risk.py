@@ -425,7 +425,7 @@ async def test_reconcile_counts_divergence_and_the_exit_engine_closes_it(
     partial = Snapshot(broker_positions=[
         {"symbol": s, "cost_basis": 500.0, "unrealized_pl": 0.0}
         for s in pos.symbols[:-1]
-    ])
+    ], broker_readable=True)
     closed_legs: list[str] = []
     closer = tools_for(close_position=lambda **kw: closed_legs.append(
         kw.get("symbol_or_asset_id")) or {"status": "ok"})
@@ -457,10 +457,10 @@ async def test_a_transient_divergence_clears_and_leaves_a_trace(paths, make_posi
     partial = Snapshot(broker_positions=[
         {"symbol": s, "cost_basis": 500.0, "unrealized_pl": 0.0}
         for s in pos.symbols[:-1]
-    ])
+    ], broker_readable=True)
     whole = Snapshot(broker_positions=[
         {"symbol": s, "cost_basis": 500.0, "unrealized_pl": 0.0} for s in pos.symbols
-    ])
+    ], broker_readable=True)
 
     await reconcile.reconcile(store, partial, journal, FakeMem(), Wiki(paths.wiki), None)
     assert store.load(pos.position_id).leg_divergence_count == 1
