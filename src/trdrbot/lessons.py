@@ -207,6 +207,28 @@ LESSONS: tuple[Lesson, ...] = (
         tags=("calibration", "instruments", "regimes"),
     ),
     Lesson(
+        "the-vol-i-evaluate-at-is-a-choice",
+        "The vol I price a structure at is an assumption I am making, not an "
+        "observation I am reading - and it is worth real money. Measured on a "
+        "skewed board: a call credit spread whose legs quote 19% and 21% "
+        "evaluated at the 25% ATM figure prices at -$6.68, and at the "
+        "vega-weighted 21.0% at +$0.05 - a $6.73 swing on a structure whose "
+        "whole max profit is small, from a number nobody made me defend. Two "
+        "things follow. My EV, P(profit) and payoff now evaluate at the "
+        "vega-weighted leg vol and the simulator prints the span across the "
+        "legs' own IVs: if a trade only works at one end of that span it is "
+        "untested, not attractive. And when my thesis is ABOUT vol, I state "
+        "vol_view_pct - the payoff is then priced under the same vol as my "
+        "probability, which is the only way a vol edge can earn size rather "
+        "than sit at the exploration allocation. One caution I proved on "
+        "myself: there is no single flat vol that makes a skewed board fair, "
+        "so 'evaluated correctly' is not available here - only 'evaluated "
+        "where the position lives, with the range stated'.",
+        cue="when leg IVs differ from the vol I am evaluating at, or when the "
+            "thesis is about volatility rather than direction",
+        tags=("volatility", "assumptions", "instruments"),
+    ),
+    Lesson(
         "a-38-percent-trade-can-be-the-right-trade",
         "Win rate is not the decision; payoff times probability is. I opened "
         "an NVDA call spread at an honest 38% probability because the payoff "
