@@ -2780,11 +2780,19 @@ def test_sizing_uses_the_conditional_ratio_and_says_when_it_cannot():
     assert "max/max" in without.reason, "a silent fallback is the thing to avoid"
 
 
-def test_the_payoff_ratio_is_matched_scale_invariantly():
+def test_the_structure_match_is_scale_invariant_and_refuses_rather_than_guessing():
     """The model quotes PER-CONTRACT figures; simulate priced whatever quantity
     the legs carried. Matching on dollars fails on every multi-lot candidate,
-    so the match is on risk/reward, which is scale-free."""
-    from trdrbot.local_tools import SharedContext, SimStructure, _matching_payoff_ratio
+    so the match is on risk/reward, which is scale-free.
+
+    Assertions rewritten for WU-4.2's contract - a deliberate, explained test
+    change, not a weakened one. The helper returns the matched SimStructure or
+    a REFUSAL string where it used to return the payoff ratio or None. The
+    behaviour under test is unchanged (identity across lot sizes; never guess an
+    ambiguous match); what changed is that "no match" is now a refusal the
+    caller surfaces instead of a silent frictionless max/max fallback (I-40).
+    """
+    from trdrbot.local_tools import SharedContext, SimStructure, _match_structure
 
     def _s(name, rr, payoff):
         return SimStructure(key=(), name=name, qty=1, entry_cost=None,
@@ -2793,21 +2801,21 @@ def test_the_payoff_ratio_is_matched_scale_invariantly():
     shared = SharedContext(structures=[_s("condor", 0.59, 0.67),
                                        _s("put spread", 5.17, 3.09)])
     # 10 lots of the condor: same R:R, ten times the dollars.
-    assert _matching_payoff_ratio(shared, 1860.0, -3140.0) == 0.67
-    assert _matching_payoff_ratio(shared, 186.0, -314.0) == 0.67
-    assert _matching_payoff_ratio(shared, 838.0, -162.0) == 3.09
-    # Never simulated -> no guess.
-    assert _matching_payoff_ratio(shared, 999.0, -1000.0) is None
-    # Ambiguous -> no guess either.
+    assert _match_structure(shared, 1860.0, -3140.0).payoff_ratio == 0.67
+    assert _match_structure(shared, 186.0, -314.0).payoff_ratio == 0.67
+    assert _match_structure(shared, 838.0, -162.0).payoff_ratio == 3.09
+    # Never simulated -> refusal, not a guess and not a silent fallback.
+    assert "REFUSED" in _match_structure(shared, 999.0, -1000.0)
+    # Ambiguous -> refusal too, and it names what it does know.
     ambiguous = SharedContext(structures=[_s("a", 1.0, 1.1), _s("b", 1.0, 2.2)])
-    assert _matching_payoff_ratio(ambiguous, 100.0, -100.0) is None
-    assert _matching_payoff_ratio(None, 100.0, -100.0) is None
+    assert "REFUSED" in _match_structure(ambiguous, 100.0, -100.0)
+    assert "REFUSED" in _match_structure(None, 100.0, -100.0)
 
     # ...unless the model names the candidate, which resolves exactly the case
     # the R:R match documented as unresolvable (D-092). Falling back to max/max
     # there is the mismatch I-13 measured as DIRECTIONAL, not conservative.
-    assert _matching_payoff_ratio(ambiguous, 100.0, -100.0, "b") == 2.2
-    assert _matching_payoff_ratio(ambiguous, 100.0, -100.0, "nonexistent") is None
+    assert _match_structure(ambiguous, 100.0, -100.0, "b").payoff_ratio == 2.2
+    assert "REFUSED" in _match_structure(ambiguous, 100.0, -100.0, "nonexistent")
 
 
 # ==================================== D-077 horizons that resolve in time
@@ -3890,3 +3898,141 @@ def test_unbounded_profit_without_a_ratio_refuses_for_the_MISSING_RATIO():
     assert d.contracts == 0
     assert "conditional payoff" in d.reason
     assert "simulate" in d.reason.lower()
+
+
+def _sim_and_size(tmp_path, candidates, *, journal=None, spot=100.0, iv_pct=25.0,
+                  days=7, equity=100_000.0):
+    """Drive the REAL tool pair over a real SharedContext.
+
+    Producer-derived on purpose (the trdrbot testing overlay): the shared
+    context is built by calling `simulate_experiments`, never by hand-stuffing
+    `shared.structures` - two capabilities have shipped dead here because a
+    test built its own input and the caller disagreed with it.
+    """
+    from trdrbot.calibration import CalibrationStore
+
+    shared = local_tools.SharedContext()
+    sim = local_tools.build_simulate_experiments(shared, None, None)
+    sim.func(thesis_claim="pinned", underlying="X", horizon="2099-01-05",
+             drift_pct=0.0, spot=spot, iv_pct=iv_pct, days_to_expiry=days,
+             band_low=spot - 1, band_high=spot + 1, candidates=candidates)
+    size = local_tools.build_size_position(
+        CalibrationStore(tmp_path / "cal.jsonl"), equity, shared=shared,
+        journal=journal)
+    return shared, size
+
+
+def _legs(spec, spread=None):
+    """[(right, strike, side)] -> tool leg dicts priced fair, optionally quoted."""
+    out = []
+    for right, strike, side in spec:
+        price = round(_fair(right, strike), 4)
+        leg = {"right": right, "strike": strike, "side": side, "qty": 1, "price": price}
+        if spread is not None:
+            leg["bid"] = round(max(0.01, price - spread / 2), 4)
+            leg["ask"] = round(price + spread / 2, 4)
+        out.append(leg)
+    return out
+
+
+NARROW = [("P", 100, "short"), ("P", 99, "long"), ("C", 101, "short"), ("C", 102, "long")]
+WIDE = [("P", 95, "short"), ("P", 90, "long"), ("C", 105, "short"), ("C", 110, "long")]
+
+
+def test_sizing_tool_refuses_when_nothing_was_simulated(tmp_path):
+    """I-40, one gate earlier than D-038's chain-order-record shortcut: the
+    conditional payoff and the friction estimate exist ONLY inside
+    simulate_experiments, so sizing without one has nothing honest to size on."""
+    from trdrbot.calibration import CalibrationStore
+
+    size = local_tools.build_size_position(
+        CalibrationStore(tmp_path / "cal.jsonl"), 100_000.0,
+        shared=local_tools.SharedContext())
+
+    out = size.func(stated_confidence=0.70, max_profit=800.0, max_loss=-1200.0,
+                    underlying="X")
+
+    assert "REFUSED" in out and "simulate_experiments" in out
+
+
+def test_sizing_tool_refuses_an_ambiguous_match_and_names_the_candidates(tmp_path):
+    """A wrong `b` is worse than no trade, and the repair must be actionable -
+    so the refusal lists the names it would accept."""
+    _shared, size = _sim_and_size(tmp_path, [
+        {"name": "narrow condor", "legs": _legs(NARROW)},
+        {"name": "wide condor", "legs": _legs(WIDE)},
+    ])
+
+    out = size.func(stated_confidence=0.70, max_profit=999.0, max_loss=-1000.0,
+                    underlying="X")
+
+    assert "REFUSED" in out
+    assert "narrow condor" in out and "wide condor" in out
+
+
+def test_sizing_tool_refuses_when_friction_has_eaten_the_conditional_payoff(tmp_path):
+    """I-40, the measured case, at real quoted spreads.
+
+    `optmath.payoff_ratio` returns None when the whole expected win is consumed
+    by the round trip - D-079's "there is no payoff to bet on, and sizing should
+    refuse rather than compute with it". That refusal was then DISCARDED one
+    seam later: `None` reached `size_position` as "no match", which fell back to
+    frictionless max/max and sized the trade at the per-position cap.
+    """
+    shared, size = _sim_and_size(tmp_path, [
+        {"name": "narrow condor", "legs": _legs(NARROW, spread=0.15)},
+        {"name": "wide condor", "legs": _legs(WIDE, spread=0.15)},
+    ])
+    narrow = next(s for s in shared.structures if s.name == "narrow condor")
+    assert narrow.payoff_ratio is None, "precondition: friction ate the expected win"
+
+    out = size.func(stated_confidence=0.70, max_profit=narrow.max_profit,
+                    max_loss=narrow.max_loss, underlying="X",
+                    structure_name="narrow condor")
+
+    assert "REFUSED" in out and "friction" in out
+    # What the discarded refusal used to become: a sized position at the cap.
+    fallback = sizing.size_position(
+        equity=100_000.0, stated_confidence=0.70, max_profit=narrow.max_profit,
+        max_loss=narrow.max_loss, calibration=ESTABLISHED, underlying="X",
+        payoff_ratio=None)
+    assert fallback.contracts > 0, "the fallback this seam no longer reaches"
+
+
+def test_sizing_tool_uses_the_priced_structures_own_conditional_ratio(tmp_path):
+    """The happy path, and the reason the refusals above are affordable."""
+    shared, size = _sim_and_size(tmp_path, [
+        {"name": "narrow condor", "legs": _legs(NARROW)},
+        {"name": "wide condor", "legs": _legs(WIDE)},
+    ])
+    wide = next(s for s in shared.structures if s.name == "wide condor")
+
+    out = size.func(stated_confidence=0.95, max_profit=wide.max_profit,
+                    max_loss=wide.max_loss, underlying="X",
+                    structure_name="wide condor")
+
+    assert "REFUSED" not in out
+    assert f"payoff {wide.payoff_ratio:.2f}" in out, "sized on the ratio actually priced"
+    assert "conditional" in out
+
+
+def test_every_sizing_outcome_is_journalled_including_the_refusals(tmp_path):
+    """The production-visible trace. Without it a seam that starts losing the
+    conditional payoff again is invisible until a position is already on."""
+    from trdrbot.journal import Journal
+
+    journal = Journal(tmp_path / "journal.jsonl")
+    shared, size = _sim_and_size(tmp_path, [
+        {"name": "narrow condor", "legs": _legs(NARROW)},
+        {"name": "wide condor", "legs": _legs(WIDE)},
+    ], journal=journal)
+    wide = next(s for s in shared.structures if s.name == "wide condor")
+
+    size.func(stated_confidence=0.95, max_profit=wide.max_profit,
+              max_loss=wide.max_loss, underlying="X", structure_name="wide condor")
+    size.func(stated_confidence=0.70, max_profit=1.0, max_loss=-1.0, underlying="X")
+
+    rows = [r for r in journal.read() if r.get("kind") == "sizing"]
+    assert [r["result"] for r in rows] == ["sized", "refused"]
+    assert rows[0]["contracts"] > 0 and rows[1]["contracts"] == 0
+    assert "REFUSED" in rows[1]["reason"]

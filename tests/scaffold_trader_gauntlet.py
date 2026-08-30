@@ -456,17 +456,47 @@ print(f"    stated 70% WITH ratio -> {with_pr.contracts} contracts; "
       f"WITHOUT (fallback) -> {no_pr.contracts} contracts "
       f"({no_pr.fraction_of_equity:.2%} of equity)")
 check(with_pr.contracts == 0, "G6: friction-aware path should refuse 70% on b=0.26")
-if no_pr.contracts > 0 and with_pr.contracts == 0:
-    note(f"G6: the payoff_ratio=None FALLBACK abandons friction entirely: the same "
-         f"narrow condor at the same claimed 70% is REFUSED under the "
-         f"friction-charged conditional ratio (b {b_cond:.2f}, gate needs "
-         f"{gate_cond:.0%}) but sized {no_pr.contracts} contracts "
-         f"({no_pr.fraction_of_equity:.1%} of equity, the per-position cap) under the "
-         f"max/max fallback (b {b_mm:.2f}, gate needs {1 / (1 + b_mm):.0%}). "
-         f"`_matching_payoff_ratio` returns None whenever the sized structure fails "
-         f"to match a simulated one - so a name-mismatch flips the gate from "
-         f"'needs {gate_cond:.0%}' to 'needs {1 / (1 + b_mm):.0%}' and the warning "
-         f"is one clause in a reason string the model may not heed.")
+
+# CHANGED (WU-4.2): the frictionless max/max fallback above is still reachable
+# from a DIRECT caller (and still measured, as the contrast), but production
+# can no longer reach it - the tool refuses at every seam that would have
+# produced payoff_ratio=None. Driven through the real tool, not the function.
+from trdrbot.calibration import CalibrationStore  # noqa: E402
+from trdrbot.local_tools import (  # noqa: E402
+    SharedContext, build_simulate_experiments, build_size_position,
+)
+
+_shared = SharedContext()
+_sim = build_simulate_experiments(_shared, None, None)
+_sim.func(thesis_claim="pinned", underlying="X", horizon="2099-01-05", drift_pct=0.0,
+          spot=SPOT, iv_pct=25.0, days_to_expiry=7, band_low=99.0, band_high=101.0,
+          candidates=[
+              {"name": "narrow condor", "legs": [
+                  {"right": r, "strike": k, "side": s, "qty": 1,
+                   "price": round(fair_price(r, k, 0.25, 7), 4)}
+                  for r, k, s in (("P", 100, "short"), ("P", 99, "long"),
+                                  ("C", 101, "short"), ("C", 102, "long"))]},
+              {"name": "wide condor", "legs": [
+                  {"right": r, "strike": k, "side": s, "qty": 1,
+                   "price": round(fair_price(r, k, 0.25, 7), 4)}
+                  for r, k, s in (("P", 95, "short"), ("P", 90, "long"),
+                                  ("C", 105, "short"), ("C", 110, "long"))]},
+          ])
+import tempfile as _tf  # noqa: E402
+from pathlib import Path as _Path  # noqa: E402
+
+with _tf.TemporaryDirectory() as _d:
+    _cal = CalibrationStore(_Path(_d) / "cal.jsonl")
+    _size = build_size_position(_cal, EQUITY, shared=_shared)
+    unnamed = _size.func(stated_confidence=0.70, max_profit=999.0, max_loss=-1000.0,
+                         underlying="X")
+    never_simmed = build_size_position(
+        _cal, EQUITY, shared=SharedContext()
+    ).func(stated_confidence=0.70, max_profit=999.0, max_loss=-1000.0, underlying="X")
+check("REFUSED" in unnamed, "G6: tool guessed an unmatched structure instead of refusing")
+check("REFUSED" in never_simmed, "G6: tool sized without any simulation")
+print(f"    via the TOOL: unmatched -> {unnamed.split('.')[0][:56]}")
+print(f"                  no sim    -> {never_simmed.split('.')[0][:56]}")
 
 g = optmath.bs_greeks("C", 100, SPOT, 0.25, 0)
 check(g is None, "G6: greeks at 0 DTE should refuse")

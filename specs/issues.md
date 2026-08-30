@@ -42,17 +42,16 @@ Sorted by severity.
   and `work` sums that instead. A closed weekend of housekeeping noise now reads OK; a muse run
   that genuinely fails to reach `record_trial` still reads BAD, including when housekeeping noise
   sits either side of it.
-- **I-40 · The `payoff_ratio=None` fallback abandons friction, and it is the default on any
-  structure mismatch** (found by `tests/scaffold_trader_gauntlet.py`, G6). D-079 fixed the gate to
-  open exactly where EV-after-costs turns positive - but only when the conditional ratio reaches
-  `size_position`. `_matching_payoff_ratio` returns None whenever the sized structure fails to
-  match a simulated one (name mismatch, two structures sharing one rr, or simulate's own
-  friction-refusal), and the fallback is max/max **with no friction at all**. Measured on a
-  fair-priced 99/100-101/102 condor at a claimed 70%: the friction-charged conditional ratio
-  (b 0.26) demands 79% and REFUSES; the fallback (b 3.49) demands 22% and sizes **224 contracts -
-  4.99% of equity, the per-position cap**. The very structures friction punishes most (narrow,
-  multi-leg) are the ones the fallback flatters most, and the only trace is one clause in the
-  reason string. The refusal D-079 promised does not survive the seam.
+- ~~**I-40 · The `payoff_ratio=None` fallback abandons friction, and it is the default on any
+  structure mismatch**~~ **FIXED 2026-08-30 (WU-4.2).** `_matching_payoff_ratio` returned the ratio
+  or None, and None meant four different things - nothing simulated, no unique match, the match's
+  own payoff refused after friction, and a direct caller supplying nothing - which `size_position`
+  then treated identically by falling back to frictionless max/max. It is now `_match_structure`,
+  returning the matched structure or the REFUSAL that replaces it, one named sentence per cause
+  (the friction one is D-079's own "there is no payoff to bet on", finally reaching the model).
+  Production cannot reach the max/max fallback any more; it survives for direct callers and says
+  so. Every sizing outcome, refusals included, is journalled for the `sizing.refused_rate` gauge.
+  Verified by reverting local_tools.py and watching all six regression tests fail.
 - **I-41 · A short-vol trade can NEVER earn Kelly size - the ladder is inert for half the book**
   (scaffold G2). A thesis has a drift knob but no vol knob, so for a vol trade the stated
   probability comes from the agent's own vol view while Kelly's `b` is computed under the MARKET's

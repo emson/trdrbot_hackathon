@@ -628,6 +628,10 @@ async def _run_tick(
             calib, equity_now,
             open_risk_usd=open_risk, open_risk_by_underlying=by_underlying,
             shared=shared, posture=posture, extra_forecasts=declined,
+            # Every sizing outcome on the record, refusals included (WU-4.2).
+            # A rising refusal share is the only production-visible sign that
+            # the structure-matching seam is losing the conditional payoff.
+            journal=journal,
         )
         record_tool = local_tools.build_record_position(
             store, decision_id, elfmem_blocks=ctx.blocks,

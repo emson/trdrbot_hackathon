@@ -185,7 +185,7 @@ def test_naming_the_structure_resolves_a_tie_the_ratio_match_cannot():
     """Two candidates at the same risk/reward returned None and sizing fell
     back to max/max - which I-13 measured as DIRECTIONAL, not conservative:
     credit structures understated 11-35%, debit overstated 43%."""
-    from trdrbot.local_tools import SharedContext, SimStructure, _matching_payoff_ratio
+    from trdrbot.local_tools import SharedContext, SimStructure, _match_structure
 
     def _s(name: str, payoff: float) -> SimStructure:
         return SimStructure(key=(), name=name, qty=1, entry_cost=None, max_profit=None,
@@ -193,8 +193,11 @@ def test_naming_the_structure_resolves_a_tie_the_ratio_match_cannot():
 
     shared = SharedContext(structures=[_s("condor", 1.1), _s("put spread", 2.2)])
 
-    assert _matching_payoff_ratio(shared, 100.0, -100.0) is None
-    assert _matching_payoff_ratio(shared, 100.0, -100.0, "put spread") == 2.2
+    # Unnamed and ambiguous is now a REFUSAL rather than a silent fallback
+    # (WU-4.2) - the tie is still unresolved, but it no longer resolves itself
+    # into a frictionless max/max `b`.
+    assert "REFUSED" in _match_structure(shared, 100.0, -100.0)
+    assert _match_structure(shared, 100.0, -100.0, "put spread").payoff_ratio == 2.2
 
 
 # ------------------------------------- caps live with the thing they cap

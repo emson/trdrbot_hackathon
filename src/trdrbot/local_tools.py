@@ -522,36 +522,88 @@ def build_record_position(
 RR_MATCH_TOLERANCE = 0.02
 
 
-def _matching_payoff_ratio(shared: SharedContext | None, max_profit: float,
-                           max_loss: float, name: str = "") -> float | None:
-    """The conditional payoff ratio of the simulated structure being sized.
+def _match_structure(shared: SharedContext | None, max_profit: float | None,
+                     max_loss: float, name: str = "") -> SimStructure | str:
+    """The simulated structure being sized - or the REFUSAL that replaces it.
 
-    By NAME when the model gives one - the names are echoed back to it in
-    `render_comparison`, so it can. That is exact, and it resolves the case
-    the R:R match documented as unresolvable: two candidates at the same
-    risk/reward returned None rather than guessing, and the sizing silently
-    fell back to max/max, which is the mismatch I-13 measured as directional
-    (credit structures understated 11-35%, debit overstated 43%).
+    **A str is a refusal**, the convention `_vacuity_check` and every tool guard
+    here already use. That is the whole change (I-40): this used to return the
+    payoff ratio or None, and None meant four different things -
 
-    Falling back to R:R, which is SCALE-INVARIANT: the model quotes
-    per-contract max profit and loss while `simulate` priced whatever quantity
-    the legs carried, so matching on dollars would fail on every multi-lot
-    candidate. Ambiguity there still returns None rather than guessing - a
-    wrong `b` is worse than the honest fallback, and `explain()` says which
-    one it used.
+        nothing was simulated                    | no conditional payoff exists
+        no unique match                          | we do not know WHICH payoff
+        the match's own payoff_ratio was None    | friction ate the expected win
+        a direct caller supplied nothing         | not this tool's case at all
+
+    - which `sizing.size_position` then treated identically, falling back to
+    max/max **with no friction at all**. D-079 had just made the gate open
+    exactly where EV-after-costs turns positive; this seam dropped the cost view
+    one layer later, and the structures friction punishes most are the ones the
+    fallback flatters most. Measured on a fair-priced 99/100-101/102 condor at a
+    claimed 70%: refused under the friction-charged conditional ratio (b 0.26,
+    gate needs 79%), sized **224 contracts - 4.99% of equity, the per-position
+    cap** - under the fallback (b 3.49, gate needs 22%).
+
+    Matching is by NAME first - the names are echoed to the model in
+    `render_comparison`, so it can give one, and that is exact. R:R is the
+    fallback because it is SCALE-INVARIANT: the model quotes per-contract
+    figures while `simulate` priced whatever quantity the legs carried, so
+    matching on dollars would fail on every multi-lot candidate. Ambiguity
+    refuses rather than guessing; a wrong `b` is worse than no trade.
     """
     structures = shared.structures if shared else []
-    if not structures or not max_loss:
-        return None
+    if not structures:
+        return (
+            "REFUSED: nothing usable has been simulated this cycle, so this "
+            "structure has no conditional payoff and no friction estimate to be "
+            "sized against. Call simulate_experiments first. (Sizing on max "
+            "profit over max loss pairs a tail ratio with a whole-region "
+            "probability and charges no costs - that combination is how a "
+            "structure priced as unaffordable gets sized at the position cap.)"
+        )
+
+    match: SimStructure | None = None
     if name:
-        named = [s for s in structures if s.name == name and s.payoff_ratio is not None]
+        named = [s for s in structures if s.name == name]
         if len(named) == 1:
-            return named[0].payoff_ratio
-    want = abs(max_profit / max_loss)
-    hits = [s for s in structures
-            if s.rr is not None and s.payoff_ratio is not None
-            and abs(s.rr - want) <= RR_MATCH_TOLERANCE]
-    return hits[0].payoff_ratio if len(hits) == 1 else None
+            match = named[0]
+    if match is None and max_profit is not None and max_loss:
+        want = abs(max_profit / max_loss)
+        hits = [s for s in structures if s.rr is not None
+                and abs(s.rr - want) <= RR_MATCH_TOLERANCE]
+        if len(hits) == 1:
+            match = hits[0]
+    if match is None:
+        known = ", ".join(sorted(s.name for s in structures))
+        return (
+            f"REFUSED: this does not match anything simulated this cycle. Pass "
+            f"structure_name exactly as it appeared in the comparison - one of: "
+            f"{known}. Inferring the match from the risk/reward ratio cannot tell "
+            f"two candidates apart when they share one, and a structure with an "
+            f"unbounded max profit has no ratio to infer from at all."
+        )
+    if match.payoff_ratio is None:
+        return (
+            f"REFUSED: '{match.name}' has no usable conditional payoff. Its entire "
+            f"expected win is eaten by the round-trip friction, or it wins (or "
+            f"loses) so one-sidedly that there is no side to condition on - see "
+            f"its row in the comparison. There is no payoff left to bet on, so "
+            f"not trading it is the answer, not sizing it smaller."
+        )
+    return match
+
+
+def _journal_sizing(journal: Any, **fields: Any) -> None:
+    """Record what sizing actually did. Never blocks a decision (same guard as
+    the ledger calls). Feeds `sizing.refused_rate` - a rising refusal share is
+    the I-40 class resurfacing in production, where nothing else would show it.
+    """
+    if journal is None:
+        return
+    try:
+        journal.append("sizing", **fields)
+    except Exception as exc:  # noqa: BLE001 - observability never breaks a trade
+        print(f"[sizing] journal append failed: {exc!r}")
 
 
 def build_size_position(
@@ -561,6 +613,7 @@ def build_size_position(
     shared: SharedContext | None = None,
     posture: Any = None,
     extra_forecasts: list[Any] | None = None,
+    journal: Any = None,
 ) -> StructuredTool:
     """Tool: how many contracts, given edge, bankroll, and earned trust.
 
@@ -591,22 +644,32 @@ def build_size_position(
             max_loss: from simulate_experiments (use a NEGATIVE number)
             underlying: the ticker, so per-name concentration is checked
             structure_name: the candidate's name from simulate_experiments,
-                exactly as it appeared in the comparison table. Optional, but
-                give it: it matches this size to the structure that was
-                actually priced, instead of inferring the match from the
-                risk/reward ratio - which cannot tell two candidates apart
-                when they happen to share one.
+                exactly as it appeared in the comparison table. GIVE IT: it
+                matches this size to the structure that was actually priced.
+                Without it the match is inferred from the risk/reward ratio,
+                which cannot tell two candidates apart when they share one -
+                and an ambiguous match is refused rather than guessed.
+
+        Sizing needs a structure this cycle's simulate_experiments actually
+        priced, because the conditional payoff and the friction estimate exist
+        only there. If you have not simulated it, or the name does not match, or
+        its expected win is entirely eaten by costs, this REFUSES - and that
+        refusal is a real answer about the trade, not an error to route around.
         """
+        match = _match_structure(shared, max_profit, max_loss, structure_name)
+        if isinstance(match, str):
+            _journal_sizing(journal, underlying=underlying.upper(), result="refused",
+                            contracts=0, structure=structure_name, reason=match[:160])
+            return match
+
         d = sizing.size_position(
             equity=equity,
             underlying=underlying,
-            # Matched on the RISK/REWARD RATIO, which is scale-invariant - the
-            # model quotes per-contract figures while simulate priced whatever
-            # quantity the legs carried, so absolute dollars would not line up.
-            # No match (a structure never simulated) falls back to max/max and
-            # `explain()` says so, rather than silently using a different `b`.
-            payoff_ratio=_matching_payoff_ratio(shared, max_profit, max_loss,
-                                                structure_name),
+            # ALWAYS the conditional ratio of the structure that was actually
+            # priced, friction included. `_match_structure` refused above if it
+            # could not identify one, so the max/max fallback inside
+            # `sizing.size_position` is now unreachable from production (I-40).
+            payoff_ratio=match.payoff_ratio,
             open_risk_usd=open_risk_usd,
             open_risk_by_underlying=open_risk_by_underlying,
             stated_confidence=stated_confidence,
@@ -633,6 +696,11 @@ def build_size_position(
                 underlying=underlying.upper(), contracts=d.contracts,
                 max_loss_usd=abs(max_loss) * d.contracts,
             )
+        _journal_sizing(journal, underlying=underlying.upper(),
+                        result="sized" if d.contracts > 0 else "no_position",
+                        contracts=d.contracts, structure=structure_name,
+                        fraction=round(d.fraction_of_equity, 5),
+                        payoff_ratio=match.payoff_ratio)
         return d.explain()
 
     return StructuredTool.from_function(
