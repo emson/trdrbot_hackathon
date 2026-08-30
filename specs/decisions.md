@@ -4204,3 +4204,65 @@ could see them, which is exactly why they had never become a gauge.
 
 **Verified:** 469 default tests (+29), every fix revert-verified before its issue was struck;
 both scaffolds re-run with zero invariant violations; `trdrbot lessons verify` 12/12.
+
+## D-095: Phase 6 - the sibling sweep, and the defect the trace found
+**Date:** 2026-08-30
+**Status:** accepted
+**Context:** Four parallel audits over the subsystems phase 4 did not touch produced 15 findings
+(recorded as I-46..I-53). Reading them together, they are not a new defect class. They are the
+project's OLDEST one - notes/019 §1.2, "every hard-won pattern exists once, next to N places that
+lack it" - relocated to newer ground, twice into code phase 4 had shipped the same day.
+
+So the phase's rule was that **every fix lands inside a mechanism that already exists**, and a fix
+that appears to need new machinery means the finding was misread. Held: one Probe, one registry
+entry, one gauge, four dataclass fields, two state checks, one constant. Zero new subsystems,
+stores or row kinds.
+
+**What the sweep closed.** The cost sentinel counted unpriced spend as zero, which is `usage.py`'s
+own documented anti-pattern committed inside the safety brake (I-46). Health had no question to
+ask about the two journal kinds phase 4 gave it (I-47). A vanished leg was journalled while the
+remainder - possibly a naked short - kept being priced on the legs it still had (I-48); reconcile
+now counts and the exit registry closes, which needed no tools in reconcile and no new mechanism,
+just the D-037 recipe. The muse's malformed candidates escaped the trial count, so a prompt
+variant producing garbage was invisible to its own A/B reward (I-49). Per-leg IV died at the
+trade boundary, leaving every post-entry greek flat for a position built from a skewed board
+(I-50). The tick lock was the one non-atomic state write left (I-51). The single-shot tick path
+crashed raw where the loop degrades (I-52). `doctor` could not see a typo in its own config's
+role keys (I-53).
+
+**Two things the work found that the review had not.**
+
+*I-54, found by implementing I-48:* `Position.frontmatter()` is a hand-maintained allowlist and
+`_parse` its hand-maintained mirror, so **WU-4.5's `thesis_vol_view` had never been persisted at
+all** - set at record time, gone on the next read, and the entire point of that field is that a
+vol thesis stays scoreable AFTER the cycle that formed it. No test noticed because every test
+checked the fields it already knew about. Fixed as a PROPERTY, not two more examples:
+`test_every_position_field_survives_a_save_load_round_trip` walks
+`dataclasses.fields(Position)` and fails on any field that does not survive, unless it is on an
+exclusion list carrying a stated reason.
+
+*I-55, found by WU-6.9's trace and by far the most serious:* `analytics.snapshot` degrades on a
+failed broker read and leaves `broker_positions == []`, which is indistinguishable from "the
+broker holds nothing". Reconcile treated that as proof, so **a dead MCP session marked every open
+position closed, scored each through learning, and left the real exposure running with no exit
+rules watching it** - a terminal position is never evaluated again. Reproduced before the fix,
+contained after. It is D-038's absence-as-zero and I-46's unpriced-as-free at a third seam, so it
+took the same shape: `Snapshot.broker_readable`, defaulting FALSE because fail-closed is the only
+defensible default on a capital guard, with the failed read routed through the `health.degraded`
+mechanism that already existed for exactly this.
+
+WU-6.9 was specified as an investigation whose two permitted outcomes were "pin it" or "ledger
+it", explicitly forbidding reconnect machinery built in anticipation. The trace found the defect
+was real, so it was fixed - a guard against acting on evidence you do not have is not
+anticipation, and the run loop was live at the time.
+
+**What the phase deliberately did NOT do, recorded because the reasons bound it:** the muse
+exclusion list the review proposed was rejected in favour of measurement (`muse.
+funnel_overlap_rate`) - the muse prompt is the Coach's one live A/B lever, editing it from outside
+corrupts an open trial's pairing, and the premise is unproven since the muse's mandate is novel
+THESES rather than novel names. Scoring declined structures (I-16) was routed to the gate-regret
+workstream it belongs to. Research's missing options gate was reclassified as a deliberate
+limitation: research runs while the market is closed, so there is no chain to check.
+
+**Verified:** 490 default tests (+21), every fix revert-verified before its issue was struck,
+both scaffolds re-run with zero violations, `trdrbot health` 0 problems against live data.
