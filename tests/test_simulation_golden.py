@@ -171,3 +171,31 @@ def test_equal_implied_and_realized_read_as_parity_not_as_a_unit_bug():
                              realized_vol_pct=12.0)
 
     assert m["iv_vs_realized"] == pytest.approx(1.0)
+
+
+def test_a_thesis_with_no_vol_view_prices_exactly_as_before(monkeypatch):
+    """WU-4.5's load-bearing guarantee: `vol_view=None` IS the market's IV, so
+    the decision measure changes nothing until the agent states one.
+
+    The goldens above already pin the values; this pins the EQUIVALENCE, which
+    is the property a future edit is most likely to break - one column quietly
+    moving to `dec_iv` while another stays on `iv` is precisely the two-measures
+    defect the vol view exists to remove.
+    """
+    exp = experiments.Experiment(name="vertical", legs=_vertical(), rationale="r")
+    no_view = experiments.simulate(exp, THESIS, spot=SPOT, iv=IV, days=DAYS,
+                                   terminal_factors=FACTORS)
+
+    explicit = experiments.simulate(
+        exp, experiments.Thesis(claim=THESIS.claim, underlying=THESIS.underlying,
+                                horizon=THESIS.horizon, drift=THESIS.drift,
+                                band_low=THESIS.band_low, band_high=THESIS.band_high,
+                                vol_view=IV),
+        spot=SPOT, iv=IV, days=DAYS, terminal_factors=FACTORS)
+
+    for key, want in sorted(no_view.items()):
+        if key in ("vol_view_pct", "breakeven_vol", "breakeven_drift"):
+            continue  # objects, and the one key that exists to differ
+        assert explicit[key] == want, f"{key} moved: {explicit[key]!r} != {want!r}"
+    assert no_view["vol_view_pct"] is None
+    assert no_view["dec_iv_pct"] == pytest.approx(IV * 100)

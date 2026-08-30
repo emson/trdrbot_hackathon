@@ -158,6 +158,7 @@ def build_simulate_experiments(shared: SharedContext, state_dir: Path | None = N
         candidates: list[dict[str, Any]],
         band_low: float | None = None,
         band_high: float | None = None,
+        vol_view_pct: float | None = None,
     ) -> str:
         """Simulate several candidate structures expressing ONE thesis, and rank them.
 
@@ -181,6 +182,20 @@ def build_simulate_experiments(shared: SharedContext, state_dir: Path | None = N
                 Give at least one band - without one the thesis cannot be
                 scored later and you lose the ability to learn whether your
                 VIEW or your STRUCTURE was wrong.
+            vol_view_pct: your forecast for the ANNUALIZED REALIZED VOL over
+                this horizon, in percent (8.5 = 8.5%). **State it whenever the
+                trade is about volatility** - premium you think is rich,
+                premium you think is cheap, any range structure. It is the vol
+                half of your decision measure: P(profit), expected value and
+                the payoff ratio that sizes the trade are all computed under
+                it, so a vol edge you can defend becomes size you have earned.
+                Omit it and those columns price under the market's own IV,
+                where by construction you have no vol edge at all - the honest
+                answer for a purely directional thesis, and the wrong one for a
+                condor. It is the number you already state in prose every cycle
+                ("I forecast 8.5%; the condors need sub-7.5%"), so put it on
+                the record with record_forecast(metric='realized_vol') too -
+                that is what turns a claim into a scored input.
             candidates: list of {name, rationale, legs}, where legs is a list
                 of {right: "C"|"P", strike, side: "long"|"short", qty, price,
                 bid?, ask?, iv_pct?}. Include bid and ask when you have real
@@ -193,6 +208,9 @@ def build_simulate_experiments(shared: SharedContext, state_dir: Path | None = N
         thesis = experiments.Thesis(
             claim=thesis_claim, underlying=underlying, horizon=horizon,
             drift=drift_pct / 100.0, band_low=band_low, band_high=band_high,
+            # Percent at the boundary, fraction inside - the same convention as
+            # iv_pct and drift_pct, and the conversion happens here, once.
+            vol_view=(vol_view_pct / 100.0) if vol_view_pct is not None else None,
         )
         built: list[experiments.Experiment] = []
         frictions: list[float | None] = []
@@ -452,6 +470,7 @@ def build_record_position(
             pos.thesis_band_low = th.band_low
             pos.thesis_band_high = th.band_high
             pos.thesis_drift = th.drift
+            pos.thesis_vol_view = th.vol_view
         # Close the loop: mark the pre-registered thesis as traded, so the
         # ledger distinguishes ideas acted on from ideas declined.
         if ledger is not None and pos.thesis_horizon:

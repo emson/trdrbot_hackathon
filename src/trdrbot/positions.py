@@ -99,6 +99,11 @@ class Position:
     thesis_band_low: float | None = None
     thesis_band_high: float | None = None
     thesis_drift: float = 0.0
+    #: The vol half of the decision measure this position was sized under
+    #: (a FRACTION, None = priced at the market's own IV). Recorded for the
+    #: same reason as thesis_drift: resolution can ask whether the VIEW was
+    #: right, and for a vol trade the view is this number (WU-4.5).
+    thesis_vol_view: float | None = None
     attribution: str = ""          # set once the horizon has passed
     #: Highest materiality band already interim-scored (INV-24). Monotonic:
     #: caps how much cumulative evidence one unresolved position can

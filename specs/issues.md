@@ -52,17 +52,21 @@ Sorted by severity.
   Production cannot reach the max/max fallback any more; it survives for direct callers and says
   so. Every sizing outcome, refusals included, is journalled for the `sizing.refused_rate` gauge.
   Verified by reverting local_tools.py and watching all six regression tests fail.
-- **I-41 · A short-vol trade can NEVER earn Kelly size - the ladder is inert for half the book**
-  (scaffold G2). A thesis has a drift knob but no vol knob, so for a vol trade the stated
-  probability comes from the agent's own vol view while Kelly's `b` is computed under the MARKET's
-  IV. Swept on a fair-priced condor and put credit spread with a genuine, honestly-stated vol edge
-  of 0 to 12 points: full Kelly under the shrunk probability stays <= 0 at EVERY point, so size is
-  pinned at the seed allocation with a "record disagrees" warning - at 12 points of true edge, the
-  strongest vol view the agent could ever hold. Directional trades ramp normally (2.1% -> 4.9% of
-  equity over the same sweep, G2b). The measure-mixing also shifts the gate itself: the put credit
-  spread's gate opens 3 vol points late. Net effect: the sizing ladder rewards direction bets and
-  structurally starves vol bets, a preference nobody chose - the same defect class as the max/max
-  bias D-077 removed, one measure deeper.
+- ~~**I-41 · A short-vol trade can NEVER earn Kelly size - the ladder is inert for half the
+  book**~~ **FIXED 2026-08-30 (WU-4.5).** `Thesis` now carries `vol_view`, the annualized realized
+  vol the agent forecasts for the horizon, and it is the vol half of the DECISION MEASURE:
+  `pop_thesis`, `ev_thesis` and the payoff ratio that sizes the trade are all computed under it,
+  while every market-labelled column stays on the market's IV so the gap between them remains the
+  claimed edge. D-079's algebra is measure-agnostic, so the gate is now exact for vol theses as it
+  already was for drift ones - measured on the scaffold's own sweep, the put credit spread's gate
+  opens at 4.0% of vol edge where EV-after-costs turns positive at 4.0% (it was 3 points late),
+  and Kelly engages from 7 points with size ramping 1.86% -> 2.61% -> 3.72% instead of pinning at
+  the seed allocation forever. `vol_view=None` is byte-identical to the old behaviour, pinned by
+  the golden. One emergent property worth knowing (recorded, not fixed): past ~10 points of
+  claimed vol edge the losing side of a wide condor holds under 1% of the agent's own
+  distribution, `payoff_ratio` refuses, and sizing refuses with it - an extreme view self-refuses
+  rather than manufacturing an enormous Kelly from a corner of the grid. Verified by reverting
+  experiments.py and watching the wiring tests fail.
 - **I-42 · One wide print closes a credit spread immediately - the documented artifact IS the
   decisive case** (scaffold G4/P2). `position_mark`'s registry entry sets `immediate_overshoot=1.0`
   ("not plausibly a quote artifact") while its own comment says a wide or stale quote "can print

@@ -4150,3 +4150,76 @@ def test_a_normal_spread_gets_no_blind_mark_warning(tmp_path):
               {"symbol": "X261016C00105000", "side": "sell", "qty": 1}])
 
     assert "NEVER fire" not in out
+
+
+# ==================================================================== PILLAR-1
+# ECONOMIC CONSCIENCE  (WU-4.5; issue I-41, notes/023-024)
+#
+# One relationship, not a level, and it is deliberately BOTH of the things a
+# pair of threshold evals would contradict each other about: the gate opens
+# exactly where expected value after costs turns positive, under the measure the
+# thesis actually declares. "Never pay for a coin flip" and "never starve a real
+# edge" are the same invariant read in two directions.
+#
+# D-079 proved this exact for drift theses. The vol view extends the SAME
+# algebra to vol theses: with `b` = (E[win|win] - f) / (E[loss|loss] + f) and
+# the model's own p, EV-after-costs > 0 iff p > 1/(1+b) iff Kelly > 0.
+
+def test_the_gate_opens_exactly_where_ev_after_costs_does_under_a_vol_view():
+    """I-41: a vol thesis had no vol knob, so `p` came from the agent's measure
+    while `b` came from the market's - two measures in one Kelly. Swept across a
+    real vol edge, the sign of Kelly must agree with the sign of EV after costs
+    at every point, exactly as it already did for drift."""
+    spot, iv_market, days = 100.0, 0.25, 7.0
+    legs = [Leg(right="P", strike=100.0, side="short", qty=1, price=_fair("P", 100.0)),
+            Leg(right="P", strike=95.0, side="long", qty=1, price=_fair("P", 95.0))]
+    mp, ml = optmath.max_profit_loss(legs)
+    friction = sum(l.price * l.qty * 100 for l in legs) * experiments.DEFAULT_ROUND_TRIP_COST
+
+    for vol_view in [0.25 - i / 100 for i in range(0, 13)]:
+        ev = optmath.expected_value(legs, spot, vol_view, days) - friction
+        p = optmath.prob_profit(legs, spot, vol_view, days)
+        pr = optmath.payoff_ratio(legs, spot, vol_view, days, friction=friction)
+        k = sizing.kelly_fraction(p, mp, ml, payoff_ratio=pr[2]) if pr else None
+        if abs(ev) < 1.0:
+            continue  # the boundary itself; sign is meaningless inside a dollar
+        assert (k > 0) == (ev > 0), (
+            f"vol {vol_view:.0%}: Kelly {k:+.4f} disagrees with EV after costs {ev:+.2f}")
+
+
+def test_a_real_vol_edge_now_earns_kelly_instead_of_the_seed_allocation():
+    """The measured consequence of I-41, and the point of the whole change: a
+    short-premium book could never earn Kelly size however large and however
+    honestly stated its edge, because the payoff was priced under the market's
+    vol while the probability was priced under the agent's."""
+    spot, days = 100.0, 7
+    legs = [{"right": "P", "strike": 100, "side": "short", "qty": 1,
+             "price": round(_fair("P", 100.0), 4)},
+            {"right": "P", "strike": 95, "side": "long", "qty": 1,
+             "price": round(_fair("P", 95.0), 4)}]
+    exp_legs = [Leg.parse(l) for l in legs]
+    mp, ml = optmath.max_profit_loss(exp_legs)
+
+    def sized(vol_view_pct):
+        thesis = experiments.Thesis(
+            claim="realized comes in under implied", underlying="X",
+            horizon="2099-01-05", band_low=95.0, band_high=105.0,
+            vol_view=(vol_view_pct / 100.0) if vol_view_pct else None)
+        m = experiments.simulate(
+            experiments.Experiment(name="put credit", legs=exp_legs), thesis,
+            spot=spot, iv=0.25, days=days)
+        return sizing.size_position(
+            equity=100_000.0, stated_confidence=m["pop_thesis"], max_profit=mp,
+            max_loss=ml, calibration=ESTABLISHED, underlying="X",
+            payoff_ratio=m["payoff_ratio"])
+
+    # A genuine 12-point vol edge, honestly stated.
+    edge = sized(13.0)
+    assert edge.kelly_full > 0, "a real vol edge must reach Kelly at all"
+    assert "record does not support" not in edge.reason
+
+    # ...and with no vol view the same trade is priced at the market's own vol,
+    # where by construction there is no edge to earn size with.
+    none_stated = sized(None)
+    assert none_stated.kelly_full <= 0
+    assert edge.fraction_of_equity > none_stated.fraction_of_equity

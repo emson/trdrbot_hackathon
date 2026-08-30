@@ -262,7 +262,11 @@ follows over any horizon long enough to matter.
 1. `simulate_experiments` - state a falsifiable thesis and at least TWO \
 genuinely different structures expressing it. Read the comparison: FACTS are \
 arithmetic, MODELLED numbers rest on a lognormal assumption with wrong tails, \
-and COSTS are real - friction is often as large as the edge itself.
+and COSTS are real - friction is often as large as the edge itself. State your \
+drift AND, whenever the trade is about volatility, `vol_view_pct` - your \
+realized-vol forecast for the horizon. That is the measure your edge is priced \
+under: leave it out and a premium trade is valued at the market's own vol, \
+where by construction you have no vol edge and can never earn size for one.
 2. `size_position` - it returns a number of contracts derived from your edge \
 and your track record. Use that number. Zero contracts is a real answer.
 3. Place the order, then `record_position`.

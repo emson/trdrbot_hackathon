@@ -42,6 +42,22 @@ class Thesis:
     drift: float = 0.0  # expected total return over the horizon (0.02 = +2%)
     band_low: float | None = None
     band_high: float | None = None
+    #: Annualized realized vol the agent forecasts over this horizon, as a
+    #: FRACTION (0.18 = 18%). None means "no vol view" and prices the thesis
+    #: columns under the market's own IV, exactly as before.
+    #:
+    #: **This is the other half of the decision measure, and its absence was
+    #: structural.** A thesis had a drift knob and no vol knob, so for a VOL
+    #: trade the stated probability came from the agent's own vol view while
+    #: Kelly's payoff `b` was computed under the MARKET's - two measures inside
+    #: one decision, the defect class of D-074's two clocks and D-076's two
+    #: calibration numbers. Measured (scaffold G2): with a genuine, honestly
+    #: stated vol edge swept from 0 to 12 points, full Kelly never turned
+    #: positive at any point, so a short-vol trade was pinned at the seed
+    #: allocation with a "record disagrees" warning however large its edge -
+    #: while directional trades ramped normally. The size ladder rewarded
+    #: direction bets and starved vol bets, a preference nobody chose.
+    vol_view: float | None = None
 
     def holds_at(self, price: float) -> bool | None:
         """None means unfalsifiable - deliberately not guessed."""
@@ -53,7 +69,8 @@ class Thesis:
             lo = f"{self.band_low:g}" if self.band_low is not None else "-inf"
             hi = f"{self.band_high:g}" if self.band_high is not None else "+inf"
             band = f" [holds if {lo} <= price <= {hi} on {self.horizon}]"
-        return f"{self.claim}{band} (drift {self.drift:+.1%})"
+        vol = f", vol view {self.vol_view:.1%}" if self.vol_view is not None else ""
+        return f"{self.claim}{band} (drift {self.drift:+.1%}{vol})"
 
 
 @dataclass
@@ -99,9 +116,20 @@ def simulate(
     # fallback when no quotes were supplied.
     friction = friction_usd if friction_usd is not None else gross_premium * round_trip_cost
 
+    # THE DECISION MEASURE. Two parameters, both the thesis's own: the drift it
+    # states, and the vol it forecasts. Absent a vol view this IS the market's
+    # IV, so everything below is byte-identical to the pre-vol_view behaviour -
+    # the golden test asserts exactly that.
+    #
+    # The split that matters: columns labelled MARKET stay on the market's IV
+    # (they exist to be compared against), and columns labelled "your view" move
+    # to `dec_iv`. Mixing the two inside one Kelly is what starved every vol
+    # trade the agent could ever form (see `Thesis.vol_view`).
+    dec_iv = thesis.vol_view if thesis.vol_view is not None else iv
+
     greeks = optmath.net_greeks(legs, spot, iv, days)
     pop_market = optmath.prob_profit(legs, spot, iv, days)
-    pop_thesis = optmath.pop_given_view(legs, spot, iv, days, drift=thesis.drift)
+    pop_thesis = optmath.pop_given_view(legs, spot, dec_iv, days, drift=thesis.drift)
     ev_market = optmath.expected_value(legs, spot, iv, days)
     # EV UNDER THE AGENT'S OWN VIEW. Its absence was the quiet defect at the
     # centre of this whole comparison: `ev_after_costs` was computed at drift
@@ -114,7 +142,7 @@ def simulate(
     #
     # A thesis that cannot move the number the decision is made on is
     # decorative. This is the number it moves.
-    ev_thesis = optmath.expected_value(legs, spot, iv, days, drift=thesis.drift)
+    ev_thesis = optmath.expected_value(legs, spot, dec_iv, days, drift=thesis.drift)
 
     # The payoff this bet actually offers, conditional on winning and on
     # losing. `size_position` uses it as Kelly's `b` in place of max/max, which
@@ -122,7 +150,7 @@ def simulate(
     # Friction charged to both sides: it is paid whether the trade wins or
     # loses, and netting it here is what makes the sizing gate open at exactly
     # the point EV-after-costs turns positive instead of ahead of it.
-    payoff = optmath.payoff_ratio(legs, spot, iv, days, drift=thesis.drift,
+    payoff = optmath.payoff_ratio(legs, spot, dec_iv, days, drift=thesis.drift,
                                   friction=friction)
 
     # WHAT HAS TO BE TRUE. An EV is one number resting on one volatility
@@ -133,7 +161,10 @@ def simulate(
     # previously answer.
     be_vol = optmath.breakeven_vol(legs, spot, days, friction=friction,
                                    drift=thesis.drift, iv_hint=iv)
-    be_drift = optmath.breakeven_drift(legs, spot, days, friction=friction, iv=iv)
+    # "Given MY vol, what drift do I need" - the coherent question once a vol
+    # view exists. At `iv` it would answer a question about a distribution the
+    # thesis does not hold.
+    be_drift = optmath.breakeven_drift(legs, spot, days, friction=friction, iv=dec_iv)
     dominant = optmath.dominant_risk(greeks)
 
     # Risk/reward only means something when both ends are bounded. An
@@ -213,6 +244,10 @@ def simulate(
                            if realized_vol_pct else None),
         "realized_vol_pct": realized_vol_pct,
         "iv_pct": iv * 100,
+        # The vol half of the decision measure, None when the thesis states no
+        # vol view (and then `dec_iv_pct` equals `iv_pct` by construction).
+        "vol_view_pct": (thesis.vol_view * 100) if thesis.vol_view is not None else None,
+        "dec_iv_pct": dec_iv * 100,
     }
 
 
@@ -383,6 +418,21 @@ def render_comparison(
                 f"Market 1-sigma expected move by horizon: +/-${em:,.2f}"
                 f" (i.e. {sp - em:,.2f} to {sp + em:,.2f}; spot {sp:,.2f})."
                 f" Thesis band [{lo}, {hi}]."
+            )
+            break
+    # The decision measure, named once, when it differs from the market's.
+    # Absent a vol view this line does not render at all and the whole
+    # comparison is unchanged - which is the byte-identity the golden asserts.
+    for _, m0 in ranked:
+        vv, mkt = m0.get("vol_view_pct"), m0.get("iv_pct")
+        if vv is not None and mkt is not None:
+            direction = "BELOW" if vv < mkt else "above"
+            lines.append(
+                f"Decision measure: drift {thesis.drift:+.1%} and realized vol "
+                f"{vv:.1f}% - your forecast, {direction} the market's {mkt:.1f}% IV. "
+                f"Every 'your view' column below is computed under it, so the size "
+                f"you earn is the size your vol view justifies. It is scored: record "
+                f"it with record_forecast(metric='realized_vol')."
             )
             break
     # Printed once, in the market-context block rather than per candidate: the

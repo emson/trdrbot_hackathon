@@ -151,9 +151,11 @@ check("searched to" in optmath.breakeven_vol(free, SPOT, 7).describe(),
 
 # ================================================================ G2 EDGE RESPONSE
 report("G2  Edge-response: a REAL vol edge, honestly stated - when does the stack trade?")
-print("Market prices the condor at IV 25%; true vol is lower by `edge`. The agent states")
-print("the honest P(win) under true vol. Production computes payoff at MARKET IV (a")
-print("thesis has a drift knob but NO vol knob), friction charged. SCALE tier, n=20.\n")
+print("Market prices the structure at IV 25%; true vol is lower by `edge`, and the agent")
+print("states the honest P(win) under it. MIXED is what production did before WU-4.5:")
+print("p from the agent's vol, payoff `b` from the market's - two measures in one Kelly.")
+print("ONE MEASURE is `Thesis.vol_view`: both from the vol the thesis declares. Friction")
+print("charged either way. SCALE tier, n=20.\n")
 
 post20, cal20 = posture(20), cal(20)
 for name in ("iron condor 90-110", "put credit 95/100"):
@@ -161,49 +163,87 @@ for name in ("iron condor 90-110", "put credit 95/100"):
     mp, ml = optmath.max_profit_loss(legs)
     fr = gross_premium(legs) * DEFAULT_ROUND_TRIP_COST
     print(f"--- {name}: friction ${fr:.0f}/contract, maxP ${mp:.0f}, maxL ${ml:.0f}")
-    print(f"{'edge':>6} {'stated':>7} {'EV_true-f':>9} {'gate':>5} {'frac':>7} {'ctr':>4}")
+    print(f"{'edge':>6} {'stated':>7} {'EV_true-f':>9} | {'MIXED measure':>21} "
+          f"| {'ONE measure (vol_view)':>25}")
+    print(f"{'':>6} {'':>7} {'':>9} | {'gate':>5} {'frac':>7} {'Kelly':>7} "
+          f"| {'gate':>5} {'frac':>7} {'Kelly':>7}")
     prev_frac, first_trade, ev_cross = -1.0, None, None
-    all_seed = True
+    mixed_all_seed, one_earns, refused_from = True, False, None
     for e_bp in range(0, 130, 10):
         e = e_bp / 1000.0
         iv_true = 0.25 - e
         stated = optmath.prob_profit(legs, SPOT, iv_true, 7)
         ev_true = optmath.expected_value(legs, SPOT, iv_true, 7) - fr
-        pr = optmath.payoff_ratio(legs, SPOT, 0.25, 7, friction=fr)  # market measure
-        d = sizing.size_position(
-            equity=EQUITY, stated_confidence=stated, max_profit=mp, max_loss=ml,
-            calibration=cal20, posture=post20, underlying="X",
-            payoff_ratio=pr[2] if pr else None)
-        gate = "open" if d.contracts else "shut"
-        if d.contracts and first_trade is None:
+
+        def _size(payoff):
+            """Production's path: no usable conditional payoff means REFUSE.
+
+            The max/max fallback is deliberately NOT modelled here - WU-4.2
+            removed it from every path the agent can reach, so a scaffold that
+            still took it would be measuring dead code.
+            """
+            if payoff is None:
+                return None
+            return sizing.size_position(
+                equity=EQUITY, stated_confidence=stated, max_profit=mp, max_loss=ml,
+                calibration=cal20, posture=post20, underlying="X",
+                payoff_ratio=payoff[2])
+
+        def _cells(d):
+            if d is None:
+                return f"{'refuse':>5} {'-':>7} {'-':>7}"
+            return (f"{'open' if d.contracts else 'shut':>5} "
+                    f"{d.fraction_of_equity:>7.2%} {(d.kelly_full or 0):>+7.3f}")
+
+        # What production did before WU-4.5: p from the agent's vol, b from the
+        # market's. Kept as the measured contrast, not as behaviour.
+        mixed = _size(optmath.payoff_ratio(legs, SPOT, 0.25, 7, friction=fr))
+        # CHANGED (WU-4.5): the thesis carries `vol_view`, so `simulate` prices
+        # the payoff under the SAME vol the stated probability came from.
+        one = _size(optmath.payoff_ratio(legs, SPOT, iv_true, 7, friction=fr))
+
+        if one is not None and one.contracts and first_trade is None:
             first_trade = e
         if ev_true > 0 and ev_cross is None:
             ev_cross = e
-        check(d.fraction_of_equity >= prev_frac - 1e-9,
-              f"G2: {name} size fell as real edge grew at edge {e:.1%}")
-        prev_frac = d.fraction_of_equity
-        earned = d.contracts and d.kelly_full is not None and d.kelly_full > 0
-        if earned:
-            all_seed = False
-        print(f"{e:>6.1%} {stated:>7.1%} {ev_true:>9.0f} {gate:>5} "
-              f"{d.fraction_of_equity:>7.2%} {d.contracts:>4}  "
-              f"{'seed (record disagrees)' if d.contracts and not earned else ''}")
-    if all_seed and first_trade is not None:
-        note(f"G2: {name} - at EVERY vol edge up to 12 points, full Kelly under the "
-             f"shrunk probability x market-measure payoff stays <= 0, so the trade is "
-             f"pinned at the seed allocation with a 'record disagrees' warning. A "
-             f"short-vol book NEVER earns Kelly size, however real and large its "
-             f"edge; directional trades (G2b) ramp normally. The bot is structurally "
-             f"biased toward direction bets.")
+        # Monotonicity holds only where a conditional payoff EXISTS. Past that
+        # the structure has no losing side left to condition on and the stack
+        # refuses outright, which is a fall in size and the correct one.
+        if one is not None:
+            check(one.fraction_of_equity >= prev_frac - 1e-9,
+                  f"G2: {name} size fell as real edge grew at edge {e:.1%}")
+            prev_frac = one.fraction_of_equity
+            if one.contracts and (one.kelly_full or 0) > 0:
+                one_earns = True
+        elif not refused_from:
+            refused_from = e
+        if mixed is not None and mixed.contracts and (mixed.kelly_full or 0) > 0:
+            mixed_all_seed = False
+        print(f"{e:>6.1%} {stated:>7.1%} {ev_true:>9.0f} "
+              f"| {_cells(mixed)} | {_cells(one)}")
+    check(mixed_all_seed, f"G2: {name} - the MIXED measure was expected to never "
+                          f"earn Kelly; if it now does, this contrast is stale")
+    check(one_earns, f"G2: {name} - a real vol edge must earn Kelly under one measure")
     if first_trade is not None and ev_cross is not None:
         gap = first_trade - ev_cross
-        print(f"    hurdle: first trade at {first_trade:.1%} vol edge; EV-after-costs "
-              f"positive from {ev_cross:.1%}; measure-mixing gap {gap:+.1%}")
-        if abs(gap) >= 0.02:
-            note(f"G2: {name} - the gate opens {gap:+.1%} vol points away from where "
-                 f"EV-after-costs actually turns positive, because a vol thesis has no "
-                 f"vol knob: stated p comes from the TRUE measure, payoff b from the "
-                 f"MARKET measure. Directional theses do not have this gap (G2b).")
+        print(f"    one measure: first trade at {first_trade:.1%} vol edge; "
+              f"EV-after-costs positive from {ev_cross:.1%}; gap {gap:+.1%} "
+              f"(one grid step = 1.0%)")
+        check(abs(gap) <= 0.011,
+              f"G2: {name} gate opens {gap:+.1%} from EV>0 - the measures have "
+              f"drifted apart again")
+    if refused_from is not None:
+        print(f"    beyond a {refused_from:.0%} vol edge the losing side thins past "
+              f"MIN_CONDITIONAL_MASS and the stack REFUSES to size at all")
+        note(f"G2: {name} - past ~{refused_from:.0%} of claimed vol edge the losing "
+             f"side of this structure holds under 1% of the agent's own "
+             f"distribution, so `payoff_ratio` refuses and (since WU-4.2) sizing "
+             f"refuses with it. An extreme vol view SELF-REFUSES rather than "
+             f"manufacturing an enormous Kelly out of a corner of the grid - the "
+             f"layers cover each other, which is what balance looks like. Worth "
+             f"knowing rather than fixing: the agent gets no position from a view "
+             f"that says a trade cannot lose, which is the correct reading of "
+             f"such a view.")
 
 report("G2b Directional edge (drift knob EXISTS): gate must open exactly at EV>0")
 legs = structures(0.25, 7)["call debit 100/105"]
