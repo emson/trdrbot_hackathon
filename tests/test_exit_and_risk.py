@@ -208,6 +208,7 @@ def test_a_partially_dated_leg_set_is_refused_not_assumed_shared():
 # breach that should wait, a gap that should not, a bleed that never resolves.
 # The relationship pinned is "a close happens when the world agrees it should",
 # never a threshold level - the levels are the agent's own to write.
+# Governed by docs/principles_testing.md - the four pillars.
 
 from datetime import timedelta
 

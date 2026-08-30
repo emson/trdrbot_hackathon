@@ -4137,3 +4137,70 @@ registry's data fields. The deletions are real - `pinned`, `vol_days`, `VOL_DAYS
 `WEEKEND_VOL_WEIGHT`, a duplicated JSONL reader and a duplicated tally fold. `trdrbot.health`,
 `trdrbot.journal` and `trdrbot.coach_pkg.state` are promoted to mypy strict; the tree's total
 error count fell 89 -> 63.
+
+## D-094: Phase 4 - one measure per decision, and refusals that survive the seam
+**Date:** 2026-08-30
+**Status:** accepted
+**Context:** The trader gauntlet (`tests/scaffold_trader_gauntlet.py`, notes/023) measured six
+defect-grade behaviours, I-40..I-45. Reading them together, they are not six problems. They are
+one class this project keeps fixing instance by instance: **two layers computing one decision
+quantity under different assumptions.** Two clocks (D-074), two calibration numbers (D-076), two
+cost views (D-079) - and now two probability measures inside one Kelly, plus a seam that dropped
+the cost view entirely one layer after D-079 installed it.
+
+**The rule that generalises, and is now enforced in code rather than remembered:** every
+probability, expected value and payoff ratio feeding one gate/size decision is computed under one
+declared measure (drift, vol), friction included; a seam that loses any part of the measure
+REFUSES rather than substituting.
+
+**What that bought, measured:**
+
+- **A vol thesis can finally earn size (I-41).** `Thesis.vol_view` makes the agent's realized-vol
+  forecast the vol half of the decision measure. D-079's algebra is measure-agnostic, so the gate
+  became exact for vol theses as it already was for drift ones: the put credit spread's gate now
+  opens at 4.0% of vol edge where EV-after-costs turns positive at 4.0% (it was 3 points late),
+  and Kelly engages from 7 points with size ramping 1.86% -> 2.61% -> 3.72% where it used to pin
+  at the seed allocation *at every edge up to 12 points*. A short-premium book was structurally
+  unable to earn size, however large and however honestly stated its edge.
+- **The friction refusal now reaches the model (I-40).** `payoff_ratio` returning None meant four
+  different things and `size_position` treated them alike, falling back to frictionless max/max.
+  The same fair-priced narrow condor at a claimed 70%: refused under the friction-charged ratio
+  (b 0.26, gate 79%), sized **224 contracts - the 5% per-position cap** - under the fallback
+  (b 3.49, gate 22%). Now one named refusal per cause, and production cannot reach the fallback.
+- **The artifact print stopped closing healthy spreads (I-42).** A mark breach is decisive only if
+  the underlying corroborates it, using entry state D-040 already records and `dominant_risk` to
+  decide what "adverse" means. The gap still closes on the first print; the lone wide quote
+  debounces.
+- **Two refusals deleted rather than added.** Kelly refuses unbounded LOSS only, so cheap
+  convexity is buyable (a fair-priced ATM call: refused at any edge before, 36 contracts now).
+  And the planned EV hurdle above the seed floor was never built - with the measure right, the
+  gate boundary IS EV=0, and a hurdle would re-stack haircuts into the D-076 class.
+
+**Two things the scaffold caught that inspection did not, both recorded rather than smoothed
+over.** First, size is NOT monotone in claimed edge: past ~10 points of vol view the losing side
+of a wide condor holds under 1% of the agent's own distribution, `payoff_ratio` refuses, and
+sizing refuses with it - an extreme view self-refuses rather than manufacturing an enormous Kelly
+from a corner of the grid. The layers cover each other. Second, **half of I-43's own headline was
+wrong.** It claimed the flat-IV evaluation gated "the same zero-edge trade 26pp apart purely by
+which side of the smile it sits on", comparing a put credit 95/100 with a call credit 105/110.
+Those are not mirrors - one is struck at the money, the other 5% out - and under the fix the gates
+move 71.2%/96.9% to 72.2%/96.0%, which fixes nothing. There is also no single flat vol that makes
+a leg-wise-priced board zero-EV at all. The narrower defect (a structure evaluated at a vol nobody
+quoted for its strikes: EV -$6.68 at ATM 25% against +$0.05 at the vega-weighted 21.0%) was real
+and is fixed; the headline is withdrawn in the ledger and in the scaffold section that produced it.
+
+**Testing, deliberately consolidated rather than grown.** Four named pillars - economic
+conscience, one-measure/seams-refuse, capital-protection paths, learning integrity - greppable as
+`PILLAR-1..4`, governed by six admission rules stated ONCE in `docs/principles_testing.md`.
+Pillars pin RELATIONSHIPS, never levels: "the gate opens iff EV-after-costs is positive" is
+simultaneously "never pay for a coin flip" and "never starve a real edge", which a pair of
+threshold tests would fight over forever.
+
+**Three gauges, no new sentinels.** `sizing.refused_rate`, `exit.uncorroborated_decisives` and
+the book's vega/beta-delta, each reading a row the system already writes. A vega CAP has to earn
+its existence from that trajectory: measure, then gate. `_render_positions` lost four parameters
+in the process - three existed only so a renderer could compute book greeks where nothing else
+could see them, which is exactly why they had never become a gauge.
+
+**Verified:** 469 default tests (+29), every fix revert-verified before its issue was struck;
+both scaffolds re-run with zero invariant violations; `trdrbot lessons verify` 12/12.

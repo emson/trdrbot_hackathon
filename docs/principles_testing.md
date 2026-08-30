@@ -262,6 +262,48 @@ simplify our workaround; that is the test doing its job in the good direction.
 one test named for the bug, carrying the incident in its docstring. Verification
 done in a throwaway shell command protects nothing against the next edit.
 
+#### The four pillars, and the rules that keep them from multiplying
+
+Four named invariant classes, greppable as `PILLAR-1`…`PILLAR-4`. They exist because
+threshold-flavoured tests contradict each other in pairs ("trade more" vs "refuse more",
+"exit fast" vs "don't churn"), and a suite that argues with itself gets ignored.
+
+| | guards | lives in |
+|---|---|---|
+| **PILLAR-1** economic conscience | on fair pricing, zero size at every regime; the gate opens exactly where EV-after-costs turns positive, under the measure the thesis declares | `test_regressions.py` |
+| **PILLAR-2** one measure, seams refuse | `p` and `b` from one measure with friction in every path that can size; a seam that loses either refuses rather than substituting | `test_regressions.py` |
+| **PILLAR-3** capital-protection paths | the exit engine driven as price PATHS: whipsaw, corroborated gap, artifact print, stale quote, bleed | `test_exit_and_risk.py` |
+| **PILLAR-4** learning integrity | luck never promotes, drawdown demotes, more evidence never means less size, fitted numbers are holdout-vetoed | `test_regressions.py`, `test_coach.py` |
+
+**Pillars pin RELATIONSHIPS, never levels.** An exactness invariant cannot contradict a
+monotonicity invariant; two thresholds eventually always do. PILLAR-1 is the worked example:
+*the gate opens iff EV-after-costs is positive* is simultaneously "never pay for a coin flip"
+and "never starve a real edge" - the two goals a pair of threshold tests would fight over.
+
+Six rules govern admission, and they are the reason the set stays small:
+
+1. **Mutation-verified.** A pillar test ships only with proof it FAILS when its fix is reverted.
+   Every I-3x/I-4x entry in `issues.md` carries that sentence because the revert was actually
+   performed. Not a published LLM-eval practice - ours, and it has caught real gaps here.
+2. **Frozen and additive.** Scenario tables only ever gain rows. A row is never edited to make a
+   candidate pass; behaviour changed on purpose is a new row plus a `# CHANGED (WU-x.y)` note
+   naming the reason.
+3. **Admission needs an address AND an incident.** A new test names the pillar it belongs to and
+   the observed failure it traces to. Evals from theory are how suites sprawl.
+4. **Balanced pressure.** Any test pushing toward an action ships with its opposite direction, or
+   is expressed as an exactness/band invariant. One-sided tests plus a self-improvement loop is
+   the fastest route to always-trade or never-trade drift, and this book has measured both.
+5. **Saturated tests retire into the canary set** - they stop giving improvement signal and keep
+   catching regressions. Never deleted for being boring.
+6. **The measured/measurer split is law** (notes/015): nothing the Coach can move may score its
+   own trial.
+
+**Scaffolds and pinned tests are both, deliberately** (D-079). `tests/scaffold_*.py` are the
+trader-readable tables - the thing you look at to ask "is the stack balanced" - and are not
+collected by pytest. The invariants they establish get pinned as real tests. The scaffold caught
+two of my own wrong assumptions during phase 4 that no assertion would have surfaced, which is
+its whole justification.
+
 #### What we deliberately do NOT test
 
 - LLM output quality or wording. Non-deterministic and not a contract.

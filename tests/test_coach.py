@@ -896,6 +896,7 @@ def test_a_lever_with_no_evidence_stream_still_mutates():
 # reads a row the system already writes; a gauge needing new instrumentation is
 # the wrong gauge. And a gauge with no data is OMITTED, never zeroed - on a
 # chart those are indistinguishable (D-038, absence-as-zero).
+# Governed by docs/principles_testing.md - the four pillars.
 
 def _cfg(tmp_path):
     from types import SimpleNamespace

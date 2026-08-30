@@ -351,10 +351,17 @@ Rationale and rules: [`docs/principles_testing.md`](docs/principles_testing.md).
   correctly reflects that.
 - **The first position can never be attributed** — no thesis was recorded at entry. Fabricating
   one retroactively would be worse than the gap.
+- **A skewed board is evaluated at one vol, not a smile.** Per-leg IVs set the greeks and now
+  set the vega-weighted vol the distribution uses, with the EV span across the legs' own IVs
+  printed beside it - but a smile-consistent terminal distribution is refused for the same reason
+  calendars are. There is no single flat vol that makes a leg-wise-priced board fair, so the
+  honest offer is "evaluated where the position lives, with the range stated".
 - **No guardrails, by choice.** Paper account, iteration speed mattered. What exists instead is
-  the agent's own exit rules, sizing that refuses unbounded-loss structures, and book-level caps.
+  the agent's own exit rules, sizing that refuses unbounded-LOSS structures (unbounded profit
+  with a finite conditional payoff is sizeable - a long call is not a naked short), and
+  book-level caps.
 - **Known issues are tracked openly** in [`specs/issues.md`](specs/issues.md) — recorded the
   moment they are found, removed only by the commit that fixes them.
 
-Design decisions and their reasoning: [`specs/decisions.md`](specs/decisions.md) (D-001…D-075).
+Design decisions and their reasoning: [`specs/decisions.md`](specs/decisions.md) (D-001…D-094).
 Architecture and invariants: [`specs/architecture.md`](specs/architecture.md).

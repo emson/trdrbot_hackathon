@@ -816,6 +816,9 @@ def _size_tier(comp, resolved, mp=800.0, ml=-1200.0, risk=0.0, by=None):
                                 open_risk_by_underlying=by)
 
 
+# ---- PILLAR-4 (learning integrity) lives here as well as in test_coach.py:
+# the four tests below are the originals, tagged rather than duplicated.
+# Governed by docs/principles_testing.md - the four pillars.
 def test_size_is_monotonic_in_evidence():
     """Two separate ladder inversions have shipped and been caught here: an
     earned record sizing smaller than an unproven one, and promotion from
@@ -3854,9 +3857,8 @@ def test_model_gauges_are_omitted_when_no_artifact_exists(tmp_path):
 # friction included, and a seam that loses any part of it refuses rather than
 # substitutes.
 #
-# Governance (notes/023): rows are added, never edited to make a candidate
-# pass; each test names the incident it traces to; each was verified by
-# reverting its fix and watching it fail.
+# Governed by docs/principles_testing.md - "The four pillars, and the rules that
+# keep them from multiplying". One copy of those rules, not four.
 
 def _fair(right: str, strike: float, spot: float = 100.0,
           iv: float = 0.25, days: float = 7.0) -> float:
@@ -4174,6 +4176,7 @@ def test_a_normal_spread_gets_no_blind_mark_warning(tmp_path):
 # D-079 proved this exact for drift theses. The vol view extends the SAME
 # algebra to vol theses: with `b` = (E[win|win] - f) / (E[loss|loss] + f) and
 # the model's own p, EV-after-costs > 0 iff p > 1/(1+b) iff Kelly > 0.
+# Governed by docs/principles_testing.md - the four pillars.
 
 def test_the_gate_opens_exactly_where_ev_after_costs_does_under_a_vol_view():
     """I-41: a vol thesis had no vol knob, so `p` came from the agent's measure
