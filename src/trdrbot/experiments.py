@@ -125,12 +125,21 @@ def simulate(
     # (they exist to be compared against), and columns labelled "your view" move
     # to `dec_iv`. Mixing the two inside one Kelly is what starved every vol
     # trade the agent could ever form (see `Thesis.vol_view`).
-    dec_iv = thesis.vol_view if thesis.vol_view is not None else iv
+    #
+    # And the MARKET's own vol is `iv_eff`, not the caller's ATM figure,
+    # whenever the legs carry their own IVs: one flat number has to stand in for
+    # a skewed surface somewhere, and the vega-weighted one is the honest
+    # choice. Flat quotes leave it exactly equal to `iv` (WU-4.8).
+    iv_eff = optmath.vega_weighted_iv(legs, spot, days, iv) or iv
+    dec_iv = thesis.vol_view if thesis.vol_view is not None else iv_eff
 
+    # Greeks keep the caller's `iv` as their FALLBACK: they already honour each
+    # leg's own IV where it exists, so this is only the reference for a leg that
+    # quoted none, and that is the ATM figure the caller passed.
     greeks = optmath.net_greeks(legs, spot, iv, days)
-    pop_market = optmath.prob_profit(legs, spot, iv, days)
+    pop_market = optmath.prob_profit(legs, spot, iv_eff, days)
     pop_thesis = optmath.pop_given_view(legs, spot, dec_iv, days, drift=thesis.drift)
-    ev_market = optmath.expected_value(legs, spot, iv, days)
+    ev_market = optmath.expected_value(legs, spot, iv_eff, days)
     # EV UNDER THE AGENT'S OWN VIEW. Its absence was the quiet defect at the
     # centre of this whole comparison: `ev_after_costs` was computed at drift
     # ZERO - the market's own distribution - where a fairly priced structure
@@ -160,7 +169,7 @@ def simulate(
     # betting on - a desk's first question, and one this comparison could not
     # previously answer.
     be_vol = optmath.breakeven_vol(legs, spot, days, friction=friction,
-                                   drift=thesis.drift, iv_hint=iv)
+                                   drift=thesis.drift, iv_hint=iv_eff)
     # "Given MY vol, what drift do I need" - the coherent question once a vol
     # view exists. At `iv` it would answer a question about a distribution the
     # thesis does not hold.
@@ -185,6 +194,22 @@ def simulate(
     # centering as the lognormal grid, so the GAP between the two is
     # attributable to tail shape - when they diverge, the edge depends on
     # the tail assumption, and the agent should know that.
+    # How much the choice of ONE flat vol is worth, in the currency of the
+    # decision itself. `iv_eff` picks a defensible number; this says what the
+    # answer would have read at the extremes of the same smile, so the residual
+    # assumption is visible rather than buried (the `breakeven_vol` philosophy:
+    # name what has to be true instead of choosing silently).
+    ev_span = None
+    leg_ivs = [l.iv for l in legs if l.iv is not None]
+    if leg_ivs and min(leg_ivs) != max(leg_ivs):
+        lo = optmath.expected_value(legs, spot, min(leg_ivs), days, drift=thesis.drift)
+        hi = optmath.expected_value(legs, spot, max(leg_ivs), days, drift=thesis.drift)
+        if lo is not None and hi is not None:
+            # Ordered by VALUE, not by vol: a short-vol structure's EV falls as
+            # vol rises, and the consumer of this wants a range to read, not a
+            # mapping to decode.
+            ev_span = (min(lo, hi) - friction, max(lo, hi) - friction)
+
     pop_bootstrap = None
     tail_gap = None
     if terminal_factors:
@@ -248,6 +273,11 @@ def simulate(
         # vol view (and then `dec_iv_pct` equals `iv_pct` by construction).
         "vol_view_pct": (thesis.vol_view * 100) if thesis.vol_view is not None else None,
         "dec_iv_pct": dec_iv * 100,
+        # The vega-weighted stand-in for a skewed surface, and what the decision
+        # number would read at the extremes of that same smile. Both None on a
+        # flat board, where there is no choice to defend.
+        "iv_eff_pct": (iv_eff * 100) if leg_ivs else None,
+        "ev_span": ev_span,
     }
 
 
@@ -449,6 +479,20 @@ def render_comparison(
             lines.append(
                 f"Implied vs realized: entry IV {ivp:.1f}% vs trailing realized"
                 f" {rv:.1f}% -> ratio {ratio:.2f}x ({reading})."
+            )
+            break
+    # The skew, and what it is worth. Rendered only when the legs actually
+    # quoted their own IVs - on a flat board there is no choice to defend.
+    for _, m0 in ranked:
+        eff, span = m0.get("iv_eff_pct"), m0.get("ev_span")
+        if eff is not None and span is not None:
+            lines.append(
+                f"Skew: these legs quote different vols, so one flat number has to "
+                f"stand in for the surface - evaluated at the vega-weighted "
+                f"{eff:.1f}%. Across the legs' own IVs the decision number would read "
+                f"${span[0]:+,.0f} to ${span[1]:+,.0f}. That range is an assumption "
+                f"you are choosing inside, not a measurement: if the trade only works "
+                f"at one end of it, it is untested rather than attractive."
             )
             break
     lines.append("\n### Candidate expressions (ranked)")

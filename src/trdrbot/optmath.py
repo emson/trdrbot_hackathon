@@ -856,6 +856,52 @@ def net_greeks(legs: list[Leg], spot: float, iv: float,
     }
 
 
+def vega_weighted_iv(legs: list[Leg], spot: float, days: float,
+                     fallback_iv: float) -> float | None:
+    """One flat vol that best represents a SKEWED set of quotes. None if flat.
+
+    The gap this closes: `net_greeks` honours each leg's own IV, so the risk
+    layer sees the smile the agent measured - but `_lognormal_grid` takes a
+    single vol, so every probability, expected value and payoff ratio was
+    evaluated against a flat surface. Risk and edge were computed under
+    DIFFERENT distributions, which is the two-layers-disagree class again
+    (D-074, D-076, D-079), and it is not small: on a board priced fairly at its
+    own skewed quotes the flat evaluation manufactures real EV out of nothing,
+    and gates a put credit spread and its mirror call credit spread tens of
+    points apart on identical zero edge (I-43, scaffold G3).
+
+    Weighted by |vega| x qty because vega is exactly "how much this leg's own
+    volatility matters to the position", which is the question being asked. The
+    absolute value is deliberate: on a spread the long and short vegas partly
+    cancel, and a signed weighting would divide by that near-zero remainder and
+    return a vol from nowhere.
+
+    **An approximation, and said to be one.** The honest answer is a
+    smile-consistent terminal distribution, which is a pricing model this
+    module deliberately does not have - the same refusal as calendars, and for
+    the same reason: a confident wrong distribution is worse than a stated
+    approximation. `experiments.simulate` reports the EV span across the leg
+    IVs alongside it, so the residual assumption is visible rather than buried.
+
+    Returns None when NO leg carries its own IV - there is no smile to weight,
+    and the caller's vol is already the right answer.
+    """
+    num = den = 0.0
+    skewed = False
+    for leg in legs:
+        iv = leg.iv if leg.iv is not None else fallback_iv
+        skewed = skewed or leg.iv is not None
+        g = bs_greeks(leg.right, leg.strike, spot, iv, days)
+        if g is None:
+            continue
+        w = abs(g["vega"]) * leg.qty
+        num += w * iv
+        den += w
+    if not skewed or den <= 0:
+        return None
+    return num / den
+
+
 def expected_move(spot: float, iv: float, days: float) -> float | None:
     """The market's own 1-sigma move by the horizon, in dollars.
 

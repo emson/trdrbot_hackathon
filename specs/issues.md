@@ -81,15 +81,24 @@ Sorted by severity.
   the same print with the underlying gapped to 96 still closes on the first. A suppressed breach
   closes nothing and would leave no trace, so `evaluate` counts them into the `exit_run`
   heartbeat. Verified by reverting exit_rules.py and watching all five path tests fail.
-- **I-43 · EV, POP and the payoff ratio ignore `Leg.iv` - risk and edge are priced off different
-  surfaces** (scaffold G3). `net_greeks` honours per-leg IV (the README sells this: "per-leg IV so
-  measured skew is priced"), but `_lognormal_grid` takes one flat IV, so every probability, EV and
-  conditional payoff evaluates skewed quotes against a flat surface. Priced a fair-by-construction
-  skewed board (puts 30-34%, ATM 25%, calls 19-21%) and asked the stack for edge: it manufactures
-  up to $18/contract of EV on zero-edge structures, and the claimed-probability gate lands at
-  71% for the put credit spread vs 97% for the call credit spread - the same zero-edge trade,
-  gated 26pp apart purely by which side of the smile it sits on. The agent measured 16.5-vs-7.4
-  put/call splits live, records them on the Leg, and the decision layer cannot see them.
+- ~~**I-43 · EV, POP and the payoff ratio ignore `Leg.iv` - risk and edge are priced off
+  different surfaces**~~ **FIXED 2026-08-30 (WU-4.8), and the original finding partly
+  CORRECTED.** What was real: `net_greeks` honours each leg's IV while `_lognormal_grid` took one
+  flat vol, so a structure was evaluated at a vol nobody quoted for its strikes. Measured on a
+  call credit spread whose legs quote 19% and 21% on a 25%-ATM board: EV reads -$6.68 at the ATM
+  figure and +$0.05 at the vega-weighted 21.0%. `simulate` now evaluates the market measure at
+  `optmath.vega_weighted_iv` and reports the EV span across the legs' own IVs, so the residual is
+  stated instead of chosen silently. A smile-consistent distribution is still refused, same reason
+  as calendars.
+  **What was overstated, recorded rather than quietly dropped:** the original entry claimed the
+  flat evaluation "gates the same zero-edge trade 26pp apart purely by which side of the smile it
+  sits on", comparing a put credit 95/100 against a call credit 105/110. Those are not mirror
+  structures - one is struck at the money and the other 5% out - and the gap is mostly moneyness,
+  not skew. Under the fix the two gates move from 71.2%/96.9% to 72.2%/96.0%, which is the
+  measurement that killed the claim. There is also no single flat vol that makes a leg-wise-priced
+  board zero-EV at all: the legs are priced under mutually inconsistent lognormals, which is what
+  a smile IS to a model without one. The narrower defect was real and is fixed; the headline
+  number was wrong and is withdrawn.
 - ~~**I-44 · `breakeven_vol` caps its search at 120% and reports "EV positive at every realized vol
   tested" above it**~~ **FIXED 2026-08-30 (WU-4.3).** Two halves. The scan now follows the quote -
   `_vol_grid` widens to 1.5x the vol the structure was priced at whenever that exceeds the default

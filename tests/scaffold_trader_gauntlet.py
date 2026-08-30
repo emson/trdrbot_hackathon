@@ -276,10 +276,17 @@ note("G2: at the gate boundary size steps 0 -> seed floor (2.2% of equity) in on
      "near-zero-EV trades are sized 2.2%, not Kelly-small.")
 
 # ================================================================ G3 SKEW
-report("G3  A fairly-priced SKEWED surface, evaluated at one flat IV")
-print("Each leg priced at its own IV (typical equity put skew). The market has zero")
-print("edge by construction under its own quotes. EV/POP/payoff evaluate at flat ATM")
-print("25% (per-leg IV is used by greeks ONLY). Any EV shown is manufactured.\n")
+report("G3  A SKEWED surface: which flat vol does the stack evaluate at?")
+print("Each leg priced at its own IV (typical equity put skew). CHANGED (WU-4.8): the")
+print("distribution now evaluates at the VEGA-WEIGHTED leg vol instead of the caller's")
+print("ATM figure, and simulate reports the EV span across the legs' own IVs.")
+print()
+print("The honest reading, which the first version of this section got wrong: there is")
+print("NO single flat vol that makes a leg-wise-priced board zero-EV. The legs were")
+print("priced under mutually inconsistent lognormals - that is what a smile IS to a")
+print("model without one - so 'evaluated at fair value' is not available at any vol.")
+print("What IS available: evaluate where the position's own vega sits, and SAY what the")
+print("answer would read across the rest of the smile.\n")
 SKEW = {90: 0.34, 95: 0.30, 100: 0.25, 105: 0.21, 110: 0.19}
 DAYS = 7
 
@@ -297,21 +304,26 @@ skewed = {
                            skew_leg("C", 105, "short"), skew_leg("C", 110, "long")],
     "risk reversal 95/105": [skew_leg("P", 95, "short"), skew_leg("C", 105, "long")],
 }
-print(f"{'structure':<22} {'EV@flat':>8} {'EV-fric':>8} {'gate opens at':>13}  "
-      f"vs fair-under-quotes 0")
+print(f"{'structure':<22} {'legIVs':>9} {'iv_eff':>7} {'EV@ATM25':>9} {'EV@eff':>8} "
+      f"{'moved by':>9}")
+worst = 0.0
 for name, legs in skewed.items():
-    ev = optmath.expected_value(legs, SPOT, 0.25, DAYS)
-    fr = gross_premium(legs) * DEFAULT_ROUND_TRIP_COST
-    pr = optmath.payoff_ratio(legs, SPOT, 0.25, DAYS, friction=fr)
-    gate_at = 1.0 / (1.0 + pr[2]) if pr else None
-    ga = f"{gate_at:.1%}" if gate_at is not None else "refused"
-    print(f"{name:<22} {ev:>8.2f} {ev - fr:>8.2f} {ga:>13}")
-check(True, "")  # measurements, not invariants: no unique flat-IV truth exists
-mag = max(abs(optmath.expected_value(l, SPOT, 0.25, DAYS)) for l in skewed.values())
-note(f"G3: evaluating skewed quotes at one flat IV moves EV by up to ${mag:.0f} per "
-     f"contract on zero-edge structures - the distribution ignores Leg.iv while "
-     f"net_greeks honours it, so risk and edge are computed under DIFFERENT "
-     f"surfaces (the two-layers-disagree defect class, D-074/D-076/D-079).")
+    eff = optmath.vega_weighted_iv(legs, SPOT, DAYS, 0.25)
+    ev_flat = optmath.expected_value(legs, SPOT, 0.25, DAYS)
+    ev_eff = optmath.expected_value(legs, SPOT, eff, DAYS)
+    lo, hi = min(l.iv for l in legs), max(l.iv for l in legs)
+    worst = max(worst, abs(ev_eff - ev_flat))
+    check(lo - 1e-9 <= eff <= hi + 1e-9,
+          f"G3: {name} evaluated at {eff:.1%}, outside its own legs' {lo:.0%}-{hi:.0%}")
+    print(f"{name:<22} {lo:>4.0%}-{hi:<4.0%} {eff:>7.1%} {ev_flat:>9.2f} {ev_eff:>8.2f} "
+          f"{ev_eff - ev_flat:>+9.2f}")
+note(f"G3: choosing the evaluation vol is worth up to ${worst:.0f} per contract on "
+     f"these boards - the flat ATM figure is simply a different structure's vol for "
+     f"anything not struck at the money (the call credit spread quotes 19-21% on a "
+     f"25% board). Now evaluated at the vega-weighted vol, with the span across the "
+     f"legs' own IVs reported so the residual assumption is visible. A "
+     f"smile-consistent distribution remains refused, same reason as calendars: a "
+     f"confident wrong distribution is worse than a stated approximation.")
 
 # ================================================================ G4 EXIT PATHS
 report("G4  Exit rules driven through price paths (real evaluate(), real debounce)")

@@ -4233,3 +4233,62 @@ def test_a_real_vol_edge_now_earns_kelly_instead_of_the_seed_allocation():
     none_stated = sized(None)
     assert none_stated.kelly_full <= 0
     assert edge.fraction_of_equity > none_stated.fraction_of_equity
+
+
+def test_a_skewed_board_is_evaluated_where_the_position_lives_not_at_the_ATM_guess():
+    """I-43: greeks honoured `Leg.iv` while the distribution did not, so risk
+    and edge were computed under DIFFERENT surfaces - and the vol the edge was
+    computed at could be one nobody quoted for these strikes.
+
+    The measured case is a call credit spread whose legs quote 19% and 21% on a
+    board whose ATM is 25%. Evaluating it at 25% is not a conservative
+    approximation, it is a different structure: EV reads -$6.68 there and
+    +$0.05 at the vega-weighted 21.0%.
+
+    Note what is NOT claimed, because the first version of this finding claimed
+    it and it does not survive: there is no single flat vol that makes such a
+    board zero-EV. The legs were priced under mutually inconsistent lognormals,
+    which is what a smile IS to a model that does not have one. So the honest
+    invariant is that the evaluation vol sits where the position's own vega
+    sits - and that the residual is REPORTED rather than chosen silently.
+    """
+    skew = {90: 0.34, 95: 0.30, 100: 0.25, 105: 0.21, 110: 0.19}
+
+    def leg(right, strike, side):
+        return Leg(right=right, strike=strike, side=side, qty=1,
+                   price=_fair(right, strike, iv=skew[strike]), iv=skew[strike])
+
+    legs = [leg("C", 105, "short"), leg("C", 110, "long")]
+    thesis = experiments.Thesis(claim="no view", underlying="X", horizon="2099-01-05",
+                                band_low=90.0, band_high=110.0)
+
+    m = experiments.simulate(experiments.Experiment(name="call credit", legs=legs),
+                             thesis, spot=100.0, iv=0.25, days=7)
+
+    # The evaluation vol is inside the range the legs actually quote, and
+    # nowhere near the ATM figure the caller passed.
+    assert 19.0 <= m["iv_eff_pct"] <= 21.0, m["iv_eff_pct"]
+    # ...and that materially changes the decision number on this structure.
+    flat = optmath.expected_value(legs, 100.0, 0.25, 7.0)
+    assert abs(m["ev_market"] - flat) > 5.0, (
+        f"the flat-ATM guess and the vega-weighted evaluation differ by only "
+        f"{abs(m['ev_market'] - flat):.2f} - this board no longer demonstrates the gap")
+    # The residual assumption is reported, and the evaluated answer sits inside it.
+    assert m["ev_span"] is not None
+    assert m["ev_span"][0] < m["ev_span"][1]
+
+
+def test_a_flat_board_is_untouched_by_the_skew_machinery():
+    """Byte-identity where there is no smile: no leg IVs means no choice to
+    defend, so nothing is weighted, nothing is reported, nothing moves."""
+    legs = [Leg(right="P", strike=100.0, side="short", qty=1, price=_fair("P", 100.0)),
+            Leg(right="P", strike=95.0, side="long", qty=1, price=_fair("P", 95.0))]
+    thesis = experiments.Thesis(claim="no view", underlying="X", horizon="2099-01-05",
+                                band_low=90.0, band_high=110.0)
+
+    m = experiments.simulate(experiments.Experiment(name="flat", legs=legs), thesis,
+                             spot=100.0, iv=0.25, days=7)
+
+    assert optmath.vega_weighted_iv(legs, 100.0, 7.0, 0.25) is None
+    assert m["iv_eff_pct"] is None and m["ev_span"] is None
+    assert m["ev_market"] == optmath.expected_value(legs, 100.0, 0.25, 7.0)
