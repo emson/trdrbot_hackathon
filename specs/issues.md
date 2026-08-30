@@ -42,6 +42,61 @@ Sorted by severity.
   and `work` sums that instead. A closed weekend of housekeeping noise now reads OK; a muse run
   that genuinely fails to reach `record_trial` still reads BAD, including when housekeeping noise
   sits either side of it.
+- **I-40 · The `payoff_ratio=None` fallback abandons friction, and it is the default on any
+  structure mismatch** (found by `tests/scaffold_trader_gauntlet.py`, G6). D-079 fixed the gate to
+  open exactly where EV-after-costs turns positive - but only when the conditional ratio reaches
+  `size_position`. `_matching_payoff_ratio` returns None whenever the sized structure fails to
+  match a simulated one (name mismatch, two structures sharing one rr, or simulate's own
+  friction-refusal), and the fallback is max/max **with no friction at all**. Measured on a
+  fair-priced 99/100-101/102 condor at a claimed 70%: the friction-charged conditional ratio
+  (b 0.26) demands 79% and REFUSES; the fallback (b 3.49) demands 22% and sizes **224 contracts -
+  4.99% of equity, the per-position cap**. The very structures friction punishes most (narrow,
+  multi-leg) are the ones the fallback flatters most, and the only trace is one clause in the
+  reason string. The refusal D-079 promised does not survive the seam.
+- **I-41 · A short-vol trade can NEVER earn Kelly size - the ladder is inert for half the book**
+  (scaffold G2). A thesis has a drift knob but no vol knob, so for a vol trade the stated
+  probability comes from the agent's own vol view while Kelly's `b` is computed under the MARKET's
+  IV. Swept on a fair-priced condor and put credit spread with a genuine, honestly-stated vol edge
+  of 0 to 12 points: full Kelly under the shrunk probability stays <= 0 at EVERY point, so size is
+  pinned at the seed allocation with a "record disagrees" warning - at 12 points of true edge, the
+  strongest vol view the agent could ever hold. Directional trades ramp normally (2.1% -> 4.9% of
+  equity over the same sweep, G2b). The measure-mixing also shifts the gate itself: the put credit
+  spread's gate opens 3 vol points late. Net effect: the sizing ladder rewards direction bets and
+  structurally starves vol bets, a preference nobody chose - the same defect class as the max/max
+  bias D-077 removed, one measure deeper.
+- **I-42 · One wide print closes a credit spread immediately - the documented artifact IS the
+  decisive case** (scaffold G4/P2). `position_mark`'s registry entry sets `immediate_overshoot=1.0`
+  ("not plausibly a quote artifact") while its own comment says a wide or stale quote "can print
+  -100%-of-credit on a HEALTHY spread". Those two statements name the same number: -100% against
+  the standard -50% stop is exactly overshoot 1.0, so the single most common quote artifact on a
+  credit spread skips the debounce that exists for it and closes the position on one print. The
+  N-of-M machinery protects only against breaches in [-50%, -100%) - the shallow ones. A real gap
+  and a wide quote are indistinguishable in one mark; the underlying (which prints tightly) is
+  the disambiguator and is not consulted.
+- **I-43 · EV, POP and the payoff ratio ignore `Leg.iv` - risk and edge are priced off different
+  surfaces** (scaffold G3). `net_greeks` honours per-leg IV (the README sells this: "per-leg IV so
+  measured skew is priced"), but `_lognormal_grid` takes one flat IV, so every probability, EV and
+  conditional payoff evaluates skewed quotes against a flat surface. Priced a fair-by-construction
+  skewed board (puts 30-34%, ATM 25%, calls 19-21%) and asked the stack for edge: it manufactures
+  up to $18/contract of EV on zero-edge structures, and the claimed-probability gate lands at
+  71% for the put credit spread vs 97% for the call credit spread - the same zero-edge trade,
+  gated 26pp apart purely by which side of the smile it sits on. The agent measured 16.5-vs-7.4
+  put/call splits live, records them on the Leg, and the decision layer cannot see them.
+- **I-44 · `breakeven_vol` caps its search at 120% and reports "EV positive at every realized vol
+  tested" above it** (scaffold G1b). A put credit spread or condor priced at IV 150% - ordinary
+  for a meme name or a binary event - has its true breakeven above the grid, and the honest
+  "wins if realized < 150%" comes back as a no-crossing result whose describe() reads as *wins at
+  any vol*. The exact opposite of the tool's purpose: the one input nobody has to defend is back,
+  wearing the tool's own uniform. `_VOL_GRID` stops at 1.20; high-IV names are where short-premium
+  candidates cluster.
+- **I-45 · A near-zero-net-cost position's mark rules are permanently blind, and record-time
+  checks read it as protected** (scaffold G4/P6). `position_pnl_fraction` refuses the P&L base
+  when net cost < 2% of gross (correct - division by noise), so every `stop_loss`/`profit_target`
+  on such a position holds forever. But `invalid_rules()` returns 0 (they parse fine) and
+  `watched_signals()` lists `position_mark` (they are watched - they just never print), so the
+  divergence-surfacing built for exactly this class shows a healthy board. A box-ish or
+  wide-condor structure sails through with stops that are sentences, the failure `watched_signals`
+  was written for, one layer deeper again than I-42's cousin `_unreachable_rules`.
 - **I-29 · The bootstrap base rate is overconfident by 15-18pp where credit spreads live**
   ([notes/017](notes/017_learning_from_historic_data.md)). Measured offline over **21,280
   historical band-forecasts** (56 tickers, horizons 3/5/10, 5 band shapes, history sliced before
