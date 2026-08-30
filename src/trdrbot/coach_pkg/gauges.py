@@ -133,6 +133,40 @@ def _attributable_rate(rows: list[dict[str, Any]]) -> float | None:
     return round(useful / len(verdicts), 4)
 
 
+def _funnel_overlap_rate(cfg: Any, rows: list[dict[str, Any]]) -> float | None:
+    """Share of recent muse candidates on names the funnel already covers.
+
+    The muse's stated value is finding "what a funnel never asks about", and
+    discovery explicitly excludes the research universe and the watchlist from
+    its nominations while the muse excludes nothing - so it can spend one of
+    two daily emission slots re-discovering a name research already has a
+    thesis on.
+
+    **Measured before gated, deliberately.** Two reasons not to just add the
+    exclusion. The muse prompt is the Coach's one LIVE lever: editing it from
+    outside corrupts the pairing of any open A/B trial and re-fingerprints an
+    artefact mid-experiment. And the premise is unproven - the muse's mandate
+    is novel THESES, not novel names, so a fresh angle on a covered name may be
+    exactly its job. This is the trajectory that has to justify a gate, the
+    same discipline that held the vega cap to measure-first (D-094).
+    """
+    muse = _muse_rows(rows)
+    if not muse:
+        return None
+    covered = {str(s).upper() for s in
+               (list(getattr(cfg, "research_universe", []) or [])
+                + list(getattr(cfg, "watchlist", []) or []))}
+    if not covered:
+        return None
+    seen = [str(f.get("underlying", "")).upper()
+            for r in muse for f in (r.get("fates") or [])
+            if isinstance(f, dict)]
+    seen = [u for u in seen if u and u != "?"]
+    if not seen:
+        return None
+    return round(sum(1 for u in seen if u in covered) / len(seen), 4)
+
+
 def _sizing_refused_rate(rows: list[dict[str, Any]]) -> float | None:
     """Share of recent sizing calls that REFUSED rather than returned a size.
 
@@ -259,6 +293,7 @@ def snapshot_gauges(cfg: Any, rows: list[dict[str, Any]]) -> dict[str, Any]:
     put("muse.survival_rate", _survival(rows))
     put("muse.candidates_per_run", _candidates_per_run(rows))
     put("muse.seed_entropy", _seed_entropy(rows))
+    put("muse.funnel_overlap_rate", _funnel_overlap_rate(cfg, rows))
     put("muse.runs_total", sum(1 for r in rows if r.get("kind") == "muse") or None)
     # The other two thesis sources and the ladder's own promotion criterion.
     # Each omitted (never zeroed) when there is no data - a gauge reading 0 is

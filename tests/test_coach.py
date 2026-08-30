@@ -991,3 +991,24 @@ def test_the_cost_sentinel_stays_quiet_on_priced_spend_under_its_ceiling(tmp_pat
 
     assert not fired
     assert priced > 0 and unpriced == 0, "a priced call must not read as unpriced"
+
+
+def test_the_funnel_overlap_gauge_measures_before_anything_gates(tmp_path):
+    """The muse excludes nothing while discovery excludes the funnel's own
+    names. Whether that is waste or the muse doing its job (a novel thesis on a
+    covered name) is a question for a trajectory, not for taste - and the muse
+    prompt is the Coach's live lever, which nobody edits from outside it."""
+    from types import SimpleNamespace
+
+    from trdrbot.coach_pkg.gauges import _funnel_overlap_rate
+
+    cfg = SimpleNamespace(research_universe=["SPY", "QQQ"], watchlist=["NVDA"])
+    rows = [{"kind": "muse", "fates": [
+        {"underlying": "SPY", "fate": "EMITTED"},      # covered
+        {"underlying": "NVDA", "fate": "candidate"},   # covered
+        {"underlying": "XLE", "fate": "EMITTED"},      # genuinely new
+        {"underlying": "?", "fate": "malformed reply element"},  # not a name
+    ]}]
+
+    assert _funnel_overlap_rate(cfg, rows) == 0.6667
+    assert _funnel_overlap_rate(cfg, []) is None, "omitted, never zeroed (D-038)"

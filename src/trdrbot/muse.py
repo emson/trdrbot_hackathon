@@ -297,6 +297,31 @@ async def _evaluate(
         verdict: dict[str, Any] = {}
         try:
             if not isinstance(cand, dict) or not cand.get("underlying"):
+                # COUNTED, not silently dropped. This file's own invariant is
+                # that every candidate is registered, because an LLM's discards
+                # are exactly the selection bias the multiple-testing
+                # correction exists to catch - and a bare `continue` here made
+                # a malformed element the one candidate that escaped it.
+                #
+                # It still does not reach `ledger.register`: a row with no
+                # underlying and no band is precisely what `register` refuses,
+                # and inventing one would be worse than the gap. So the
+                # invariant it satisfies is "every candidate is COUNTED",
+                # which is what the correction actually needs.
+                #
+                # The consequence that matters most is on the Coach: this
+                # verdict scores as a non-survivor, so a prompt variant that
+                # produces garbage now LOSES its A/B trials on that garbage
+                # instead of being invisible to its own reward. Both arms see
+                # the same rule from the same run, so pairing is preserved.
+                #
+                # Keys chosen for the two downstream readers: the journal's
+                # `fates` comprehension is guarded, but the verbose print
+                # indexes `underlying`, `stated` and `fate` directly - and a
+                # KeyError here would take down the whole muse run, which is
+                # the opposite of the point.
+                evaluated.append({"underlying": "?", "stated": 0.0,
+                                  "fate": "malformed reply element"})
                 continue
             u = str(cand["underlying"]).upper()
             verdict = {"underlying": u, "claim": str(cand.get("claim", ""))[:300],

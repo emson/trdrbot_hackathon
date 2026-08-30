@@ -135,3 +135,40 @@ async def test_a_candidate_that_raises_is_recorded_as_a_rejection(paths, monkeyp
 
     assert len(evaluated) == 1
     assert evaluated[0]["fate"].startswith("error:")
+
+
+async def test_a_malformed_reply_element_is_counted_not_silently_dropped(paths):
+    """I-49: this file's own invariant is that EVERY candidate is registered,
+    because an LLM's discards are exactly the selection bias the
+    multiple-testing correction exists to catch - and a bare `continue` on a
+    malformed element made it the one candidate that escaped the count.
+
+    The consequence that matters is on the Coach: a prompt variant producing
+    garbage must LOSE its A/B trials on that garbage rather than be invisible
+    to its own reward. It still does not reach `ledger.register` - a row with
+    no underlying and no band is exactly what register refuses.
+    """
+    from types import SimpleNamespace
+
+    from trdrbot import coach
+    from trdrbot.ledger import Ledger
+
+    good = {"underlying": "SPY", "claim": "c", "chain": ["a"], "probability": 0.4,
+            "band_low_pct": -3.0, "band_high_pct": 3.0, "horizon": _soon()}
+    cfg = SimpleNamespace(paths=paths, deadline=_soon(20))
+
+    evaluated = await muse._evaluate(
+        ["not a dict at all", {"claim": "no underlying anywhere"}, good],
+        {}, cfg, Ledger(paths.state / "ledger.jsonl"),
+        latest=_soon(10), variant="v0", cache={},
+    )
+
+    assert len(evaluated) == 3, "malformed elements vanished from the accounting"
+    fates = [v["fate"] for v in evaluated]
+    assert fates.count("malformed reply element") == 2
+    # And the Coach scores them as failures, which is the whole point.
+    assert sum(1 for f in fates if coach.survived(f)) <= 1
+    # Every verdict carries the keys the journal row and the verbose print read
+    # directly - a KeyError here would take down the whole muse run.
+    for v in evaluated:
+        assert "underlying" in v and "stated" in v and "fate" in v

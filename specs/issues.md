@@ -161,16 +161,22 @@ Sorted by severity.
   Assigned stock appearing at the broker remains out of scope here; it surfaces through
   reconcile's existing "at the broker with no story of ours" branch. Verified by reverting
   reconcile.py and exit_rules.py and watching all three fail.
-- **I-49 · Two muse accounting gaps: funnel overlap unmeasured, malformed candidates evade the
-  trial count** (2026-08-30 review). (a) The muse may spend its 2 daily emission slots on names
-  research/discovery already cover - nothing measures how often, though the journal's `muse` rows
-  already carry per-candidate underlyings, so the gauge is free. Whether to EXCLUDE those names is
-  deliberately deferred until measured (the muse prompt is the Coach's live A/B lever; editing it
-  from outside would corrupt the running trial's pairing - and a novel thesis on a covered name is
-  legitimately the muse's job). (b) `muse.py`'s per-candidate skip (`not isinstance(cand, dict) or
-  no underlying`) drops a candidate before `ledger.register`, against the file's own stated
-  invariant that every candidate is counted - and the Coach's survival reward never sees that the
-  prompt produced garbage.
+- ~~**I-49 · Two muse accounting gaps: funnel overlap unmeasured, malformed candidates evade the
+  trial count**~~ **FIXED 2026-08-30 (WU-6.4).** (a) A malformed reply element now appends a
+  verdict (`fate="malformed reply element"`, with the exact keys the journal row and the verbose
+  print read - a KeyError there would take the whole run down) instead of a bare `continue`. It
+  still does not reach `ledger.register`, which refuses a row with no underlying and no band; the
+  invariant it satisfies is "every candidate is COUNTED", which is what the multiple-testing
+  correction actually needs. The consequence that matters: `coach.survived` scores it as a
+  non-survivor, so **a prompt variant that produces garbage now loses its A/B trials on that
+  garbage** rather than being invisible to its own reward. Both arms see the rule identically from
+  the same run, so an open experiment's pairing is preserved. (b) `muse.funnel_overlap_rate`
+  measures the share of candidates on names research/discovery already cover. Deliberately a
+  GAUGE and not a gate: the muse prompt is the Coach's one live lever (editing it from outside
+  corrupts an open trial's pairing and re-fingerprints the artefact mid-experiment), and the
+  premise is unproven - the muse's mandate is novel THESES, not novel names. A gate must earn its
+  existence from this trajectory, the measure-first discipline that held the vega cap (D-094).
+  Verified by reverting muse.py and gauges.py and watching both tests fail.
 - **I-50 · Post-trade greeks are flat-IV even when the position was built from skewed quotes**
   (2026-08-30 review). `optmath.Leg.from_position_leg` never sets `.iv`, so the greeks recorded at
   entry (`record_position`) and the book-greeks line the agent reads every cycle fall back to one
