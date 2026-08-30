@@ -349,10 +349,14 @@ r, _, _ = evaluate(blind, snap(-0.90, 100, basis=(500.0, -495.0)), DEADLINE)
 check(r is None, "G4: near-zero-net-cost position unexpectedly fired")
 print(f"  P6 net cost $5 on $995 gross: mark signal refused    "
       f"invalid_rules={invalid_rules(blind)} watched={watched_signals(blind)}")
-note("G4/P6: a near-zero-net-cost structure makes EVERY mark rule permanently "
-     "unobservable (MIN_NET_COST_SHARE) - yet invalid_rules()=0 and "
-     "watched_signals() lists position_mark, so record-time checks read it as "
-     "protected. The position is unwatched and nothing says so.")
+# CHANGED (WU-4.4): the evaluator's behaviour is unchanged and correct - it
+# holds, because the mark base is genuinely unobservable here. What changed is
+# that the agent is TOLD at record time instead of discovering it at a loss;
+# invalid_rules()=0 and watched_signals()=[position_mark] still read healthy,
+# which is exactly why the warning had to live in record_position (I-45, pinned
+# by test_record_position_warns_when_mark_rules_can_never_print).
+print("     (record_position now warns at entry; the evaluator still holds - "
+      "both correct)")
 
 # ================================================================ G5 LADDER
 report("G5  The ladder under a losing streak")

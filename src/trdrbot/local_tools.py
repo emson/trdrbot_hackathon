@@ -19,6 +19,7 @@ from typing import Any
 from langchain_core.tools import StructuredTool
 
 from . import experiments, ids, market_stats, optmath, sizing
+from .analytics import MIN_NET_COST_SHARE
 from .calibration import CalibrationStore
 from .ledger import PRICE_BAND, REALIZED_VOL_PCT, STANDALONE
 from .positions import Position, PositionStore
@@ -48,6 +49,10 @@ class SimStructure:
     max_loss: float | None
     payoff_ratio: float | None
     rr: float | None
+    #: Gross premium traded across all legs. Carried because the mark-based
+    #: P&L base is refused below `MIN_NET_COST_SHARE` of it, which makes every
+    #: stop and target on such a structure permanently unobservable (I-45).
+    gross_premium: float | None = None
 
 
 @dataclass(frozen=True)
@@ -287,6 +292,8 @@ def build_simulate_experiments(shared: SharedContext, state_dir: Path | None = N
                 payoff_ratio=m.get("payoff_ratio"),
                 rr=(abs(m["max_profit"] / m["max_loss"])
                     if m.get("max_profit") is not None and m.get("max_loss") else None),
+                gross_premium=sum(l.price * l.qty * optmath.CONTRACT_MULTIPLIER
+                                  for l in e.legs),
             )
             for e, m in results if m.get("usable")
         ]
@@ -480,6 +487,27 @@ def build_record_position(
             )
             if bad:
                 note += " WARNING - exit rule(s) that cannot trigger: " + "; ".join(bad) + "."
+            # ...and the case one layer deeper: rules that parse, are watched,
+            # and can never PRINT. Below MIN_NET_COST_SHARE of gross premium the
+            # mark-based P&L base is refused as division by noise (correctly -
+            # a spread whose legs nearly cancel has almost no net cost), so
+            # every stop and target on the position holds forever. Nothing else
+            # says so: `invalid_rules()` reads 0 because they parse, and
+            # `watched_signals()` lists position_mark because they ARE watched
+            # - they simply never observe anything (I-45).
+            mark_rules = stop_loss_pct is not None or profit_target_pct is not None
+            gross = (st.gross_premium or 0.0) * scale
+            if mark_rules and gross > 0 and abs((st.entry_cost or 0.0) * scale) < (
+                    MIN_NET_COST_SHARE * gross):
+                note += (
+                    f" WARNING - this structure's net cost is under "
+                    f"{MIN_NET_COST_SHARE:.0%} of the ${gross:,.0f} gross premium traded, "
+                    f"so position-mark P&L is refused as division by noise and your "
+                    f"stop_loss/profit_target can NEVER fire, however far the position "
+                    f"moves. Watch the underlying or the clock instead: add "
+                    f"underlying_stop_below/_above at your invalidation level, or a "
+                    f"time_stop."
+                )
             break
         if thesis_missing:
             note += (

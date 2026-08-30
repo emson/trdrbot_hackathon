@@ -90,14 +90,15 @@ Sorted by severity.
   "no crossing" is a claim about the GRID and was being read as a claim about the world, which is
   the confident wrongness the tool exists to refuse. Verified by reverting optmath.py and watching
   both regression tests fail.
-- **I-45 · A near-zero-net-cost position's mark rules are permanently blind, and record-time
-  checks read it as protected** (scaffold G4/P6). `position_pnl_fraction` refuses the P&L base
-  when net cost < 2% of gross (correct - division by noise), so every `stop_loss`/`profit_target`
-  on such a position holds forever. But `invalid_rules()` returns 0 (they parse fine) and
-  `watched_signals()` lists `position_mark` (they are watched - they just never print), so the
-  divergence-surfacing built for exactly this class shows a healthy board. A box-ish or
-  wide-condor structure sails through with stops that are sentences, the failure `watched_signals`
-  was written for, one layer deeper again than I-42's cousin `_unreachable_rules`.
+- ~~**I-45 · A near-zero-net-cost position's mark rules are permanently blind, and record-time
+  checks read it as protected**~~ **FIXED 2026-08-30 (WU-4.4).** `record_position` now warns when
+  the traded structure's net cost is under `MIN_NET_COST_SHARE` of the gross premium it traded:
+  the mark-based P&L base is refused as division by noise, so every stop and target holds forever,
+  and the repair (an underlying stop or a time stop) is named in the same sentence. The constant
+  is imported from `analytics`, not copied - one definition, per the defect class this whole phase
+  is about. This is `_unreachable_rules`' blind spot by construction: that check bails at
+  `base <= 0`, which is exactly the structure needing the warning. Reported, never blocked (D-009).
+  Verified by reverting local_tools.py and watching the regression test fail.
 - **I-29 · The bootstrap base rate is overconfident by 15-18pp where credit spreads live**
   ([notes/017](notes/017_learning_from_historic_data.md)). Measured offline over **21,280
   historical band-forecasts** (56 tickers, horizons 3/5/10, 5 band shapes, history sliced before

@@ -4072,3 +4072,81 @@ def test_a_scan_that_finds_nothing_says_how_far_it_looked():
     assert not be.crossings
     assert "searched to 120%" in be.describe(), be.describe()
     assert "searched to 225%" in breakeven_vol(free, 100.0, 7.0, iv_hint=1.50).describe()
+
+
+def test_record_position_warns_when_mark_rules_can_never_print(tmp_path):
+    """I-45: below 2% of gross premium the mark-based P&L base is refused as
+    division by noise (correctly - a structure whose legs nearly cancel has
+    almost no net cost), so every stop and target on it holds FOREVER. Nothing
+    else said so: `invalid_rules()` reads 0 because they parse and
+    `watched_signals()` lists position_mark because they are watched - they
+    simply never observe anything. This is `_unreachable_rules`' blind spot by
+    construction: that check bails out at `base <= 0`, which is precisely the
+    structure that needs warning about.
+    """
+    from trdrbot.calibration import CalibrationStore
+    from trdrbot.positions import PositionStore
+
+    # Synthetic long: at-the-money call and put are equal by parity on a
+    # martingale grid, so the two premiums cancel to a near-zero net cost.
+    shared = local_tools.SharedContext()
+    sim = local_tools.build_simulate_experiments(shared, None, None)
+    sim.func(thesis_claim="up", underlying="X", horizon="2099-01-05", drift_pct=1.0,
+             spot=100.0, iv_pct=25.0, days_to_expiry=7, band_low=99.0, band_high=105.0,
+             candidates=[
+                 {"name": "synthetic long", "legs": _legs(
+                     [("C", 100, "long"), ("P", 100, "short")])},
+                 {"name": "call debit", "legs": _legs(
+                     [("C", 100, "long"), ("C", 105, "short")])},
+             ])
+    synth = next(s for s in shared.structures if s.name == "synthetic long")
+    assert abs(synth.entry_cost) < 0.02 * synth.gross_premium, "precondition: legs cancel"
+
+    store = PositionStore(tmp_path)
+    rec = local_tools.build_record_position(
+        store, "jrn_x", shared=shared,
+        calibration=CalibrationStore(tmp_path / "cal.jsonl"))
+    out = rec.func(
+        underlying="X", strategy="synthetic_long", thesis="up", confidence=0.6,
+        expiry="2026-10-16", stop_loss_pct=-50.0, profit_target_pct=50.0,
+        legs=[{"symbol": "X261016C00100000", "side": "buy", "qty": 1},
+              {"symbol": "X261016P00100000", "side": "sell", "qty": 1}])
+
+    assert "NEVER fire" in out, out
+    assert "underlying_stop" in out and "time_stop" in out, "the warning names the repair"
+    # The rules really are watched and really do parse - which is why nothing
+    # else in the system could have told the agent this.
+    saved = store.all()[0]
+    from trdrbot.exit_rules import invalid_rules, watched_signals
+    assert invalid_rules(saved) == 0
+    assert "position_mark" in watched_signals(saved)
+
+
+def test_a_normal_spread_gets_no_blind_mark_warning(tmp_path):
+    """The other half of the pair: a structure with a real net cost must not
+    collect a warning about one it does not have."""
+    from trdrbot.calibration import CalibrationStore
+    from trdrbot.positions import PositionStore
+
+    shared = local_tools.SharedContext()
+    sim = local_tools.build_simulate_experiments(shared, None, None)
+    sim.func(thesis_claim="up", underlying="X", horizon="2099-01-05", drift_pct=1.0,
+             spot=100.0, iv_pct=25.0, days_to_expiry=7, band_low=99.0, band_high=105.0,
+             candidates=[
+                 {"name": "call debit", "legs": _legs(
+                     [("C", 100, "long"), ("C", 105, "short")])},
+                 {"name": "put credit", "legs": _legs(
+                     [("P", 100, "short"), ("P", 95, "long")])},
+             ])
+
+    store = PositionStore(tmp_path)
+    rec = local_tools.build_record_position(
+        store, "jrn_x", shared=shared,
+        calibration=CalibrationStore(tmp_path / "cal.jsonl"))
+    out = rec.func(
+        underlying="X", strategy="call_debit", thesis="up", confidence=0.6,
+        expiry="2026-10-16", stop_loss_pct=-50.0, profit_target_pct=50.0,
+        legs=[{"symbol": "X261016C00100000", "side": "buy", "qty": 1},
+              {"symbol": "X261016C00105000", "side": "sell", "qty": 1}])
+
+    assert "NEVER fire" not in out
