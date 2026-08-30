@@ -81,13 +81,15 @@ Sorted by severity.
   71% for the put credit spread vs 97% for the call credit spread - the same zero-edge trade,
   gated 26pp apart purely by which side of the smile it sits on. The agent measured 16.5-vs-7.4
   put/call splits live, records them on the Leg, and the decision layer cannot see them.
-- **I-44 · `breakeven_vol` caps its search at 120% and reports "EV positive at every realized vol
-  tested" above it** (scaffold G1b). A put credit spread or condor priced at IV 150% - ordinary
-  for a meme name or a binary event - has its true breakeven above the grid, and the honest
-  "wins if realized < 150%" comes back as a no-crossing result whose describe() reads as *wins at
-  any vol*. The exact opposite of the tool's purpose: the one input nobody has to defend is back,
-  wearing the tool's own uniform. `_VOL_GRID` stops at 1.20; high-IV names are where short-premium
-  candidates cluster.
+- ~~**I-44 · `breakeven_vol` caps its search at 120% and reports "EV positive at every realized vol
+  tested" above it**~~ **FIXED 2026-08-30 (WU-4.3).** Two halves. The scan now follows the quote -
+  `_vol_grid` widens to 1.5x the vol the structure was priced at whenever that exceeds the default
+  ceiling, so a put credit spread or condor at IV 150% recovers its breakeven exactly (measured:
+  "wins if realized vol < 150.0%", where it previously reported no crossing at all). And a scan
+  that genuinely finds nothing now names the range it searched - "(searched to 120%)" - because
+  "no crossing" is a claim about the GRID and was being read as a claim about the world, which is
+  the confident wrongness the tool exists to refuse. Verified by reverting optmath.py and watching
+  both regression tests fail.
 - **I-45 · A near-zero-net-cost position's mark rules are permanently blind, and record-time
   checks read it as protected** (scaffold G4/P6). `position_pnl_fraction` refuses the P&L base
   when net cost < 2% of gross (correct - division by noise), so every `stop_loss`/`profit_target`

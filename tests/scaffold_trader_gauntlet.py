@@ -127,23 +127,27 @@ for iv in (0.08, 0.25, 0.60, 1.50):
             print(f"IV{iv:>4.0%} {days:>5g}d  {name:<20} {ev:>8.2f} {p:>7.1%} {kk:>10}  {tag}")
 
 # --- breakeven_vol must recover the priced IV - including ABOVE the grid cap
-report("G1b breakeven_vol recovery - and what it says when priced OUTSIDE its grid")
+report("G1b breakeven_vol recovery at every regime, and the range it admits to")
+# CHANGED (WU-4.3): `iv_hint` is passed, as `experiments.simulate` now does, so
+# the scan follows the quote instead of stopping at a fixed 120%. The IV 150%
+# rows used to report "EV positive at every realized vol tested" - a claim about
+# the grid that read as a claim about the world (I-44).
 for iv, days in ((0.08, 30), (0.60, 30), (1.50, 7)):
     for name in ("put credit 95/100", "iron condor 90-110"):
         legs = structures(iv, days)[name]
-        be = optmath.breakeven_vol(legs, SPOT, days)
+        be = optmath.breakeven_vol(legs, SPOT, days, iv_hint=iv)
         if be is None:
             print(f"IV{iv:>4.0%} {days:>3g}d  {name:<20} -> None")
             continue
         got = be.crossings[0] if be.crossings else None
         print(f"IV{iv:>4.0%} {days:>3g}d  {name:<20} -> {be.describe()}")
-        if iv <= 1.20:
-            check(got is not None and abs(got - iv) < 0.01,
-                  f"G1b: {name} priced at {iv:.0%} but breakeven found {got}")
-        elif got is None:
-            note(f"G1b: {name} priced at IV {iv:.0%} reports '{be.describe()}' - "
-                 f"the vol grid caps at 120%, so a high-IV name reads as "
-                 f"'wins at any vol', which is confidently wrong for meme-stock IV")
+        check(got is not None and abs(got - iv) < 0.01,
+              f"G1b: {name} priced at {iv:.0%} but breakeven found {got}")
+# ...and a scan that genuinely finds nothing still says how far it looked.
+free = [Leg("C", 105, "long", 1, 0.0), Leg("C", 110, "short", 1, 0.50)]
+print(f"{'free money (no crossing)':<32} -> {optmath.breakeven_vol(free, SPOT, 7).describe()}")
+check("searched to" in optmath.breakeven_vol(free, SPOT, 7).describe(),
+      "G1b: a no-crossing verdict must name the range it searched")
 
 # ================================================================ G2 EDGE RESPONSE
 report("G2  Edge-response: a REAL vol edge, honestly stated - when does the stack trade?")

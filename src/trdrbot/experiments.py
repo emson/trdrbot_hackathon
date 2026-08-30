@@ -131,7 +131,8 @@ def simulate(
     # structure actually needs the world to do, and which of the two it is
     # betting on - a desk's first question, and one this comparison could not
     # previously answer.
-    be_vol = optmath.breakeven_vol(legs, spot, days, friction=friction, drift=thesis.drift)
+    be_vol = optmath.breakeven_vol(legs, spot, days, friction=friction,
+                                   drift=thesis.drift, iv_hint=iv)
     be_drift = optmath.breakeven_drift(legs, spot, days, friction=friction, iv=iv)
     dominant = optmath.dominant_risk(greeks)
 

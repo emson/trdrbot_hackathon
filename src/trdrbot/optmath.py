@@ -456,8 +456,33 @@ def payoff_ratio(legs: Iterable[Leg], spot: float, iv: float, days: float,
 #: drift and falls away both sides, so its breakeven is a BAND. Assuming a
 #: single crossing would have reported a confident wrong number for every
 #: range structure the agent trades.
-_VOL_GRID = tuple(0.005 * i for i in range(1, 241))        # 0.5% .. 120%
+_VOL_GRID_STEP = 0.005
+_VOL_GRID_HI = 1.20
+_VOL_GRID = tuple(_VOL_GRID_STEP * i
+                  for i in range(1, round(_VOL_GRID_HI / _VOL_GRID_STEP) + 1))
 _DRIFT_GRID = tuple(-0.20 + 0.002 * i for i in range(201))  # -20% .. +20%
+
+
+def _vol_grid(iv_hint: float | None) -> tuple[float, ...]:
+    """The vol scan, widened to bracket a high-IV name's own breakeven.
+
+    A fixed 120% ceiling is invisible until it is wrong, and then it is wrong in
+    the worst possible direction. A put credit spread priced at IV 150% -
+    ordinary for a meme name or a binary event - has its breakeven above the
+    grid, so the scan finds no crossing and `describe()` reports **"EV positive
+    at every realized vol tested"**: the exact confident wrongness this whole
+    module exists to refuse, in the one regime where short premium looks most
+    attractive (I-44, scaffold G1b).
+
+    So the grid follows the quote: 1.5x the vol the structure was actually
+    priced at, whenever that is higher than the default. The `describe()` string
+    names the range it searched either way - a scan that found nothing must say
+    how far it looked, or "no crossing" reads as "no risk".
+    """
+    if not iv_hint or iv_hint * 1.5 <= _VOL_GRID_HI:
+        return _VOL_GRID
+    return tuple(_VOL_GRID_STEP * i
+                 for i in range(1, round(iv_hint * 1.5 / _VOL_GRID_STEP) + 1))
 
 
 @dataclass(frozen=True)
@@ -473,12 +498,18 @@ class Breakeven:
     crossings: tuple[float, ...]
     positive_at_low: bool
     unit: str = "%"
+    #: Top of the range actually scanned. None where the scan is bounded by
+    #: the question itself rather than by a grid (the drift scan). A
+    #: no-crossing result is only honest alongside this: "positive at every vol
+    #: tested" is a claim about the GRID, and reads as a claim about the world.
+    searched_hi: float | None = None
 
     def describe(self) -> str:
         f = (lambda v: f"{v:.1%}") if self.unit == "%" else (lambda v: f"{v:g}")
         if not self.crossings:
             side = "positive" if self.positive_at_low else "negative"
-            return f"EV {side} at every {self.variable} tested"
+            span = f" (searched to {self.searched_hi:.0%})" if self.searched_hi else ""
+            return f"EV {side} at every {self.variable} tested{span}"
         if len(self.crossings) == 1:
             c = f(self.crossings[0])
             return (f"wins if {self.variable} < {c}" if self.positive_at_low
@@ -519,7 +550,8 @@ def _crossings(f, grid: tuple[float, ...], *, tol: float = 1e-4) -> tuple[float,
 
 
 def breakeven_vol(legs: Iterable[Leg], spot: float, days: float, *,
-                  friction: float = 0.0, drift: float = 0.0) -> Breakeven | None:
+                  friction: float = 0.0, drift: float = 0.0,
+                  iv_hint: float | None = None) -> Breakeven | None:
     """The REALIZED VOL at which this structure's EV after costs crosses zero.
 
     The honest statement of a premium trade. "EV is -$20" depends entirely on
@@ -538,6 +570,11 @@ def breakeven_vol(legs: Iterable[Leg], spot: float, days: float, *,
     the terminal-distribution width that breaks even, expressed in vol units.
     That is the right unit for the decision and the wrong unit for a variance
     swap, and the difference matters at the tails.
+
+    `iv_hint` is the vol the structure was actually priced at; it widens the
+    scan so a high-IV name's breakeven is inside the searched range rather than
+    beyond it (see `_vol_grid`). Absent, the default 120% ceiling applies and
+    the result says so.
     """
     legs = list(legs)
     if not legs or spot <= 0:
@@ -547,10 +584,12 @@ def breakeven_vol(legs: Iterable[Leg], spot: float, days: float, *,
         ev = expected_value(legs, spot, iv, days, drift=drift)
         return None if ev is None else ev - friction
 
-    lo = f(_VOL_GRID[0])
+    grid = _vol_grid(iv_hint)
+    lo = f(grid[0])
     if lo is None:
         return None
-    return Breakeven("realized vol", _crossings(f, _VOL_GRID), lo > 0)
+    return Breakeven("realized vol", _crossings(f, grid), lo > 0,
+                     searched_hi=grid[-1])
 
 
 def breakeven_drift(legs: Iterable[Leg], spot: float, days: float, *,

@@ -4036,3 +4036,39 @@ def test_every_sizing_outcome_is_journalled_including_the_refusals(tmp_path):
     assert [r["result"] for r in rows] == ["sized", "refused"]
     assert rows[0]["contracts"] > 0 and rows[1]["contracts"] == 0
     assert "REFUSED" in rows[1]["reason"]
+
+
+def test_breakeven_vol_finds_the_crossing_of_a_name_priced_above_the_old_grid_cap():
+    """I-44: the grid stopped at 120%, so a structure priced at IV 150% - a meme
+    name, a binary event - had its breakeven OUTSIDE the searched range and came
+    back as "EV positive at every realized vol tested". The scan now follows the
+    quote, and a fair-priced structure still breaks even at exactly the vol it
+    was priced at (the cleanest check that the root-finder finds the right root).
+    """
+    from trdrbot.optmath import breakeven_vol
+
+    legs = [Leg(right="P", strike=100.0, side="short", qty=1,
+                price=_fair("P", 100.0, iv=1.50)),
+            Leg(right="P", strike=95.0, side="long", qty=1,
+                price=_fair("P", 95.0, iv=1.50))]
+
+    be = breakeven_vol(legs, 100.0, 7.0, iv_hint=1.50)
+
+    assert be.crossings, "the breakeven exists, it was simply above the old ceiling"
+    assert abs(be.crossings[0] - 1.50) < 0.01, be.crossings
+    assert "wins if realized vol <" in be.describe()
+
+
+def test_a_scan_that_finds_nothing_says_how_far_it_looked():
+    """"No crossing" is a claim about the GRID and reads as a claim about the
+    world. Both are legitimate answers; only one of them is honest on its own."""
+    from trdrbot.optmath import breakeven_vol
+
+    free = [Leg(right="C", strike=105.0, side="long", qty=1, price=0.0),
+            Leg(right="C", strike=110.0, side="short", qty=1, price=0.50)]
+
+    be = breakeven_vol(free, 100.0, 7.0)
+
+    assert not be.crossings
+    assert "searched to 120%" in be.describe(), be.describe()
+    assert "searched to 225%" in breakeven_vol(free, 100.0, 7.0, iv_hint=1.50).describe()
