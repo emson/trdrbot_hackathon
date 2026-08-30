@@ -117,6 +117,59 @@ Sorted by severity.
   is about. This is `_unreachable_rules`' blind spot by construction: that check bails at
   `base <= 0`, which is exactly the structure needing the warning. Reported, never blocked (D-009).
   Verified by reverting local_tools.py and watching the regression test fail.
+- ~~**I-46 · The Coach's cost-ceiling sentinel counts unpriced-model spend as zero**~~ **FIXED
+  2026-08-30 (WU-6.1).** `_cost_today` now returns `(priced_usd, unpriced_call_count)` and
+  `_sentinel_cost` fires on `spent > limit OR unpriced > 0`, naming both in the value it reports
+  so the report says WHY. The `coach.cost_usd_today` GAUGE keeps reporting priced spend only,
+  deliberately and now documented: a gauge folding in unpriced calls would mix dollars with an
+  unknown, which a chart cannot show - stopping the loop is the sentinel's job, blurring a line
+  is not. Verified by reverting gauges.py and watching both tests fail.
+- **I-47 · Phase 4's two new journal kinds have no health probe** (2026-08-30 review). `sizing`
+  (WU-4.2) and `book_risk` (WU-4.10) rows feed gauges, but `trdrbot health` - whose whole thesis
+  is "health detects, the ledger remembers" - asks nothing about either. If the sizing tool
+  silently stopped being called while orders still placed, or every sizing call refused for a
+  week, or the book-risk feed died with positions open, health would say nothing; only a person
+  reading the report chart would notice. The exact "just-fixed defect regresses silently" class
+  phase 4 exists to prevent, missing its own detector.
+- **I-48 · `leg_divergence` is journalled and nothing corrects the position** (2026-08-30
+  review). When one leg of a multi-leg position vanishes at the broker (early assignment, partial
+  external close), reconcile journals a `leg_divergence` finding and moves on - `pos.status` and
+  `pos.legs` are never touched. Downstream, `position_pnl_fraction` and `exit_rules.evaluate`
+  silently filter to the legs still present and keep pricing the position indefinitely on that
+  partial view: book greeks, `max_loss_usd` and every mark rule now describe a spread that no
+  longer exists, and the remainder can be an UNDEFINED-RISK naked leg - the exact shape INV-19
+  refuses to create via its own close path, arriving via the broker instead. D-091's sweep
+  hardened the exit-rule spine, not reconcile's state-mutation completeness.
+- **I-49 · Two muse accounting gaps: funnel overlap unmeasured, malformed candidates evade the
+  trial count** (2026-08-30 review). (a) The muse may spend its 2 daily emission slots on names
+  research/discovery already cover - nothing measures how often, though the journal's `muse` rows
+  already carry per-candidate underlyings, so the gauge is free. Whether to EXCLUDE those names is
+  deliberately deferred until measured (the muse prompt is the Coach's live A/B lever; editing it
+  from outside would corrupt the running trial's pairing - and a novel thesis on a covered name is
+  legitimately the muse's job). (b) `muse.py`'s per-candidate skip (`not isinstance(cand, dict) or
+  no underlying`) drops a candidate before `ledger.register`, against the file's own stated
+  invariant that every candidate is counted - and the Coach's survival reward never sees that the
+  prompt produced garbage.
+- **I-50 · Post-trade greeks are flat-IV even when the position was built from skewed quotes**
+  (2026-08-30 review). `optmath.Leg.from_position_leg` never sets `.iv`, so the greeks recorded at
+  entry (`record_position`) and the book-greeks line the agent reads every cycle fall back to one
+  flat vol - while `net_greeks` would honour per-leg IV if given it, and the simulated structure
+  the trade came from HAD per-leg IVs. WU-4.8 made the pre-trade layer skew-aware; the post-trade
+  layer did not follow. Pre-existing, but phase 4 widened the sophistication gap between the two.
+- **I-51 · The tick lock's write is the one non-atomic state write left** (2026-08-30 review).
+  `lock.py` is read-check-write with a bare `path.write_text` - two processes racing acquisition
+  within the same instant (stale-lock breaking, or two `trdrbot run` loops started by accident)
+  can BOTH proceed, and concurrent ticks double-process the inbox or double-submit orders. Narrow
+  trigger, capital-relevant consequence; the I-36 atomic-writers sweep reached every writer except
+  the lock that guards them all.
+- **I-52 · The single-shot tick path crashes raw where the loop degrades** (2026-08-30 review).
+  `cli.py::_tick` (what `run.sh` points cron/launchd at) catches only `BlockingIOError`; any other
+  exception exits via traceback with no classification, while `_run_loop` prints-and-continues.
+  The `failures.classify`/`advice` machinery exists and is not consulted on this path.
+- **I-53 · `doctor` cannot see a typo'd role key in `llm.roles`** (2026-08-30 review). It iterates
+  the CODE's role list and probes each chain; it never reads config.yaml's `roles:` keys, so a
+  misspelled override (e.g. `reserach:`) silently falls through to the default chain - degradation
+  by design, but invisible to the one command built to catch config problems.
 - **I-29 · The bootstrap base rate is overconfident by 15-18pp where credit spreads live**
   ([notes/017](notes/017_learning_from_historic_data.md)). Measured offline over **21,280
   historical band-forecasts** (56 tickers, horizons 3/5/10, 5 band shapes, history sliced before
@@ -302,6 +355,10 @@ Sorted by severity.
 
 ## Deliberate limitations (not bugs, recorded so nobody "fixes" them)
 
+- Research opportunities carry no options-liquidity check, by structure: the research desk runs
+  while the market is CLOSED, so there is no chain to check against. `opportunity.admit` records
+  the gap as `unchecked` and journals it; a non-optionable name dies at the decide cycle's live
+  quotes, not silently (confirmed 2026-08-30 review - reclassified from finding to limitation).
 - Attribution waits for the thesis horizon; a stopped-early position is recorded, not judged.
 - The first SPY position can never be attributed (no thesis recorded at entry, D-039).
   Fabricating one retroactively would be worse.

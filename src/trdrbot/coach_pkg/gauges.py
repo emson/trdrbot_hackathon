@@ -205,13 +205,26 @@ def _seed_entropy(rows: list[dict[str, Any]]) -> int | None:
     return len(pairs)
 
 
-def _cost_today(cfg: Any, roles: tuple[str, ...] = ("muse", "coach_mutate")) -> float:
+def _cost_today(cfg: Any, roles: tuple[str, ...] = ("muse", "coach_mutate")
+                ) -> tuple[float, int]:
+    """(priced spend today, count of UNPRICED calls) for the sentineled roles.
+
+    The second number exists because summing `cost_usd or 0.0` alone is
+    `usage.py`'s own named anti-pattern committed inside the safety brake:
+    that module documents `cost_usd=None` as "the model is not in the pricing
+    table - UNPRICED, never counted as free", and `usage.render()` surfaces it
+    loudly to a human. The Coach's cost sentinel was the one reader that
+    swallowed it, so a model added to the fallback chain without an
+    `llm.pricing` entry spent real money against `cost_ceiling_usd_per_day`
+    while the gauge read $0 (I-46, absence-as-zero, D-038).
+    """
     from ..usage import UsageLedger
 
     day = ids.utc_now().date().isoformat()
     led = UsageLedger(Path(cfg.paths.state) / "usage.jsonl", cfg.pricing)
-    return round(sum(c.cost_usd or 0.0 for c in led.calls()
-                     if c.role in roles and str(c.ts)[:10] == day), 4)
+    today = [c for c in led.calls() if c.role in roles and str(c.ts)[:10] == day]
+    priced = round(sum(c.cost_usd for c in today if c.cost_usd is not None), 4)
+    return priced, sum(1 for c in today if c.cost_usd is None)
 
 
 def snapshot_gauges(cfg: Any, rows: list[dict[str, Any]]) -> dict[str, Any]:
@@ -273,7 +286,12 @@ def snapshot_gauges(cfg: Any, rows: list[dict[str, Any]]) -> dict[str, Any]:
             put("calibration.n_eff", round(cal.n_eff, 2) if cal.n_eff else None)
 
     guarded("calibration", _calibration_gauges)
-    guarded("coach.cost_usd_today", lambda: put("coach.cost_usd_today", _cost_today(cfg)))
+    # PRICED spend only, deliberately: a gauge that silently folded unpriced
+    # calls in would be mixing "dollars" with "dollars plus an unknown", and a
+    # chart cannot show that. Unpriced spend is the SENTINEL's business
+    # (`_sentinel_cost`), where it can stop the loop rather than blur a line.
+    guarded("coach.cost_usd_today",
+            lambda: put("coach.cost_usd_today", _cost_today(cfg)[0]))
 
     # The model layer's calibration (D-089): the fitted inflation and how old
     # the fit is. A drifting inflation across refits, or a fit going stale
@@ -349,10 +367,19 @@ class Sentinel:
 
 
 def _sentinel_cost(cfg: Any, rows: list[dict[str, Any]]) -> tuple[bool, Any, Any]:
+    """Brake on the day's spend - and on spend it CANNOT price.
+
+    Unpriced calls fire it too. The alternative is the failure this sentinel
+    exists to prevent, arriving invisibly: an unpriced model is spending an
+    amount nobody knows, and a ceiling compared against a number that omits it
+    is not a ceiling. Firing here pauses experimentation until a human adds the
+    pricing entry, which is the cheap and correct repair.
+    """
     c = getattr(cfg, "coach", None) or {}
     limit = float(c.get("cost_ceiling_usd_per_day", 10.0))
-    spent = _cost_today(cfg)
-    return spent > limit, spent, limit
+    spent, unpriced = _cost_today(cfg)
+    value = f"${spent}" + (f" + {unpriced} UNPRICED call(s)" if unpriced else "")
+    return (spent > limit or unpriced > 0), value, f"${limit}"
 
 
 def _sentinel_churn(cfg: Any, rows: list[dict[str, Any]]) -> tuple[bool, Any, Any]:

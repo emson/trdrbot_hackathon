@@ -942,3 +942,52 @@ def test_the_drift_gauges_read_the_rows_the_system_already_writes(tmp_path):
     assert g["exit.uncorroborated_decisives"] == 3
     assert g["book.vega_dollars"] == -250.0
     assert g["book.beta_delta_dollars"] == 4200.0
+
+
+def test_the_cost_sentinel_fires_on_spend_it_cannot_price(tmp_path):
+    """I-46: `usage.py` documents cost_usd=None as "UNPRICED, never counted as
+    free" and renders it loudly - and the one reader that BRAKES autonomous
+    spend summed `cost_usd or 0.0`, reading it as $0. A model added to the
+    fallback chain without an llm.pricing entry could spend without limit while
+    the ceiling compared against a number that omitted it. Absence-as-zero
+    (D-038), inside the safety brake.
+    """
+    from types import SimpleNamespace
+
+    from trdrbot.coach_pkg.gauges import _sentinel_cost
+    from trdrbot.usage import UsageLedger
+
+    state = tmp_path / "state"
+    state.mkdir(exist_ok=True)
+    # Producer-derived: written by the real ledger, priced by the real table.
+    # An empty pricing table is exactly the condition under test.
+    UsageLedger(state / "usage.jsonl", {}).record("muse", "unpriced:model", 1000, 500)
+    cfg = SimpleNamespace(paths=SimpleNamespace(state=state), pricing={},
+                          coach={"cost_ceiling_usd_per_day": 10.0})
+
+    fired, value, _limit = _sentinel_cost(cfg, [])
+
+    assert fired, "unpriced spend read as $0.00 and the brake never engaged"
+    assert "UNPRICED" in str(value), value
+
+
+def test_the_cost_sentinel_stays_quiet_on_priced_spend_under_its_ceiling(tmp_path):
+    """The other half: a sentinel that cries wolf trains the reader to skip the
+    one line that finally matters (D-070)."""
+    from types import SimpleNamespace
+
+    from trdrbot.coach_pkg.gauges import _cost_today, _sentinel_cost
+    from trdrbot.usage import UsageLedger
+
+    state = tmp_path / "state"
+    state.mkdir(exist_ok=True)
+    pricing = {"openai:gpt-5": {"input": 1.25, "output": 10.0}}
+    UsageLedger(state / "usage.jsonl", pricing).record("muse", "openai:gpt-5", 1000, 500)
+    cfg = SimpleNamespace(paths=SimpleNamespace(state=state), pricing=pricing,
+                          coach={"cost_ceiling_usd_per_day": 10.0})
+
+    fired, _value, _limit = _sentinel_cost(cfg, [])
+    priced, unpriced = _cost_today(cfg)
+
+    assert not fired
+    assert priced > 0 and unpriced == 0, "a priced call must not read as unpriced"
