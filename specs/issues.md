@@ -67,15 +67,20 @@ Sorted by severity.
   distribution, `payoff_ratio` refuses, and sizing refuses with it - an extreme view self-refuses
   rather than manufacturing an enormous Kelly from a corner of the grid. Verified by reverting
   experiments.py and watching the wiring tests fail.
-- **I-42 · One wide print closes a credit spread immediately - the documented artifact IS the
-  decisive case** (scaffold G4/P2). `position_mark`'s registry entry sets `immediate_overshoot=1.0`
-  ("not plausibly a quote artifact") while its own comment says a wide or stale quote "can print
-  -100%-of-credit on a HEALTHY spread". Those two statements name the same number: -100% against
-  the standard -50% stop is exactly overshoot 1.0, so the single most common quote artifact on a
-  credit spread skips the debounce that exists for it and closes the position on one print. The
-  N-of-M machinery protects only against breaches in [-50%, -100%) - the shallow ones. A real gap
-  and a wide quote are indistinguishable in one mark; the underlying (which prints tightly) is
-  the disambiguator and is not consulted.
+- ~~**I-42 · One wide print closes a credit spread immediately - the documented artifact IS the
+  decisive case**~~ **FIXED 2026-08-30 (WU-4.6).** `position_mark`'s immediate_overshoot of 1.0
+  and its own comment about "-100%-of-credit on a HEALTHY spread" named the same number, so the
+  commonest quote artifact on a credit spread skipped the debounce built for it. A mark breach is
+  now decisive only when the UNDERLYING corroborates it - an adverse move of at least
+  `CORROBORATION_FRACTION` (0.25) of the position's own expected move since entry, using the entry
+  spot, IV and greeks D-040 already records. `dominant_risk` decides what "adverse" means: a vol
+  bet is hurt by a large move either way, and anything with a directional stake uses the signed
+  test, so a favourable move can never confirm a loss claim. Gains stay decisive (booking a win
+  early on a wild print costs opportunity, not capital), and an unjudgeable position debounces.
+  Measured on the scaffold: the artifact print now holds and confirms on the second check, while
+  the same print with the underlying gapped to 96 still closes on the first. A suppressed breach
+  closes nothing and would leave no trace, so `evaluate` counts them into the `exit_run`
+  heartbeat. Verified by reverting exit_rules.py and watching all five path tests fail.
 - **I-43 · EV, POP and the payoff ratio ignore `Leg.iv` - risk and edge are priced off different
   surfaces** (scaffold G3). `net_greeks` honours per-leg IV (the README sells this: "per-leg IV so
   measured skew is priced"), but `_lognormal_grid` takes one flat IV, so every probability, EV and

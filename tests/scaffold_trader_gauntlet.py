@@ -318,10 +318,15 @@ report("G4  Exit rules driven through price paths (real evaluate(), real debounc
 DEADLINE = "2026-12-31"
 
 
-def mkpos(rules, legs_syms=("XYZ261016P00100000", "XYZ261016P00095000")):
+def mkpos(rules, legs_syms=("XYZ261016P00100000", "XYZ261016P00095000"), **kw):
+    # Entry state as D-040 records it, so mark breaches can be checked against
+    # the underlying the way production does (WU-4.6).
+    kw.setdefault("entry_spot", 100.0)
+    kw.setdefault("entry_iv", 0.25)
+    kw.setdefault("greeks_at_entry", {"delta_dollars": 4000.0, "vega_dollars": -10.0})
     return Position(position_id="SIM", status="open", underlying="XYZ",
                     expiry="2026-10-16", legs=[{"symbol": s} for s in legs_syms],
-                    exit_rules=list(rules))
+                    exit_rules=list(rules), **kw)
 
 
 def snap(pnl_frac, under_px, *, missing_leg=False, basis=(-350.0, 150.0)):
@@ -358,13 +363,19 @@ run_path("P1 whipsaw -52/-30/-55 vs -50% stop (2-of-3)",
          mkpos([{"type": "stop_loss", "threshold": "-50%"}]),
          [snap(-0.52, 100), snap(-0.30, 100), snap(-0.55, 100)], 3, "stop_loss")
 
-run_path("P2 ONE wide print -100% vs -50% stop (their own",
+# CHANGED (WU-4.6): the artifact case now DEBOUNCES. One -100%-of-net print on
+# an unmoved underlying is exactly what position_mark's own comment warns a wide
+# quote can produce, so it is held for confirmation instead of closing the
+# position at the worst quote of the day (I-42).
+run_path("P2 ONE wide print -100%, underlying unmoved (the artifact)",
          mkpos([{"type": "stop_loss", "threshold": "-50%"}]),
-         [snap(-1.00, 100)], 1, "stop_loss")
-note("G4/P2: a single -100%-of-net print closes a credit spread IMMEDIATELY via the "
-     "magnitude override (overshoot 1.0 >= 1.0) - but position_mark's own docstring "
-     "says 'a wide or stale quote can print -100%-of-credit on a HEALTHY spread'. "
-     "The documented artifact case IS the decisive case; the debounce never sees it.")
+         [snap(-1.00, 100)], None)
+run_path("P2b same print, underlying gapped 96 (the real thing)",
+         mkpos([{"type": "stop_loss", "threshold": "-50%"}]),
+         [snap(-1.00, 96)], 1, "stop_loss")
+run_path("P2c artifact print twice - the debounce still closes it",
+         mkpos([{"type": "stop_loss", "threshold": "-50%"}]),
+         [snap(-1.00, 100), snap(-1.00, 100)], 2, "stop_loss")
 
 run_path("P3 underlying gap 93.5 + crazy +120% mark, both decisive",
          mkpos([{"type": "underlying_stop", "level": "95", "direction": "below"},

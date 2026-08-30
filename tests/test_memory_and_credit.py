@@ -193,6 +193,12 @@ async def test_a_memory_failure_does_not_disarm_the_capital_protection_path(
     ])
     closer = tools_for(close_position=lambda **kw: {"status": "ok"})
 
+    # Two ticks: this snapshot carries no underlying, so the mark breach takes
+    # the ordinary debounce rather than the immediate path (WU-4.6). What is
+    # under test - a breached stop still closes while memory is broken - is
+    # unchanged, and the debounce path exercises MORE of the evaluator.
+    await exit_rules.run(store, snap, closer, journal, "2099-01-01",
+                         broken, wiki, calibration=calib, verbose=False)
     triggered = await exit_rules.run(store, snap, closer, journal, "2099-01-01",
                                      broken, wiki, calibration=calib, verbose=False)
 

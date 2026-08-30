@@ -26,10 +26,10 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import date
+from datetime import UTC, date, datetime
 from typing import Any
 
-from . import health, ids, learn, mcp_client
+from . import health, ids, learn, mcp_client, optmath
 from .analytics import Snapshot, _f, position_pnl_fraction
 from .calibration import CalibrationStore
 from .elfmem_adapter import ElfmemAdapter
@@ -48,6 +48,82 @@ def _days_to(day: str) -> int | None:
         return None
 
 
+#: How much of the underlying's OWN expected move must already have happened
+#: before a mark-based breach counts as decisive rather than debounced.
+#:
+#: A starting point, not a measurement - and deliberately the only number this
+#: rule adds. Tune it from the journal's own `exit_run` rows once they have
+#: counted real suppressions against real gaps (WU-4.10 records both), never by
+#: taste. At 0.25 a genuine gap - which moves the underlying hard - still closes
+#: on the first print, while a lone wide quote on an unmoved underlying waits
+#: for the 2-of-3 confirmation that already exists for it.
+CORROBORATION_FRACTION = 0.25
+
+
+def _days_since(iso: str) -> float:
+    """Days a position has been open, floored at one.
+
+    The floor matters: `expected_move` over zero days is zero, which would make
+    every threshold trivially met on the day of entry - the opposite of the
+    intent. One day is the tightest honest yardstick.
+    """
+    try:
+        opened = datetime.fromisoformat(str(iso))
+    except (ValueError, TypeError):
+        return 1.0
+    if opened.tzinfo is None:
+        opened = opened.replace(tzinfo=UTC)
+    return max((ids.utc_now() - opened).total_seconds() / 86400.0, 1.0)
+
+
+def _mark_corroborated(pos: Position, snap: Snapshot, direction: str) -> bool | None:
+    """Does the UNDERLYING agree with what the option mark is claiming?
+
+    The registry set `position_mark`'s immediate_overshoot to 1.0 on the grounds
+    that a breach at twice the threshold "is not plausibly a quote artifact" -
+    while its own comment says a wide or stale quote "can print -100%-of-credit
+    on a HEALTHY spread". Those two statements name the SAME number: -100%
+    against the standard -50% stop is exactly overshoot 1.0. So the single most
+    common artifact on a credit spread skipped the debounce that exists for it
+    and closed the position on one print, at the worst quote of the day (I-42).
+
+    The underlying is the disambiguator - it prints continuously and tightly,
+    which is why thesis stops watch it. A real gap moves it; a wide quote does
+    not. So a loss claim must be matched by a real adverse move before it is
+    believed on a single print; otherwise it debounces like any other breach.
+
+    Returns None when the position cannot be judged (a legacy row without entry
+    greeks, an unpriced underlying) - and None debounces, the conservative
+    direction. Gains are left decisive: booking a win early on a wild print
+    costs opportunity, not capital, and is not the failure this guards.
+    """
+    if direction != "below":
+        return True
+    spot = snap.underlying_prices.get(pos.underlying)
+    entry, iv = pos.entry_spot, pos.entry_iv
+    if spot is None or not entry or not iv:
+        return None
+    move = spot - entry
+    em = optmath.expected_move(entry, iv, _days_since(pos.opened))
+    if not em:
+        return None
+    needed = CORROBORATION_FRACTION * em
+
+    # What counts as ADVERSE depends on what the position is betting on, and
+    # `dominant_risk` already answers exactly that question from the entry
+    # greeks. A VOL bet is hurt by a large move either way, so its test is on
+    # magnitude. Anything carrying a directional stake - including a position
+    # `dominant_risk` calls "balanced" - uses the SIGNED test, which is the
+    # conservative reading: a move that helped the position can never confirm a
+    # claim that the position collapsed, and refusing to confirm only means the
+    # ordinary debounce applies.
+    dom = optmath.dominant_risk(pos.greeks_at_entry)
+    delta = (pos.greeks_at_entry or {}).get("delta_dollars", 0.0)
+    if (dom and dom[0] == "volatility") or not delta:
+        return abs(move) >= needed
+    return (-move if delta > 0 else move) >= needed
+
+
 @dataclass(frozen=True)
 class ExitSignal:
     """One observable an exit rule can watch."""
@@ -60,6 +136,12 @@ class ExitSignal:
     #: noisy, so a date-based rule never needs confirming).
     immediate_overshoot: float
     render: Callable[[float], str]
+    #: Second opinion on a decisive breach, for signals noisy enough that
+    #: "far past the threshold" and "bad print" are the same observation.
+    #: (pos, snap, direction) -> True to confirm, False to debounce, None when
+    #: it cannot be judged (which debounces too). Absent on signals that print
+    #: cleanly - the underlying and the calendar need no corroborating.
+    corroborate: Callable[[Position, Snapshot, str], bool | None] | None = None
 
 
 #: The registry. A new rule type usually needs no new signal at all.
@@ -69,6 +151,7 @@ EXIT_SIGNALS: dict[str, ExitSignal] = {
     "position_mark": ExitSignal(
         "position_mark", lambda p, s, d: position_pnl_fraction(p.symbols, s),
         1.0, lambda v: f"{v:+.1%}",
+        corroborate=_mark_corroborated,
     ),
     # What a professional actually exits on: the underlying breaking the level
     # that invalidates the thesis. Prints continuously and tightly.
@@ -185,12 +268,21 @@ def watched_signals(pos: Position) -> list[str]:
     return out
 
 
-def evaluate(pos: Position, snap: Snapshot, deadline: str) -> tuple[str | None, str, float | None]:
+def evaluate(pos: Position, snap: Snapshot, deadline: str,
+             *, stats: dict[str, int] | None = None
+             ) -> tuple[str | None, str, float | None]:
     """Return (close_reason, explanation, pnl_fraction). None means hold.
 
     pnl_fraction comes back alongside the reason so the caller can feed it straight
     to learn.on_resolution() without recomputing - the position's net mark is
     exactly the signal credit assignment needs (D-018 #9).
+
+    `stats` is an optional counter bag the caller owns. It exists because the
+    interesting event here does NOT produce a close and therefore leaves no exit
+    row: a decisive mark breach that the underlying refused to corroborate is a
+    position NOT closed, and without a count nothing downstream could ever see
+    it happening (WU-4.6). The keys are `mark_breach_suppressed` and
+    `mark_breach_confirmed`.
     """
     pnl = position_pnl_fraction(pos.symbols, snap)
     # Remember the last time we could see it. A position that closes outside
@@ -234,11 +326,24 @@ def evaluate(pos: Position, snap: Snapshot, deadline: str) -> tuple[str | None, 
             continue
 
         decisive = _overshoot(x, thr, direction) >= signal.immediate_overshoot
+        confirmed: bool | None = None
+        if decisive and signal.corroborate is not None:
+            confirmed = signal.corroborate(pos, snap, direction)
+            decisive = confirmed is True
+            if stats is not None:
+                key = "mark_breach_confirmed" if decisive else "mark_breach_suppressed"
+                stats[key] = stats.get(key, 0) + 1
         if decisive or sum(history) >= NEEDED:
+            note = ""
+            if decisive and confirmed is True:
+                note = ", underlying confirms"
+            elif confirmed is not None and not decisive:
+                note = " - the underlying has not confirmed it, so this is the"\
+                       " debounce, not the print"
             why = (
                 f"{sig_name} {signal.render(x)} {direction} {signal.render(thr)}"
-                + (" - decisive, immediate" if decisive
-                   else f" ({sum(history)}/{len(history)} checks)")
+                + (f" - decisive, immediate{note}" if decisive
+                   else f" ({sum(history)}/{len(history)} checks){note}")
             )
             fired.append((_PRIORITY.get(kind, 5), kind, why))
 
@@ -264,6 +369,9 @@ async def run(
     """Evaluate every still-open position and close those that trigger."""
     triggered: list[str] = []
     watched = rules_checked = unreadable = errors = 0
+    #: Owned here, filled by `evaluate`. A suppressed breach closes nothing, so
+    #: it would leave no trace at all without a count of its own.
+    stats: dict[str, int] = {}
 
     for pos in store.open_positions():
         if pos.status != "open":
@@ -277,7 +385,7 @@ async def run(
         # malformed rule used to take capital protection offline for the whole
         # book, every tick, until someone hand-fixed the file.
         try:
-            reason, why, pnl = evaluate(pos, snap, deadline)
+            reason, why, pnl = evaluate(pos, snap, deadline, stats=stats)
         except Exception as exc:  # noqa: BLE001 - per-position isolation
             errors += 1
             print(f"[exit] {pos.position_id}: rule evaluation failed, holding: {exc!r}")
@@ -333,9 +441,19 @@ async def run(
                        # An unreadable rule is a commitment that can never be
                        # honoured, and an evaluation error is a position going
                        # unwatched. Both are silent otherwise.
-                       invalid_rules=unreadable, errors=errors)
+                       invalid_rules=unreadable, errors=errors,
+                       # A mark breach the underlying refused to confirm closes
+                       # nothing, so these two counts are the ONLY record that
+                       # the corroboration rule is doing anything at all - and
+                       # the data that will eventually tune its fraction.
+                       mark_breach_suppressed=stats.get("mark_breach_suppressed", 0),
+                       mark_breach_confirmed=stats.get("mark_breach_confirmed", 0))
         if unreadable or errors:
             print(f"[exit] WARNING: {unreadable} unreadable rule(s), "
                   f"{errors} position(s) failed evaluation - those are not being watched")
+        if stats.get("mark_breach_suppressed"):
+            print(f"[exit] {stats['mark_breach_suppressed']} mark breach(es) past the "
+                  f"immediate threshold held for confirmation - the underlying has not "
+                  f"moved enough to corroborate them; the debounce still applies")
 
     return triggered

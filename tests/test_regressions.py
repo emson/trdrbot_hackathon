@@ -182,9 +182,19 @@ def test_single_wide_quote_does_not_trigger_a_stop():
 
 
 def test_decisive_breach_skips_debounce_on_both_conventions():
-    """One overshoot rule must mean 2x for a percentage and 1% for a price."""
-    p = pos(exit_rules=[{"type": "stop_loss", "threshold": "-100%"}])
-    assert "decisive" in evaluate(p, snap(mark_pnl=-250), "2099-01-01")[1]
+    """One overshoot rule must mean 2x for a percentage and 1% for a price.
+
+    The mark half now also needs the UNDERLYING to corroborate it (WU-4.6), so
+    the position carries its entry state and the snapshot shows a real adverse
+    move. That is the point of the rule, not a weakening of this one: a breach
+    at twice the threshold is only "not plausibly a quote artifact" when
+    something that prints cleanly agrees.
+    """
+    p = pos(exit_rules=[{"type": "stop_loss", "threshold": "-100%"}],
+            entry_spot=100.0, entry_iv=0.25,
+            greeks_at_entry={"delta_dollars": 4000.0, "vega_dollars": -10.0})
+    assert "decisive" in evaluate(p, snap(mark_pnl=-250, underlying=96.0),
+                                  "2099-01-01")[1]
     q = pos(exit_rules=[{"type": "underlying_stop", "direction": "below", "level": 757.5}])
     assert "decisive" in evaluate(q, snap(underlying=748.0), "2099-01-01")[1]
 

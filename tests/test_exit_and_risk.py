@@ -78,8 +78,13 @@ async def test_a_valid_rule_alongside_a_broken_one_still_fires(paths, make_posit
         {"type": "stop_loss", "basis": "position_mark", "threshold": "-20.0%"},
     ])
     store.save(pos)
-    snap = _underwater(pos.symbols, -0.9)  # decisive: past 2x the -20% stop
+    snap = _underwater(pos.symbols, -0.9)  # past 2x the -20% stop
 
+    # Two ticks, because the breach is on the MARK and this snapshot carries no
+    # underlying to corroborate it (WU-4.6) - so it takes the ordinary 2-of-3
+    # debounce rather than the immediate path. The subject of this test is
+    # unchanged: a broken rule beside a good one must not disarm the good one.
+    await _run(store, snap, journal, paths, tools_for(close_position=lambda **k: {}))
     triggered = await _run(store, snap, journal, paths,
                            tools_for(close_position=lambda **k: {}))
 
@@ -109,14 +114,18 @@ async def test_one_unevaluable_position_does_not_blind_the_evaluator_to_the_othe
 
     real_evaluate = exit_rules.evaluate
 
-    def explode(pos: Any, snap: Any, deadline: str) -> Any:
+    def explode(pos: Any, snap: Any, deadline: str, **kw: Any) -> Any:
         if pos.position_id == "pos_bad":
             raise ValueError("unreadable debounce state")
-        return real_evaluate(pos, snap, deadline)
+        return real_evaluate(pos, snap, deadline, **kw)
 
     monkeypatch.setattr(exit_rules, "evaluate", explode)
     snap = _underwater(good.symbols, -0.9)
 
+    # Two ticks: the mark breach debounces without an underlying to corroborate
+    # it (WU-4.6). What is under test - one bad position must not blind the
+    # evaluator to the rest of the book - is unchanged.
+    await _run(store, snap, journal, paths, tools_for(close_position=lambda **k: {}))
     triggered = await _run(store, snap, journal, paths,
                            tools_for(close_position=lambda **k: {}))
 
@@ -190,3 +199,124 @@ def test_a_partially_dated_leg_set_is_refused_not_assumed_shared():
     optmath.require_single_expiry([blank, blank])  # the simulate path: legitimate
     with pytest.raises(optmath.MultiExpiryError):
         optmath.require_single_expiry([dated, blank])
+
+
+# ==================================================================== PILLAR-3
+# CAPITAL-PROTECTION PATHS  (WU-4.6..4.7; issue I-42, notes/023-024)
+#
+# Driven as PATHS, tick by tick, because the failures here are sequences: a
+# breach that should wait, a gap that should not, a bleed that never resolves.
+# The relationship pinned is "a close happens when the world agrees it should",
+# never a threshold level - the levels are the agent's own to write.
+
+from datetime import timedelta
+
+from trdrbot import ids
+from trdrbot.positions import Position
+
+
+def _spread(**kw) -> Position:
+    """A live credit spread carrying the entry state D-040 records: spot, IV and
+    greeks. Built through the real dataclass, defaults overridable per test."""
+    kw.setdefault("greeks_at_entry", {"delta_dollars": 4000.0, "gamma_shares": -7.0,
+                                      "theta_dollars": 7.0, "vega_dollars": -40.0})
+    kw.setdefault("entry_spot", 100.0)
+    kw.setdefault("entry_iv", 0.25)
+    kw.setdefault("opened", (ids.utc_now() - timedelta(days=1)).isoformat())
+    kw.setdefault("exit_rules", [{"type": "stop_loss", "threshold": "-50%"}])
+    return Position(
+        position_id="p1", status="open", underlying="X", expiry="2099-01-30",
+        legs=[{"symbol": "A", "side": "sell", "qty": 1}], **kw)
+
+
+def _mark(pnl_fraction: float, underlying: float) -> Snapshot:
+    return Snapshot(
+        broker_positions=[{"symbol": "A", "cost_basis": 1000.0,
+                           "unrealized_pl": 1000.0 * pnl_fraction}],
+        underlying_prices={"X": underlying})
+
+
+def test_one_wide_print_no_longer_closes_a_healthy_spread(monkeypatch):
+    """I-42: `position_mark`'s immediate_overshoot of 1.0 and its own comment
+    about "-100%-of-credit on a HEALTHY spread" name the SAME number, so the
+    single most common quote artifact skipped the debounce built for it and
+    closed the position on one print, at the worst quote of the day."""
+    pos, stats = _spread(), {}
+
+    # -100% of net against a -50% stop is exactly overshoot 1.0 - and the
+    # underlying has not moved at all, so nothing corroborates it.
+    reason, why, _ = exit_rules.evaluate(pos, _mark(-1.00, 100.0), "2099-01-01",
+                                         stats=stats)
+
+    assert reason is None, why
+    assert stats["mark_breach_suppressed"] == 1
+
+    # ...and it is HELD, not ignored: a second print confirms it the ordinary
+    # way, which is what the 2-of-3 debounce has always been for.
+    reason, _why, _ = exit_rules.evaluate(pos, _mark(-1.00, 100.0), "2099-01-01")
+    assert reason == "stop_loss"
+
+
+def test_a_real_gap_still_closes_on_the_first_print():
+    """The other half, and the reason corroboration is not just a delay: a gap
+    moves the UNDERLYING, which prints tightly. Protection is unchanged."""
+    pos, stats = _spread(), {}
+
+    # Same -100% print, but the underlying has fallen through its own expected
+    # move against a long-delta position.
+    reason, why, _ = exit_rules.evaluate(pos, _mark(-1.00, 96.0), "2099-01-01",
+                                         stats=stats)
+
+    assert reason == "stop_loss"
+    assert "underlying confirms" in why
+    assert stats["mark_breach_confirmed"] == 1
+
+
+def test_a_favourable_move_never_corroborates_a_loss_claim():
+    """The artifact case that matters most: the mark says catastrophe while the
+    underlying says the thesis is working. One of those two is lying, and it is
+    not the one that prints continuously."""
+    pos = _spread()
+
+    reason, _why, _ = exit_rules.evaluate(pos, _mark(-1.00, 104.0), "2099-01-01")
+
+    assert reason is None
+
+
+def test_a_vol_structure_is_corroborated_by_a_move_either_way():
+    """A condor is hurt by a large move in EITHER direction, so its
+    corroboration is on magnitude - `dominant_risk` already knows which kind of
+    bet the position is, from the greeks recorded at entry."""
+    condor = _spread(greeks_at_entry={"delta_dollars": 50.0, "gamma_shares": -7.0,
+                                      "theta_dollars": 7.0, "vega_dollars": -400.0})
+
+    up, _w, _ = exit_rules.evaluate(condor, _mark(-1.00, 104.0), "2099-01-01")
+    assert up == "stop_loss", "a big move up hurts a short-vol position too"
+
+    condor.exit_state.clear()
+    flat, _w2, _ = exit_rules.evaluate(condor, _mark(-1.00, 100.2), "2099-01-01")
+    assert flat is None, "an unmoved underlying corroborates nothing"
+
+
+def test_a_legacy_position_without_entry_state_debounces_rather_than_guessing():
+    """None means "cannot judge", and cannot-judge takes the conservative path.
+    Positions written before D-040 carry no entry greeks at all."""
+    legacy = _spread(greeks_at_entry=None, entry_spot=None, entry_iv=None)
+
+    first, _w, _ = exit_rules.evaluate(legacy, _mark(-1.00, 100.0), "2099-01-01")
+    second, _w2, _ = exit_rules.evaluate(legacy, _mark(-1.00, 100.0), "2099-01-01")
+
+    assert first is None and second == "stop_loss"
+
+
+def test_an_underlying_stop_needs_no_corroborating():
+    """The underlying IS the corroborator - it prints continuously and tightly,
+    which is why thesis stops watch it. Gapping through the level stays
+    immediate, and this is the regression that would catch over-applying the
+    rule to every signal in the registry."""
+    pos = _spread(exit_rules=[{"type": "underlying_stop", "direction": "below",
+                               "level": 95.0}])
+
+    reason, why, _ = exit_rules.evaluate(pos, _mark(0.0, 93.0), "2099-01-01")
+
+    assert reason == "underlying_stop" and "decisive" in why
