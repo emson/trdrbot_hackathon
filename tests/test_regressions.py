@@ -4351,3 +4351,88 @@ def test_every_position_field_survives_a_save_load_round_trip(tmp_path):
             f"Position.{f.name} did not survive the round trip - add it to "
             f"`frontmatter()` AND `_parse()`, or to NOT_PERSISTED with a reason")
     assert loaded.thesis == saved.thesis, "the body prose must round-trip too"
+
+
+def test_the_skew_the_agent_traded_survives_onto_the_position(tmp_path):
+    """I-50: WU-4.8 made the PRE-trade layer skew-aware (EV, POP, payoff all
+    evaluate at the vega-weighted leg vol) while everything after entry stayed
+    flat - `Leg.from_position_leg` never set `.iv`, so the greeks stamped at
+    entry and the book-greeks line the agent reads every cycle described a
+    position built from a skewed board as though the board were flat.
+
+    Derived, not declared (D-037): the IVs come from the simulated structure
+    the trade was matched to, never from the model re-typing them.
+    """
+    from trdrbot.calibration import CalibrationStore
+    from trdrbot.positions import PositionStore
+
+    skew = {100: 0.30, 95: 0.34}
+    shared = local_tools.SharedContext()
+    sim = local_tools.build_simulate_experiments(shared, None, None)
+    sim.func(thesis_claim="range", underlying="X", horizon="2099-01-05", drift_pct=0.0,
+             spot=100.0, iv_pct=25.0, days_to_expiry=7, band_low=95.0, band_high=105.0,
+             candidates=[
+                 {"name": "put credit", "legs": [
+                     {"right": "P", "strike": 100, "side": "short", "qty": 1,
+                      "price": round(_fair("P", 100.0, iv=skew[100]), 4),
+                      "iv_pct": skew[100] * 100},
+                     {"right": "P", "strike": 95, "side": "long", "qty": 1,
+                      "price": round(_fair("P", 95.0, iv=skew[95]), 4),
+                      "iv_pct": skew[95] * 100}]},
+                 {"name": "call debit", "legs": [
+                     {"right": "C", "strike": 100, "side": "long", "qty": 1,
+                      "price": round(_fair("C", 100.0), 4)},
+                     {"right": "C", "strike": 105, "side": "short", "qty": 1,
+                      "price": round(_fair("C", 105.0), 4)}]},
+             ])
+
+    store = PositionStore(tmp_path)
+    rec = local_tools.build_record_position(
+        store, "jrn_x", shared=shared,
+        calibration=CalibrationStore(tmp_path / "cal.jsonl"))
+    rec.func(underlying="X", strategy="put_credit", thesis="range", confidence=0.6,
+             expiry="2026-10-16",
+             legs=[{"symbol": "X261016P00100000", "side": "sell", "qty": 1},
+                   {"symbol": "X261016P00095000", "side": "buy", "qty": 1}])
+
+    saved = store.load(store.all()[0].position_id)
+    by_strike = {optmath.parse_occ(l["symbol"])["strike"]: l for l in saved.legs}
+    assert by_strike[100.0]["iv_pct"] == pytest.approx(30.0)
+    assert by_strike[95.0]["iv_pct"] == pytest.approx(34.0)
+
+    # ...and the greeks actually USED it: the same legs priced flat differ.
+    flat = optmath.net_greeks(
+        [optmath.Leg(right="P", strike=100.0, side="short", qty=1, price=0.0),
+         optmath.Leg(right="P", strike=95.0, side="long", qty=1, price=0.0)],
+        saved.entry_spot, saved.entry_iv, 7)
+    assert saved.greeks_at_entry["vega_dollars"] != pytest.approx(
+        round(flat["vega_dollars"], 2)), "the skew made no difference to the greeks"
+
+
+def test_a_flat_board_records_no_per_leg_iv(tmp_path):
+    """The identity half: no skew observed, nothing invented."""
+    from trdrbot.calibration import CalibrationStore
+    from trdrbot.positions import PositionStore
+
+    shared = local_tools.SharedContext()
+    sim = local_tools.build_simulate_experiments(shared, None, None)
+    sim.func(thesis_claim="up", underlying="X", horizon="2099-01-05", drift_pct=1.0,
+             spot=100.0, iv_pct=25.0, days_to_expiry=7, band_low=99.0, band_high=105.0,
+             candidates=[
+                 {"name": "call debit", "legs": _legs(
+                     [("C", 100, "long"), ("C", 105, "short")])},
+                 {"name": "put credit", "legs": _legs(
+                     [("P", 100, "short"), ("P", 95, "long")])},
+             ])
+
+    store = PositionStore(tmp_path)
+    rec = local_tools.build_record_position(
+        store, "jrn_x", shared=shared,
+        calibration=CalibrationStore(tmp_path / "cal.jsonl"))
+    rec.func(underlying="X", strategy="call_debit", thesis="up", confidence=0.6,
+             expiry="2026-10-16",
+             legs=[{"symbol": "X261016C00100000", "side": "buy", "qty": 1},
+                   {"symbol": "X261016C00105000", "side": "sell", "qty": 1}])
+
+    saved = store.load(store.all()[0].position_id)
+    assert all("iv_pct" not in l for l in saved.legs)

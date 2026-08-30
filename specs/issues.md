@@ -177,12 +177,16 @@ Sorted by severity.
   premise is unproven - the muse's mandate is novel THESES, not novel names. A gate must earn its
   existence from this trajectory, the measure-first discipline that held the vega cap (D-094).
   Verified by reverting muse.py and gauges.py and watching both tests fail.
-- **I-50 · Post-trade greeks are flat-IV even when the position was built from skewed quotes**
-  (2026-08-30 review). `optmath.Leg.from_position_leg` never sets `.iv`, so the greeks recorded at
-  entry (`record_position`) and the book-greeks line the agent reads every cycle fall back to one
-  flat vol - while `net_greeks` would honour per-leg IV if given it, and the simulated structure
-  the trade came from HAD per-leg IVs. WU-4.8 made the pre-trade layer skew-aware; the post-trade
-  layer did not follow. Pre-existing, but phase 4 widened the sophistication gap between the two.
+- ~~**I-50 · Post-trade greeks are flat-IV even when the position was built from skewed
+  quotes**~~ **FIXED 2026-08-30 (WU-6.5).** `SimStructure` carries the per-leg IVs it was priced
+  with, `record_position` writes them onto the recorded legs from the structure the trade MATCHED
+  (derived, never re-declared - D-037), and `Leg.from_position_leg` reads `iv_pct` on the same
+  terms `parse` already used. `net_greeks` honoured per-leg IV all along; it was simply never
+  given one on this path, so the entry greeks and every later book-greeks line described a
+  skew-built position as though the board were flat. A flat board still records no `iv_pct` and
+  is byte-identical. The structure match is now computed ONCE and reused by both consumers
+  (the IVs and the exit-rule reachability warnings) rather than twice. Verified by reverting
+  optmath.py and local_tools.py and watching the round-trip test fail.
 - **I-51 · The tick lock's write is the one non-atomic state write left** (2026-08-30 review).
   `lock.py` is read-check-write with a bare `path.write_text` - two processes racing acquisition
   within the same instant (stale-lock breaking, or two `trdrbot run` loops started by accident)

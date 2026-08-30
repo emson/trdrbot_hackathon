@@ -53,6 +53,11 @@ class SimStructure:
     #: P&L base is refused below `MIN_NET_COST_SHARE` of it, which makes every
     #: stop and target on such a structure permanently unobservable (I-45).
     gross_premium: float | None = None
+    #: {(right, strike, side): iv_fraction} for legs that quoted their own IV.
+    #: The skew the agent OBSERVED, kept so `record_position` can put it on the
+    #: recorded legs rather than asking the model to re-declare it (D-037).
+    #: None when the board was flat.
+    leg_ivs: dict | None = None
 
 
 @dataclass(frozen=True)
@@ -312,6 +317,8 @@ def build_simulate_experiments(shared: SharedContext, state_dir: Path | None = N
                     if m.get("max_profit") is not None and m.get("max_loss") else None),
                 gross_premium=sum(l.price * l.qty * optmath.CONTRACT_MULTIPLIER
                                   for l in e.legs),
+                leg_ivs={_legs_key([(l.right, l.strike, l.side)]): l.iv
+                         for l in e.legs if l.iv is not None} or None,
             )
             for e, m in results if m.get("usable")
         ]
@@ -442,6 +449,30 @@ def build_record_position(
         elif max_loss_usd is not None:
             pos.max_loss_usd = float(max_loss_usd)
 
+        # WHICH simulated structure was actually traded, matched on legs so
+        # nothing is re-declared (D-037). Computed once, here, because two
+        # separate things need it: the per-leg IVs below, and the exit-rule
+        # reachability warnings further down.
+        traded = [optmath.Leg.from_position_leg(leg) for leg in legs]
+        traded_key = (_legs_key([(t.right, t.strike, t.side) for t in traded if t])
+                      if legs and all(traded) else ())
+        matched = next((st for st in (shared.structures if shared else [])
+                        if st.key == traded_key and st.qty), None)
+
+        # The skew the agent OBSERVED, carried onto the recorded legs. Without
+        # it every greek computed after entry - these, and the book-greeks line
+        # read every cycle afterwards - falls back to one flat vol even for a
+        # position deliberately built from a skewed board, while the pre-trade
+        # EV/POP layer has been skew-aware since WU-4.8. `net_greeks` honours
+        # per-leg IV; this is what finally gives it one (I-50).
+        if matched and matched.leg_ivs:
+            for leg, t in zip(legs, traded):
+                if t is None:
+                    continue
+                iv = matched.leg_ivs.get(_legs_key([(t.right, t.strike, t.side)]))
+                if iv is not None:
+                    leg["iv_pct"] = round(iv * 100.0, 4)
+
         # Entry greeks, derived not declared (D-040): parse the executed OCC
         # legs, price them with the market params simulate_experiments stashed.
         # The judged story ("net delta X, theta Y - chosen because...") comes
@@ -497,12 +528,8 @@ def build_record_position(
         # Can the mark-based rules the agent just wrote actually fire? Matched
         # by LEGS against what simulate_experiments priced, so nothing is
         # re-declared and a mismatch simply skips the check.
-        traded = [optmath.Leg.from_position_leg(leg) for leg in legs]
-        traded_key = (_legs_key([(t.right, t.strike, t.side) for t in traded if t])
-                      if legs and all(traded) else ())
-        for st in (shared.structures if shared else []):
-            if st.key != traded_key or not st.qty:
-                continue
+        if matched is not None:
+            st = matched
             scale = sum(int(l.get("qty", 1) or 1) for l in legs) / st.qty
             bad = _unreachable_rules(
                 stop_loss_pct, profit_target_pct,
@@ -533,7 +560,6 @@ def build_record_position(
                     f"underlying_stop_below/_above at your invalidation level, or a "
                     f"time_stop."
                 )
-            break
         if thesis_missing:
             note += (
                 " NOTE: no thesis on file - simulate_experiments was not called "

@@ -105,10 +105,18 @@ class Leg:
             qty = int(d.get("qty", 1) or 1)
         except (TypeError, ValueError):
             qty = 1
+        # `iv_pct` when the recorded leg carries one, on exactly the terms
+        # `parse` uses (percent on the wire, fraction inside). Without it every
+        # greek computed AFTER entry - the ones at entry, and the book-greeks
+        # line the agent reads every cycle - fell back to one flat vol, even
+        # for a position deliberately built from a skewed board. `net_greeks`
+        # honours per-leg IV; it was simply never given one here (I-50).
+        iv = d.get("iv_pct")
         return cls(
             right=occ["right"], strike=occ["strike"],
             side="long" if side in ("long", "buy") else "short",
             qty=qty, price=float(d.get("price", 0.0) or 0.0), expiry=occ["expiry"],
+            iv=(float(iv) / 100.0) if iv is not None else None,
         )
 
 
