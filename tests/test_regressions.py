@@ -4295,3 +4295,59 @@ def test_a_flat_board_is_untouched_by_the_skew_machinery():
     assert optmath.vega_weighted_iv(legs, 100.0, 7.0, 0.25) is None
     assert m["iv_eff_pct"] is None and m["ev_span"] is None
     assert m["ev_market"] == optmath.expected_value(legs, 100.0, 0.25, 7.0)
+
+
+def test_every_position_field_survives_a_save_load_round_trip(tmp_path):
+    """The frontmatter is an explicit allowlist, so a new dataclass field is
+    silently NOT persisted until someone remembers three places at once.
+
+    Found the hard way: `thesis_vol_view` shipped in WU-4.5 - the whole point of
+    which was that a vol thesis is scored and attributable later - and never
+    reached the page at all. Set at record time, gone on the next read, and no
+    test noticed because every test checked the fields it already knew about.
+
+    So this asserts the PROPERTY rather than a list: every field a Position
+    carries round-trips, unless it is on the exclusion list below with a reason.
+    One invariant beats ten examples, and this is the invariant the three
+    hand-maintained copies (dataclass, frontmatter, _parse) need.
+    """
+    import dataclasses
+
+    from trdrbot.positions import Position, PositionStore
+
+    #: Fields deliberately not in the frontmatter, each for a stated reason.
+    #: Adding to this list is a decision; forgetting a field is not.
+    NOT_PERSISTED = {
+        "path": "runtime handle to the file itself, not content",
+        "thesis": "written as page BODY prose, not frontmatter (round-tripped below)",
+        "generated_by": "nested under the OKF `generated` block, not a top-level key",
+    }
+
+    store = PositionStore(tmp_path)
+    saved = Position(
+        position_id="pos_roundtrip_test", status="open", strategy="iron_condor",
+        underlying="SPY", opened="2026-08-30T12:00:00+00:00", expiry="2026-09-11",
+        legs=[{"symbol": "SPY260911P00600000", "side": "sell", "qty": 2}],
+        exit_rules=[{"type": "stop_loss", "threshold": "-50.0%"}],
+        exit_state={"position_mark:below:-0.5": [True]},
+        close_reason=None, thesis="a test thesis", decision_ref="jrn_x",
+        provenance="agent", sources=[{"id": "s1"}], generated_by="model:x",
+        verified=[{"claim": "c"}], elfmem_blocks={"task": ["b1"]},
+        mind_decision_block_id="m1", thesis_claim="SPY stays in a range",
+        thesis_horizon="2026-09-05", thesis_band_low=590.0, thesis_band_high=610.0,
+        thesis_drift=0.004, thesis_vol_view=0.135, attribution="",
+        interim_band=1, max_loss_usd=800.0, last_pnl_pct=-0.12,
+        greeks_at_entry={"delta_dollars": 1.0}, entry_iv=0.16, entry_spot=604.2,
+        leg_divergence_count=1,
+    )
+    store.save(saved)
+
+    loaded = store.load("pos_roundtrip_test")
+
+    for f in dataclasses.fields(Position):
+        if f.name in NOT_PERSISTED:
+            continue
+        assert getattr(loaded, f.name) == getattr(saved, f.name), (
+            f"Position.{f.name} did not survive the round trip - add it to "
+            f"`frontmatter()` AND `_parse()`, or to NOT_PERSISTED with a reason")
+    assert loaded.thesis == saved.thesis, "the body prose must round-trip too"

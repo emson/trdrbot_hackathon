@@ -134,6 +134,18 @@ Sorted by severity.
   before the row existed; "this shipped yesterday" is the cheapest false alarm to avoid (D-070).
   Verified by reverting health.py and watching four of the five tests fail (the fifth asserts
   absence and correctly still passes).
+- ~~**I-54 · `thesis_vol_view` never reached the position page**~~ **FIXED 2026-08-30 (WU-6.3a,
+  found while implementing WU-6.3).** `Position.frontmatter()` is a hand-maintained allowlist and
+  `_parse` is its hand-maintained mirror, so a field added to the dataclass is silently NOT
+  persisted until someone remembers three places at once. WU-4.5 added `thesis_vol_view` - the
+  whole point of which is that a vol thesis stays scoreable and attributable AFTER the cycle that
+  formed it - and it never reached the page: set at record time, gone on the next read, invisible
+  because every existing test checked the fields it already knew about. Both it and WU-6.3's
+  `leg_divergence_count` now round-trip, and the gap is closed as a PROPERTY rather than two more
+  examples: `test_every_position_field_survives_a_save_load_round_trip` walks
+  `dataclasses.fields(Position)` and fails on any field that does not survive, unless it is on an
+  exclusion list carrying a stated reason. Verified by reverting the frontmatter/_parse additions
+  and watching the invariant name the exact missing field.
 - **I-48 · `leg_divergence` is journalled and nothing corrects the position** (2026-08-30
   review). When one leg of a multi-leg position vanishes at the broker (early assignment, partial
   external close), reconcile journals a `leg_divergence` finding and moves on - `pos.status` and

@@ -104,6 +104,13 @@ class Position:
     #: same reason as thesis_drift: resolution can ask whether the VIEW was
     #: right, and for a vol trade the view is this number (WU-4.5).
     thesis_vol_view: float | None = None
+    #: Consecutive reconcile passes that saw a leg missing at the broker.
+    #: Reset the moment the full set is present again. The exit engine reads
+    #: this as an ordinary signal (WU-6.3): reconcile counts, the registry
+    #: closes, so a single stale snapshot cannot liquidate a healthy spread
+    #: and a genuinely broken one does not sit there being priced on legs it
+    #: no longer has.
+    leg_divergence_count: int = 0
     attribution: str = ""          # set once the horizon has passed
     #: Highest materiality band already interim-scored (INV-24). Monotonic:
     #: caps how much cumulative evidence one unresolved position can
@@ -232,6 +239,8 @@ class Position:
             "thesis_band_low": self.thesis_band_low,
             "thesis_band_high": self.thesis_band_high,
             "thesis_drift": self.thesis_drift,
+            "thesis_vol_view": self.thesis_vol_view,
+            "leg_divergence_count": self.leg_divergence_count,
             "attribution": self.attribution,
             "provenance": self.provenance,
         }
@@ -308,6 +317,9 @@ class PositionStore:
             thesis_band_low=d.get("thesis_band_low"),
             thesis_band_high=d.get("thesis_band_high"),
             thesis_drift=float(d.get("thesis_drift") or 0.0),
+            thesis_vol_view=(float(d["thesis_vol_view"])
+                             if d.get("thesis_vol_view") is not None else None),
+            leg_divergence_count=int(d.get("leg_divergence_count") or 0),
             attribution=d.get("attribution", ""),
             provenance=d.get("provenance", "agent"),
             path=path,
