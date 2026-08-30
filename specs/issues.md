@@ -124,13 +124,16 @@ Sorted by severity.
   deliberately and now documented: a gauge folding in unpriced calls would mix dollars with an
   unknown, which a chart cannot show - stopping the loop is the sentinel's job, blurring a line
   is not. Verified by reverting gauges.py and watching both tests fail.
-- **I-47 · Phase 4's two new journal kinds have no health probe** (2026-08-30 review). `sizing`
-  (WU-4.2) and `book_risk` (WU-4.10) rows feed gauges, but `trdrbot health` - whose whole thesis
-  is "health detects, the ledger remembers" - asks nothing about either. If the sizing tool
-  silently stopped being called while orders still placed, or every sizing call refused for a
-  week, or the book-risk feed died with positions open, health would say nothing; only a person
-  reading the report chart would notice. The exact "just-fixed defect regresses silently" class
-  phase 4 exists to prevent, missing its own detector.
+- ~~**I-47 · Phase 4's two new journal kinds have no health probe**~~ **FIXED 2026-08-30
+  (WU-6.2).** A `sizing` Probe (produced = verdicts, so a window of nothing but refusals reads as
+  "ran plenty, produced nothing" - which is what it is), plus two cross-kind state checks a
+  single probe cannot express: orders placed since sizing was last consulted (BAD - the Kelly
+  gate routed around looks identical to normal trading from every other signal), and an open book
+  with no `book_risk` reading in the last STALE_AFTER_RUNS decide cycles (WARN). Both checks are
+  SELF-ARMING - inert until their row kind has been seen once - so neither fires on the era
+  before the row existed; "this shipped yesterday" is the cheapest false alarm to avoid (D-070).
+  Verified by reverting health.py and watching four of the five tests fail (the fifth asserts
+  absence and correctly still passes).
 - **I-48 · `leg_divergence` is journalled and nothing corrects the position** (2026-08-30
   review). When one leg of a multi-leg position vanishes at the broker (early assignment, partial
   external close), reconcile journals a `leg_divergence` finding and moves on - `pos.status` and

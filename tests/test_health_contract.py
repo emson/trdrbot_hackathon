@@ -334,3 +334,89 @@ def test_housekeeping_noise_between_two_muse_runs_does_not_mask_a_real_break(tmp
 
     coach = [f for f in findings if f[1] == "coach"][0]
     assert coach[0] == health.BAD, coach
+
+
+# ==================================================================== PILLAR-4
+# Phase 4 shipped two journal kinds and no way to notice them failing
+# (I-47, WU-6.2). "Health detects, the ledger remembers" is this project's own
+# division of labour; these are the detectors for the rows it added to itself.
+# Governed by docs/principles_testing.md - the four pillars.
+
+def _sized(journal, n=1, result="sized"):
+    for _ in range(n):
+        journal.append("sizing", result=result, contracts=1 if result == "sized" else 0)
+
+
+def test_a_window_of_nothing_but_refusals_is_flagged(tmp_path):
+    """I-47: refusals are deliberate and useful; refusals CLUSTERING is the
+    shape of a seam that has stopped identifying which structure it is sizing
+    (the I-40 class). The gauge charts it - a chart needs someone to look."""
+    journal = Journal(tmp_path / "journal.jsonl")
+    _sized(journal, 9, result="refused")
+
+    found = {name: (lvl, detail) for lvl, name, detail in
+             health.check(tmp_path / "journal.jsonl", [])}
+
+    assert found["sizing"][0] == health.BAD
+    assert "REFUSED" in found["sizing"][1]
+
+
+def test_a_healthy_mix_of_sizes_and_refusals_stays_quiet(tmp_path):
+    """The crying-wolf half of the contract (D-070). A refusal among real
+    verdicts is the system working, not the system stuck."""
+    journal = Journal(tmp_path / "journal.jsonl")
+    _sized(journal, 6, result="sized")
+    _sized(journal, 3, result="refused")
+
+    found = {name: (lvl, detail) for lvl, name, detail in
+             health.check(tmp_path / "journal.jsonl", [])}
+
+    assert found["sizing"][0] == health.OK
+
+
+def test_orders_placed_without_consulting_sizing_are_flagged(tmp_path):
+    """The Kelly gate and the book caps can be routed around simply by not
+    calling the tool - and from every other signal that looks exactly like
+    normal trading."""
+    journal = Journal(tmp_path / "journal.jsonl")
+    _sized(journal, 1)  # arms the check: sizing has been seen at least once
+    for _ in range(health.ORDERS_WITHOUT_SIZING):
+        journal.append("execution", order_calls=[{"symbol": "SPY..."}])
+
+    found = {name: (lvl, detail) for lvl, name, detail in
+             health.check(tmp_path / "journal.jsonl", [])}
+
+    assert found["sizing.bypassed"][0] == health.BAD
+    assert "routed around" in found["sizing.bypassed"][1]
+
+
+def test_the_bypass_check_is_inert_before_sizing_has_ever_been_seen(tmp_path):
+    """Self-arming: the journal predates these row kinds by the project's whole
+    history, and "this shipped yesterday" is the cheapest false alarm to
+    avoid."""
+    journal = Journal(tmp_path / "journal.jsonl")
+    for _ in range(10):
+        journal.append("execution", order_calls=[{"symbol": "SPY..."}])
+
+    names = {name for _lvl, name, _detail in health.check(tmp_path / "journal.jsonl", [])}
+
+    assert "sizing.bypassed" not in names
+
+
+def test_a_dead_book_risk_feed_is_flagged_only_while_positions_are_open(tmp_path):
+    """Correlated exposure going invisible matters when there is a book to be
+    exposed; with no open position it is silence about nothing."""
+    from types import SimpleNamespace
+
+    journal = Journal(tmp_path / "journal.jsonl")
+    journal.append("book_risk", delta_dollars=1.0, vega_dollars=-1.0)
+    for _ in range(health.STALE_AFTER_RUNS):
+        journal.append("decision", batch="b")
+    open_pos = [SimpleNamespace(status="open", position_id="p1", max_loss_usd=100.0,
+                                exit_rules=[], thesis="t", thesis_band_low=1.0)]
+
+    flat = {n for _l, n, _d in health.check(tmp_path / "journal.jsonl", [])}
+    held = {n for _l, n, _d in health.check(tmp_path / "journal.jsonl", open_pos)}
+
+    assert "book_risk.stale" not in flat
+    assert "book_risk.stale" in held

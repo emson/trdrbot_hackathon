@@ -212,6 +212,29 @@ PROBES: tuple[Probe, ...] = (
         heartbeat_fields=("experiments_open", "trials_scored", "muse_runs_since_pulse"),
         never_producing_is_ok=True,
     ),
+    # The sizing tool answering, or refusing. A refusal is deliberate and
+    # useful - WU-4.2 made it one named sentence per cause - but refusals
+    # CLUSTERING is the shape of a seam that has stopped identifying which
+    # simulated structure it is sizing (the I-40 class), or of an agent that
+    # has stopped naming its structures. Neither is visible anywhere else: the
+    # gauge charts it, and a chart needs someone to look.
+    #
+    # `produced` counts verdicts, not calls: a refusal is the tool declining to
+    # answer, so a window of nothing but refusals reads as "ran plenty,
+    # produced nothing", which is exactly what it is. No `heartbeat_fields` -
+    # `sizing` is an output row written by the tool, not a `*_run` heartbeat.
+    #
+    # The lesson this points at is the agent's own: when candidates die at one
+    # gate en masse, the instrument is the suspect before the candidates are.
+    Probe(
+        "sizing", ("sizing",),
+        lambda rows: sum(1 for r in rows
+                         if str(r.get("result")) in ("sized", "no_position")), 8,
+        "every recent sizing call REFUSED - the structure-matching seam is "
+        "losing the conditional payoff, or structures are no longer being named. "
+        "See [when-refusals-cluster-audit-the-ruler]: clustered refusals indict "
+        "the instrument before the candidates",
+    ),
 )
 
 def heartbeat(journal: Any, kind: str, **fields: Any) -> str:
@@ -279,6 +302,13 @@ def degraded(journal: Any, subsystem: str, reason: str, **fields: Any) -> None:
 #: output, say so.
 STALE_AFTER_RUNS = 20
 
+#: Orders placed since sizing was last consulted, before that reads as the gate
+#: being bypassed rather than as one cycle's ordering. A REPORTING threshold,
+#: not a behaviour knob - health gates nothing (D-009) - and it lives beside
+#: `STALE_AFTER_RUNS`, which is the same judgment for a different subsystem.
+#: Three because one is an ordering artifact and two is a coincidence.
+ORDERS_WITHOUT_SIZING = 3
+
 
 def _runs_since_last_output(ran: list[dict[str, Any]], probe: Probe) -> int:
     """How many runs have gone by with nothing produced, counting back.
@@ -329,6 +359,41 @@ def check(journal_path: Path, positions: list[Any]) -> list[tuple[str, str, str]
                                  f"last {since} runs. {probe.meaning}"))
             else:
                 findings.append((OK, probe.name, f"ran {len(ran)}x, produced {made}"))
+
+    # --- 1.5 cross-kind checks a single probe cannot express -------------
+    #
+    # A Probe asks one subsystem "did you run and produce?". These ask whether
+    # one subsystem's output implies another's - a question about the SEAM
+    # between two, which is where this project's bug history actually lives
+    # (notes/019: the seams the bugs came from are the untyped ones).
+    #
+    # Both are SELF-ARMING: inert until the row kind they watch has been seen
+    # at least once, so neither fires on the era before the row existed. A
+    # health check that cries wolf trains the reader to skip the one line that
+    # finally matters (D-070), and "this feature shipped yesterday" is the
+    # cheapest possible false alarm to avoid.
+    last_sizing = max((i for i, r in enumerate(rows) if r.get("kind") == "sizing"),
+                      default=None)
+    if last_sizing is not None:
+        since = sum(len(r.get("order_calls") or []) for r in rows[last_sizing + 1:])
+        if since >= ORDERS_WITHOUT_SIZING:
+            findings.append((BAD, "sizing.bypassed",
+                             f"{since} order(s) placed since sizing was last consulted - "
+                             f"the Kelly gate and the book caps are being routed around, "
+                             f"which looks identical to normal trading from every other "
+                             f"signal"))
+
+    last_book_risk = max((i for i, r in enumerate(rows) if r.get("kind") == "book_risk"),
+                         default=None)
+    if last_book_risk is not None and any(
+            getattr(p, "status", "") == "open" for p in positions):
+        decisions_since = sum(1 for r in rows[last_book_risk + 1:]
+                              if r.get("kind") == "decision")
+        if decisions_since >= STALE_AFTER_RUNS:
+            findings.append((WARN, "book_risk.stale",
+                             f"positions are open but no book-risk reading in the last "
+                             f"{decisions_since} decide cycles - correlated exposure is "
+                             f"invisible to the report, and names are not exposures"))
 
     # --- 2. the null paths, when they explain themselves ----------------
     skipped = sum(int(r.get("skipped_no_price") or 0)
