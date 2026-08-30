@@ -477,12 +477,28 @@ state, never wording. Runs at promotion time and weekly - **never in pytest, nev
 
 ### WU-5.1 - Harvest recorder
 
-In the decide path (tick.py), after the context is assembled, persist the cycle's inputs as
-one JSON bundle to `data/evals/harvest/<date>_<decision_ref>.json`: snapshot render, inbox
-item, option-chain text as compacted, market params, deadline, posture/calibration summary,
-prompt fingerprints. Bounded: keep the newest 50 (delete older on write). Guarded like every
-tick side-write (failure prints, never aborts). This is the Braintrust harvest pattern; the
-journal alone cannot replay a cycle (verified - decision rows carry fingerprints, not inputs).
+**SPEC GAP found while building phase 4 - resolve this before writing the code.** The bundle
+as originally specified (snapshot render, inbox item, chain text, market params, deadline,
+posture, fingerprints) is the DECIDE PROMPT's inputs, and that is not enough to replay a
+cycle. The decide agent is a tool-using loop: the option chain, the live quotes and the
+account state arrive as TOOL RESPONSES during the loop, not in the prompt. Replay them absent
+and the agent calls `get_option_chain`, gets a stub, and the graded "decision" is a decision
+about nothing - a harness that runs and proves nothing, which is the exact failure class this
+project keeps naming (D-074/D-082/D-086).
+
+So WU-5.1 is two captures, not one:
+
+1. **Prompt inputs** as originally specified, at assembly time in `_build_decide_prompt`.
+2. **Tool responses**, keyed by `(tool_name, arguments-digest)`, recorded at the MCP boundary
+   as the loop runs. `compact.wrap_heavy_tools` already wraps every heavy tool result and is
+   the natural interception point - it sees the response before compaction, which is also the
+   form a replay wants. `mcp_client.call` is the alternative if the compactor's coverage
+   turns out to be partial; check which before choosing.
+
+Both land in one bundle at `data/evals/harvest/<date>_<decision_ref>.json`. Bounded: keep the
+newest 50 (delete older on write). Guarded like every tick side-write (failure prints, never
+aborts). Verify the capture is sufficient by replaying ONE bundle before curating any others -
+a scenario set built on an insufficient bundle is a week of work that grades nothing.
 
 ### WU-5.2 - Runner and graders
 
