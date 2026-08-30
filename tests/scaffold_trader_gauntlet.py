@@ -28,7 +28,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from trdrbot import competence, optmath, sizing
+from trdrbot import competence, ids, optmath, sizing
 from trdrbot.analytics import Snapshot
 from trdrbot.calibration import Calibration
 from trdrbot.exit_rules import evaluate, invalid_rules, watched_signals
@@ -324,8 +324,9 @@ def mkpos(rules, legs_syms=("XYZ261016P00100000", "XYZ261016P00095000"), **kw):
     kw.setdefault("entry_spot", 100.0)
     kw.setdefault("entry_iv", 0.25)
     kw.setdefault("greeks_at_entry", {"delta_dollars": 4000.0, "vega_dollars": -10.0})
+    kw.setdefault("expiry", "2026-10-16")
     return Position(position_id="SIM", status="open", underlying="XYZ",
-                    expiry="2026-10-16", legs=[{"symbol": s} for s in legs_syms],
+                    legs=[{"symbol": s} for s in legs_syms],
                     exit_rules=list(rules), **kw)
 
 
@@ -387,12 +388,17 @@ run_path("P4 both legs stale (mark blind), underlying 93 breaks 95",
                 {"type": "underlying_stop", "level": "95", "direction": "below"}]),
          [snap(None, 93.0, missing_leg=True)], 1, "underlying_stop")
 
-run_path("P5 slow bleed: eight ticks at -49% vs -50% stop",
+run_path("P5 slow bleed: eight ticks at -49% vs -50% stop (far from expiry)",
          mkpos([{"type": "stop_loss", "threshold": "-50%"}]),
          [snap(-0.49, 100)] * 8, None)
-note("G4/P5: a position pinned just above its stop bleeds to expiry unchallenged - "
-     "no escalation ('n ticks within 5% of stop = act'), and no theta-aware time "
-     "stop unless the agent happened to write one.")
+# CHANGED (WU-4.7): the same bleed is now BOUNDED - at 1 DTE the implicit
+# gamma-wall time stop closes it, so "rides to expiry unchallenged" is no
+# longer a path the book has.
+import datetime as _dt  # noqa: E402
+_soon = (ids.market_today() + _dt.timedelta(days=1)).isoformat()
+run_path("P5b same bleed, now 1 day from expiry",
+         mkpos([{"type": "stop_loss", "threshold": "-50%"}], expiry=_soon),
+         [snap(-0.49, 100)], 1, "time_stop")
 
 blind = mkpos([{"type": "stop_loss", "threshold": "-50%"},
                {"type": "profit_target", "threshold": "+50%"}])

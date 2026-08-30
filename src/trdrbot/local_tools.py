@@ -380,7 +380,13 @@ def build_record_position(
                 spread +50% is the standard "buy it back for half the credit";
                 note that a credit spread's max profit IS the credit, so a
                 target above +100% can never fire.
-            time_stop_days_before_expiry: close this many days before expiry
+            time_stop_days_before_expiry: close this many days before expiry.
+                Defaults are not neutral here: if you write NO time stop, an
+                implicit one closes the position 1 day before expiry - the
+                gamma wall, where delta flips on a small move and short-dated
+                premium stops behaving like the position you opened. Write
+                your own to override it, and write 0 if you genuinely mean to
+                hold to expiry.
             underlying_stop_below: close if the UNDERLYING trades below this
                 price - your thesis-invalidation level. Prefer this to
                 stop_loss_pct for spreads: the underlying prints cleanly,

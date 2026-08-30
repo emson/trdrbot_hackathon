@@ -40,6 +40,18 @@ from .wiki import Wiki
 WINDOW = 3  # M
 NEEDED = 2  # N
 
+#: Days before expiry at which a position carrying no time stop of its own is
+#: closed. The gamma wall: short-dated premium concentrates its risk at the
+#: strike into the final session, where delta flips on a small move and the
+#: mark stops being a fair description of the risk. It also bounds the slow
+#: bleed the scaffold found - a position pinned just above its stop rides to
+#: expiry with nothing ever firing (G4/P5).
+#:
+#: The agent overrides it by writing ANY usable time_stop, including 0, which
+#: means "hold to expiry deliberately". Same mechanism as the implicit deadline
+#: rule (INV-26), which is the point: a default nobody has to remember.
+IMPLICIT_TIME_STOP_DAYS = 1
+
 
 def _days_to(day: str) -> int | None:
     try:
@@ -301,7 +313,16 @@ def evaluate(pos: Position, snap: Snapshot, deadline: str,
     # The deadline is an implicit rule on every position (INV-26): without it
     # a conventional-DTE position never resolves inside the competition and
     # the learning loop produces nothing at all.
-    for rule in [{"type": "deadline"}] + list(pos.exit_rules):
+    implicit: list[dict[str, Any]] = [{"type": "deadline"}]
+    # A gamma-wall time stop is the second, unless the agent wrote a USABLE one
+    # of its own. Keyed on whether the rule PARSES rather than on whether one
+    # is present: a time_stop the evaluator cannot read is a typo, not a
+    # commitment, and letting it disarm the default would be the
+    # absence-as-zero class (D-038) wearing a different hat.
+    if not any((n := _normalise(r)) and n[3] == "time_stop" for r in pos.exit_rules):
+        implicit.append({"type": "time_stop",
+                         "days_before_expiry": IMPLICIT_TIME_STOP_DAYS})
+    for rule in implicit + list(pos.exit_rules):
         norm = _normalise(rule)
         if norm is None:
             continue

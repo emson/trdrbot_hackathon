@@ -224,8 +224,9 @@ def _spread(**kw) -> Position:
     kw.setdefault("entry_iv", 0.25)
     kw.setdefault("opened", (ids.utc_now() - timedelta(days=1)).isoformat())
     kw.setdefault("exit_rules", [{"type": "stop_loss", "threshold": "-50%"}])
+    kw.setdefault("expiry", "2099-01-30")
     return Position(
-        position_id="p1", status="open", underlying="X", expiry="2099-01-30",
+        position_id="p1", status="open", underlying="X",
         legs=[{"symbol": "A", "side": "sell", "qty": 1}], **kw)
 
 
@@ -320,3 +321,58 @@ def test_an_underlying_stop_needs_no_corroborating():
     reason, why, _ = exit_rules.evaluate(pos, _mark(0.0, 93.0), "2099-01-01")
 
     assert reason == "underlying_stop" and "decisive" in why
+
+
+def _dte(days: int) -> str:
+    """An expiry `days` from the market's today, so the test states DTE."""
+    return (ids.market_today() + timedelta(days=days)).isoformat()
+
+
+def test_a_position_with_no_time_stop_is_closed_at_the_gamma_wall():
+    """G4/P5: a position pinned just above its stop bled to expiry with nothing
+    ever firing. The implicit time stop bounds that with the mechanism the
+    implicit deadline rule already uses - a default nobody has to remember."""
+    pos = _spread(expiry=_dte(3))
+
+    assert exit_rules.evaluate(pos, _mark(-0.49, 100.0), "2099-01-01")[0] is None
+    pos.expiry = _dte(2)
+    assert exit_rules.evaluate(pos, _mark(-0.49, 100.0), "2099-01-01")[0] is None
+
+    pos.expiry = _dte(1)
+    reason, why, _ = exit_rules.evaluate(pos, _mark(-0.49, 100.0), "2099-01-01")
+
+    assert reason == "time_stop", why
+
+
+def test_the_agents_own_time_stop_wins_including_a_deliberate_zero():
+    """The implicit rule is a default, not a policy. Zero means "hold to
+    expiry", and it must survive - a default that cannot be overridden is a
+    guardrail, and this system deliberately has none."""
+    pos = _spread(expiry=_dte(1), exit_rules=[
+        {"type": "stop_loss", "threshold": "-50%"},
+        {"type": "time_stop", "days_before_expiry": 0},
+    ])
+
+    assert exit_rules.evaluate(pos, _mark(-0.49, 100.0), "2099-01-01")[0] is None
+
+    pos.expiry = _dte(0)
+    assert exit_rules.evaluate(pos, _mark(-0.49, 100.0), "2099-01-01")[0] == "time_stop"
+
+
+def test_an_unreadable_time_stop_does_not_disarm_the_implicit_one():
+    """Absence-as-zero (D-038) wearing a different hat: a rule the evaluator
+    cannot parse is a typo, not a commitment, and must not silently remove the
+    default that would otherwise have applied."""
+    pos = _spread(expiry=_dte(1), exit_rules=[
+        {"type": "time_stop", "days_before_expiry": None},
+    ])
+
+    assert exit_rules.invalid_rules(pos) == 1, "precondition: the rule is unreadable"
+    assert exit_rules.evaluate(pos, _mark(0.0, 100.0), "2099-01-01")[0] == "time_stop"
+
+
+def test_a_position_with_no_expiry_is_unaffected():
+    """An unobservable signal holds; it never fires blind."""
+    pos = _spread(expiry="")
+
+    assert exit_rules.evaluate(pos, _mark(-0.49, 100.0), "2099-01-01")[0] is None
