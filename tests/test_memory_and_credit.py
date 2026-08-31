@@ -189,7 +189,7 @@ async def test_a_memory_failure_does_not_disarm_the_capital_protection_path(
                              exit_rules=[{"type": "stop_loss", "basis": "position_mark",
                                           "threshold": "-10.0%"}])
     store.save(breached)
-    snap = Snapshot(broker_positions=[
+    snap = Snapshot(market_open=True, broker_positions=[
         {"symbol": s, "cost_basis": 1000.0, "unrealized_pl": -900.0}
         for s in breached.symbols
     ])

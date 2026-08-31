@@ -169,6 +169,42 @@ def test_a_repeated_degradation_escalates_from_warning_to_problem(tmp_path, n, e
     assert "reduced input" in hit[0][2]
 
 
+@pytest.mark.parametrize("n,expected", [(1, health.WARN), (3, health.BAD)])
+def test_a_stuck_closing_position_escalates_from_warning_to_problem(
+    tmp_path, make_position, n, expected
+):
+    """A position mid-liquidation is retried every open tick (I-57). One failed
+    attempt is a broker hiccup; a run of them is a close that is NOT happening,
+    on exposure the book already believes it has exited. Same escalation as the
+    degraded-subsystem section, for the same reason."""
+    import json
+
+    pos = make_position(status="closing", close_reason="stop_loss")
+    rows = [{"kind": "exit", "position_id": pos.position_id,
+             "close_reason": "stop_loss", "submitted": False}] * n
+    path = tmp_path / "j.jsonl"
+    path.write_text("".join(json.dumps(r) + "\n" for r in rows), encoding="utf-8")
+
+    hit = [f for f in health.check(path, [pos]) if "stuck in 'closing'" in f[2]]
+
+    assert hit, f"{n} failed close attempt(s) left no trace in health"
+    assert hit[0][0] == expected
+
+
+def test_a_closing_position_whose_retry_succeeded_is_not_flagged(tmp_path, make_position):
+    """Balanced pressure: the probe must read the `submitted` flag, not the
+    mere presence of a closing position mid-tick."""
+    import json
+
+    pos = make_position(status="closing", close_reason="stop_loss")
+    path = tmp_path / "j.jsonl"
+    path.write_text(json.dumps(
+        {"kind": "exit", "position_id": pos.position_id, "submitted": True}) + "\n",
+        encoding="utf-8")
+
+    assert not [f for f in health.check(path, [pos]) if "stuck in 'closing'" in f[2]]
+
+
 def test_two_subsystems_degrading_are_two_findings_not_one(tmp_path):
     """Grouped by (subsystem, reason), because "something fell back 6 times" is
     not actionable and "the compactor is passing chains through" is."""

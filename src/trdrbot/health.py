@@ -447,6 +447,22 @@ def check(journal_path: Path, positions: list[Any]) -> list[tuple[str, str, str]
     from .exit_rules import watched_signals
 
     for p in positions:
+        # A position mid-liquidation is retried every open tick (I-57), so one
+        # failed attempt is weather and a run of them is a close that is not
+        # happening - real exposure the book still believes it is exiting.
+        # Counted from the `exit` rows' own `submitted` flag rather than a new
+        # field, because the retry already writes one row per attempt.
+        if getattr(p, "status", "") == "closing":
+            failed = sum(1 for r in rows
+                         if r.get("kind") == "exit"
+                         and r.get("position_id") == p.position_id
+                         and r.get("submitted") is False)
+            if failed:
+                findings.append((WARN if failed < 3 else BAD,
+                                 f"position:{p.position_id[:28]}",
+                                 f"stuck in 'closing' - {failed} close attempt(s) failed; "
+                                 "legs may still be live at the broker"))
+            continue
         if getattr(p, "status", "") not in ("open", "opening"):
             continue
         if getattr(p, "max_loss_usd", None) is None:

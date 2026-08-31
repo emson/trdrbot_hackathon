@@ -64,7 +64,7 @@ from .elfmem_adapter import ElfmemAdapter
 from .inbox import Inbox, Item
 from .journal import Journal
 from .llm import SYSTEM_PROMPT, build_model
-from .positions import PositionStore
+from .positions import ACTIVE, PositionStore
 from .wiki import Wiki
 
 
@@ -309,8 +309,15 @@ def _guarded_mcp_tools(tools_list: list[Any], config: Config, batch: str,
     tools = [t for t in tools_list if not allow or t.name in allow]
     tools = compact.wrap_heavy_tools(tools, config, journal)
     tools = tool_guard.enforce_order_ids(tools, batch)
+    # Every status carrying real broker exposure, not just `open` (I-58). An
+    # `opening` position has an order working and a `closing` one is mid-
+    # liquidation - `close_all_positions` would touch both, so both must count
+    # toward the >1 refusal. `closing` is no longer transient either: it now
+    # persists across ticks until the retry completes (I-57). `proposed` alone
+    # is excluded - nothing has been sent to the broker yet.
     return tool_guard.redirect_whole_book_close(
-        tools, lambda: len([p for p in store.open_positions() if p.status == "open"])
+        tools, lambda: len([p for p in store.open_positions()
+                            if p.status in ACTIVE - {"proposed"}])
     )
 
 

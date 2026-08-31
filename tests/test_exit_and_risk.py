@@ -20,12 +20,20 @@ from trdrbot.positions import PositionStore
 from trdrbot.wiki import Wiki
 
 
-def _underwater(symbols: list[str], pnl_fraction: float) -> Snapshot:
+def _underwater(symbols: list[str], pnl_fraction: float, *,
+                market_open: bool = True) -> Snapshot:
     """A broker snapshot showing the position at `pnl_fraction` of its net
     entry cost - built the way `position_pnl_fraction` actually reads it, not the
-    way a test would find convenient."""
+    way a test would find convenient.
+
+    `market_open=True` is stated rather than inherited from the dataclass
+    default: every caller of this helper is asking whether a breach CLOSES, and
+    since I-56 a close only actuates in session. The old default said "closed"
+    and these tests passed anyway, which meant they were not testing what they
+    read as testing. Same honest-form correction as I-55's `broker_readable`.
+    """
     per_leg = 1000.0 / max(1, len(symbols))
-    return Snapshot(broker_positions=[
+    return Snapshot(market_open=market_open, broker_positions=[
         {"symbol": s, "cost_basis": per_leg, "unrealized_pl": per_leg * pnl_fraction}
         for s in symbols
     ])
@@ -422,7 +430,7 @@ async def test_reconcile_counts_divergence_and_the_exit_engine_closes_it(
     assert len(pos.symbols) > 1, "the fixture must be a multi-leg position"
 
     # The broker shows every leg but one - an early assignment's signature.
-    partial = Snapshot(broker_positions=[
+    partial = Snapshot(market_open=True, broker_positions=[
         {"symbol": s, "cost_basis": 500.0, "unrealized_pl": 0.0}
         for s in pos.symbols[:-1]
     ], broker_readable=True)
@@ -437,13 +445,17 @@ async def test_reconcile_counts_divergence_and_the_exit_engine_closes_it(
     assert store.load(pos.position_id).leg_divergence_count == 1
     assert triggered == [] and closed_legs == []
 
-    # Tick 2: confirmed, and ALL remaining legs close (INV-19).
+    # Tick 2: confirmed, and every leg the broker STILL SHOWS closes. The
+    # vanished leg is deliberately not resubmitted (I-57): reconcile found it
+    # missing moments earlier in this same tick, and closing what is already
+    # gone can only turn a clean `submitted: true` into a false failure.
+    # INV-19 is about never leaving a survivor behind, which this satisfies.
     await reconcile.reconcile(store, partial, journal, FakeMem(), Wiki(paths.wiki), None)
     triggered = await _run(store, partial, journal, paths, closer)
 
     assert triggered == [pos.position_id]
     assert store.load(pos.position_id).status == "closed"
-    assert sorted(closed_legs) == sorted(pos.symbols), "INV-19: all legs, not the survivors"
+    assert sorted(closed_legs) == sorted(pos.symbols[:-1]), "every surviving leg, no orphan"
     assert store.load(pos.position_id).close_reason == "leg_divergence"
 
 
@@ -471,3 +483,183 @@ async def test_a_transient_divergence_clears_and_leaves_a_trace(paths, make_posi
     findings = [r.get("finding") for r in journal_rows(journal, "reconciliation")]
     assert "leg_divergence_cleared" in findings
     assert store.load(pos.position_id).status == "open", "a glitch closes nothing"
+
+
+# ---- PILLAR-3 continued: the close itself failing, and the clock (I-56, I-57)
+#
+# The incident: a calendar rule (deadline, or the implicit 1-DTE time stop)
+# reads a DATE and nothing else, so it fires on the 00:15 tick of expiry day
+# with the market shut. The close was submitted anyway, failed, and the
+# position parked in `closing` - a status `run()` fetched and then skipped
+# forever, so it lost its stop, its target and its retry in one move. On the
+# live book that ended in an auto-exercised long put and ~1,300 short shares
+# nothing was watching. Two fixes, tested here as one story.
+
+
+async def test_a_deadline_trigger_holds_off_hours_and_fires_on_the_next_open_tick(
+    paths, make_position
+):
+    """The trigger is real and must survive to the open, not be spent into a
+    shut session. Detection is deliberately NOT gated - only the broker call."""
+    store, journal = PositionStore(paths.wiki), Journal(paths.journal)
+    pos = make_position(status="open", exit_rules=[])
+    store.save(pos)
+    closer = tools_for(close_position=lambda **kw: {"status": "ok"})
+
+    shut = _underwater(pos.symbols, 0.0, market_open=False)
+    triggered = await exit_rules.run(
+        store, shut, closer, journal, "2020-01-01", FakeMem(), Wiki(paths.wiki),
+        calibration=CalibrationStore(paths.state / "forecasts.jsonl"), verbose=False)
+
+    assert triggered == [], "a close was submitted into a shut market"
+    assert closer["close_position"].calls == []
+    assert store.load(pos.position_id).status == "open", "parked in `closing` off-hours"
+
+    # Same deadline, same position, market now open: it fires.
+    triggered = await exit_rules.run(
+        store, _underwater(pos.symbols, 0.0), closer, journal, "2020-01-01",
+        FakeMem(), Wiki(paths.wiki),
+        calibration=CalibrationStore(paths.state / "forecasts.jsonl"), verbose=False)
+
+    assert triggered == [pos.position_id]
+    assert store.load(pos.position_id).status == "closed"
+    assert store.load(pos.position_id).close_reason == "deadline"
+
+
+async def test_a_mark_breach_also_holds_off_hours(paths, make_position):
+    """The gate is uniform, not calendar-only. A mark breach off-hours is
+    reading a stale quote by definition - there is no session to price it."""
+    store, journal = PositionStore(paths.wiki), Journal(paths.journal)
+    pos = make_position(status="open", exit_rules=[
+        {"type": "stop_loss", "basis": "position_mark", "threshold": "-20.0%"},
+    ])
+    store.save(pos)
+    closer = tools_for(close_position=lambda **kw: {"status": "ok"})
+    shut = _underwater(pos.symbols, -0.9, market_open=False)
+
+    await _run(store, shut, journal, paths, closer)
+    triggered = await _run(store, shut, journal, paths, closer)  # past the debounce
+
+    assert triggered == [] and closer["close_position"].calls == []
+    assert store.load(pos.position_id).status == "open"
+
+
+async def test_a_failed_close_is_retried_not_abandoned(paths, make_position):
+    """I-57, the incident this whole pass exists for. One failed leg used to
+    strand the position in `closing`, which `run()` skipped forever - no stop,
+    no target, no second attempt, and reconcile only notices once the legs are
+    ALREADY gone. It is retried now, and finishes."""
+    store, journal = PositionStore(paths.wiki), Journal(paths.journal)
+    pos = make_position(status="open", exit_rules=[
+        {"type": "stop_loss", "basis": "position_mark", "threshold": "-20.0%"},
+    ])
+    store.save(pos)
+    snap = _underwater(pos.symbols, -0.9)
+
+    attempts: list[str] = []
+
+    def flaky(**kw: Any) -> Any:
+        attempts.append(kw.get("symbol_or_asset_id"))
+        if len(attempts) == 1:  # the first leg of the first attempt only
+            raise RuntimeError("stdio transport closed: broken pipe")
+        return {"status": "ok"}
+
+    closer = tools_for(close_position=flaky)
+
+    await _run(store, snap, journal, paths, closer)   # debounce
+    await _run(store, snap, journal, paths, closer)   # fires, one leg fails
+
+    stranded = store.load(pos.position_id)
+    assert stranded.status == "closing", "the failed close should be visible as in-flight"
+    assert journal_rows(journal, "exit")[-1]["submitted"] is False
+
+    triggered = await _run(store, snap, journal, paths, closer)  # the retry
+
+    assert triggered == [pos.position_id]
+    assert store.load(pos.position_id).status == "closed"
+    retry_row = journal_rows(journal, "exit")[-1]
+    assert retry_row["retry"] is True and retry_row["submitted"] is True
+    assert store.load(pos.position_id).close_reason == "stop_loss", \
+        "the retry must finish the ORIGINAL decision, not re-derive a new one"
+
+
+async def test_a_retry_only_reattempts_the_legs_the_broker_still_shows(
+    paths, make_position
+):
+    """A close that half-succeeded leaves half a spread. The retry must finish
+    the job without resubmitting the leg that already went - resubmitting it
+    fails, which would flip `submitted` false forever and retry a position that
+    is in fact almost closed."""
+    store, journal = PositionStore(paths.wiki), Journal(paths.journal)
+    pos = make_position(status="closing", close_reason="stop_loss")
+    store.save(pos)
+    survivor = pos.symbols[-1]
+
+    # Leg one already closed on the previous tick; only the survivor is held.
+    partial = Snapshot(market_open=True, broker_readable=True, broker_positions=[
+        {"symbol": survivor, "cost_basis": 500.0, "unrealized_pl": -100.0},
+    ])
+    closed_legs: list[str] = []
+    closer = tools_for(close_position=lambda **kw: closed_legs.append(
+        kw.get("symbol_or_asset_id")) or {"status": "ok"})
+
+    triggered = await _run(store, partial, journal, paths, closer)
+
+    assert closed_legs == [survivor], "the vanished leg was resubmitted"
+    assert triggered == [pos.position_id]
+    assert store.load(pos.position_id).status == "closed"
+
+
+async def test_a_vanished_leg_is_not_resubmitted_so_the_close_can_succeed_at_all(
+    paths, make_position
+):
+    """The property that makes the retry loop terminate. A leg_divergence close
+    is BY DEFINITION missing a leg, so a close of every recorded symbol always
+    fails against a real broker - which, now that `closing` is retried, would
+    retry forever and never resolve. Broker-truth filtering is what stops the
+    fix from becoming an infinite loop."""
+    store, journal = PositionStore(paths.wiki), Journal(paths.journal)
+    pos = make_position(status="open")
+    store.save(pos)
+    gone, survivor = pos.symbols[0], pos.symbols[-1]
+
+    partial = Snapshot(market_open=True, broker_readable=True, broker_positions=[
+        {"symbol": survivor, "cost_basis": 500.0, "unrealized_pl": 0.0},
+    ])
+
+    def broker(**kw: Any) -> Any:
+        symbol = kw.get("symbol_or_asset_id")
+        if symbol == gone:  # what Alpaca does with a position you do not hold
+            raise RuntimeError("position not found")
+        return {"status": "ok"}
+
+    closer = tools_for(close_position=broker)
+
+    for _ in range(exit_rules.LEG_DIVERGENCE_CONFIRM):
+        await reconcile.reconcile(store, partial, journal, FakeMem(), Wiki(paths.wiki), None)
+        await _run(store, partial, journal, paths, closer)
+
+    assert store.load(pos.position_id).status == "closed", \
+        "the close never succeeded, so the position would retry forever"
+    assert journal_rows(journal, "exit")[-1]["submitted"] is True
+
+
+async def test_an_unreadable_broker_still_attempts_every_leg(paths, make_position):
+    """The other half of the filter, and the I-55 lesson applied to it: when
+    the holdings read FAILED, absence proves nothing. Skipping a leg on that
+    evidence would leave real exposure unattended, while attempting one that is
+    already gone merely errors - so a failed read attempts everything."""
+    store, journal = PositionStore(paths.wiki), Journal(paths.journal)
+    pos = make_position(status="closing", close_reason="deadline")
+    store.save(pos)
+
+    # market open, holdings unreadable: exactly what a dead MCP session returns.
+    blind = Snapshot(market_open=True, broker_positions=[], broker_readable=False)
+    closed_legs: list[str] = []
+    closer = tools_for(close_position=lambda **kw: closed_legs.append(
+        kw.get("symbol_or_asset_id")) or {"status": "ok"})
+
+    await _run(store, blind, journal, paths, closer)
+
+    assert sorted(closed_legs) == sorted(pos.symbols), \
+        "a failed read silently skipped legs it could not see"

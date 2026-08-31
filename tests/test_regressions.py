@@ -787,6 +787,56 @@ def test_close_all_positions_is_refused_while_several_are_open():
     assert out2 == "liquidated" and t2.called, "one position: equivalent to a normal close"
 
 
+def test_the_whole_book_count_includes_opening_and_closing_positions(paths, make_position):
+    """I-58. The count decided whether D-046's refusal fires, and it read only
+    `open` - so one open position beside one mid-fill (`opening`) or one
+    mid-liquidation (`closing`) counted as ONE, and the sweep was permitted
+    against a book of three. `closing` is no longer momentary either: since
+    I-57 it persists across ticks until the retry completes.
+
+    Calls the real lambda `_guarded_mcp_tools` builds, not a copy of it - the
+    counting rule and the guard it feeds must not drift apart.
+    """
+    from trdrbot import tick as tick_mod
+    from trdrbot.positions import PositionStore
+
+    store = PositionStore(paths.wiki)
+    for pid, status in [("pos_open", "open"), ("pos_filling", "opening"),
+                        ("pos_exiting", "closing"), ("pos_idea", "proposed")]:
+        store.save(make_position(position_id=pid, status=status))
+
+    counter = _whole_book_counter(tick_mod, store)
+
+    assert counter() == 3, "a position with live broker exposure was not counted"
+
+
+def _whole_book_counter(tick_mod, store):
+    """The `count_open` callable `_guarded_mcp_tools` hands to the guard.
+
+    Captured by wrapping the real assembly rather than re-deriving it: the
+    lambda is an argument to `redirect_whole_book_close`, so intercepting that
+    call is how a test gets hold of the production one.
+    """
+    from trdrbot import tool_guard
+
+    captured: list[Any] = []
+    real = tool_guard.redirect_whole_book_close
+
+    def spy(tools, count_open):
+        captured.append(count_open)
+        return real(tools, count_open)
+
+    class _Cfg:
+        decide_tools: list[str] = []
+
+    tool_guard.redirect_whole_book_close = spy
+    try:
+        tick_mod._guarded_mcp_tools([], _Cfg(), "batch", store)
+    finally:
+        tool_guard.redirect_whole_book_close = real
+    return captured[0]
+
+
 # ------------------------------- D-048 competence ladder (replaces D-047 phases)
 
 GOOD_V = "thesis_right_expression_right"

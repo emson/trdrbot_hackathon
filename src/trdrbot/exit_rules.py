@@ -404,6 +404,44 @@ def evaluate(pos: Position, snap: Snapshot, deadline: str,
     return kind, why, pnl
 
 
+async def _close_legs(tools: dict[str, Any], symbols: list[str]) -> bool:
+    """Attempt to close every symbol. True iff every attempt succeeded.
+
+    One helper, two callers - a fresh trigger and a retry - because the two
+    used to be one inline loop and a plan to write a second copy of it. A
+    single close path is the only way the retry cannot drift from the thing it
+    is retrying.
+    """
+    ok = True
+    for symbol in symbols:
+        try:
+            await mcp_client.call(tools, "close_position", symbol_or_asset_id=symbol)
+        except Exception as exc:  # noqa: BLE001
+            ok = False
+            print(f"[exit] failed closing leg {symbol}: {exc!r}")
+    return ok
+
+
+def _legs_to_close(pos: Position, snap: Snapshot) -> list[str]:
+    """Which of this position's legs to send to `close_position`.
+
+    Broker truth when we have it: a leg the broker no longer shows is already
+    gone, and resubmitting it is noise that can only mask a real failure in the
+    `submitted` flag beside it. This applies to a FIRST attempt exactly as much
+    as to a retry - reconcile runs immediately before this every tick (INV-25),
+    so a leg it just found missing must not then be blindly closed.
+
+    When the read itself failed, absence proves nothing (I-55) and every leg is
+    attempted: a close call against a leg that is already gone errors
+    harmlessly, while a leg skipped on bad information is real exposure left
+    unattended. The asymmetry decides it.
+    """
+    if not snap.broker_readable:
+        return list(pos.symbols)
+    held = snap.by_symbol()
+    return [s for s in pos.symbols if s in held]
+
+
 async def run(
     store: PositionStore,
     snap: Snapshot,
@@ -416,58 +454,99 @@ async def run(
     calibration: CalibrationStore | None = None,
     verbose: bool = True,
 ) -> list[str]:
-    """Evaluate every still-open position and close those that trigger."""
+    """Evaluate every still-open position and close those that trigger.
+
+    Two candidate statuses, one close path. `open` positions are evaluated;
+    `closing` positions are ones a previous tick already decided to close and
+    could not finish - they are retried, never re-evaluated, because the
+    decision to close is made once and finishing it is not a fresh judgment
+    (I-57). Before this, `closing` was a dead end: `open_positions()` returned
+    those positions and the loop skipped them forever, so a single failed
+    `close_position` call left real exposure with no stop, no retry and nothing
+    watching it at all.
+    """
     triggered: list[str] = []
-    watched = rules_checked = unreadable = errors = 0
+    watched = rules_checked = unreadable = errors = retried = 0
     #: Owned here, filled by `evaluate`. A suppressed breach closes nothing, so
     #: it would leave no trace at all without a count of its own.
     stats: dict[str, int] = {}
 
     for pos in store.open_positions():
-        if pos.status != "open":
-            continue  # only fully-open positions are candidates
-        watched += 1
-        rules_checked += len(watched_signals(pos)) + 1  # +1 for the implicit deadline
-        unreadable += invalid_rules(pos)
+        # Captured BEFORE any transition, which mutates status in place.
+        is_retry = pos.status == "closing"
 
-        # One position's bad data must not blind the evaluator to every OTHER
-        # position. `evaluate` reads model-authored YAML off disk, so a single
-        # malformed rule used to take capital protection offline for the whole
-        # book, every tick, until someone hand-fixed the file.
-        try:
-            reason, why, pnl = evaluate(pos, snap, deadline, stats=stats)
-        except Exception as exc:  # noqa: BLE001 - per-position isolation
-            errors += 1
-            print(f"[exit] {pos.position_id}: rule evaluation failed, holding: {exc!r}")
+        if is_retry:
+            # The reason was decided on the tick that first fired. Re-running
+            # `evaluate` here could surface a DIFFERENT reason for a position
+            # already mid-liquidation, and would re-debounce a decision that is
+            # no longer in question.
+            if not snap.market_open:
+                continue
+            reason = pos.close_reason or "retry"
+            why = "retry: a previous close attempt did not complete"
+            pnl = position_pnl_fraction(pos.symbols, snap)
+        elif pos.status == "open":
+            watched += 1
+            rules_checked += len(watched_signals(pos)) + 1  # +1 for the implicit deadline
+            unreadable += invalid_rules(pos)
+
+            # One position's bad data must not blind the evaluator to every OTHER
+            # position. `evaluate` reads model-authored YAML off disk, so a single
+            # malformed rule used to take capital protection offline for the whole
+            # book, every tick, until someone hand-fixed the file.
+            try:
+                reason, why, pnl = evaluate(pos, snap, deadline, stats=stats)
+            except Exception as exc:  # noqa: BLE001 - per-position isolation
+                errors += 1
+                print(f"[exit] {pos.position_id}: rule evaluation failed, holding: {exc!r}")
+                continue
+            store.save(pos)  # persist debounce state either way
+
+            if not reason:
+                continue
+
+            # DETECTION is unaffected by the clock; only the broker-mutating
+            # close is gated. The calendar signals (deadline, days_to_expiry)
+            # read a date and nothing else, so they fire on the 00:15 tick of
+            # expiry day as readily as at noon - and a close submitted into a
+            # shut session is the first domino of I-56: it fails, the position
+            # parks in `closing`, and before I-57 above nothing looked at it
+            # again. Debounce state is already persisted, so the same reason
+            # re-fires the moment the market reopens; nothing is lost by
+            # waiting, and the position is still watched while it waits.
+            if not snap.market_open:
+                continue
+
+            # INV-17: first detector wins. If reconciliation already resolved this
+            # position earlier in the tick, transition refuses and we do not act.
+            if not store.transition(pos, "closing", close_reason=reason):
+                continue
+        else:
+            continue  # proposed/opening/adjusting: nothing to act on
+
+        remaining = _legs_to_close(pos, snap)
+        if not remaining:
+            # Every leg already gone at the broker. Reconcile's phantom branch
+            # owns this resolution (it covers `closing`) and will take it next
+            # tick with the same exactly-once guard; closing it from here would
+            # race that for no gain.
             continue
-        store.save(pos)  # persist debounce state either way
 
-        if not reason:
-            continue
-
-        # INV-17: first detector wins. If reconciliation already resolved this
-        # position earlier in the tick, transition refuses and we do not act.
-        if not store.transition(pos, "closing", close_reason=reason):
-            continue
-
+        if is_retry:
+            retried += 1
         if verbose:
             print(f"[exit] {pos.position_id}: {reason} - {why}")
 
-        closed_ok = True
-        for symbol in pos.symbols:  # ALL legs (INV-19)
-            try:
-                await mcp_client.call(tools, "close_position", symbol_or_asset_id=symbol)
-            except Exception as exc:  # noqa: BLE001
-                closed_ok = False
-                print(f"[exit] failed closing leg {symbol}: {exc!r}")
+        closed_ok = await _close_legs(tools, remaining)  # ALL surviving legs (INV-19)
 
         journal.append(
             "exit",
             position_id=pos.position_id,
             close_reason=reason,
             explanation=why,
-            legs=pos.symbols,
+            legs=remaining,
             submitted=closed_ok,
+            retry=is_retry,
         )
         if closed_ok:
             store.transition(pos, "closed")  # INV-17: terminal, exactly once
@@ -485,9 +564,13 @@ async def run(
     # because nothing had breached - which is the engine working, not the
     # engine missing. An engine that evaluates and correctly holds must be
     # distinguishable from one that is not evaluating at all.
-    if watched:
+    if watched or retried:
         health.heartbeat(journal, "exit_run", positions=watched, rules=rules_checked,
                          triggered=len(triggered),
+                       # A retry is work the engine did that no rule evaluation
+                       # accounts for - without its own count, a tick that
+                       # spent itself finishing a stuck close reads as idle.
+                       retried=retried,
                        # An unreadable rule is a commitment that can never be
                        # honoured, and an evaluation error is a position going
                        # unwatched. Both are silent otherwise.
