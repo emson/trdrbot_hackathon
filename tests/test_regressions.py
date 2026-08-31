@@ -3914,6 +3914,47 @@ def test_band_inflation_loader_fails_safe_and_clamps(tmp_path):
     assert market_stats.band_inflation(tmp_path, 9) == 1.3
 
 
+def test_simulate_experiments_prices_against_the_calibrated_bootstrap(tmp_path):
+    """I-62. The muse's gates read the calibrated bootstrap (D-089); this call
+    - the one feeding the EV, POP and payoff_ratio the agent picks a structure
+    from, and then sizing's Kelly gate - still read the raw one. An optimistic
+    tail here is an optimistic bet size downstream.
+
+    Pins the WIRING, not the maths: the fit itself is tested above. Identical
+    inputs, two artifacts, and the tail probabilities must differ."""
+    import json
+
+    from trdrbot import local_tools, market_stats
+
+    closes = [400.0 * (1.0 + 0.004 * ((i * 7) % 11 - 5)) for i in range(260)]
+    dates = synthetic_dates(len(closes))
+
+    def pop_at(k: float) -> float:
+        d = tmp_path / f"k{k}"
+        (d / "closes").mkdir(parents=True, exist_ok=True)
+        market_stats.save_closes(d, "SPY", closes, dates=dates)
+        market_stats.model_cal_path(d).write_text(
+            json.dumps({"per_horizon": {"5": k}}), encoding="utf-8")
+        sim = local_tools.build_simulate_experiments(local_tools.SharedContext(), d, None)
+        out = sim.func(
+            thesis_claim="SPY drifts lower", underlying="SPY", horizon="2026-09-05",
+            drift_pct=-1.0, spot=400.0, iv_pct=20.0, days_to_expiry=5,
+            band_low=380.0, band_high=395.0,
+            candidates=[
+                {"name": "put_spread", "legs": [
+                    {"right": "P", "strike": 395, "side": "long", "qty": 1, "price": 4.0},
+                    {"right": "P", "strike": 385, "side": "short", "qty": 1, "price": 1.5}]},
+                {"name": "wider_put_spread", "legs": [
+                    {"right": "P", "strike": 395, "side": "long", "qty": 1, "price": 4.0},
+                    {"right": "P", "strike": 380, "side": "short", "qty": 1, "price": 1.0}]},
+            ])
+        return out
+
+    flat, inflated = pop_at(1.0), pop_at(1.5)
+
+    assert flat != inflated, "the fitted inflation never reached the EV grid"
+
+
 def test_the_muse_base_rate_uses_the_fitted_inflation():
     """The muse's gates were the measured defect site (I-29): the vacuity
     ceiling and the lottery floor both consumed the overconfident raw base.

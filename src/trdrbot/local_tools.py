@@ -262,8 +262,17 @@ def build_simulate_experiments(shared: SharedContext, state_dir: Path | None = N
         if state_dir is not None:
             closes = market_stats.load_closes(state_dir, underlying)
             if closes:
+                # The CALIBRATED bootstrap, the same one the muse's gates read
+                # (D-089). The raw one was measured overconfident by 15-23pp
+                # exactly where credit spreads live (I-29), and this call feeds
+                # the EV, POP and payoff_ratio columns the agent chooses a
+                # structure from - and then sizing's Kelly gate. An optimistic
+                # tail here is an optimistic bet size downstream. The inflation
+                # is fitted offline with a holdout veto and is 1.0 whenever no
+                # fit exists, so this is byte-identical until one does.
                 factors = market_stats.bootstrap_factors(
-                    closes, days_to_expiry, seed=underlying, drift=drift_pct / 100.0
+                    closes, days_to_expiry, seed=underlying, drift=drift_pct / 100.0,
+                    inflate=market_stats.band_inflation(state_dir, days_to_expiry),
                 ) or None
                 # Same closes, already loaded: what the tape has actually been
                 # delivering, to sit beside what the market is charging.
