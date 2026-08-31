@@ -331,6 +331,20 @@ def build_simulate_experiments(shared: SharedContext, state_dir: Path | None = N
     )
 
 
+def _leg_qty(leg: dict[str, Any]) -> int:
+    """A recorded leg's contract count, 0 when it is unreadable.
+
+    Model-authored, so a string, a null or a float are all live possibilities;
+    an unreadable quantity must not raise inside `record_position` (that would
+    lose a position that is already open at the broker) and must not be
+    silently counted as a real number either.
+    """
+    try:
+        return abs(int(float(leg.get("qty", 0) or 0)))
+    except (TypeError, ValueError):
+        return 0
+
+
 def build_record_position(
     store: PositionStore,
     decision_ref: str,
@@ -341,6 +355,7 @@ def build_record_position(
     sources: list[dict[str, Any]] | None = None,
     shared: SharedContext | None = None,
     ledger: Any = None,
+    journal: Any = None,
 ) -> StructuredTool:
     def record_position(
         underlying: str,
@@ -439,6 +454,7 @@ def build_record_position(
             # so a resolved position can credit or discredit its inputs.
             sources=list(sources or []),
         )
+        note = ""
         # Risk is DERIVED, not declared: prefer what size_position actually
         # computed this cycle, falling back to the model's own figure only if
         # sizing was skipped. Keeps the book caps honest without depending on
@@ -446,6 +462,28 @@ def build_record_position(
         sized = shared.sizing if shared else None
         if sized is not None and sized.underlying in ("", underlying.upper()):
             pos.max_loss_usd = float(sized.max_loss_usd)
+            # ...and say so when the two disagree. `max_loss_usd` above is
+            # sizing's contract count times sizing's per-contract risk, so
+            # recording a DIFFERENT quantity silently denominates the book caps
+            # in a size that was never traded. Reported, never refused (D-009):
+            # the agent may deliberately take a different size, and this is its
+            # own two tool calls being held against each other, not a policy
+            # imposed on either. Reconcile reprices from the fill regardless
+            # (I-59), so the caps are protected either way - this exists to
+            # make the INTENT gap visible while it is still explicable.
+            recorded_qtys = sorted({q for q in (_leg_qty(l) for l in legs) if q > 0})
+            if recorded_qtys and recorded_qtys != [sized.contracts]:
+                if journal is not None:
+                    journal.append("sizing_mismatch", position_id=pos.position_id,
+                                   underlying=sized.underlying,
+                                   sized_contracts=sized.contracts,
+                                   recorded_qtys=recorded_qtys)
+                note += (
+                    f" NOTE: size_position computed {sized.contracts} contract(s) for this "
+                    f"trade; the legs recorded here carry {recorded_qtys}. Recorded as given "
+                    f"- but the book caps were sized against {sized.contracts}, so if the "
+                    f"quantity was deliberate, re-run size_position to re-derive the risk."
+                )
         elif max_loss_usd is not None:
             pos.max_loss_usd = float(max_loss_usd)
 
@@ -523,7 +561,6 @@ def build_record_position(
         # watches - visible here rather than discovered at a loss (D-037).
         from .exit_rules import watched_signals
         watching = watched_signals(pos)
-        note = ""
 
         # Can the mark-based rules the agent just wrote actually fire? Matched
         # by LEGS against what simulate_experiments priced, so nothing is

@@ -431,6 +431,56 @@ def test_record_position_warns_when_simulate_was_skipped():
     assert pos.thesis_claim == ""  # the free-text `thesis` arg is NOT thesis_claim
 
 
+def _record_with_sizing(tmpdir, *, sized_contracts: int, leg_qty: int):
+    """Run the REAL record_position tool with a real SizingStash in shared.
+
+    Derived from the producer: the stash is the dataclass `size_position`
+    actually writes, not a stand-in, because the whole point is whether these
+    two tool calls are compared correctly.
+    """
+    from trdrbot.calibration import CalibrationStore
+    from trdrbot.journal import Journal
+
+    store = PositionStore(tmpdir)
+    calib = CalibrationStore(tmpdir / "c.json")
+    journal = Journal(tmpdir / "j.jsonl")
+    shared = local_tools.SharedContext()
+    shared.sizing = local_tools.SizingStash(
+        underlying="SPY", contracts=sized_contracts, max_loss_usd=167.0 * sized_contracts)
+    rec = local_tools.build_record_position(
+        store, "dec_q", shared=shared, calibration=calib, journal=journal)
+    msg = rec.func(
+        underlying="SPY", strategy="bear_put_spread",
+        legs=[{"symbol": "SPY260903P00766000", "side": "buy", "qty": leg_qty},
+              {"symbol": "SPY260903P00758000", "side": "sell", "qty": leg_qty}],
+        thesis="SPY rolls over", confidence=0.6, expiry="2026-09-03")
+    return msg, store, journal
+
+
+def test_a_recorded_quantity_sizing_did_not_compute_is_reported_not_refused(tmp_path):
+    """I-60. size_position's contract count is what max_loss_usd - and so every
+    book cap - is derived from. Recording a different quantity denominates
+    those caps in a size that was never traded.
+
+    Reported, never refused: D-009 leaves the size to the agent, and this is its
+    own two tool calls held against each other, not a policy over either."""
+    msg, store, journal = _record_with_sizing(tmp_path, sized_contracts=13, leg_qty=40)
+
+    assert store.all(), "the position was refused, not recorded"
+    assert "size_position computed 13" in msg and "[40]" in msg
+    row = [r for r in journal.read() if r.get("kind") == "sizing_mismatch"]
+    assert row and row[0]["sized_contracts"] == 13 and row[0]["recorded_qtys"] == [40]
+
+
+def test_a_recorded_quantity_matching_sizing_is_not_flagged(tmp_path):
+    """Balanced pressure: the common case must stay silent, or the note is
+    noise and the agent learns to skim past it."""
+    msg, store, journal = _record_with_sizing(tmp_path, sized_contracts=13, leg_qty=13)
+
+    assert "size_position computed" not in msg
+    assert not [r for r in journal.read() if r.get("kind") == "sizing_mismatch"]
+
+
 # ---------------------------------------------------- D-040 greeks layer
 
 def test_bull_put_spread_shape_is_bullish_theta_income_short_vol():

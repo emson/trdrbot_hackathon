@@ -678,7 +678,7 @@ async def _run_tick(
             calibration=calib,
             sources=[{"id": i.id, "resource": f"inbox/{i.id}", "author": i.source}
                      for i in items],
-            shared=shared, ledger=book,
+            shared=shared, ledger=book, journal=journal,
         )
         agent_tools = guarded + [sim_tool, size_tool, record_tool, forecast_tool]
         agent = create_react_agent(build_model(config, role="decide"),

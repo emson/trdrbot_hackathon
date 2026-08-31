@@ -443,6 +443,20 @@ def check(journal_path: Path, positions: list[Any]) -> list[tuple[str, str, str]
                          f"{n}x fell back - {reason} - the run continued on "
                          "reduced input, which reads as success everywhere else"))
 
+    # A recorded quantity that is not the one sizing computed means the book
+    # caps were derived from a size that was never traded. Once is a deliberate
+    # override the agent is entitled to make (D-009); a pattern of it means
+    # size_position's answer is not reaching the trade at all.
+    mismatches: dict[str, int] = {}
+    for r in rows:
+        if r.get("kind") == "sizing_mismatch":
+            key = str(r.get("underlying") or "?")
+            mismatches[key] = mismatches.get(key, 0) + 1
+    for underlying, n in sorted(mismatches.items(), key=lambda kv: -kv[1]):
+        findings.append((WARN if n < 3 else BAD, f"sizing_mismatch:{underlying}",
+                         f"{n}x recorded a quantity size_position did not compute - "
+                         "the caps were sized against a trade that was not made"))
+
     # --- 4. absence that quietly loosens a constraint --------------------
     from .exit_rules import watched_signals
 

@@ -205,6 +205,22 @@ def test_a_closing_position_whose_retry_succeeded_is_not_flagged(tmp_path, make_
     assert not [f for f in health.check(path, [pos]) if "stuck in 'closing'" in f[2]]
 
 
+@pytest.mark.parametrize("n,expected", [(1, health.WARN), (3, health.BAD)])
+def test_a_repeated_sizing_mismatch_escalates_from_warning_to_problem(
+    tmp_path, n, expected
+):
+    """Once is a deliberate override the agent may make (D-009). A pattern of
+    it means size_position's answer is not reaching the trade at all, and the
+    caps have been sized against trades nobody placed."""
+    rows = [{"kind": "sizing_mismatch", "underlying": "SPY",
+             "sized_contracts": 13, "recorded_qtys": [40]}] * n
+
+    hit = [f for f in _check(tmp_path, rows) if f[1] == "sizing_mismatch:SPY"]
+
+    assert hit, f"a size divergence seen {n}x is invisible in health"
+    assert hit[0][0] == expected
+
+
 def test_two_subsystems_degrading_are_two_findings_not_one(tmp_path):
     """Grouped by (subsystem, reason), because "something fell back 6 times" is
     not actionable and "the compactor is passing chains through" is."""
