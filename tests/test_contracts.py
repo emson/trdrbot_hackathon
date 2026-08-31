@@ -126,6 +126,118 @@ async def mcp_client_call_bars(tools):
 
 
 @pytest.mark.asyncio
+async def test_an_option_positions_cost_basis_is_a_signed_dollar_total(cfg):
+    """The belief every book cap now rests on (I-59).
+
+    `reconcile` reprices a position's max loss from the fill, and derives BOTH
+    the side and the per-share premium from `cost_basis` alone - specifically to
+    avoid a second, untested belief about whether `avg_entry_price` is quoted
+    per share or per contract. If cost_basis were ever per-share rather than a
+    dollar total, every recomputed max loss would be wrong by the 100x contract
+    multiplier, in the direction that says "plenty of room left in the caps".
+
+    The discriminating property, not a value: cost_basis must reconcile with
+    qty x avg_entry_price x 100 to within rounding. That single relationship
+    pins the units of all three fields at once.
+    """
+    from trdrbot import mcp_client, optmath
+    tools = await _tools(cfg)
+    rows = await mcp_client.call(tools, "get_all_positions")
+
+    assert isinstance(rows, list), f"expected a list, got {type(rows).__name__}"
+    options = [r for r in rows if isinstance(r, dict)
+               and optmath.parse_occ(str(r.get("symbol", "")))]
+    if not options:
+        pytest.skip("no option position open right now - nothing to check the units against")
+
+    for row in options:
+        cost = float(row["cost_basis"])
+        qty, entry = abs(float(row["qty"])), float(row["avg_entry_price"])
+        expected = qty * entry * optmath.CONTRACT_MULTIPLIER
+        assert abs(abs(cost) - expected) <= max(1.0, 0.01 * expected), (
+            f"{row['symbol']}: cost_basis {cost} does not equal qty x avg_entry_price "
+            f"x {optmath.CONTRACT_MULTIPLIER} ({expected}). One of these three fields "
+            f"has changed units, and filled_legs() derives risk from the first."
+        )
+        assert (cost > 0) == (float(row["qty"]) > 0), (
+            f"{row['symbol']}: the sign of cost_basis no longer agrees with the sign "
+            f"of qty - filled_legs() reads long/short from it."
+        )
+
+
+@pytest.mark.asyncio
+@pytest.mark.skip(reason="places a real order - run manually, supervised, never in the "
+                         "competition window; see docstring")
+async def test_a_naked_short_option_is_refused_by_the_broker_or_by_our_level(cfg):
+    """Is the broker a SECOND backstop against unbounded loss, or is sizing the
+    only one?
+
+    `size_position` refuses a structure whose max loss is unbounded, but the
+    agent can reach `place_option_order` without calling it - so what the broker
+    does with a naked short is the difference between one guard and none. We
+    have never checked; the answer is currently an assumption.
+
+    Deliberately unmarketable (a far-OTM short call priced far above any bid) so
+    it cannot fill even briefly, cancelled in `finally`, and asserted on the
+    SUBMISSION's shape only - never on a fill. Run it with the account open in
+    front of you.
+    """
+    from trdrbot import mcp_client
+    tools = await _tools(cfg)
+    order_id = None
+    try:
+        r = await mcp_client.call(
+            tools, "place_option_order", legs=[{
+                "symbol": "SPY271217C01200000", "side": "sell", "ratio_qty": 1}],
+            quantity=1, order_type="limit", limit_price=95.0, time_in_force="day")
+        assert isinstance(r, (dict, str)), f"unexpected response type {type(r).__name__}"
+        order_id = r.get("id") if isinstance(r, dict) else None
+        # Either outcome is informative and BOTH are recorded by this assertion
+        # failing loudly if the shape stops being readable at all.
+        assert order_id or "reject" in str(r).lower() or "level" in str(r).lower(), (
+            f"a naked short was neither accepted with an id nor refused with a "
+            f"reason - the response says: {str(r)[:300]}"
+        )
+    finally:
+        if order_id:
+            await mcp_client.call(tools, "cancel_order_by_id", order_id=order_id)
+
+
+@pytest.mark.asyncio
+@pytest.mark.skip(reason="must run while the market is SHUT, against a symbol we do not "
+                         "hold; see docstring")
+async def test_close_position_off_hours_refuses_rather_than_silently_accepting(cfg):
+    """WU-7.1 defers every close to an open session, on the belief that a close
+    submitted into a shut market is not reliably actioned. This checks the half
+    of that belief which is safe to check: a close must never come back looking
+    like a success it did not achieve.
+
+    Against a symbol we do not hold, so it exercises the transport and the error
+    shape without touching the book. That is a real limit: it does NOT answer
+    what the broker does with a close of a position we DO hold, off-hours, which
+    needs either Alpaca's own documentation or a disposable single-contract
+    position opened for the purpose - well clear of anything live.
+    """
+    from trdrbot import mcp_client
+    tools = await _tools(cfg)
+    clock = await mcp_client.call(tools, "get_clock")
+    if clock.get("is_open"):
+        pytest.skip("market is open - this test is about the shut-session path")
+
+    try:
+        r = await mcp_client.call(
+            tools, "close_position", symbol_or_asset_id="ZZZNOTAREALSYMBOL999")
+    except Exception as exc:  # noqa: BLE001 - an exception IS a valid outcome here
+        assert str(exc), "the transport raised without saying why"
+        return
+    assert "error" in str(r).lower() or "not" in str(r).lower(), (
+        f"closing a position we do not hold returned something that reads like "
+        f"success: {str(r)[:300]}. `exit_rules` treats a non-raising close as "
+        f"submitted, so a false success there strands a live position."
+    )
+
+
+@pytest.mark.asyncio
 async def test_option_chain_is_large_enough_to_matter_for_context_cost(cfg):
     """Not a correctness contract - a COST one. One chain measured 15,343
     tokens and is re-sent every agent turn, which is 84% of decide spend. If
