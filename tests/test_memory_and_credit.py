@@ -233,6 +233,108 @@ def test_filled_legs_refuses_a_leg_it_cannot_price(make_position):
     assert filled_legs(pos.symbols, snap) is None
 
 
+async def test_two_orphan_legs_of_one_spread_are_adopted_as_a_single_position(
+    paths, mem: FakeMem
+):
+    """I-61. An orphan was journalled and then left alone - which is a note, not
+    a stop. It had no exit rules, so nothing evaluated it, and the deadline
+    sweep could not see it either.
+
+    Legs sharing an underlying and an expiry are adopted TOGETHER, because that
+    is what they are: the survivors of a spread whose page we lost. Adopting
+    them separately would let the exit path close one and leave the other, which
+    is the naked short INV-19 exists to prevent."""
+    store, journal, wiki, calib = _stores(paths)
+    snap = Snapshot(broker_readable=True, broker_positions=[
+        {"symbol": "SPY260903P00766000", "qty": 13, "cost_basis": 5330.0},
+        {"symbol": "SPY260903P00758000", "qty": -13, "cost_basis": -2119.0},
+    ])
+
+    await reconcile.reconcile(store, snap, journal, mem, wiki, calib)
+
+    adopted = store.all()
+    assert len(adopted) == 1, "a broken spread was adopted as two loose legs"
+    pos = adopted[0]
+    assert pos.status == "open" and pos.provenance == "unknown"
+    assert pos.underlying == "SPY" and pos.expiry == "2026-09-03"
+    assert sorted(pos.symbols) == ["SPY260903P00758000", "SPY260903P00766000"]
+    assert [l["side"] for l in pos.legs] == ["short", "long"]  # sorted by symbol
+    assert pos.max_loss_usd is None, "a guessed risk figure is worse than none"
+
+
+async def test_an_adopted_orphan_reports_itself_as_needing_a_human(paths, mem: FakeMem):
+    """The stub deliberately carries no risk figure and no thesis, and both are
+    already BAD findings for any open position. Adoption therefore makes the
+    orphan LOUD as well as watched - which is the honest state: it is managed,
+    it is not understood."""
+    from trdrbot import health
+
+    store, journal, wiki, calib = _stores(paths)
+    snap = Snapshot(broker_readable=True, broker_positions=[
+        {"symbol": "SPY260903P00766000", "qty": 13, "cost_basis": 5330.0},
+    ])
+
+    await reconcile.reconcile(store, snap, journal, mem, wiki, calib)
+    findings = health.check(paths.journal, store.all())
+
+    subjects = [f[2] for f in findings if f[0] == health.BAD]
+    assert any("no max_loss_usd" in s for s in subjects)
+    assert any("no thesis recorded" in s for s in subjects)
+
+
+async def test_an_adopted_orphan_is_not_re_adopted_on_the_next_pass(paths, mem: FakeMem):
+    """Idempotence, proven rather than reasoned about: `claimed` is rebuilt from
+    the open pages every call, so the stub's own legs must claim themselves."""
+    store, journal, wiki, calib = _stores(paths)
+    snap = Snapshot(broker_readable=True, broker_positions=[
+        {"symbol": "SPY260903P00766000", "qty": 13, "cost_basis": 5330.0},
+    ])
+
+    await reconcile.reconcile(store, snap, journal, mem, wiki, calib)
+    second = await reconcile.reconcile(store, snap, journal, mem, wiki, calib)
+
+    assert second["orphan"] == [], "the stub did not claim its own legs"
+    assert len(store.all()) == 1, "a duplicate page per tick, forever"
+
+
+async def test_an_unreadable_broker_adopts_nothing(paths, mem: FakeMem):
+    """I-55's rule reaches this branch too. It used to sit outside the
+    readability guard, safe only because a failed read happens to leave the
+    holdings list empty - a guarantee held by an unrelated accident."""
+    store, journal, wiki, calib = _stores(paths)
+    dead = Snapshot(broker_readable=False, broker_positions=[
+        {"symbol": "SPY260903P00766000", "qty": 13, "cost_basis": 5330.0},
+    ])
+
+    await reconcile.reconcile(store, dead, journal, mem, wiki, calib)
+
+    assert store.all() == []
+
+
+async def test_an_adopted_orphan_is_force_closed_at_the_deadline(paths, mem: FakeMem):
+    """The claim the whole work unit rests on, end to end through the real pair:
+    something the broker holds and we cannot explain is nonetheless flat before
+    the competition ends, with no human and no thesis involved (INV-26)."""
+    from conftest import tools_for
+
+    from trdrbot import exit_rules
+    store, journal, wiki, calib = _stores(paths)
+    snap = Snapshot(market_open=True, broker_readable=True, broker_positions=[
+        {"symbol": "SPY260903P00766000", "qty": 13, "cost_basis": 5330.0,
+         "unrealized_pl": 0.0},
+    ])
+    closer = tools_for(close_position=lambda **kw: {"status": "ok"})
+
+    await reconcile.reconcile(store, snap, journal, mem, wiki, calib)
+    triggered = await exit_rules.run(store, snap, closer, journal, "2020-01-01",
+                                     mem, wiki, calibration=calib, verbose=False)
+
+    pos = store.all()[0]
+    assert triggered == [pos.position_id]
+    assert pos.status == "closed" and pos.close_reason == "deadline"
+    assert closer["close_position"].calls, "the orphan was never actually closed"
+
+
 async def test_a_phantom_close_resolves_exactly_once(paths, make_position, mem: FakeMem):
     """INV-17 through the real transition guard: two detectors, one resolution.
     Double credit assignment is the failure this guard exists to prevent."""

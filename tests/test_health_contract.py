@@ -317,10 +317,16 @@ def test_the_learning_heartbeat_fires_even_when_there_is_nothing_to_learn(tmp_pa
     from types import SimpleNamespace
 
     from trdrbot import reconcile
+    from trdrbot.analytics import Snapshot
 
     journal = Journal(tmp_path / "journal.jsonl")
     store = SimpleNamespace(open_positions=lambda: [])
-    snap = SimpleNamespace(by_symbol=lambda: {}, open_orders=[])
+    # The REAL Snapshot, not a stand-in with just the two attributes reconcile
+    # happened to read when this was written. A hand-rolled fake silently stops
+    # covering the seam the moment the real one grows a field - which is exactly
+    # what it did, and the reason conftest builds every other input from its
+    # real producer.
+    snap = Snapshot(broker_readable=True)
 
     asyncio.run(reconcile.reconcile(store, snap, journal, None, None))
 

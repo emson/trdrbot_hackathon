@@ -11,8 +11,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from . import health, learn, optmath
-from .analytics import Snapshot, filled_legs
+from . import health, ids, learn, optmath
+from .analytics import Snapshot, _f, filled_legs
 from .calibration import CalibrationStore
 from .elfmem_adapter import ElfmemAdapter
 from .journal import Journal
@@ -215,19 +215,92 @@ async def reconcile(
                      resolutions=len(result["phantom"]),
                      errors=learn_errors)
 
-    for symbol in held:
-        if symbol not in claimed:
-            # At the broker with no story of ours. A position we cannot explain
-            # is still a position - record it rather than ignoring it.
-            journal.append(
-                "reconciliation",
-                finding="orphan",
-                symbol=symbol,
-                detail="held at broker, no position page",
-            )
-            result["orphan"].append(symbol)
+    if snap.broker_readable:
+        _adopt_orphans(store, snap, journal, claimed, result)
 
     return result
+
+
+def _adopt_orphans(store: PositionStore, snap: Snapshot, journal: Journal,
+                   claimed: set[str], result: dict[str, list[str]]) -> None:
+    """Give anything held at the broker with no page of ours a page, and rules.
+
+    Recording an orphan was never the hard part - the branch this replaces
+    already journalled one every tick. The gap was that a journal row is not a
+    stop: an orphan had no exit rules, so nothing evaluated it, and the deadline
+    sweep (INV-26) that force-closes every position before the competition ends
+    could not see it either. It sat there, unexplained AND unmanaged, until a
+    human read the journal.
+
+    A stub fixes both at once by being an ordinary position: `status="open"`
+    puts it in `exit_rules.run`'s candidate set, where the implicit deadline,
+    time-stop and leg-divergence rules apply to it exactly as to anything else.
+    This is the FM-9 stub the architecture already specifies, finally built.
+
+    Legs sharing an underlying AND an expiry are adopted as ONE position, not
+    one each. That is what they almost certainly are - the surviving legs of a
+    spread whose page we lost - and it is what INV-19 requires: closing them
+    together is the difference between exiting a spread and legging out of one
+    into a naked short. A plain ticker (assigned stock, no OCC fields) has no
+    expiry to group on and is adopted alone, which is correct: assigned stock is
+    a whole position, not a fragment of one.
+
+    `max_loss_usd` and the thesis are left EMPTY rather than guessed. Both are
+    already BAD findings in `health.check` for any open position, so an adopted
+    orphan reports itself as needing a human - which is exactly true, and better
+    than a confident number nobody derived (D-038's absence-as-zero, inverted:
+    do not invent presence either).
+    """
+    held = snap.by_symbol()
+    groups: dict[tuple[str, str], list[str]] = {}
+    for symbol in sorted(held):
+        if symbol in claimed:
+            continue
+        occ = optmath.parse_occ(symbol)
+        key = (occ["underlying"], occ["expiry"]) if occ else (symbol.upper(), "")
+        groups.setdefault(key, []).append(symbol)
+
+    for (underlying, expiry), symbols in groups.items():
+        legs = []
+        for symbol in symbols:
+            row = held[symbol]
+            qty = abs(int(_f(row.get("qty"), 0.0))) or 1
+            # Side from the broker's own word where it gives one, else from the
+            # sign of the quantity it reports. Both are stated here rather than
+            # assumed, because a leg adopted with the wrong side would be closed
+            # in the wrong direction - doubling the position instead of exiting.
+            side = str(row.get("side") or "").lower()
+            if side not in ("long", "short"):
+                side = "short" if _f(row.get("qty"), 0.0) < 0 else "long"
+            legs.append({"symbol": symbol, "side": side, "qty": qty})
+
+        pos = Position(
+            position_id=ids.position_id(underlying, "orphan"),
+            status="open",
+            strategy="orphan_option" if expiry else "orphan_equity",
+            underlying=underlying,
+            opened=ids.utc_now().isoformat(),
+            expiry=expiry,
+            legs=legs,
+            thesis=(
+                "Adopted orphan. Held at the broker with no position page of ours - "
+                "an unrecorded fill, a crash between placing and recording, or an "
+                "assignment. There is no thesis because there is no record of why "
+                "this was opened; it is adopted so that it is WATCHED, not because "
+                "it is understood."
+            ),
+            provenance="unknown",
+        )
+        store.save(pos)
+        journal.append(
+            "reconciliation",
+            finding="orphan_adopted",
+            position_id=pos.position_id,
+            symbols=symbols,
+            detail="held at broker with no page - adopted so the exit rules and the "
+                   "deadline sweep can see it",
+        )
+        result["orphan"].extend(symbols)
 
 
 def summarise(result: dict[str, list[str]]) -> str:
