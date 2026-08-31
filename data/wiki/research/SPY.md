@@ -4,7 +4,7 @@ sources:
 - id: src-1
   resource: computed:market_stats
   author: trdrbot/research
-  last_modified: '2026-08-31T00:30:41.873253+00:00'
+  last_modified: '2026-08-31T15:14:09.509510+00:00'
 - id: src-2
   resource: computed:market_stats
   author: trdrbot/research
@@ -18,22 +18,22 @@ sources:
   author: trdrbot/research
   last_modified: '2026-08-28T00:06:31.229258+00:00'
 generated:
-  at: '2026-08-31T00:30:41.874034+00:00'
-stale_after: '2026-09-01T00:30:41.874037+00:00'
+  at: '2026-08-31T15:14:09.510356+00:00'
+stale_after: '2026-09-01T15:14:09.510359+00:00'
 status: stable
 ---
 
 # What it is
-SPY is an exchange-traded fund designed to track the S&P 500 and provide broad exposure to large US companies. (model knowledge) It closed at 769.28 and remains above both its 20-day and 50-day moving averages.
+SPY is an exchange-traded fund designed to track the S&P 500 Index. It provides broad exposure to large-cap U.S. equities.
 
 # Bull case
-Returns are positive over 5, 21, and 63 days, while RSI14 of 57 leaves room for further gains without indicating an overbought condition. Low 21-day and 5-day realized volatility supports an orderly continuation rather than a stressed advance.
+Positive 21-day and 63-day returns, a position above the 50-day average, and neutral RSI support an intact intermediate uptrend. Low realized volatility and limited near-term recession odds could allow the index to consolidate before resuming higher.
 
 # Bear case
-The reported increase in September rate-hike odds could pressure equity valuations, particularly if bond yields rise. With realized volatility already low, an unexpected policy shock could produce an outsized repricing relative to the recent calm.
+The price is now below its 20-day average, showing that short-term momentum has weakened. Hawkish rate expectations, geopolitical tension, and poor liquidity could cause a volatility expansion from currently subdued levels.
 
 # People
-No corporate executive is directly associated with SPY in the supplied material. Kevin Warsh is the principal named macro figure because his speech was linked to increased September rate-hike expectations.
+Kevin Warsh is central to the immediate rates narrative because his Jackson Hole speech reportedly increased September rate-hike expectations. Justin Wolfers has publicly criticized Warsh’s stance, while Owen Lamont’s liquidity warning contributes to near-term caution.
 
 # Environment
-Prediction markets assign only 1% odds of a Fed cut by the September 2026 meeting and 4% by the October meeting. Recession odds of 8% by year-end 2026 remain consistent with continued expansion, but the separate 60% reported probability of a September hike creates policy uncertainty.
+The index environment combines low realized volatility with conflicting macro headlines and a reported 66% probability of a September rate hike. Prediction markets show low 2026 recession odds but materially higher recession risk by the end of 2027.
