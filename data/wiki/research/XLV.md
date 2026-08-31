@@ -4,23 +4,24 @@ sources:
 - id: src-1
   resource: computed:market_stats
   author: trdrbot/research
-  last_modified: '2026-08-28T00:06:31.233499+00:00'
+  last_modified: '2026-08-31T00:30:41.879160+00:00'
 generated:
-  at: '2026-08-28T00:06:31.233751+00:00'
-status: deprecated
+  at: '2026-08-31T00:30:41.879546+00:00'
+status: stable
+stale_after: '2026-09-01T00:30:41.879548+00:00'
 ---
 
 # What it is
-The Health Care Select Sector SPDR fund, covering large-cap pharmaceuticals, managed care, medical devices and life-science tools within the S&P 500. It is typically treated as a defensive-growth sleeve.
+XLV is an exchange-traded fund focused on large US healthcare companies. (model knowledge) It closed at 171.16 and remains above both its 20-day and 50-day moving averages.
 
 # Bull case
-The quiet leader of the group at +13.8% over 63 days and +3.2% over 21, holding above both moving averages with RSI14 at 58 and a modest 1-year max drawdown of 10.8%. It is delivering leadership-grade returns with far less path risk than the AI complex.
+XLV has the strongest 63-day return in the supplied sector group at 14.5%, while its 21-day return remains positive at 4.7%. The recent 2.0% five-day decline occurred with 5-day volatility below 21-day volatility, consistent with a potentially orderly pullback.
 
 # Bear case
-Realized vol of 19.6% sits at the 88th percentile — the highest percentile reading in the sleeve — meaning internal churn is unusually elevated for a sector that has already run 13.8% in a quarter. That combination of extended returns and historically high internal volatility is a classic setup for a leadership handoff.
+Twenty-one-day realized volatility is at the 84th percentile, so the intermediate advance has not been as calm as the latest five sessions suggest. Failure to hold the moving-average structure would make the recent decline look more like trend deterioration than consolidation.
 
 # People
-Sector direction is dominated by drug-pricing and reimbursement policy and by the large-cap pharma and managed-care CEOs; no individual is named in the source material (model knowledge).
+No healthcare executive or regulator is named in the supplied material. Drug-pricing policy, clinical results, and regulatory decisions are recurring drivers of healthcare-sector performance. (model knowledge)
 
 # Environment
-Healthcare is benefiting from rotation into non-tech leadership while staples are being sold, an unusual pairing that suggests investors want defensiveness with growth rather than pure defensiveness. No sector-specific catalysts appear in the material.
+Low near-term recession odds and continued economic expansion can support healthcare earnings, while healthcare can also attract defensive flows during periods of uncertainty. (model knowledge) XLP’s weak relative posture indicates that the market is not currently making a broad defensive rotation.

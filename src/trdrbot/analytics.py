@@ -147,6 +147,52 @@ def position_pnl_fraction(symbols: list[str], snap: Snapshot) -> float | None:
     return sum(_f(l.get("unrealized_pl")) for l in legs) / net
 
 
+def filled_legs(symbols: list[str], snap: Snapshot) -> list[Any] | None:
+    """The position's legs priced at what the broker ACTUALLY filled, or None.
+
+    Everything here is derived from `cost_basis`, and deliberately so. It is a
+    signed DOLLAR TOTAL for the leg - the one broker cost field whose units are
+    unambiguous, the one this module already computes every stop against
+    (`position_pnl_fraction` above), and therefore the only one whose meaning
+    is already load-bearing in production rather than newly assumed here.
+    `avg_entry_price` would need a second belief - per-share or per-contract? -
+    that nothing in this repo currently tests, and getting it wrong by the
+    100x contract multiplier would silently corrupt every book cap downstream.
+
+        side  = sign of cost_basis   (paid for it = long, received = short)
+        price = |cost_basis| / (qty x 100)
+
+    which round-trips exactly: `optmath.entry_cost` of these legs is the same
+    signed net that `position_pnl_fraction` divides by.
+
+    None - never a partial answer - when any leg is absent, unparseable, or
+    carries no cost. A max loss recomputed from half a spread is worse than
+    the stated one it would replace.
+    """
+    from . import optmath
+
+    held = snap.by_symbol()
+    out = []
+    for symbol in symbols:
+        row = held.get(symbol)
+        if row is None:
+            return None
+        cost = _f(row.get("cost_basis"))
+        qty = abs(int(_f(row.get("qty"), 0.0)))
+        if cost == 0.0 or qty == 0:
+            return None  # unusable: side and premium are both undecidable
+        leg = optmath.Leg.from_position_leg({
+            "symbol": symbol,
+            "side": "long" if cost > 0 else "short",
+            "qty": qty,
+            "price": abs(cost) / (qty * optmath.CONTRACT_MULTIPLIER),
+        })
+        if leg is None:
+            return None  # not an OCC option symbol (assigned stock, say)
+        out.append(leg)
+    return out or None
+
+
 async def snapshot(tools: dict[str, Any], underlyings: list[str] | None = None,
                    journal: Any = None) -> Snapshot:
     """Gather deterministic state. A failing call degrades, never aborts."""

@@ -117,6 +117,122 @@ async def test_reconcile_confirms_a_fill_and_remembers_the_thesis(
     assert reloaded.elfmem_blocks["attention"][f"blk_{pos.position_id}"] == 1.0
 
 
+def _filled(pos, debit_per_share: float, credit_per_share: float) -> Snapshot:
+    """The broker's view of `pos` after a two-leg vertical fills.
+
+    Shaped the way `position_pnl_fraction` and `filled_legs` actually read a
+    holdings row - `cost_basis` as a signed dollar total, positive for the leg
+    we paid for - rather than the way a test would find convenient.
+    """
+    long_sym, short_sym = pos.symbols
+    qty = pos.legs[0]["qty"]
+    mult = 100
+    return Snapshot(broker_readable=True, broker_positions=[
+        {"symbol": long_sym, "qty": qty, "cost_basis": debit_per_share * qty * mult,
+         "unrealized_pl": 0.0},
+        {"symbol": short_sym, "qty": -qty, "cost_basis": -credit_per_share * qty * mult,
+         "unrealized_pl": 0.0},
+    ])
+
+
+async def test_a_confirmed_fill_reprices_max_loss_from_the_broker_not_the_model(
+    paths, make_position, mem: FakeMem
+):
+    """`max_loss_usd` decided the book caps and had never once been checked
+    against a fill. The model supplied a per-contract max loss, sizing
+    multiplied it, `record_position` stored it, and every later cap summed it.
+
+    Here the fill is worse than claimed: $2.50 net debit on a $8-wide 13-lot is
+    $3,250 at risk, against the $2,171 on the page."""
+    store, journal, wiki, calib = _stores(paths)
+    pos = make_position(status="opening", max_loss_usd=2171.0)
+    store.save(pos)
+
+    await reconcile.reconcile(store, _filled(pos, 4.10, 1.60), journal, mem, wiki, calib)
+
+    reloaded = store.load(pos.position_id)
+    assert reloaded.status == "open"
+    assert reloaded.max_loss_usd == 3250.0, "the book caps still trust the model's figure"
+    row = [r for r in journal_rows(journal, "reconciliation")
+           if r.get("finding") == "max_loss_recomputed"]
+    assert row and row[0]["prior"] == 2171.0 and row[0]["recomputed"] == 3250.0
+
+
+async def test_a_fill_that_matches_the_stated_risk_is_repriced_without_a_finding(
+    paths, make_position, mem: FakeMem
+):
+    """Balanced pressure. The repricing is unconditional - a measured number is
+    never worse than a claimed one - but only a MATERIAL gap is worth a row.
+    A finding on every rounding difference is a finding nobody reads."""
+    store, journal, wiki, calib = _stores(paths)
+    pos = make_position(status="opening", max_loss_usd=2171.0)
+    store.save(pos)
+
+    # $1.67 net debit x 13 x 100 = $2,171: exactly what the page claims.
+    await reconcile.reconcile(store, _filled(pos, 3.30, 1.63), journal, mem, wiki, calib)
+
+    assert store.load(pos.position_id).max_loss_usd == 2171.0
+    assert not [r for r in journal_rows(journal, "reconciliation")
+                if r.get("finding") == "max_loss_recomputed"]
+
+
+async def test_an_incomplete_fill_leaves_the_stated_risk_alone(
+    paths, make_position, mem: FakeMem
+):
+    """Half a spread prices to a max loss that is not this position's. The
+    stated figure is a claim; a number derived from half the legs would be a
+    wrong measurement, which is worse - so the claim stands until the fill is
+    whole."""
+    store, journal, wiki, calib = _stores(paths)
+    pos = make_position(status="opening", max_loss_usd=2171.0)
+    store.save(pos)
+    partial = Snapshot(broker_readable=True, broker_positions=[
+        {"symbol": pos.symbols[0], "qty": 13, "cost_basis": 5330.0, "unrealized_pl": 0.0},
+    ])
+
+    await reconcile.reconcile(store, partial, journal, mem, wiki, calib)
+
+    assert store.load(pos.position_id).max_loss_usd == 2171.0
+    assert not [r for r in journal_rows(journal, "reconciliation")
+                if r.get("finding") == "max_loss_recomputed"]
+
+
+def test_filled_legs_round_trip_to_the_same_net_the_stops_are_measured_against(
+    make_position,
+):
+    """The property the whole derivation rests on: reading a leg back out of
+    `cost_basis` must reproduce the exact net that `position_pnl_fraction`
+    divides by. If these two ever disagreed, a position's risk and its stop
+    would be denominated in different currencies."""
+    from trdrbot import optmath
+    from trdrbot.analytics import filled_legs, position_pnl_fraction
+
+    pos = make_position()
+    snap = _filled(pos, 4.10, 1.60)
+
+    legs = filled_legs(pos.symbols, snap)
+    net_from_legs = optmath.entry_cost(legs)
+    net_from_broker = sum(p["cost_basis"] for p in snap.broker_positions)
+
+    assert net_from_legs == net_from_broker == 3250.0
+    # And the same snapshot is a legitimate input to the P&L base, unchanged.
+    assert position_pnl_fraction(pos.symbols, snap) == 0.0
+
+
+def test_filled_legs_refuses_a_leg_it_cannot_price(make_position):
+    """A zero cost basis leaves side AND premium undecidable. Guessing either
+    produces a confident wrong max loss, which is the failure mode this whole
+    work unit exists to remove - so it returns None and the caller holds."""
+    from trdrbot.analytics import filled_legs
+
+    pos = make_position()
+    snap = Snapshot(broker_readable=True, broker_positions=[
+        {"symbol": s, "qty": 13, "cost_basis": 0.0} for s in pos.symbols
+    ])
+
+    assert filled_legs(pos.symbols, snap) is None
+
+
 async def test_a_phantom_close_resolves_exactly_once(paths, make_position, mem: FakeMem):
     """INV-17 through the real transition guard: two detectors, one resolution.
     Double credit assignment is the failure this guard exists to prevent."""

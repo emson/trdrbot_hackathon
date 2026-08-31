@@ -57,6 +57,10 @@ exit_state:
   - false
   - false
   - false
+  leg_divergence:above:2:
+  - false
+  - false
+  - false
 close_reason: null
 decision_ref: jrn_20260828T173214Z_decadf2cc
 sources:
@@ -65,7 +69,7 @@ sources:
   author: alpaca_news
 generated:
   by: anthropic:claude-opus-5
-  at: '2026-08-29T19:16:28.557348+00:00'
+  at: '2026-08-31T11:01:48.586469+00:00'
 verified:
 - by: trdrbot/reconcile
   at: '2026-08-28T17:39:23.192346+00:00'
@@ -99,6 +103,8 @@ thesis_horizon: '2026-09-03'
 thesis_band_low: 745.0
 thesis_band_high: 766.0
 thesis_drift: -0.009000000000000001
+thesis_vol_view: null
+leg_divergence_count: 0
 attribution: ''
 provenance: agent
 ---

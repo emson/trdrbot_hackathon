@@ -4,7 +4,7 @@ sources:
 - id: src-1
   resource: computed:market_stats
   author: trdrbot/research
-  last_modified: '2026-08-27T06:26:34.057192+00:00'
+  last_modified: '2026-08-31T00:30:41.875786+00:00'
 - id: src-2
   resource: computed:market_stats
   author: trdrbot/research
@@ -18,21 +18,22 @@ sources:
   author: trdrbot/research
   last_modified: '2026-08-28T00:06:31.231251+00:00'
 generated:
-  at: '2026-08-28T00:06:31.231834+00:00'
-status: deprecated
+  at: '2026-08-31T00:30:41.876575+00:00'
+status: stable
+stale_after: '2026-09-01T00:30:41.876577+00:00'
 ---
 
 # What it is
-Nvidia designs the GPUs and accelerated-computing platforms that underpin essentially all frontier AI training and inference workloads. It is the largest single driver of index-level returns in the current regime and the reference asset for the entire AI capex trade.
+Nvidia supplies accelerated-computing hardware and software used in artificial intelligence and other high-performance workloads. (model knowledge) The stock closed at 217.54, below its 20-day average but above its 50-day average.
 
 # Bull case
-Closed 228.17, +5.2% on the week and +20.0% over 21 days on an upbeat fiscal Q2 and early 2028 guidance that has analysts raising targets and calling valuation 'conservative'; one session added roughly $370B of market value, the best day since April 2025. Raymond James has floated a path to $1 trillion in annual sales by 2029, and Huang has said he is '100% confident' frontier AI labs remain customers.
+NVDA gained 11.5% over 21 days, and supplied headlines cite strong guidance, raised price targets, AI-infrastructure investment, product demand, and a potential Hugging Face bid. Remaining above the 50-day average preserves the intermediate uptrend despite recent instability.
 
 # Bear case
-Realized vol is 42.4% on 21 days and 71.9% on 5 days at the 81st percentile — this is a violent repricing, not a durable grind, and 1-year max drawdown of 20.2% shows how far it can retrace. Meta, Google and Amazon continue to develop in-house accelerators, and Nvidia is itself financing parts of the buildout, concentrating both demand and credit risk on one balance sheet.
+Twenty-one-day realized volatility is at the 97th percentile, while 5-day volatility has surged to 82.8%, indicating unusually difficult position management. Price below the 20-day average, mixed earnings-related signals in adjacent technology companies, AI-bubble concerns, and power constraints could impede near-term upside.
 
 # People
-CEO Jensen Huang, whose net worth is reported in the material to have passed Mark Zuckerberg and Larry Ellison, and who is scheduled to speak alongside Musk and Altman at a US-hosted G20 technology meeting. Dan Ives has said the earnings 'should hang in the Louvre'; Bill Gates is cited as urging caution on AI's pace.
+Jensen Huang is the principal Nvidia figure named in the supplied coverage. The headlines connect him to debate about AI employment effects and to a less consequential report concerning his exclusion from Time’s AI influencer list.
 
 # Environment
-The stock sits at the center of an ecosystem — Supermicro, Micron, AMD, Intel, IREN, Marvell, Synopsys — that trades as a single datacenter-demand factor. No Fed easing is priced, so the entire bid is earnings- and capex-narrative driven rather than liquidity driven.
+AI demand and infrastructure spending remain constructive, including the reported $1.1 billion Andreessen Horowitz investment in AI infrastructure and strong Nvidia guidance commentary. The restrictive-rate backdrop and potential September hike are valuation risks for a volatile growth stock.

@@ -11,13 +11,56 @@ from __future__ import annotations
 
 from typing import Any
 
-from . import health, learn
-from .analytics import Snapshot
+from . import health, learn, optmath
+from .analytics import Snapshot, filled_legs
 from .calibration import CalibrationStore
 from .elfmem_adapter import ElfmemAdapter
 from .journal import Journal
-from .positions import PositionStore
+from .positions import Position, PositionStore
 from .wiki import Wiki
+
+
+#: How far a refilled max loss must move before it is worth a journal row.
+#: A starting point, not a measurement - the same honest footing as
+#: exit_rules' CORROBORATION_FRACTION. The absolute floor keeps a near-zero
+#: prior from making every rounding difference a finding; the relative one
+#: keeps a large position from flagging on cents. Tune from the
+#: `max_loss_recomputed` rows themselves once there are enough to look at.
+REPRICE_REPORT_USD, REPRICE_REPORT_SHARE = 50.0, 0.05
+
+
+def _reprice_max_loss(pos: Position, snap: Snapshot, journal: Journal) -> None:
+    """Recompute `max_loss_usd` from the fill, at the moment it is confirmed.
+
+    Until now this number was whatever the MODEL said - `size_position` derived
+    it from a per-contract max loss the model itself supplied, and
+    `record_position` stored it. Nothing ever checked it against what the
+    broker actually filled. It is not a display figure: `tick` sums it across
+    open positions to enforce the portfolio and per-underlying caps, so a
+    position whose real risk exceeds its stated risk silently buys headroom
+    for the NEXT position too.
+
+    Once per position, here, because this is the one moment the fill is both
+    complete and freshly observed. A failure to price it leaves the stated
+    figure alone rather than overwriting it with a worse guess.
+    """
+    legs = filled_legs(pos.symbols, snap)
+    if legs is None:
+        return
+    try:
+        _, recomputed = optmath.max_profit_loss(legs)
+    except optmath.MultiExpiryError:
+        return  # a calendar: refused here for the same reason it is everywhere
+    if recomputed is None:
+        return  # unbounded - `None` is the honest answer and must not become a number
+    recomputed = round(abs(recomputed), 2)
+    prior = pos.max_loss_usd
+    if prior is None or abs(recomputed - prior) > max(
+            REPRICE_REPORT_USD, REPRICE_REPORT_SHARE * abs(prior)):
+        journal.append("reconciliation", position_id=pos.position_id,
+                       finding="max_loss_recomputed", prior=prior, recomputed=recomputed,
+                       detail="risk repriced from the fill; the book caps sum this field")
+    pos.max_loss_usd = recomputed
 
 
 def _working_symbols(orders: list[dict[str, Any]]) -> set[str]:
@@ -78,6 +121,8 @@ async def reconcile(
             # is the whole point of the `opening` state.
             if present:
                 pos.status = "open"
+                if len(present) == len(syms):
+                    _reprice_max_loss(pos, snap, journal)
                 store.save(pos)
                 journal.append("reconciliation", position_id=pos.position_id,
                                finding="fill_confirmed", legs=present)
