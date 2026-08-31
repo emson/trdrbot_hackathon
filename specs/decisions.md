@@ -4266,3 +4266,84 @@ limitation: research runs while the market is closed, so there is no chain to ch
 
 **Verified:** 490 default tests (+21), every fix revert-verified before its issue was struck,
 both scaffolds re-run with zero violations, `trdrbot health` 0 problems against live data.
+
+---
+
+## D-096: Phase 7 - the divergence sweep, and the trap the review found
+**Date:** 2026-08-31
+**Status:** accepted
+**Context:** A stress simulation of the live book asked one question - where could this lose an
+unexpected amount? - and the worst answer was scheduled to run within days, on the position
+actually open (a 13-lot SPY 766/758 bear put spread expiring 2026-09-03, one day before the
+competition deadline, carrying `time_stop days_before_expiry: 0`).
+
+The chain: a calendar rule reads a DATE and nothing else, so it fires on the 00:15 tick of expiry
+day with the market shut (I-56). The close was submitted anyway, failed, and `transition` had
+already moved the position to `closing` - a status `run()` fetched on every later tick and then
+skipped, forever, on `status != "open"` (I-57). One failed call cost the position its stop, its
+target and any second attempt at once. Riding unmanaged to expiry between the strikes, the long
+put auto-exercises into ~1,300 short SPY shares, which reconcile would journal as an orphan and
+otherwise ignore (I-61) - roughly $1M of notional, into a payrolls print, against a recorded max
+loss of $2,171.
+
+**The unifying read.** Eight findings, one shape, and it is I-55's: something the system BELIEVES
+(a status, a risk figure, a count, a distribution) had silently diverged from what is true, and
+nothing looked again. That framing is what made the fix smaller than the finding list. An earlier
+draft treated them as eight independent patches; read as one class they are six, and two of those
+were already-built mechanisms that simply were not wired to a second call site.
+
+**Choice.** Detect the divergence where it is first observable, then either close it (when doing
+so is plumbing) or journal it loudly (when closing it silently would erase something a human or
+the Coach needs to see). Concretely:
+
+`closing` becomes a second candidate status rather than a dead end - retried, never re-evaluated,
+because the decision to close is made once and finishing it is not a fresh judgment. Both paths
+share ONE close tail, so the retry cannot drift from the thing it retries. Three designs were
+weighed: two parallel loops (rejected, duplicates the close-and-finalize logic), deleting the
+`closing` state entirely so a failure re-fires naturally (rejected - it destroys the only durable
+signal that a close is in flight, which I-58's count depends on, and discards the `close_reason`
+that lets the retry finish the ORIGINAL decision), and the unified loop that shipped.
+
+The leg filter is what stops the retry becoming an infinite loop, and is the non-obvious part. A
+`leg_divergence` close is BY DEFINITION missing a leg, so closing every recorded symbol always
+fails against a real broker - which, once `closing` is retried, would retry forever. Broker truth
+decides which legs to send, and INV-19's actual purpose survives: no SURVIVING leg is left behind.
+When the holdings read itself failed, absence proves nothing (I-55) and every leg is attempted -
+a close against a leg already gone errors harmlessly, a leg skipped on bad information is real
+exposure left unattended. The asymmetry decides it, and it is asserted in both directions.
+
+`max_loss_usd` is repriced from the fill (I-59), derived from `cost_basis` and nothing else.
+That was a deliberate narrowing: `avg_entry_price` would have needed a second belief - per share
+or per contract? - that nothing in this repo tests, where being wrong by the 100x multiplier
+corrupts the very caps the work protects. `cost_basis` is a signed dollar total, it is what
+`position_pnl_fraction` already measures every stop against, and the round trip is pinned by its
+own test so a position's risk and its stop can never end up denominated differently.
+
+Orphans are adopted as ordinary positions (I-61), grouped by `(underlying, expiry)` so a broken
+spread is closed together rather than legged out of. The risk figure and thesis are left EMPTY,
+which makes `health` report every adopted orphan as needing a human - the honest state: watched,
+not understood. Inventing a number there would be D-038's absence-as-zero run backwards.
+
+**Why WU-7.4 is not a guardrail (D-009).** It is the one fix that could be read as one, so:
+nothing is blocked, the position is recorded exactly as given, and no message reaches the model's
+own turn. It vetoes no view - the agent may deliberately trade a size sizing did not compute, and
+D-009 gives it that latitude. What it holds against each other is the agent's OWN two tool calls,
+and what it prevents is *silent* divergence between the number the caps were computed from and the
+number actually at risk - an unintended blast radius, not a considered choice. Same category as
+D-046's `close_all_positions` redirect and the reachability warnings `record_position` already
+emits. The blocking version was considered and rejected on exactly this reasoning.
+
+**What this phase deliberately did NOT do.** `_vacuity_check` and `discovery.py` still call the
+raw bootstrap: D-089's own discipline is apply where measured, validate forward, then extend, and
+neither has had its forward pass. `ASSUMED_BETA` stays 1.0 - understating a single name's
+exposure is a real defect (I-3), but any replacement number would be taste rather than
+measurement. Two contract tests ship SKIPPED and say why in their own docstrings; one places a
+real order, the other needs the market shut, and neither belongs in an automated run against a
+live book inside the competition window. That leaves the naked-short question genuinely open: it
+is not yet known whether the broker is a second backstop against unbounded loss or whether
+`size_position` - which the agent can simply skip - is the only one.
+
+**Verified:** 515 default tests (+25), 19 contract tests collected (+3); every fix
+revert-verified before its issue was struck; the real position page driven end to end through the
+new path offline (deferred while shut, retried while failing, flat once the broker answered);
+`trdrbot health` shows no new findings against live data.
