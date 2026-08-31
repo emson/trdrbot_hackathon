@@ -431,6 +431,59 @@ def test_record_position_warns_when_simulate_was_skipped():
     assert pos.thesis_claim == ""  # the free-text `thesis` arg is NOT thesis_claim
 
 
+def test_a_thesis_stop_beyond_the_far_strike_is_named_as_unprotective(tmp_path):
+    """Found by the harmony scaffold on the LIVE book: a 766/758 bear put
+    spread carrying `underlying_stop above 776`. Max loss is fully realised at
+    766, so the stop sat 10 points past the point of no further damage - and
+    satisfied health's 'has an underlying stop' check the whole time, which is
+    exactly what made it invisible. The position read as protected because it
+    was watched.
+
+    The sibling of _unreachable_rules: that catches a rule that can never fire,
+    this catches one that fires where nothing is left to save."""
+    from trdrbot.calibration import CalibrationStore
+
+    store = PositionStore(tmp_path)
+    rec = local_tools.build_record_position(
+        store, "dec_h", shared={}, calibration=CalibrationStore(tmp_path / "c.json"))
+    legs = [{"symbol": "SPY260903P00766000", "side": "buy", "qty": 13},
+            {"symbol": "SPY260903P00758000", "side": "sell", "qty": 13}]
+
+    late = rec.func(underlying="SPY", strategy="bear_put_spread", legs=legs,
+                    thesis="SPY rolls over", confidence=0.6, expiry="2026-09-03",
+                    underlying_stop_above=776.0)
+    assert "100% of max loss is ALREADY taken" in late
+    assert "never limit one" in late
+
+    # ...and the same rule INSIDE the strikes is protection, so it is silent.
+    inside = rec.func(underlying="SPY", strategy="bear_put_spread", legs=legs,
+                      thesis="SPY rolls over", confidence=0.6, expiry="2026-09-03",
+                      underlying_stop_above=762.0)
+    assert "ALREADY taken" not in inside, "a protective stop was warned about"
+
+
+def test_a_thesis_horizon_after_expiry_is_named_before_it_corrupts_attribution(tmp_path):
+    """The position is force-closed before its own claim can resolve, and
+    attribution scores the unresolved view as WRONG - teaching the agent to
+    distrust a view that may have been right. A corrupted learning signal is
+    worse than a bad trade, because it persists."""
+    from trdrbot.calibration import CalibrationStore
+
+    store = PositionStore(tmp_path)
+    shared = local_tools.SharedContext()
+    shared.thesis = experiments.Thesis(
+        claim="SPY below 766", underlying="SPY", horizon="2026-09-10",
+        drift=-0.009, band_high=766.0)
+    rec = local_tools.build_record_position(
+        store, "dec_h", shared=shared, calibration=CalibrationStore(tmp_path / "c.json"))
+
+    msg = rec.func(underlying="SPY", strategy="bear_put_spread",
+                   legs=[{"symbol": "SPY260903P00766000", "side": "buy", "qty": 1}],
+                   thesis="SPY rolls over", confidence=0.6, expiry="2026-09-03")
+
+    assert "is AFTER expiry" in msg and "7 day(s) before" in msg
+
+
 def _record_with_sizing(tmpdir, *, sized_contracts: int, leg_qty: int):
     """Run the REAL record_position tool with a real SizingStash in shared.
 

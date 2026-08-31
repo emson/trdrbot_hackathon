@@ -354,6 +354,76 @@ def _leg_qty(leg: dict[str, Any]) -> int:
         return 0
 
 
+#: How much of max loss may already be locked in at a thesis stop's own level
+#: before that stop stops being protection. At 0.99 the payoff is flat: the
+#: level can only ever confirm a loss that is already fully taken.
+STOP_TOO_LATE_SHARE = 0.99
+
+
+def _late_underlying_stops(legs: list[dict[str, Any]], below: float | None,
+                           above: float | None) -> list[str]:
+    """Thesis stops that fire only after the payoff has already bottomed out.
+
+    `_unreachable_rules` catches a mark rule that can never fire. This is its
+    sibling one step out: a rule that fires reliably, on the right signal, at a
+    price where there is nothing left to save. A vertical's payoff is FLAT
+    beyond its far strike, so a stop placed out there is outside the range
+    where price still moves P&L at all.
+
+    Found by the harmony scaffold on the live book: a 766/758 bear put spread
+    carrying `underlying_stop above 776`. Max loss is fully realised at 766, so
+    the stop sat 10 points past the point of no further damage - and satisfied
+    `health`'s "has an underlying stop" check the whole time, which is what
+    made it invisible. The position read as protected because it was watched.
+
+    Reported, never blocked (D-009). A stop out there is not senseless - it
+    still closes a position whose view has clearly failed, which frees capital
+    and ends the theta bleed. It is just not PROTECTION, and the difference is
+    the agent's to weigh once it is stated.
+    """
+    parsed = [optmath.Leg.from_position_leg(leg) for leg in legs]
+    if not parsed or not all(parsed):
+        return []
+    out: list[str] = []
+    for level, direction in ((below, "below"), (above, "above")):
+        if level is None:
+            continue
+        try:
+            locked = optmath.loss_locked_at(parsed, float(level))
+        except optmath.MultiExpiryError:
+            return []  # a calendar: payoff-at-expiry says nothing useful here
+        if locked is not None and locked >= STOP_TOO_LATE_SHARE:
+            out.append(
+                f"underlying_stop {direction} {float(level):g} sits where "
+                f"{locked:.0%} of max loss is ALREADY taken - the payoff is flat "
+                f"there, so this level can only confirm a loss, never limit one. "
+                f"For protection the level has to sit inside the strikes, where "
+                f"price still moves P&L"
+            )
+    return out
+
+
+def _horizon_outlives_expiry(horizon: str, expiry: str) -> str | None:
+    """A view that resolves after the trade is gone cannot be tested by it.
+
+    The position is force-closed at expiry (or at the deadline, INV-26), the
+    claim is still unresolved, and attribution scores that as the VIEW being
+    wrong - when the real error was choosing an expiry too short to hold it.
+    That is a corrupted learning signal, not just a bad trade: it teaches the
+    agent to distrust a view that may have been right.
+    """
+    try:
+        h, e = date.fromisoformat(str(horizon)), date.fromisoformat(str(expiry))
+    except (ValueError, TypeError):
+        return None
+    if h <= e:
+        return None
+    return (f"thesis_horizon {horizon} is AFTER expiry {expiry} - the position is "
+            f"closed {(h - e).days} day(s) before its own claim can resolve, and "
+            f"attribution will score the unresolved view as wrong. Either shorten "
+            f"the horizon or buy the expiry that outlives it")
+
+
 def build_record_position(
     store: PositionStore,
     decision_ref: str,
@@ -606,6 +676,17 @@ def build_record_position(
                     f"underlying_stop_below/_above at your invalidation level, or a "
                     f"time_stop."
                 )
+        # A stop that fires reliably, on the right signal, where nothing is left
+        # to save. Needs no matched structure - it is payoff GEOMETRY, derived
+        # from the OCC strikes on the legs just recorded, so it still speaks
+        # when simulate_experiments was skipped.
+        for late in _late_underlying_stops(legs, underlying_stop_below, underlying_stop_above):
+            note += f" WARNING - {late}."
+
+        stale_view = _horizon_outlives_expiry(pos.thesis_horizon, expiry)
+        if stale_view:
+            note += f" WARNING - {stale_view}."
+
         if thesis_missing:
             note += (
                 " NOTE: no thesis on file - simulate_experiments was not called "

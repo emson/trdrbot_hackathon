@@ -284,6 +284,39 @@ def max_profit_loss(legs: Iterable[Leg]) -> tuple[float | None, float | None]:
     return (max_profit, max_loss)
 
 
+def loss_locked_at(legs: Iterable[Leg], level: float) -> float | None:
+    """How much of the worst case the payoff has already taken at `level`.
+
+    1.0 means the payoff is FLAT from here on down: at this price the position
+    is already at its worst, and no further move can cost anything more.
+
+    This is what decides whether a thesis stop can still protect capital. A
+    vertical's payoff is flat beyond its far strike, so a stop placed out there
+    fires only after 100% of max loss is locked - it can confirm a loss, never
+    prevent one, while still satisfying every check that asks whether the
+    position HAS an underlying stop.
+
+    Price-independent by construction: entry cost is a constant offset shared
+    by both terms, so a leg set carrying no premiums (the shape a recorded
+    position has) gives the same answer as one carrying real ones. None when
+    the worst case is unbounded, where the question does not apply.
+    """
+    legs = list(legs)
+    if not legs:
+        return None
+    priced = _Priced(legs)
+    _, ml = max_profit_loss(legs)
+    if ml is None:
+        return None  # unbounded: there is no "already at the worst"
+    here = priced.pnl(level)
+    floor = min(priced.pnl(p) for p in _critical_points(legs) + [level])
+    peak = max(priced.pnl(p) for p in _critical_points(legs) + [level])
+    span = peak - floor
+    if span <= 0:
+        return None  # a flat payoff everywhere: no level is more protective
+    return min(1.0, max(0.0, (peak - here) / span))
+
+
 def breakevens(legs: Iterable[Leg], *, tol: float = 0.01) -> list[float]:
     """Terminal prices where P&L crosses zero. Bisection between sign changes."""
     legs = list(legs)
