@@ -4347,3 +4347,53 @@ is not yet known whether the broker is a second backstop against unbounded loss 
 revert-verified before its issue was struck; the real position page driven end to end through the
 new path offline (deferred while shut, retried while failing, flat once the broker answered);
 `trdrbot health` shows no new findings against live data.
+
+---
+
+## D-097: A trade blog - one markdown story per position, for outside review
+**Date:** 2026-08-31
+**Status:** accepted
+**Context:** The journal and the position pages are the machine record - complete, but not
+written for a human reviewer, and not meant to be. For the hackathon submission specifically,
+judges need to see the trades, the theses chosen and discarded, the reasoning, and the sources
+behind each one, without grepping `journal.jsonl`. The ask was for one markdown document per
+trade, written the moment it's triggered, with full metadata, destined for an HTML pass later.
+
+**Choice.** Two hooks, one file per position, `data/blog/<position_id>.md`. `write_entry` fires
+at `record_position` time with everything that cycle already computed - the position's own
+fields, the matched `SimStructure` against every rejected alternative (D-037: derived, never
+re-declared), the sources on the position page, and the agent's own `summary_text`, verbatim -
+the same text the journal's `execution` row stores, never re-summarized. `write_outcome` fires
+from whichever detector resolves the position first (an automated exit-rule close, or reconcile
+finding it gone) and **appends** to the same file rather than writing a second one, so a reader
+gets the whole story - chosen, why, and how it went - in one place.
+
+The `RecordedTrade` capture (`local_tools.SharedContext.recorded_trades`) is the seam that makes
+this cheap: `record_position` already computes the matched structure and still has every
+rejected one in scope at that exact line, so capturing it is one append, not a second pass over
+anything.
+
+**Not a guardrail, not on the fast path.** Both functions are synchronous, plain file I/O
+(matching `PositionStore.save`), and swallow their own exceptions - a `degraded` journal row and
+a print, never a raise. Publishing a trade's story must never be able to take the tick down with
+it, the same discipline `learn.guarded` already applies to credit assignment.
+
+**What was deliberately left out.** No blog *index* page, no HTML rendering - both were named as
+"later." No attempt to programmatically extract *why* each alternative was rejected as separate
+structured fields: that reasoning lives only in the model's prose, and parsing it out would be
+fragile where the honest answer is to publish the reasoning whole and let it speak for itself.
+The comparison table carries the facts (cost, max profit/loss, payoff ratio); the prose carries
+the argument.
+
+**A pre-existing test smell this surfaced:** two tests passed `shared={}` to `record_position` -
+a bare dict, not the real `SharedContext`. It worked only because an empty dict is falsy in
+Python, so `if shared else None` silently treated it as "no shared context" throughout every
+existing `shared.<attr>` access. `RecordedTrade`'s stash uses `is not None` (correctly - an
+empty-but-real `SharedContext()` should still be used), which exposed the shortcut. Fixed at the
+tests, not the code: both now pass a real `SharedContext()`, the honest form.
+
+**Verified:** 525 tests passed (+8, `tests/test_blog.py`), mutation-verified (reverting
+`local_tools.py`'s wiring breaks `blog.py`'s own imports, confirming the tests exercise the real
+seam, not a stand-in). The real open SPY position driven through both `write_entry` and
+`write_outcome` end to end against a copy of the live wiki data - output read back and confirmed
+legible, not just schema-valid.

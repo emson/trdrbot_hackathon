@@ -23,6 +23,10 @@ class Paths:
     journal: Path
     wiki: Path
     state: Path
+    #: One markdown story per position, for outside review - not the machine
+    #: record (that's the journal/positions), a human-readable one meant to be
+    #: published (D-097).
+    blog: Path
 
     @classmethod
     def build(cls, root: Path) -> Paths:
@@ -36,6 +40,7 @@ class Paths:
             journal=data / "journal.jsonl",
             wiki=data / "wiki",
             state=data / "state",
+            blog=data / "blog",
         )
 
     def ensure(self) -> None:
@@ -46,6 +51,7 @@ class Paths:
             self.wiki / "positions",
             self.wiki / "context",
             self.state,
+            self.blog,
         ):
             p.mkdir(parents=True, exist_ok=True)
         self.journal.touch(exist_ok=True)

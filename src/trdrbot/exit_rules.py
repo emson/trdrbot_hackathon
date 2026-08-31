@@ -27,9 +27,10 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
+from pathlib import Path
 from typing import Any
 
-from . import health, ids, learn, mcp_client, optmath
+from . import blog, health, ids, learn, mcp_client, optmath
 from .analytics import Snapshot, _f, position_pnl_fraction
 from .calibration import CalibrationStore
 from .elfmem_adapter import ElfmemAdapter
@@ -452,6 +453,7 @@ async def run(
     wiki: Wiki,
     *,
     calibration: CalibrationStore | None = None,
+    blog_dir: Path | None = None,
     verbose: bool = True,
 ) -> list[str]:
     """Evaluate every still-open position and close those that trigger.
@@ -554,6 +556,9 @@ async def run(
                 learn.on_resolution(pos, store, mem, wiki, journal, pnl_fraction=pnl,
                                     calibration=calibration),
                 journal, stage="on_resolution", position_id=pos.position_id)
+            if blog_dir is not None:
+                blog.write_outcome(pos, close_reason=reason, why=why, pnl_fraction=pnl,
+                                   blog_dir=blog_dir, journal=journal)
         triggered.append(pos.position_id)
 
     # Heartbeat, same reason as housekeeping's `interim_run` (D-074): the health

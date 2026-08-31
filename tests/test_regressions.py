@@ -421,7 +421,8 @@ def test_record_position_warns_when_simulate_was_skipped():
     d = Path(tf.mkdtemp())
     store = PositionStore(d)
     calib = CalibrationStore(d / "c.json")
-    rec = local_tools.build_record_position(store, "dec_z", shared={}, calibration=calib)
+    rec = local_tools.build_record_position(
+        store, "dec_z", shared=local_tools.SharedContext(), calibration=calib)
     msg = rec.func(underlying="SPY", strategy="x",
                    legs=[{"symbol": "A", "side": "sell", "qty": 1}],
                    thesis="prose the model wrote, but never wired to shared",
@@ -445,7 +446,7 @@ def test_a_thesis_stop_beyond_the_far_strike_is_named_as_unprotective(tmp_path):
 
     store = PositionStore(tmp_path)
     rec = local_tools.build_record_position(
-        store, "dec_h", shared={}, calibration=CalibrationStore(tmp_path / "c.json"))
+        store, "dec_h", shared=local_tools.SharedContext(), calibration=CalibrationStore(tmp_path / "c.json"))
     legs = [{"symbol": "SPY260903P00766000", "side": "buy", "qty": 13},
             {"symbol": "SPY260903P00758000", "side": "sell", "qty": 13}]
 

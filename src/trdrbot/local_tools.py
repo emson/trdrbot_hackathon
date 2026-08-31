@@ -88,6 +88,24 @@ class SharedContext:
     ranked: list[tuple[str, dict[str, Any]]] = field(default_factory=list)
     structures: list[SimStructure] = field(default_factory=list)
     sizing: SizingStash | None = None
+    #: One entry per successful record_position call this cycle - the trade
+    #: blog's whole input, captured here rather than re-derived, because
+    #: `record_position` already computed the matched structure and still has
+    #: every rejected one in scope (D-097).
+    recorded_trades: list[RecordedTrade] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class RecordedTrade:
+    """A position `record_position` just wrote, with the sibling structures it
+    was chosen over. `matched` is None when nothing in `structures` matched
+    the recorded legs (sizing was skipped, or the model recorded something it
+    never simulated) - the blog still gets written, honestly missing that part."""
+
+    position: Position
+    matched: SimStructure | None
+    alternatives: list[SimStructure]
+    confidence: float
 
 
 
@@ -633,6 +651,11 @@ def build_record_position(
             except Exception as exc:  # noqa: BLE001
                 print(f"[ledger] mark_traded failed: {exc!r}")
         path = store.save(pos)
+        if shared is not None:
+            shared.recorded_trades.append(RecordedTrade(
+                position=pos, matched=matched, confidence=confidence,
+                alternatives=[st for st in shared.structures if st is not matched],
+            ))
         if calibration is not None:
             calibration.record(pos.position_id, confidence, pos.underlying)
         # Say exactly which signals are enforced. The failure this guards

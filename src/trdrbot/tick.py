@@ -34,6 +34,7 @@ from langgraph.prebuilt import ToolNode, create_react_agent
 
 from . import (
     analytics,
+    blog,
     compact,
     competence,
     exit_rules,
@@ -470,10 +471,11 @@ async def _run_tick(
             # rather than a print in an unattended run (I-55).
             journal=journal,
         )
-        recon = await reconcile.reconcile(store, snap, journal, mem, wiki, calib)
+        recon = await reconcile.reconcile(store, snap, journal, mem, wiki, calib,
+                                          blog_dir=config.paths.blog)
         triggered = await exit_rules.run(
             store, snap, tools, journal, config.deadline, mem, wiki,
-            calibration=calib, verbose=verbose
+            calibration=calib, blog_dir=config.paths.blog, verbose=verbose
         )
 
         if verbose:
@@ -770,6 +772,17 @@ async def _run_tick(
             health.degraded(journal, "usage", "no calls recorded for this cycle",
                             llm_turns=llm_turns, since=decide_started_at,
                             decision_ref=decision_id)
+
+        # One trade-blog entry per position record_position wrote this cycle
+        # (D-097) - everything it needs was already computed by simulate/size/
+        # record, so this is formatting, not a second decision. Advisory: a
+        # publishing failure must never be able to take the tick down with it.
+        for trade in shared.recorded_trades:
+            blog.write_entry(
+                trade, summary_text=summary_text, decision_ref=decision_id, batch=batch,
+                model=config.model, served=served,
+                blog_dir=config.paths.blog, journal=journal,
+            )
 
         inbox.archive(items)
 

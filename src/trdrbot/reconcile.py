@@ -9,9 +9,10 @@ set excludes them by construction rather than by an extra check.
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
-from . import health, ids, learn, optmath
+from . import blog, health, ids, learn, optmath
 from .analytics import Snapshot, _f, filled_legs
 from .calibration import CalibrationStore
 from .elfmem_adapter import ElfmemAdapter
@@ -81,7 +82,7 @@ def _working_symbols(orders: list[dict[str, Any]]) -> set[str]:
 
 async def reconcile(
     store: PositionStore, snap: Snapshot, journal: Journal, mem: ElfmemAdapter, wiki: Wiki,
-    calibration: CalibrationStore | None = None,
+    calibration: CalibrationStore | None = None, *, blog_dir: Path | None = None,
 ) -> dict[str, list[str]]:
     """Diff broker holdings against our open position pages."""
     held = snap.by_symbol()
@@ -160,6 +161,11 @@ async def reconcile(
                                         calibration=calibration),
                     journal, stage="on_resolution", position_id=pos.position_id)
                 learn_errors += 0 if ok else 1
+                if blog_dir is not None:
+                    blog.write_outcome(
+                        pos, close_reason="external",
+                        why="in our records, absent at broker - no P&L observed at close",
+                        pnl_fraction=None, blog_dir=blog_dir, journal=journal)
                 result["phantom"].append(pos.position_id)
         elif present and len(present) != len(syms) and not pending:
             # COUNT, do not close. The remainder of a broken spread can be an
