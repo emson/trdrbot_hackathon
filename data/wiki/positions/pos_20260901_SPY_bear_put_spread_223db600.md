@@ -4,7 +4,7 @@ position_id: pos_20260901_SPY_bear_put_spread_223db600
 status: open
 interim_band: 0
 max_loss_usd: 2052.0
-last_pnl_pct: -0.27485380116959063
+last_pnl_pct: -0.26900584795321636
 greeks_at_entry:
   delta_shares: -310.73
   delta_dollars: -236886.05
@@ -65,7 +65,7 @@ sources:
   author: muse
 generated:
   by: openai:gpt-5.6-sol | anthropic:claude-opus-5 | openai:gpt-5
-  at: '2026-09-01T15:52:43.614079+00:00'
+  at: '2026-09-01T15:57:46.370291+00:00'
 verified:
 - by: trdrbot/reconcile
   at: '2026-09-01T14:11:41.095462+00:00'
