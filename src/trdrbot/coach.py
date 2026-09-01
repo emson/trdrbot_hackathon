@@ -139,7 +139,7 @@ def arms(cfg: Any, lever_name: str, *, seed_text: str) -> Arms:
         return Arms(incumbent=Variant(SEED_VARIANT_ID, seed_text))
 
 
-def record_trial(cfg: Any, exp_id: str, *, run_nonce: int,
+def record_trial(cfg: Any, exp_id: str, *, run_nonce: int | str,
                  incumbent: dict[str, Any], challenger: dict[str, Any]) -> None:
     """Append one paired result. Never raises."""
     try:

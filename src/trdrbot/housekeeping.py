@@ -208,9 +208,37 @@ async def run(
     # why we are in a trade is the worst possible thing to retire mid-trade.
     swept: dict[str, list[str]] = {"deprecated": [], "protected": []}
     try:
+        # A LIVE CLAIM protects its dossier, not just a live POSITION (D-103).
+        # `CompanyDossier.perishable_after_hours` is 24, so a name researched
+        # yesterday is tombstoned today - and deprecation is what removes a
+        # concept from the muse's sampling pool. Holding was the only shield,
+        # so every name the system had an open, unresolved thesis about lost
+        # its page the next day and could never be collided again. Measured:
+        # 25 of 35 dossiers deprecated, while the ledger carried unresolved
+        # theses on 12 names. The system was forgetting what it was still
+        # betting on.
+        #
+        # Tombstoning is still right for a name we have no claim on: the DATA
+        # really is stale. This says only that an open claim is a reason to
+        # keep the page and refresh it, which is what `research` now does.
+        # Its own Ledger handle: `book` above is bound inside the `if tools:`
+        # branch, so depending on it would make the sweep's protection quietly
+        # conditional on the forecast resolver having run.
+        from . import ledger as _led
+        _book = _led.Ledger(config.paths.state / "ledger.jsonl")
+        # STATED claims only. A muse candidate is registered before any gate
+        # runs (D-052's trial count), so protecting on "any unresolved trial"
+        # would shield 37 of 37 names and turn the sweep into a no-op - the
+        # bug class this repo keeps finding, introduced by the fix for another
+        # one. `probability_stated` is the ledger's own word for a claim that
+        # survived every gate and that the system therefore stands behind.
+        # Measured: 12 dossiers protected, 23 still tombstoned.
+        claimed = {f"research/{e.underlying.upper()}" for e in _book.all()
+                   if e.outcome is None and e.scoreable() and e.underlying
+                   and e.probability_stated}
         held = {f"research/{p.underlying.upper()}"
                 for p in store.open_positions() if p.underlying}
-        swept = wiki.sweep(protected=held)
+        swept = wiki.sweep(protected=held | claimed)
         if swept["deprecated"]:
             journal.append("wiki_sweep", deprecated=swept["deprecated"],
                            protected=swept["protected"])

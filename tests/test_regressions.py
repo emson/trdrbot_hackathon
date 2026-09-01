@@ -1077,12 +1077,13 @@ def test_the_sizer_names_the_constraint_that_set_the_size():
     # EXPLORE is the fixed allocation: the floor IS the answer, not a fallback.
     assert _size_tier(explore, 0).binding == "exploration floor"
     # All three outcomes of the fraction decision, in Kelly mode. Payoffs chosen
-    # to land either side of the MATURE rung's own floor (5.5%) and ceiling
-    # (12.5%); the middle case is the one that matters, because a positive edge
+    # to land either side of the MATURE rung's own floor (book_cap x SEED_SHARE)
+    # and ceiling (12.5%); the middle case is the one that matters, because a
+    # positive edge
     # whose Kelly lands BELOW the floor is what every position this book has
     # actually opened did.
     assert _size_tier(mature, 40, mp=1100.0, ml=-1000.0).binding == "Kelly"
-    assert _size_tier(mature, 40, mp=840.0, ml=-1200.0).binding == "exploration floor"
+    assert _size_tier(mature, 40, mp=720.0, ml=-1200.0).binding == "exploration floor"
     assert _size_tier(mature, 40, mp=4000.0, ml=-500.0).binding == "position ceiling"
     # A payoff too rich to refuse but too thin to size: the fraction buys less
     # than one contract, and indivisibility - not the fraction - sets the size.
@@ -1453,6 +1454,56 @@ def test_the_book_leads_with_defined_risk_not_with_a_linear_delta():
     # position a concentration finding.
     assert "DIRECTIONAL" not in out, "one name cannot be concentrated ACROSS names"
     assert "this IS the position" in out, "but it must still say what it is"
+
+
+def test_a_ready_hunt_is_not_starved_by_a_latched_material_move():
+    """I-72 / D-103. `MATERIAL_MOVE` is measured against `entry_spot`, so once a
+    held name has drifted 0.4% the review rung is satisfied FOREVER and fires on
+    every tick - the ladder never reached the hunt again while anything was
+    open. Measured: 49 `position_review` items against 9 `hunt` rows, and 22 muse
+    opportunities expiring unread at 3,100-3,800 minutes old.
+
+    Both directions (admission rule 4): the hunt wins when it is genuinely
+    ready, and loses to the oversight guarantee and to a full book."""
+    from datetime import UTC, datetime, timedelta
+    from types import SimpleNamespace
+
+    from trdrbot import idle
+
+    now = datetime.now(UTC)
+    held = [SimpleNamespace(status="open", underlying="SPY", entry_spot=100.0)]
+    drifted = {"SPY": 101.0}          # +1.0%, well past MATERIAL_MOVE
+
+    def act(**kw):
+        base = dict(market_open=True, positions=held, underlying_prices=drifted,
+                    last_decision_at=now - timedelta(minutes=5),
+                    last_hunt_at=now - timedelta(minutes=999),
+                    open_risk_usd=2_000.0, equity=100_000.0,
+                    risk_cap_fraction=0.35, minutes_to_close_=120.0)
+        return idle.decide(**{**base, **kw})
+
+    # A latched move must not block a cooled hunt with budget to spend.
+    assert act().level == "hunt"
+    # ...but the oversight guarantee still outranks it.
+    assert act(last_decision_at=now - timedelta(minutes=200)).level == "review"
+    # ...and a hunt that is not ready yields the rung back to the review.
+    assert act(last_hunt_at=now - timedelta(minutes=5)).level == "review"
+    # ...as does a book with no budget left to deploy.
+    assert act(open_risk_usd=35_000.0).level == "review"
+
+
+def test_the_hunt_cooldown_stays_longer_than_the_oversight_interval():
+    """The invariant that makes the test above SAFE, pinned separately because
+    it is a relationship between two constants either of which someone may tune.
+
+    A ready hunt is allowed to defer a material-move review only because the
+    silence rule fires within 90 minutes regardless, while a hunt cannot repeat
+    for 120. Invert them and a run of hunts could postpone oversight
+    indefinitely."""
+    from trdrbot import idle
+    assert idle.HUNT_COOLDOWN_MIN > idle.MAX_SILENCE_MIN, (
+        f"a hunt every {idle.HUNT_COOLDOWN_MIN}min could starve a review due "
+        f"every {idle.MAX_SILENCE_MIN}min")
 
 
 def test_no_function_shadows_a_callable_it_imports():

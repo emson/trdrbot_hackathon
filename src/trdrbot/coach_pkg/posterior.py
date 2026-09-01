@@ -124,6 +124,9 @@ def tally(cfg: Any, exp_id: str) -> Tally | None:
               incumbent=str(opened.get("incumbent", "")),
               challenger=str(opened.get("challenger", "")),
               opened_ts=str(opened.get("ts", "")))
+    # The key must be unique over the EXPERIMENT'S LIFE, not over a day: this
+    # dedupe is global, so a per-day counter made every nonce after day one a
+    # replay and voided it (D-103). `muse` now sends "YYYY-MM-DD|n".
     # A run_nonce is unique per muse run, and the field existed from the start
     # with nothing reading it. It has to be read: `muse.run` derives the nonce
     # from today's `muse` journal rows but calls `record_trial` BEFORE

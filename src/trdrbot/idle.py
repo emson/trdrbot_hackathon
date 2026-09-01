@@ -35,6 +35,11 @@ MATERIAL_MOVE = 0.004
 MAX_SILENCE_MIN = 90
 #: Minimum gap between opportunity hunts. News does not turn over faster than
 #: this, and each hunt costs two LLM calls plus market data.
+#:
+#: MUST stay above MAX_SILENCE_MIN: that ordering is what makes it safe for a
+#: ready hunt to defer a material-move review (I-72). A hunt can postpone at
+#: most one look before the silence rule fires regardless, so oversight of a
+#: held position stays on a bounded schedule. Pinned by a test.
 HUNT_COOLDOWN_MIN = 120
 #: Do not open new positions inside this many minutes of the close: fills are
 #: worst into the bell, and an overnight gap cannot be reacted to.
@@ -84,7 +89,6 @@ def decide(
     silent_min = _minutes_since(last_decision_at)
     open_positions = [p for p in positions if getattr(p, "status", "") == "open"]
 
-    # ---- L2: something moved under a position we hold ----
     moves = []
     for p in open_positions:
         px = underlying_prices.get(getattr(p, "underlying", ""))
@@ -92,15 +96,20 @@ def decide(
         if px and entry:
             moves.append((p.underlying, px / entry - 1.0))
     big = [(u, m) for u, m in moves if abs(m) >= MATERIAL_MOVE]
-    if big:
-        return IdleAction(
-            "review",
-            "material move under a held position: "
-            + ", ".join(f"{u} {m:+.2%}" for u, m in big),
-            {"moves": dict(moves)},
-        )
 
-    # ---- L2: gone quiet while holding risk ----
+    # ---- L3 readiness, computed BEFORE L2 can pre-empt it (I-72) ----
+    # Deliberately gated on being ABLE to act. Hunting while the book is at its
+    # risk cap generates candidates that sizing will refuse - spend with no
+    # possible outcome. Do not hunt when you cannot shoot.
+    room = risk_cap_fraction * equity - open_risk_usd
+    hunt_cooled = (_minutes_since(last_hunt_at) or 1e9) >= HUNT_COOLDOWN_MIN
+    late = (minutes_to_close_ is not None
+            and minutes_to_close_ <= NO_NEW_POSITIONS_BEFORE_CLOSE_MIN)
+    can_hunt = room > 0 and hunt_cooled and not late
+
+    # ---- L2: gone quiet while holding risk. THE OVERSIGHT GUARANTEE ----
+    # Checked first and never yielded, because it is the promise that a held
+    # position is looked at on a bounded schedule.
     if open_positions and (silent_min is None or silent_min >= MAX_SILENCE_MIN):
         return IdleAction(
             "review",
@@ -109,15 +118,31 @@ def decide(
             {"moves": dict(moves)},
         )
 
+    # ---- L2: something moved under a position we hold ----
+    # YIELDS to a ready hunt (I-72). `abs(px / entry_spot - 1)` is measured
+    # against ENTRY, so once a held name has drifted 0.4% this rung is
+    # satisfied FOREVER and returned "review" on every tick - the ladder never
+    # reached L3 again while anything was open. Measured over the run: 49
+    # `position_review` items against 9 `hunt` rows, and 22 muse opportunities
+    # expired unread at 3,100-3,800 minutes old.
+    #
+    # Yielding is safe, and bounded by two facts rather than by hope:
+    #   * HUNT_COOLDOWN_MIN (120) > MAX_SILENCE_MIN (90), so a hunt can defer a
+    #     review at most once before the silence rule above fires anyway - the
+    #     invariant is asserted below so tuning one cannot silently break it.
+    #   * exit rules run EVERY tick in the fast path, with no LLM and no
+    #     dependence on this ladder. Stops are not what is being deferred here;
+    #     a discretionary second look is.
+    if big and not can_hunt:
+        return IdleAction(
+            "review",
+            "material move under a held position: "
+            + ", ".join(f"{u} {m:+.2%}" for u, m in big),
+            {"moves": dict(moves)},
+        )
+
     # ---- L3: capital idle and deployable ----
-    # Deliberately gated on being ABLE to act. Hunting while the book is at its
-    # risk cap generates candidates that sizing will refuse - spend with no
-    # possible outcome. Do not hunt when you cannot shoot.
-    room = risk_cap_fraction * equity - open_risk_usd
-    hunt_cooled = (_minutes_since(last_hunt_at) or 1e9) >= HUNT_COOLDOWN_MIN
-    late = (minutes_to_close_ is not None
-            and minutes_to_close_ <= NO_NEW_POSITIONS_BEFORE_CLOSE_MIN)
-    if room > 0 and hunt_cooled and not late:
+    if can_hunt:
         return IdleAction(
             "hunt",
             f"${room:,.0f} of risk budget unused"

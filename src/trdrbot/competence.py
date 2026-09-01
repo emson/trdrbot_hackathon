@@ -77,14 +77,32 @@ _ORDER = (EXPLORE, ESTABLISH, SCALE, MATURE)
 #: promotion changed the tier and not the size - the ladder was decorative in
 #: the one direction it exists for. Derived, the same demotion cuts 62%.
 #:
-#: 0.22 is not a new opinion: 0.10 book cap x 0.22 = 0.022, today's constant
-#: exactly, so the EXPLORE rung is unchanged at neutral appetite. Every rung
-#: above it now inherits the shape instead of a number.
+#: **THIS CONSTANT SETS THE MAXIMUM NUMBER OF CONCURRENT POSITIONS**, and that
+#: is not obvious from its name. Every sized trade takes at least
+#: `book_cap x SEED_SHARE`, and the book may hold at most `book_cap`, so at most
+#: `1 / SEED_SHARE` floor-sized positions fit. The risk appetite cancels: it
+#: scales the cap and the floor together, so turning risk UP makes each position
+#: bigger and never makes room for more. At 0.22 the book could hold FOUR
+#: positions at any appetite (D-103).
 #:
-#: NOT YET FITTED TO ANYTHING (I-70). Because the floor binds above Kelly at
-#: every rung for this book's structure class, this share now sets the size of
-#: every trade it makes. Recorded so it is decided deliberately, not inherited.
-SEED_SHARE = 0.22
+#: 0.15 -> 6 concurrent. Chosen as the smallest step that clears "more than
+#: five", because this number has never been fitted to anything (I-70) and a
+#: step away from an unfitted constant should be the smallest one that solves
+#: the problem. 0.125 would give 8.
+#:
+#: It was 0.22 because `0.10 book cap x 0.22 = 0.022` reproduced the flat
+#: `SEED_FRACTION` D-099 replaced - a compatibility choice, never a fitted one.
+#:
+#: Lowering it costs nothing that was load-bearing, which is why it is safe:
+#:   * the drawdown brake is a PROPORTIONAL cut (cap falls, floor falls with
+#:     it), so the 50% demotion cut is share-invariant;
+#:   * Kelly governs SOONER - the crossover falls from a shrunk p of 52.5% to
+#:     46.7% at the live rung - which is I-70 improving, not a new risk;
+#:   * nesting is unaffected while the share stays under
+#:     `POSITION_SHARE_OF_BOOK` (0.5).
+#: What it does cost is a smaller day-one exploration allocation: 1.5% of
+#: equity rather than 2.2%.
+SEED_SHARE = 0.15
 
 #: The operator's size preference, applied to the earned posture. 1.0 means
 #: "the posture the ladder alone would choose" - a definition, not a taste.

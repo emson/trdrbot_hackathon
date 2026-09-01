@@ -522,10 +522,21 @@ async def run(
     # but it would have made every paired trial a repeat of one sample rather
     # than a fresh draw. The nonce is derived (today's muse rows), never a
     # clock, so a run stays reproducible from the journal alone.
-    nonce = sum(1 for r in journal.read()
-                if r.get("kind") == "muse"
-                and str(r.get("ts", ""))[:10] == ids.utc_now().date().isoformat())
-    rng = random.Random(f"muse|{ids.utc_now().date().isoformat()}|{nonce}")
+    today = ids.utc_now().date().isoformat()
+    run_of_day = sum(1 for r in journal.read()
+                     if r.get("kind") == "muse"
+                     and str(r.get("ts", ""))[:10] == today)
+    rng = random.Random(f"muse|{today}|{run_of_day}")
+    # DATE-QUALIFIED (D-103). The Coach dedupes trial rows by `run_nonce` over
+    # the WHOLE life of an experiment, but this counter resets every UTC day, so
+    # after the first day every nonce was a replay of one already seen. The one
+    # live experiment consumed nonces 0..8 on 2026-08-29 (9 runs against a cap
+    # of 3) and every trial since was discarded as a duplicate: runs frozen at
+    # 9, 6 voided, posterior stuck at 0.379 - below the 0.90 promote bar, above
+    # the 0.05 refute bar, and unable to reach the 40-run timeout. The
+    # self-improvement loop could not conclude, and each muse run went on paying
+    # a SECOND full LLM call for a challenger arm whose result was thrown away.
+    nonce = f"{today}|{run_of_day}"
 
     concepts = _sample_concepts(wiki, rng, CONCEPTS_PER_RUN)
     concept_block = "\n\n".join(f"### {cid}\n{txt}" for cid, txt in concepts)

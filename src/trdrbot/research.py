@@ -157,6 +157,12 @@ def _mark_ran(config: Config) -> None:
         ids.today().isoformat(), encoding="utf-8")
 
 
+#: How many extra names a live claim may add to the daily research cycle,
+#: on top of the configured universe (D-103). Each costs a bar fetch and
+#: some prompt; the cap is what stops a burst of muse theses turning one
+#: cycle into thirty. Names are taken in order of open-claim count.
+MAX_CLAIMED_EXTRA = 5
+
 async def run(
     tools: dict[str, Any],
     config: Config,
@@ -173,7 +179,34 @@ async def run(
             print(f"[research] skipped: {why} (pass force=True to override)")
         return {"skipped": why, "wiki": [], "opportunities": 0}
 
-    universe = config.research_universe
+    # The configured universe PLUS every name the system currently has a
+    # STATED, unresolved claim on (D-103). Keeping a dossier alive
+    # (housekeeping's sweep) and refreshing it are two halves of one promise:
+    # "the researched companies are in the vault and can be refreshed and
+    # traded if the theses require it". Protecting a page the daily cycle never
+    # revisits would preserve a snapshot that only gets staler.
+    #
+    # Bounded, because each extra name is a bar fetch and a longer prompt.
+    # Ordered by open-claim count so the names the book is most exposed to win
+    # the slots, and journalled so the widening is visible rather than assumed.
+    universe = list(config.research_universe)
+    try:
+        from collections import Counter
+
+        from . import ledger as _led
+        _book = _led.Ledger(config.paths.state / "ledger.jsonl")
+        counts = Counter(
+            e.underlying.upper() for e in _book.all()
+            if e.outcome is None and e.scoreable() and e.underlying
+            and e.probability_stated)
+        extra = [n for n, _ in counts.most_common() if n not in set(universe)]
+        extra = extra[:MAX_CLAIMED_EXTRA]
+        if extra:
+            journal.append("research_universe_widened", configured=len(universe),
+                           added=extra)
+            universe = universe + extra
+    except Exception as exc:  # noqa: BLE001 - research is advisory (INV-8)
+        print(f"[research] could not widen the universe, continuing: {exc!r}")
 
     # ---- deterministic layer: stats + persisted closes per ticker ----
     stats_lines = []

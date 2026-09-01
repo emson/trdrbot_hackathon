@@ -665,6 +665,41 @@ def test_a_duplicate_run_nonce_is_counted_once(tmp_path):
     assert t.voided == 1, "the duplicate should be visible, not silently dropped"
 
 
+def test_the_run_nonce_survives_a_day_boundary(tmp_path):
+    """D-103, the OTHER direction of the dedupe above, and the more expensive
+    one: the guard against double-counting must not become a guard against
+    counting at all.
+
+    `muse` derived the nonce as "how many muse rows today", which RESETS every
+    UTC day, while `tally` dedupes over the experiment's whole life. The live
+    experiment consumed nonces 0..8 on its first day (9 runs against a cap of
+    3), so every trial afterwards replayed a seen nonce and was voided: runs
+    frozen at 9, 6 voided, posterior stuck at 0.379 - above the 0.05 refute
+    bar, below the 0.90 promote bar, and unable to reach the 40-run timeout.
+    The loop could not conclude, and every muse run went on paying a SECOND
+    full LLM call for a challenger arm whose result was discarded."""
+    cfg = _cfg(tmp_path)
+    arm = {"survived": 3, "failed": 2, "candidates": 5}
+    coach._append(coach.events_path(cfg), {
+        "kind": "experiment_opened", "exp_id": "exp_1", "lever": "muse.prompt",
+        "incumbent": "v0", "challenger": "v1"})
+    # The same run-of-day index on three consecutive days is three real runs.
+    for day in ("2026-08-29", "2026-08-30", "2026-08-31"):
+        coach._append(coach.events_path(cfg), {
+            "kind": "trial_result", "exp_id": "exp_1", "run_nonce": f"{day}|0",
+            "incumbent": arm, "challenger": arm})
+
+    t = coach.tally(cfg, "exp_1")
+
+    assert t.runs == 3, f"a day boundary voided real evidence: runs={t.runs}"
+    assert t.voided == 0, f"nothing here is a duplicate: voided={t.voided}"
+    # And a genuine repeat WITHIN a day is still caught.
+    coach._append(coach.events_path(cfg), {
+        "kind": "trial_result", "exp_id": "exp_1", "run_nonce": "2026-08-31|0",
+        "incumbent": arm, "challenger": arm})
+    assert coach.tally(cfg, "exp_1").voided == 1
+
+
 def test_the_recorded_posterior_includes_its_own_trial(tmp_path):
     """The row decorates the trial it belongs to. Tallying before appending
     made every `trial_result` carry the posterior of the PREVIOUS state, so
