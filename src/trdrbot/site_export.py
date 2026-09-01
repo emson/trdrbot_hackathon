@@ -48,7 +48,7 @@ from .experiments import (
     UNSCOREABLE,
 )
 from .journal import Journal
-from .positions import PositionStore, Position
+from .positions import Position, PositionStore
 
 ROOT = config_mod.ROOT
 DEFAULT_OUT = ROOT / "web" / "src" / "lib" / "data" / "snapshot.json"

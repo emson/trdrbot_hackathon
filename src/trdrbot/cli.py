@@ -595,7 +595,7 @@ def _risk(proposed: float | None) -> int:
     cols = [("now", current)] + ([("proposed", proposed)] if proposed is not None else [])
     ps = [posture(a) for _, a in cols]
 
-    print(f"\nRisk appetite    " + "  ->  ".join(f"{p.appetite:.2f}x" for p in ps)
+    print("\nRisk appetite    " + "  ->  ".join(f"{p.appetite:.2f}x" for p in ps)
           + "          (config.yaml: trading.risk_appetite)")
     print(f"Competence       {ps[0].tier.upper()} - {cal.n} resolved, "
           + (f"{ps[0].attributable_rate:.0%} attributable"

@@ -1,5 +1,25 @@
 # Research: a risk-appetite lever
 
+> **AMENDED 2026-09-01 — this shipped as D-099, with four corrections.** The measurements below
+> stand; they were correct for the design they tested. What changed, all of it measured against the
+> real sizer and written up in [`plan_risk_appetite.md`](plan_risk_appetite.md) §1:
+>
+> 1. **One runtime clamp, not two.** `KELLY_CEILING` cannot fire — `max(TIERS.kelly) x
+>    APPETITE_MAX = 0.25 x 2.0 = 0.50` exactly — so it is pinned as a test instead of carried as
+>    dead code. §5's `FLOOR_CEILING` became *wrong* once the floor derived from the cap.
+> 2. **§9's sequencing was wrong about I-69.** Fixing the shrink target is not a prerequisite: the
+>    floor binds above Kelly at every rung, so its 3x span never reaches size. Do it on its own
+>    merits.
+> 3. **The floor is scaled once, THROUGH the cap** (`book_cap * SEED_SHARE`), not multiplied by the
+>    appetite a second time — and the lever is a *parameter of* `assess`, never §3's
+>    `with_appetite()` transform.
+> 4. **§6's belief table was recomputed** under the shipped design; the conclusion holds (the
+>    minimum is optimal to ~60% belief) but 1.0x is worse than it looks — a >20% drawdown becomes
+>    more likely than not *even when the thesis is right*.
+>
+> §10's third open question — "`SEED_SHARE = 0.22` has never been fitted to anything" — is now
+> load-bearing and tracked as **I-70**.
+
 **Question.** Can one knob make this system take more risk (more profit, more losses) and less
 risk (less profit, safer) — robustly, flexibly, and without adding entropy?
 

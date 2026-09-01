@@ -4470,3 +4470,98 @@ reverting it and watching named tests fail - including both directions of the at
 where over-tightening and over-loosening each break a different test. Live effect on the real
 book: ESTABLISH -> SCALE, Kelly x0.083 -> x0.149, book cap 15% -> 20%, per-position 5% -> 10%,
 and the prompt now reads "$18,165 of headroom" where it read "-3.48% per 1% SPY move".
+
+## D-099 - One number the agent did not earn, and a floor that finally falls
+
+The question was "can the user turn this system's risk up and down?" The answer is one config
+scalar, and almost none of the work was the scalar. `docs/research_risk_appetite.md` designed it;
+`docs/plan_risk_appetite.md` corrected that design in four places after driving the real sizer and
+adversarially applying the change to the repo. What shipped:
+
+```yaml
+trading:
+  risk_appetite: 0.50    # 1.0 = the posture the ladder alone would choose
+```
+
+```python
+a         = min(APPETITE_MAX, max(APPETITE_MIN, appetite))   # [0.25, 2.0], clamped ONCE
+book_cap  = min(BOOK_CEILING, t["cap"] * a)                  # 0.35 - the ruin bound
+kelly     = earned_kelly * a
+seed      = book_cap * SEED_SHARE                            # 0.22 - DERIVED
+```
+
+**1. The floor had to derive first, and that is the larger half of this change.** `SEED_FRACTION`
+was one constant, 0.022, across all four rungs, and D-098 had already moved the other three scopes
+onto the tier. Two consequences nobody chose. The drawdown circuit breaker was **a breaker with no
+contacts**: an 11% drawdown demoted MATURE to EXPLORE and cut the next trade by **13%**. And
+EXPLORE, ESTABLISH and SCALE sized **identically**, so promotion changed the tier and not the size -
+the ladder was decorative in the one direction it exists for. Derived at `book_cap x 0.22` (which
+reproduces today's EXPLORE exactly), the same demotion now cuts **63%**.
+
+**2. A parameter, never a transform.** The research scaffold modelled the lever as
+`with_appetite(posture, a)`. That shape was refused: a transform every caller must remember to
+apply is the ran-and-did-nothing bug class by construction, and this project has shipped it three
+times (the compactor, the cache, the shared session). `assess(appetite=...)` means there is exactly
+one way to obtain a posture and it is always the operative one.
+
+**3. One runtime clamp, not the three that were proposed.** `BOOK_CEILING` binds and stays. A
+half-Kelly ceiling **cannot fire** - `max(TIERS.kelly) x APPETITE_MAX = 0.25 x 2.0 = 0.50` exactly,
+reachable only as `resolved` goes to infinity - so it is pinned as a test rather than carried as
+dead code. A ceiling on the seed floor became **wrong** once the floor derived, because at
+`0.35 x 0.22 = 7.7%` it would bind and re-introduce a fourth loose constant, breaking the very
+property the lever rests on: one multiplication reaching all four scopes.
+
+**4. The suite was blind, and that is the finding worth keeping.** Applying the derived floor alone
+left **all 535 tests green** while the exploration allocation went 2.2% -> 5.5% at MATURE. No test
+referenced `seed_fraction`; `test_size_is_monotonic_in_evidence` measures integer contracts, where
+the `contracts < 1 -> 1` promotion flattens every rung - the blind spot D-098 had already
+documented for that same test. **A 2.5x size increase that nothing objected to.** The eleven new
+invariants sweep the whole rung x appetite space on FRACTIONS, and they are the only evidence this
+change has.
+
+**5. `reason` would have lied to the agent.** It is built from the tier table and fed verbatim to
+the decide prompt, beside `next_tier_needs()`, which promises more size for more resolved theses.
+Reporting only the applied Kelly would have told the agent it EARNED a posture the operator chose,
+while the ladder went on promising a reward the appetite had already halved. It now states both:
+`Kelly x0.16 earned -> x0.08 applied at 0.50x risk appetite (operator-set)`.
+
+**6. `SizingDecision.binding`, which is not appetite machinery at all.** The sizer could say what it
+decided and never WHICH of five limits decided it - so a lever moving an inert constraint was
+indistinguishable from one that worked. Measured on the real record: **all four positions this book
+has ever opened were set by the exploration floor and none by Kelly** ($2,210 / $2,100 / $2,171 /
+$2,052, each just under the 2.2% floor). That also answers I-68 from the other side.
+
+**Why 0.50 and not 1.0.** `0.20 x 0.50 x 0.22 = 0.022` - today's flat floor at today's rung - so the
+mechanism lands with the live book's size unchanged and any behaviour change afterwards is a bug
+rather than the knob. It holds today's size at today's RUNG, not forever: on demotion the floor
+falls with the tier, which is the brake this bought. Measured, the neutral setting is not a safe
+default under this design - at 1.0x a >20% drawdown is **more likely than not even when the thesis
+is right** (53.8% of paths), and research SS6's belief table puts a book at a coin flip on its own
+edge at the MINIMUM. Moving to 0.25 is a separate one-line commit.
+
+**The preference lives in the appetite, not in `SEED_SHARE`.** `0.22 x 0.50` and `0.11 x 1.00` are
+numerically identical at every rung. 0.22 is DERIVED (`0.022 / 0.10`) and has a provenance; 0.11
+would be FITTED to today's tier, which will change. Putting the preference in the constant hides a
+choice inside a derivation.
+
+**Deliberately NOT built.** Appetite touching the EV gate (strictly worse on both axes - PILLAR-1).
+A Coach lever (the measured/measurer rule; the exclusion is structural - the Coach writes only
+`data/state/levers/` - and now pinned by a test). Forced liquidation when the appetite is cut - a
+preference dial that submits market orders is not a preference dial, so the book runs over its
+target until positions expire and the prompt SAYS so. A `--set` flag on `trdrbot risk`. Per-tick
+config reload, which `run.sh` already provides for free by being one process per tick. A
+demotion-only brake, which is cheaper and fixes the brake without fixing the ladder.
+
+**Recorded, not fixed:** I-70. The derived floor binds above Kelly at every rung and every appetite
+for this book's structure class, so `SEED_SHARE` now sets the size of every trade it makes and it
+has never been fitted to anything. I-66's dead band gets WIDER, knowingly, in exchange for a brake
+that brakes. And I-69 is re-sequenced: the research made it a prerequisite because it moves Kelly by
+3x, but Kelly only reaches size above a shrunk p of 52.6% at the live rung and the live claim
+shrinks to 42.0% - real, worth fixing, not a blocker.
+
+**Verified:** 547 tests (+12), lint clean, all four scaffolds green, and mutation-verified five
+ways: reverting the derived floor fails 4 tests, removing the ruin clamp fails 2, double-scaling the
+floor (the a-squared bug) fails 1, dropping the input clamp fails 1, and hardcoding the sizer's
+binding fails 1. Live effect on the real book: **nothing** - SCALE, exploration floor 2.20%, the
+same 13 contracts - which is exactly what shipping a mechanism behaviour-neutral is supposed to look
+like.

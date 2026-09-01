@@ -1228,7 +1228,6 @@ def test_a_garbage_appetite_clamps_to_the_boundary_and_says_so():
     """A silently clamped input is a config the operator thinks they set. NaN
     must land on the SAFE end, which it does because `max(0.25, nan)` is 0.25 -
     the comparison is False, so the first argument survives."""
-    from trdrbot import competence
     for given, want in ((0.0, 0.25), (-5.0, 0.25), (100.0, 2.0),
                         (float("nan"), 0.25), (float("inf"), 2.0)):
         c = _comp(15, verdicts=_hist(15, GOOD_V), appetite=given)
