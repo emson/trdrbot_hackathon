@@ -184,3 +184,77 @@ derivation, and the whole day was about not doing that.
 **Shipped:** 548 tests (+13), lint clean, all four scaffolds green, mutation-verified five ways.
 Live effect on the real book: nothing. SCALE, exploration floor 2.20%, the same 13 contracts.
 Which is what shipping a mechanism behaviour-neutral is supposed to look like.
+
+---
+
+## Later the same day: the deadline came off, and a corpse fell out
+
+Two more asks: run indefinitely, and trade more than one name. The first was a config change with
+a trap in it. The second turned out not to be a feature request at all.
+
+**Removing the deadline was mostly already done.** `can_open` is documented as inert without one,
+and the force-close sweep is an ordinary exit rule whose signal returns `None` and therefore
+*holds* - "unobservable signal holds; it never fires blind". Two of the three things that had to be
+right were right before I touched anything.
+
+The third was the trap. `forecast_window` returned `None` with no deadline, and each caller had its
+own fallback for that: the muse's was the literal string `"10 days out"` - **the exact 1-10 day
+range D-070 deleted** after measuring that its output clustered at the far end. Deleting the
+deadline would have silently reinstated the bug the deadline had been masking, and nothing would
+have complained, because every fallback reads as sensible in isolation. A constraint whose removal
+restores the defect it replaced is not a constraint, it is a coincidence. Short horizons are a
+property of good forecasting, not of a competition, so the window now always exists and a hard stop
+merely tightens it.
+
+**The multi-asset question had a much worse answer.** I expected a config change. What the
+investigation found was six lines in the journal:
+
+```
+2026-08-31 13:39 / 15:53 / 17:58, 2026-09-01 14:03 / 16:09 / 18:15
+  hunt  opportunities=0  error=TypeError("'list' object is not callable")
+```
+
+`discovery.run` binds `section = [...]` for a block of per-ticker prose. That makes `section`
+function-local for the whole body - including the `section(text2, ...)` call fifty lines later that
+splits the model's reply into its two JSON halves. `llm.section` was never imported. So every hunt
+that successfully nominated candidates then crashed, after spending two LLM calls, a bar fetch, a
+yfinance call and an option chain **per nominee**. Six consecutive runs over two days. The
+fail-open handler printed it and moved on.
+
+Discovery is the only source that can introduce a name from outside the fixed five-name research
+universe. The muse collides wiki concepts, and housekeeping had deprecated 25 of 30 research
+dossiers, leaving exactly those five - so the "random collision" engine was colliding the universe
+with itself. The book did not become single-name by judgement. Its supply of new names had been
+severed and every log line read healthy.
+
+Introduced by a refactor whose commit message was *"one reply-text seam, one JSON parser home"*.
+
+**The class is what matters, not the instance.** An imported callable rebound in its own scope is a
+`NameError` that only fires when that line runs: it passes import, passes lint, and dies on the
+branch nobody exercises in a test. So the guard is a whole-package AST check rather than a test for
+this function - every `from X import f` where some function both calls `f` and assigns to `f`.
+Mutation-verified by putting the shadowing back.
+
+**And then the four things that kept it single-name even when candidates did arrive.** 62
+opportunities across 40+ names had reached the inbox; the agent formed theses on two.
+
+- The only news feed was scoped to `config.watchlist` - `"SPY"` - so the observations block was a
+  SPY feed by construction and the agent was right that it had nothing new.
+- The snapshot priced only names *already held*, so a candidate arrived with bands and no mark. On
+  both cycles where non-SPY candidates were presented, the agent made **zero** tool calls and its
+  summary mentioned neither. An option you cannot see the price of is not an option.
+- The prompt said `- Watchlist: SPY` under a heading called `## Constraints`. Nothing in
+  `tool_guard`, `sizing` or the order path filters by symbol, and the book had already traded
+  NVDA. One word, under the wrong heading, outranked every line of code in the repo for a fortnight.
+- The beta-delta flag stamped *"these positions are one market bet, whatever the names suggest"* on
+  a book holding **one** position, where that is a tautology. It was the stated reason for
+  declining in five of the last six no-ops - against a $2,052 max loss with $15,652 of budget free.
+  A second name would have lowered that number. The flag was telling it not to.
+
+Verified by running it: `trdrbot discover` completed for the first time since 08-31 and nominated
+PANW, MDB, HOOD, LRCX, PCG, writing five dossiers - which also doubles the muse's collapsed concept
+pool from five names to ten.
+
+The thing I keep re-learning on this project is that "why isn't it doing X" is almost never a
+preference. Four of the five findings today were surfaces telling the agent something false, and
+the fifth was a corpse.
