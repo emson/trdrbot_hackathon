@@ -553,6 +553,120 @@ async def _coach(action: str) -> int:
     return 0
 
 
+def _risk(proposed: float | None) -> int:
+    """What the risk appetite is doing, and what another value would do.
+
+    The operator has to pick a number in a range whose consequences are not
+    obvious, and "did my edit take effect?" otherwise has no answer short of
+    reading the journal. Deterministic and OFFLINE - it composes the same
+    `competence.assess` and `sizing.size_position` production runs, off the last
+    journalled equity, so it never touches the broker and never disagrees with
+    the live posture. The stochastic half of the question (what an appetite BUYS
+    over many trades) lives in the risk explorer, which is where a distribution
+    belongs.
+    """
+    from . import competence, sizing
+    from . import store as store_mod
+    from .calibration import CalibrationStore
+    from .ledger import Ledger
+    from .positions import PositionStore
+
+    cfg = config_mod.load(quiet=True)
+    rows, _ = store_mod.read_jsonl(cfg.paths.journal)
+    comp_rows = [r for r in rows if r.get("kind") == "competence"]
+    if not comp_rows:
+        print("No competence rows in the journal yet - run a tick first.")
+        return 1
+    last = comp_rows[-1]
+    equity = float(last.get("equity") or 0.0)
+    high_water = float(last.get("high_water") or equity)
+
+    calib = CalibrationStore(cfg.paths.state / "forecasts.jsonl")
+    book = Ledger(cfg.paths.state / "ledger.jsonl")
+    cal = calib.score(_as_forecasts(book))
+    positions = PositionStore(cfg.paths.wiki).all()
+
+    def posture(a: float) -> competence.Competence:
+        return competence.assess(
+            resolved=cal.n, reliability=cal.reliability, positions=positions,
+            equity=equity, high_water=high_water, effective=cal.n_eff, appetite=a)
+
+    current = cfg.risk_appetite
+    cols = [("now", current)] + ([("proposed", proposed)] if proposed is not None else [])
+    ps = [posture(a) for _, a in cols]
+
+    print(f"\nRisk appetite    " + "  ->  ".join(f"{p.appetite:.2f}x" for p in ps)
+          + "          (config.yaml: trading.risk_appetite)")
+    print(f"Competence       {ps[0].tier.upper()} - {cal.n} resolved, "
+          + (f"{ps[0].attributable_rate:.0%} attributable"
+             if ps[0].attributable_rate is not None else "attribution unmeasured")
+          + f", Kelly x{ps[0].kelly_multiplier / ps[0].appetite:.3f} earned\n")
+
+    head = "".join(f"{lbl + f' ({a:.2f}x)':>22}" for lbl, a in cols)
+    print(f"  {'':<22}{head}")
+    for name, get in (("book cap", lambda p: p.book_cap),
+                      ("per-name cap", lambda p: p.underlying_cap),
+                      ("per-position cap", lambda p: p.position_cap),
+                      ("exploration floor", lambda p: p.seed_fraction)):
+        print(f"  {name:<22}"
+              + "".join(f"{get(p):>10.2%} {'$' + format(get(p) * equity, ',.0f'):>11}"
+                        for p in ps))
+    print(f"  {'Kelly multiplier':<22}"
+          + "".join(f"{'x' + format(p.kelly_multiplier, '.4f'):>22}" for p in ps))
+    print(f"  {'realised appetite':<22}"
+          + "".join(f"{format(p.realised_appetite, '.2f') + 'x':>22}" for p in ps))
+    for p, (lbl, _) in zip(ps, cols, strict=True):
+        if abs(p.realised_appetite - p.appetite) > 1e-9:
+            print(f"    ^ {lbl}: the {p.tier.upper()} book cap is pinned at the "
+                  f"{competence.BOOK_CEILING:.0%} ruin bound, so "
+                  f"{p.appetite:.2f}x only realises {p.realised_appetite:.2f}x")
+
+    # What the NEXT trade would be, on a structure the book has actually traded.
+    # Per-contract risk comes off the position's own legs rather than a stored
+    # count: `max_loss_usd` is the whole position's, and the quantity that
+    # produced it is the leg qty (D-099).
+    def _per_contract(p: Any) -> float | None:
+        qty = abs(int((p.legs or [{}])[0].get("qty") or 0)) if p.legs else 0
+        return p.max_loss_usd / qty if (p.max_loss_usd and qty) else None
+
+    priced = [x for x in (_per_contract(p) for p in positions) if x]
+    if priced:
+        per = priced[-1]
+        print(f"\n  next trade, on a structure like the book's (${per:,.0f}/contract):")
+        for p, (lbl, _) in zip(ps, cols, strict=True):
+            d = sizing.size_position(
+                equity=equity, stated_confidence=0.40, max_profit=per * 1.9,
+                max_loss=-per, calibration=cal, posture=p, underlying="SPY",
+                payoff_ratio=1.9)
+            print(f"    {lbl:<10} {d.contracts:>3} contracts "
+                  f"({d.fraction_of_equity:.2%}), binding: {d.binding or 'refused'}")
+    else:
+        print("\n  (no priced position on the book yet, so no next-trade preview)")
+
+    at_risk = sum(p.max_loss_usd or 0.0 for p in positions
+                  if getattr(p, "status", "") in ("open", "opening", "closing"))
+    if at_risk:
+        print(f"\n  book carries ${at_risk:,.0f} ({at_risk / equity:.2%} of equity) - "
+              + ", ".join(f"{at_risk / (p.book_cap * equity):.0%} of the {lbl} book cap"
+                          for p, (lbl, _) in zip(ps, cols, strict=True))
+              + (f"; all of it {positions[-1].underlying.upper()}, against a per-name cap of "
+                 f"${ps[0].underlying_cap * equity:,.0f}"
+                 if len({q.underlying for q in positions if q.max_loss_usd}) == 1 else ""))
+    if proposed is not None and proposed != current:
+        print(f"\nTo apply: set `trading.risk_appetite: {proposed}` in config.yaml.")
+        print("  run.sh / launchd: next tick.   `trdrbot run`: restart it.\n")
+    else:
+        print()
+    return 0
+
+
+def _as_forecasts(book: Any) -> list[Any]:
+    """Resolved ledger theses as calibration forecasts - the SAME sample the
+    ladder is assessed on (D-052), so this preview cannot disagree with it."""
+    from . import ledger as ledger_mod
+    return ledger_mod.as_forecasts(book.resolved())
+
+
 def _report() -> int:
     from . import report
 
@@ -641,6 +755,10 @@ def main() -> None:
     les.add_argument("action", choices=["show", "seed", "verify"], default="show", nargs="?")
     coa = sub.add_parser("coach", help="the self-improvement loop: levers, trials, promotions")
     coa.add_argument("action", choices=["status", "pulse"], default="status", nargs="?")
+    rsk = sub.add_parser("risk", help="the operator's risk appetite, and what another "
+                                      "value would do to the live book")
+    rsk.add_argument("appetite", type=float, nargs="?", default=None,
+                     help="preview this appetite alongside the current one")
     sub.add_parser("report", help="write data/report.html - gauges, experiments, actions")
     mc = sub.add_parser("modelcal", help="the model layer's calibration: fitted bootstrap inflation")
     mc.add_argument("action", choices=["status", "fit"], default="status", nargs="?")
@@ -681,6 +799,7 @@ def main() -> None:
     _H["ledger"] = lambda a: _ledger()
     _H["lessons"] = lambda a: asyncio.run(_lessons(a.action))
     _H["coach"] = lambda a: asyncio.run(_coach(a.action))
+    _H["risk"] = lambda a: _risk(a.appetite)
     _H["report"] = lambda a: _report()
     _H["modelcal"] = lambda a: _modelcal(a.action)
     _H["run"] = lambda a: asyncio.run(_run_loop(a.interval, a.closed_interval,
