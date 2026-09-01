@@ -173,20 +173,32 @@ trading:
   # `trdrbot risk <x>` previews any value against the live book before you set
   # it, and the applied number is journalled every tick.
   #
-  # 0.50 is not neutral, and that is the point. Deriving the exploration floor
-  # from the tier raises it from a flat 2.2% to 4.4% at SCALE, and 0.50 x that
-  # is 2.2% - so this lands the MECHANISM with the live book's size unchanged,
-  # and any behaviour change afterwards is a bug rather than the knob. It holds
-  # today's size at today's RUNG, not forever: on demotion the floor falls with
-  # the tier, which is the brake this change bought. The measured belief table
-  # (docs/research_risk_appetite.md SS6) says a book at a coin flip on whether
-  # its edge is real belongs at the MINIMUM; moving to 0.25 is a separate
-  # one-line commit. See docs/plan_risk_appetite.md SS8.
+  # 1.75, RAISED FROM 0.50 for the hackathon (D-100). This is paper money and
+  # the point of the exercise is to see the machinery move under load, not to
+  # maximise expected log growth on a book with zero attributed positions. The
+  # measured belief table (docs/research_risk_appetite.md SS6) says the honest
+  # setting for THIS record is the minimum; that answer stands and is not what
+  # is wanted here. Restore 0.50 (or 0.25) when this stops being a demo.
+  #
+  # 1.75 AND NOT 2.00, and the difference is not cosmetic. At SCALE both give
+  # the identical size today - 0.20 x 1.75 = 0.35 hits the ruin bound, so 2.00
+  # realises 1.75x anyway. But after an 11% drawdown demotes the book to
+  # EXPLORE, 1.75 cuts the next trade by 50% and 2.00 cuts it by only 43%,
+  # because 2.00 has room left to scale a rung the ceiling was compressing.
+  # Same upside, weaker brake: 2.00 is strictly worse and there is no setting
+  # above 1.75 that buys anything at this rung. Verified by tracing the real
+  # sizer, docs/plan_risk_appetite.md SS8.
+  #
+  # 0.50 was the shipping default and the reason is worth keeping: deriving the
+  # exploration floor from the tier raised it from a flat 2.2% to 4.4% at
+  # SCALE, and 0.50 x that is 2.2% - so D-099 landed the MECHANISM with the
+  # live book's size unchanged, and any behaviour change was a bug rather than
+  # the knob. That verification is done; this is a deliberate move off it.
   #
   # NOT a Coach lever, ever: the Coach writes only data/state/levers/, and the
   # measured/measurer rule (specs/notes/015) forbids anything it can move from
   # scoring its own trial. This is the principal's preference, not the agent's.
-  risk_appetite: 0.50
+  risk_appetite: 1.75
 
   watchlist: ["SPY"]
   # Force-close everything on/after this date regardless of position expiry

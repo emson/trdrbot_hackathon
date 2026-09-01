@@ -4565,3 +4565,50 @@ floor (the a-squared bug) fails 1, dropping the input clamp fails 1, and hardcod
 binding fails 1. Live effect on the real book: **nothing** - SCALE, exploration floor 2.20%, the
 same 13 contracts - which is exactly what shipping a mechanism behaviour-neutral is supposed to look
 like.
+
+## D-100 - Risk appetite to 1.75x for the hackathon, and why not 2.00x
+
+Paper money, three days to the deadline, and the point of the exercise is to watch the machinery
+move under load rather than to maximise expected log growth on a book with zero attributed
+positions. D-099's belief table still says the honest setting for THIS record is the minimum; that
+answer is unchanged and is not what is wanted here. `trading.risk_appetite: 0.50 -> 1.75`.
+
+**1.75 and not 2.00, and the difference is only visible after a loss.** At SCALE both settings
+produce the IDENTICAL book today: `0.20 x 1.75 = 0.35` is the ruin bound, so 2.00 realises 1.75x
+anyway and the exploration floor is 7.70% either way. They diverge on the way down. An 11%
+drawdown demotes the book to EXPLORE, and there 2.00 still has headroom the ceiling was
+compressing:
+
+| set | SCALE floor | EXPLORE floor after -11% | cut |
+|---|---|---|---|
+| 1.75 | 7.70% | 3.85% | **50%** |
+| 2.00 | 7.70% | 4.40% | 43% |
+
+Same upside, weaker brake. **2.00 is strictly dominated** and no setting above 1.75 buys anything
+at this rung. This is the general shape of the interaction and worth stating once: `BOOK_CEILING`
+compresses the top rung first, so at high appetite the drawdown brake has less distance to fall -
+it is weakest exactly where the position is largest.
+
+**Traced through the real code before switching, not after.** Eight scenarios against
+`competence.assess` and `sizing.size_position` on the live book:
+
+- **The per-NAME cap binds first, not the book cap.** The book is 100% SPY, so accumulation stops
+  at $29,137 (28% of equity), not the 35% book cap. Four trades, then refusal - correct, and it is
+  D-053's point that several options positions on one name are one bet wearing hats.
+- **Worst case is bounded and known:** 28% of equity, all of it DEFINED max loss on bought
+  spreads. No assignment tail, no margin estimate. Equity floor ~$75k.
+- **The EV gate is untouched.** A stated 33.5% against a 34.5% break-even returns zero contracts at
+  1.75x, same as at 0.25x. Unbounded loss still refuses outright.
+- **The deadline still governs.** `can_open` refuses new positions from 2026-09-03, and refuses any
+  expiry past 2026-09-04 regardless of appetite - so this raise buys two days of 1-3 DTE
+  structures, not an open-ended run.
+- Nesting and monotonicity hold at every rung x every appetite.
+
+**Reported, not silent:** at SCALE 1.75 realises exactly 1.75. If the book ever reaches MATURE the
+same setting realises only 1.40 - the posture says so in `reason`, and `trdrbot health` raises it.
+
+**Known limitation at size.** Friction is one full bid/ask spread per leg per contract, taken from
+real quotes, with no market-impact term. At 46 contracts of SPY that is defensible; the model gets
+less conservative as size grows, and nothing currently measures the gap.
+
+**Restore 0.50 (or 0.25, which is what the evidence argues for) when this stops being a demo.**
