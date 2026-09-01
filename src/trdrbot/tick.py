@@ -228,6 +228,19 @@ def _render_book_risk(positions: list[Any], bg: dict[str, Any] | None,
                                f"loss and count as zero here.)" if unpriced else "")
             + flag
         )
+        # A cap CUT below what the book already carries is neither a bug nor an
+        # emergency. Sizing gates NEW risk and never liquidates - a preference
+        # dial that submits market orders is not a preference dial - so the book
+        # runs over its target until positions expire. Said out loud, because an
+        # operator who lowered the appetite and then read an over-cap book would
+        # reasonably read it as a failure (D-099).
+        if at_risk > budget:
+            lines.append(
+                f"  ^ OVER CAP by ${at_risk - budget:,.0f}. Nothing is being "
+                f"force-closed: sizing gates NEW risk only, so the cap is a target on "
+                f"the way down, not an invariant. New positions are refused until this "
+                f"unwinds."
+            )
     if not bg:
         return lines
     skip = f" ({bg['positions_skipped']} unpriced)" if bg["positions_skipped"] else ""
@@ -420,6 +433,15 @@ async def _build_decide_prompt(
         f"enforces both - do not argue with the number it returns.\n"
         f"To earn more size: {posture.next_tier_needs()}. Size is earned by resolved, "
         f"ATTRIBUTABLE theses - a profit on a wrong view is luck and counts for nothing."
+        # Stated only when there IS something to state. The scaled `reason`
+        # above already carries earned-vs-applied; this names the BOUNDARY,
+        # because `size_position` is consulted in 2 of 89 decide cycles (I-68)
+        # and the other 87 decide in prose. An agent that read "less risk" as
+        # "trade less" would be moving a lever nobody set - selectivity is the
+        # EV gate's business, and the gate is upstream of every multiplication.
+        + (f"\nThese caps carry an operator risk appetite of "
+           f"{posture.appetite:.2f}x. It scales SIZE, not selectivity - what is "
+           f"worth trading is unchanged." if posture.appetite != 1.0 else "")
         + (f"\nHARD STOP: {_why}" if not _ok else "")
     )
     if config.events:

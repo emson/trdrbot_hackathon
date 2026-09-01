@@ -458,6 +458,28 @@ def check(journal_path: Path, positions: list[Any]) -> list[tuple[str, str, str]
                          "the caps were sized against a trade that was not made"))
 
     # --- 4. absence that quietly loosens a constraint --------------------
+    # ...and its mirror image: a knob that is SET and quietly does nothing.
+    # Above 1.75x at SCALE and 1.40x at MATURE the book cap is pinned at the
+    # ruin bound, so the operator's number is partly absorbed and every surface
+    # keeps reporting the value they typed. Same shape as everything else in
+    # this file - a constraint that stopped meaning what it says (D-099).
+    comp_rows = [r for r in rows if r.get("kind") == "competence"]
+    if comp_rows:
+        last = comp_rows[-1]
+        asked, applied = last.get("appetite_config"), last.get("appetite")
+        realised = last.get("realised_appetite")
+        if asked is not None and applied is not None and asked != applied:
+            findings.append((WARN, "risk_appetite",
+                             f"config says {asked}, the ladder applied {applied} - "
+                             f"clamped to [0.25, 2.0]. The setting on disk is not the "
+                             f"one running"))
+        elif applied is not None and realised is not None and applied != 1.0 \
+                and abs(realised - applied) > 1e-6:
+            findings.append((WARN, "risk_appetite",
+                             f"set to {applied} but only {realised} was realised - the "
+                             f"{last.get('tier', '')} book cap is pinned at the ruin "
+                             f"bound, so turning it further changes nothing"))
+
     from .exit_rules import watched_signals
 
     for p in positions:

@@ -34,7 +34,8 @@ from .calibration import Calibration
 #: fail together in exactly the conditions that matter.
 #:
 #: **This is the FALLBACK for a caller with no posture, and it is the EXPLORE
-#: rung's value.** With a posture the ceiling is `posture.position_cap`, which
+#: rung's value AT RISK APPETITE 1.0** (D-099 - at the shipped 0.50 the EXPLORE
+#: rung is 2.5%). With a posture the ceiling is `posture.position_cap`, which
 #: rises with the tier exactly as the book cap does (`competence.
 #: POSITION_SHARE_OF_BOOK`). A flat ceiling here meant a MATURE agent got a
 #: bigger book and the same single position as a day-one one, and - measured on
@@ -51,7 +52,8 @@ MAX_FRACTION = 0.05
 #: with the portfolio cap and produced an effective limit nobody chose.
 #:
 #: **Both are FALLBACKS for a postureless caller, and both are the EXPLORE
-#: rung's values.** With a posture all three scopes come off the tier's one
+#: rung's values AT RISK APPETITE 1.0** (D-099 - at the shipped 0.50 they are
+#: 4% and 5%). With a posture all three scopes come off the tier's one
 #: earned budget (`competence.POSITION_SHARE_OF_BOOK` and
 #: `UNDERLYING_SHARE_OF_BOOK`), which is what makes `position <= underlying <=
 #: book` hold at EVERY rung rather than only at the one where three flat
@@ -307,11 +309,24 @@ def size_position(
         if per_contract_risk <= ceiling * equity:
             contracts, binding = 1, "one contract (indivisible)"
         else:
+            # NAME THE APPETITE when it is the reason. Without this the
+            # operator reads "too large for the account" and cannot tell an
+            # oversized structure from a knob they turned down themselves -
+            # measured: a $2,600/contract structure at SCALE sizes 1 at 0.50x
+            # and refuses at 0.25x, with the message identical either way.
+            appetite = getattr(posture, "appetite", 1.0)
+            lever = ""
+            if appetite < 1.0:
+                lever = (f" This ceiling carries a {appetite:.2f}x risk appetite; at "
+                         f"1.00x it would be {ceiling / appetite:.1%} "
+                         f"(${ceiling / appetite * equity:,.0f}). You would need about "
+                         f"${per_contract_risk / ceiling:,.0f} of equity to hold one "
+                         f"contract at this appetite and tier.")
             return SizingDecision(
                 0, 0.0, full, frac, adj,
                 f"NO POSITION: one contract risks ${per_contract_risk:,.0f}, above the "
                 f"{ceiling:.1%} per-position ceiling (${ceiling * equity:,.0f}). "
-                f"Position too large for the account.",
+                f"Position too large for the account.{lever}",
             )
 
     # Book caps, tightest-binding wins. Both measured in dollars of defined

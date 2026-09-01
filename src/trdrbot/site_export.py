@@ -686,9 +686,16 @@ def export(out: Path = DEFAULT_OUT, *, strict: bool = True) -> int:
             "tier": latest_comp.get("tier"), "resolved": latest_comp.get("resolved"),
             "reliability": latest_comp.get("reliability"),
             "attributable_rate": latest_comp.get("attributable_rate"),
+            # APPLIED, not earned. These three carry the operator's risk
+            # appetite (D-099), so at 0.50 the site would show a 10% book cap
+            # for an agent that earned 20% - a ladder appearing to demote with
+            # no drawdown and no tier change. The appetite ships beside them so
+            # the page can say which number it is showing.
             "kelly_multiplier": latest_comp.get("kelly_multiplier"),
             "seed_fraction": latest_comp.get("seed_fraction"),
             "book_cap": latest_comp.get("book_cap"),
+            "appetite": latest_comp.get("appetite"),
+            "realised_appetite": latest_comp.get("realised_appetite"),
             "as_of": latest_comp.get("ts"),
         },
         "book": {
