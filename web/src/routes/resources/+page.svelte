@@ -24,7 +24,7 @@
 		{:else}
 			<div class="cols c3" style="margin-top:1.6rem">
 				{#each resources as r}
-					<a class="card pad-lg" href="/resources/{r.slug}">
+					<a class="card pad-lg" href={r.href}>
 						<Icon name={r.icon || 'compass'} size={22} />
 						<span class="tag {r.kind === 'interactive' ? 'good' : 'neutral'}" style="margin-top:.2rem">
 							{KIND_LABEL[r.kind] || r.kind}
