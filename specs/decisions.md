@@ -4726,3 +4726,110 @@ inside a change that already moves five things.
 
 **Verified:** 552 tests (+3), lint clean. Mutation-verified: reinstating the shadowed name fails
 the AST guard; the single-name flag change ships with its opposite direction.
+
+## D-103 - Room for several positions, and a self-improvement loop that could not conclude
+
+Four fixes, found by asking why a book with 87% of its risk budget free and 62 candidates across
+40+ names was holding one position.
+
+**1. `SEED_SHARE` is the position-count constant, and its name does not say so.** Every sized trade
+takes at least `book_cap x SEED_SHARE`; the book holds at most `book_cap`; so at most
+`1 / SEED_SHARE` positions fit. At 0.22 that is **four**. And the risk appetite **cancels** - it
+scales the cap and the floor together - so turning risk up makes each position bigger and never
+makes room for one more. Measured across the whole range:
+
+| appetite | book cap | floor | cap/floor |
+|---|---|---|---|
+| 0.25 | 5.0% | 1.10% | 4.55 |
+| 1.00 | 20.0% | 4.40% | 4.55 |
+| 1.75 | 35.0% | 7.70% | 4.55 |
+
+0.22 was never fitted - it was chosen so `0.10 x 0.22 = 0.022` reproduced the flat constant D-099
+replaced. **0.15 gives six**, and costs nothing load-bearing: the drawdown brake is a PROPORTIONAL
+cut so it is share-invariant (still 50%), Kelly's crossover falls from a shrunk p of 52.5% to 46.7%
+(I-70 improving), and nesting is untouched while the share stays under `POSITION_SHARE_OF_BOOK`.
+It does buy a smaller day-one allocation: 1.5% of equity rather than 2.2%.
+
+**2. The idle ladder could not reach the hunt (I-72).** `MATERIAL_MOVE` is measured against
+`entry_spot`, so once a held name drifted 0.4% the review rung was satisfied **forever** and
+returned "review" on every tick. 49 `position_review` items against 9 `hunt` rows; 22 muse
+opportunities expired unread at 3,100-3,800 minutes old. A ready hunt now takes the rung, which is
+safe on two facts rather than on hope: `HUNT_COOLDOWN_MIN` (120) exceeds `MAX_SILENCE_MIN` (90), so
+a hunt defers at most one look before the oversight rule fires regardless; and exit rules run every
+tick in the fast path with no dependence on this ladder. The ordering of those two constants is now
+itself a test.
+
+**3. The Coach has been deadlocked since 2026-08-30.** `run_nonce` was "how many muse rows today" -
+it resets every UTC day - while `tally()` dedupes by nonce over the experiment's **whole life**. The
+first day produced 9 runs (against a cap of 3, D-088's own recorded incident), consuming nonces
+0..8, so every trial written since replayed a seen nonce and was voided. Live: **runs frozen at 9, 6
+voided, posterior stuck at 0.379** - above the 0.05 refute bar, below the 0.90 promote bar, and
+unable to reach the 40-run timeout. The loop could not promote, refute or time out.
+
+It was not free. `arms()` returns a paired trial while an experiment is open, so **every muse run
+went on paying a second full LLM call plus a whole gate cascade for a challenger arm whose result
+was thrown away**. A dead experiment that still bills. The nonce is now date-qualified; the
+already-voided rows stay voided (the log is append-only) and the tally accumulates from here.
+
+**4. The vault forgot what it was still betting on.** `CompanyDossier.perishable_after_hours` is 24,
+and `status: deprecated` has exactly one consumer - it removes a concept from the muse's sampling
+pool. The only shield was **holding** the name. So a name the system had an open, stated, unresolved
+thesis about lost its page the next day and could never be collided again: 25 of 35 dossiers
+tombstoned while the ledger carried live claims on 12 names.
+
+A stated unresolved claim now protects its dossier, and the daily research cycle refreshes the
+configured universe **plus** up to `MAX_CLAIMED_EXTRA = 5` claimed names, in open-claim order and
+journalled. Keeping a page and refreshing it are two halves of one promise; protecting a page the
+cycle never revisits would only preserve a staler snapshot. **STATED claims only** - a muse
+candidate is registered before any gate runs, so protecting on "any unresolved trial" would shield
+37 of 37 names and turn the sweep into a no-op, which is this repo's signature bug introduced by
+the fix for another one. Measured: 12 protected, 23 still tombstoned.
+
+**Verified:** 555 tests (+3), lint clean, mutation-verified: restoring the latched review, the
+per-day nonce, and the shadowed name each fail their named test. Live effect: the book can hold
+**6** concurrent positions where it held 4, and the next research cycle covers 10 names where it
+covered 5.
+
+### Asked and answered: do theses get promoted or demoted by the self-improvement loop?
+
+**No, and they should not be - but the reason matters more than the answer.**
+
+The Coach's entire lever set is **one entry**: `muse.prompt`, a string, scored by one number (the
+share of a run's candidates that survive the muse's own deterministic gates). It has run one
+experiment, ever, promoted nothing, and the incumbent is still the seed. The challenger arm writes
+to a `ShadowLedger` - no ledger row, no inbox item, no `mark_stated` - so a variant cannot touch the
+thesis record at all. Confirmed in the data: 75 ledger entries stamped `v0`, **zero** `v1`.
+
+What DOES happen to a thesis is three separate things that are easy to conflate:
+
+| | mechanism | driven by |
+|---|---|---|
+| **stated** | `ledger.mark_stated` - the ledger's own docstring calls it "promote" | GATE SURVIVAL, once, at birth. Not outcomes |
+| **resolved** | `ledger.resolve` at horizon; `attribution.run` on closed positions | outcomes, but consumed only in aggregate |
+| **size ladder promoted/demoted** | `competence.assess` | outcomes - but **book-wide**, never per name or per thesis |
+
+So outcomes move one global tier and nothing else. **There is no per-name feedback anywhere.** The
+research universe is a config literal changed once, by a human, on a correlation measurement.
+Discovery deliberately *excludes* names already covered. The muse samples uniformly and has an
+entropy sentinel specifically to stop it converging on productive pairs. A name whose theses keep
+failing is researched exactly as often as one whose theses keep working.
+
+**Why a thesis-selection lever must not be built.** The muse writes theses into the ledger, the
+ledger's resolved rows **are** the calibration sample, and calibration gates the size ladder. A
+lever that changed which theses get registered or stated would be changing the population its own
+reward is computed over - a variant selecting its own exam paper. That is the exact defect
+`mark_stated` was built to close (half the calibration sample was once material the system had
+already refused) and the reason `ShadowLedger` exists. It is the measured/measurer rule (notes/015)
+in its sharpest form.
+
+**What IS safe, and is already half-built: gate regret.** A rejected thesis is registered with
+`probability_stated=False` - so it never enters calibration - and still carries a band and a
+horizon, so it still resolves. "We refused it and it would have held" is a reward computed from
+resolutions the gate cannot influence: a genuinely disjoint measurer, which is what notes/015
+already names as the correct signal for a gate-threshold lever. The data structure exists and
+carries 9 rows. **Nothing computes it.** Recorded as **I-73** rather than built here.
+
+Per-name skill weighting is the other obvious candidate and is blocked on evidence, not machinery:
+57 resolved theses across ~30 names, SPY the deepest at n=8, against this project's own stated
+thresholds of ~50 to measure anything and 152 to tell 60% from a coin flip. `effective_n` exists
+and would say so. Build the index when the sample can carry it.
