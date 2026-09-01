@@ -20,7 +20,6 @@ from .journal import Journal
 from .positions import Position, PositionStore
 from .wiki import Wiki
 
-
 #: How far a refilled max loss must move before it is worth a journal row.
 #: A starting point, not a measurement - the same honest footing as
 #: exit_rules' CORROBORATION_FRACTION. The absolute floor keeps a near-zero

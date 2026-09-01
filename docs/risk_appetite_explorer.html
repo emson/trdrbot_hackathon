@@ -1,0 +1,738 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Risk Appetite Explorer · trdrbot</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,440;9..144,560;9..144,650&family=Public+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<style>
+/* ─────────────────────────────────────────────────────────────
+   trdrbot — LEDGER register (docs/design_system.md)
+   Sage paper, Fraunces display, Public Sans body, Plex Mono data,
+   sharp 4px radius. Light palette complete on :root.
+   ───────────────────────────────────────────────────────────── */
+*,*::before,*::after{box-sizing:border-box}
+:root{
+  --paper:#F1F4EF; --paper-raised:#FFFFFF; --paper-sunk:#E8EDE7; --paper-line:#D8E0D9;
+  --ink:#17242B; --ink-soft:#4B5D59; --ink-faint:#7C8C87;
+  --accent:#1F6F5C; --accent-soft:#E4EFEA;
+  --danger:#B23A2E; --danger-soft:#F7E6E3;
+  --caution:#8A6A16; --caution-soft:#F3ECD3;
+  --shadow:rgba(23,36,43,0.10);
+  --r:4px;
+  --serif:"Fraunces",Georgia,"Times New Roman",serif;
+  --sans:"Public Sans",-apple-system,"Segoe UI",Roboto,sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,Menlo,monospace;
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    --paper:#101816; --paper-raised:#172220; --paper-sunk:#0B110F; --paper-line:#293530;
+    --ink:#E8EEEA; --ink-soft:#9FB0AA; --ink-faint:#6E7F79;
+    --accent:#57C7A7; --accent-soft:#17332B;
+    --danger:#E5786A; --danger-soft:#3A2321;
+    --caution:#E0BB5C; --caution-soft:#332C16;
+    --shadow:rgba(0,0,0,0.4);
+  }
+}
+:root[data-theme="dark"]{
+  --paper:#101816; --paper-raised:#172220; --paper-sunk:#0B110F; --paper-line:#293530;
+  --ink:#E8EEEA; --ink-soft:#9FB0AA; --ink-faint:#6E7F79;
+  --accent:#57C7A7; --accent-soft:#17332B;
+  --danger:#E5786A; --danger-soft:#3A2321;
+  --caution:#E0BB5C; --caution-soft:#332C16;
+  --shadow:rgba(0,0,0,0.4);
+}
+
+body{margin:0; background:var(--paper); color:var(--ink);
+  font-family:var(--sans); font-size:16px; line-height:1.6; -webkit-font-smoothing:antialiased}
+h1,h2,h3{font-family:var(--serif); font-weight:560; text-wrap:balance; margin:0}
+h1{font-size:clamp(1.9rem,4.6vw,2.7rem); line-height:1.1; letter-spacing:-.015em; font-weight:650}
+h2{font-size:1.28rem; line-height:1.25}
+h3{font-size:.98rem; font-weight:650}
+p{margin:0}
+a{color:var(--accent)}
+code{font-family:var(--mono); font-size:.86em; background:var(--paper-sunk);
+  border:1px solid var(--paper-line); border-radius:3px; padding:.06em .32em}
+.wrap{max-width:1080px; margin:0 auto; padding:0 22px}
+.flow{display:flex; flex-direction:column; gap:1rem}
+.eyebrow{font-family:var(--mono); font-size:.68rem; font-weight:500; letter-spacing:.15em;
+  text-transform:uppercase; color:var(--ink-faint)}
+.lede{color:var(--ink-soft); max-width:64ch}
+
+header{border-bottom:1px solid var(--paper-line); padding:2.4rem 0 1.8rem}
+
+/* ── panels ───────────────────────────────────────────────── */
+.panel{background:var(--paper-raised); border:1px solid var(--paper-line);
+  border-radius:var(--r); padding:1.15rem 1.25rem; box-shadow:0 1px 2px var(--shadow)}
+.panel>header{border:0; padding:0 0 .85rem}
+.ptitle{display:flex; align-items:baseline; gap:.6rem; flex-wrap:wrap}
+.phint{font-size:.85rem; color:var(--ink-faint)}
+main{padding:1.6rem 0 3rem; display:flex; flex-direction:column; gap:1.1rem}
+.cols{display:grid; gap:1.1rem}
+@media(min-width:900px){ .cols.two{grid-template-columns:1fr 1fr} }
+
+/* ── controls ─────────────────────────────────────────────── */
+.ctl{display:flex; flex-direction:column; gap:.35rem}
+.ctl .row{display:flex; justify-content:space-between; align-items:baseline; gap:1rem}
+.ctl label{font-family:var(--mono); font-size:.7rem; letter-spacing:.11em;
+  text-transform:uppercase; color:var(--ink-faint); font-weight:600}
+.ctl .val{font-family:var(--mono); font-size:1.05rem; font-weight:600;
+  font-variant-numeric:tabular-nums; color:var(--accent)}
+.ctl .sub{font-size:.82rem; color:var(--ink-soft)}
+input[type=range]{width:100%; accent-color:var(--accent); height:1.6rem; margin:0; cursor:grab}
+input[type=range]:active{cursor:grabbing}
+input[type=range]:focus-visible{outline:2px solid var(--accent); outline-offset:3px}
+.seg{display:flex; gap:2px; flex-wrap:wrap}
+.seg button{font-family:var(--mono); font-size:.72rem; font-weight:600; letter-spacing:.04em;
+  padding:.4rem .6rem; border:1px solid var(--paper-line); background:var(--paper-sunk);
+  color:var(--ink-soft); border-radius:2px; cursor:pointer}
+.seg button[aria-pressed=true]{background:var(--accent); border-color:var(--accent); color:var(--paper-raised)}
+:root[data-theme="dark"] .seg button[aria-pressed=true],
+:root:not([data-theme="light"]) .seg button[aria-pressed=true]{color:var(--paper-sunk)}
+.seg button:focus-visible{outline:2px solid var(--accent); outline-offset:2px}
+input[type=number]{font-family:var(--mono); font-size:.9rem; padding:.4rem .55rem; width:100%;
+  background:var(--paper-sunk); color:var(--ink); border:1px solid var(--paper-line);
+  border-radius:2px}
+input[type=number]:focus-visible{outline:2px solid var(--accent); outline-offset:1px}
+
+/* ── readout ──────────────────────────────────────────────── */
+.stats{display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); gap:1px;
+  background:var(--paper-line); border:1px solid var(--paper-line); border-radius:var(--r);
+  overflow:hidden}
+.stat{background:var(--paper-raised); padding:.8rem .9rem; display:flex; flex-direction:column; gap:.15rem}
+.stat .k{font-family:var(--mono); font-size:.63rem; letter-spacing:.11em; text-transform:uppercase;
+  color:var(--ink-faint); font-weight:600}
+.stat .v{font-family:var(--mono); font-size:1.32rem; font-weight:600;
+  font-variant-numeric:tabular-nums; line-height:1.15}
+.stat .s{font-size:.76rem; color:var(--ink-soft)}
+.v.good{color:var(--accent)} .v.bad{color:var(--danger)} .v.warn{color:var(--caution)}
+
+.verdict{border-left:3px solid var(--accent); background:var(--accent-soft);
+  padding:.85rem 1rem; border-radius:0 var(--r) var(--r) 0; font-size:.95rem}
+.verdict.warn{border-left-color:var(--caution); background:var(--caution-soft)}
+.verdict.bad{border-left-color:var(--danger); background:var(--danger-soft)}
+.verdict b{font-weight:650}
+
+svg{display:block; width:100%; height:auto; overflow:visible}
+canvas{display:block; width:100%; border-radius:2px}
+.axis{font-family:var(--mono); font-size:10px; fill:var(--ink-faint)}
+.gridline{stroke:var(--paper-line); stroke-width:1}
+
+table{border-collapse:collapse; width:100%; font-size:.86rem}
+th,td{text-align:left; padding:.42rem .6rem; border-bottom:1px solid var(--paper-line)}
+th{font-family:var(--mono); font-size:.64rem; letter-spacing:.09em; text-transform:uppercase;
+  color:var(--ink-faint); font-weight:600; white-space:nowrap}
+td.n,th.n{text-align:right; font-family:var(--mono); font-variant-numeric:tabular-nums; white-space:nowrap}
+tbody tr:last-child td{border-bottom:0}
+.scroll{overflow-x:auto}
+.pill{font-family:var(--mono); font-size:.68rem; font-weight:600; padding:.1em .45em;
+  border-radius:2px; white-space:nowrap}
+.pill.live{background:var(--accent-soft); color:var(--accent)}
+.pill.inert{background:var(--danger-soft); color:var(--danger)}
+.pill.warn{background:var(--caution-soft); color:var(--caution)}
+.key{display:flex; gap:1rem; flex-wrap:wrap; font-family:var(--mono); font-size:.7rem;
+  color:var(--ink-soft); align-items:center}
+.sw{display:inline-block; width:.65rem; height:.65rem; border-radius:2px; margin-right:.3rem; vertical-align:-1px}
+footer{border-top:1px solid var(--paper-line); padding:1.6rem 0 2.6rem;
+  color:var(--ink-faint); font-size:.82rem}
+.mono-s{font-family:var(--mono); font-size:.75rem}
+@media (prefers-reduced-motion:reduce){*{transition:none!important; animation:none!important}}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="wrap flow">
+    <span class="eyebrow">trdrbot · interactive · ledger register</span>
+    <h1>Risk Appetite Explorer</h1>
+    <p class="lede">Two dials decide everything: <b>how much risk you choose to take</b>, and
+    <b>how often your thesis is actually right</b>. The second one is not yours to set — but the
+    correct value of the first depends entirely on it. Drag both and watch.</p>
+    <p class="mono-s" style="color:var(--ink-faint)">Same fair-priced SPY structure, same
+    bootstrap pools and same sizing code as
+    <a href="research_risk_appetite.html">the research note</a>. <span id="verify"></span></p>
+  </div>
+</header>
+
+<main class="wrap">
+
+  <!-- ── COCKPIT ────────────────────────────────────────── -->
+  <section class="panel">
+    <div class="cols two">
+      <div class="ctl">
+        <div class="row">
+          <label for="appetite">Risk appetite — what you choose</label>
+          <span class="val" id="appetiteVal">1.00×</span>
+        </div>
+        <input type="range" id="appetite" min="0.25" max="2" step="0.05" value="1">
+        <span class="sub" id="appetiteSub">Neutral: the posture the competence ladder alone would pick.</span>
+      </div>
+      <div class="ctl">
+        <div class="row">
+          <label for="belief">Belief — how often the thesis is right</label>
+          <span class="val" id="beliefVal">50%</span>
+        </div>
+        <input type="range" id="belief" min="0" max="100" step="1" value="50">
+        <span class="sub" id="beliefSub">A coin flip on whether the edge is real.</span>
+      </div>
+    </div>
+    <div class="cols two" style="margin-top:1rem">
+      <div class="ctl">
+        <label>Competence tier (earned, not chosen)</label>
+        <div class="seg" id="tierSeg">
+          <button data-tier="explore">EXPLORE</button>
+          <button data-tier="establish">ESTABLISH</button>
+          <button data-tier="scale" aria-pressed="true">SCALE</button>
+          <button data-tier="mature">MATURE</button>
+        </div>
+      </div>
+      <div class="cols two" style="gap:.9rem">
+        <div class="ctl">
+          <label for="floorMode">Seed floor</label>
+          <div class="seg" id="floorSeg">
+            <button data-floor="constant" aria-pressed="true">CONSTANT (today)</button>
+            <button data-floor="derived">TIER-DERIVED</button>
+          </div>
+        </div>
+        <div class="ctl">
+          <label for="equity">Starting equity</label>
+          <input type="number" id="equity" value="100000" min="5000" max="10000000" step="5000">
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <div id="verdictBox"></div>
+
+  <!-- ── HEADLINE READOUT ───────────────────────────────── -->
+  <section class="flow">
+    <div class="stats">
+      <div class="stat"><span class="k">Median outcome</span><span class="v" id="sMedian">—</span><span class="s" id="sMedianSub">after 50 trades</span></div>
+      <div class="stat"><span class="k">Reward : risk</span><span class="v" id="sRR">—</span><span class="s">upside when right vs loss when wrong</span></div>
+      <div class="stat"><span class="k">Bad case (5th pct)</span><span class="v bad" id="sP5">—</span><span class="s">1 run in 20 is worse</span></div>
+      <div class="stat"><span class="k">Good case (95th pct)</span><span class="v good" id="sP95">—</span><span class="s">1 run in 20 is better</span></div>
+      <div class="stat"><span class="k">Mean drawdown</span><span class="v" id="sDD">—</span><span class="s">peak-to-trough, average path</span></div>
+      <div class="stat"><span class="k">Chance of −20%</span><span class="v" id="sPdd">—</span><span class="s">paths breaching a 20% drawdown</span></div>
+    </div>
+  </section>
+
+  <!-- ── DECISION CURVE ─────────────────────────────────── -->
+  <section class="panel flow">
+    <header class="ptitle">
+      <h2>Where should the lever be?</h2>
+      <span class="phint">Expected growth per trade, across every appetite setting, at your current belief.</span>
+    </header>
+    <svg id="curve" viewBox="0 0 720 260" role="img" aria-labelledby="curveTitle">
+      <title id="curveTitle">Expected growth versus risk appetite</title>
+    </svg>
+    <div class="key">
+      <span><span class="sw" style="background:var(--accent)"></span>expected growth</span>
+      <span><span class="sw" style="background:var(--caution)"></span>optimum for this belief</span>
+      <span><span class="sw" style="background:var(--ink-faint)"></span>your setting</span>
+    </div>
+  </section>
+
+  <!-- ── OUTCOMES ───────────────────────────────────────── -->
+  <section class="panel flow">
+    <header class="ptitle">
+      <h2>What happens to your money</h2>
+      <span class="phint">400 simulated books of 50 trades each, using SPY's own resampled returns.</span>
+    </header>
+    <canvas id="paths" height="220" aria-label="Simulated equity paths"></canvas>
+    <svg id="fan" viewBox="0 0 720 96" role="img" aria-labelledby="fanTitle">
+      <title id="fanTitle">Distribution of final equity</title>
+    </svg>
+    <div class="key">
+      <span><span class="sw" style="background:var(--accent)"></span>ended up</span>
+      <span><span class="sw" style="background:var(--danger)"></span>ended down</span>
+      <span><span class="sw" style="background:var(--ink-faint);opacity:.5"></span>where you started</span>
+    </div>
+  </section>
+
+  <!-- ── MECHANICS ──────────────────────────────────────── -->
+  <section class="cols two">
+    <div class="panel flow">
+      <header class="ptitle">
+        <h2>The next trade</h2>
+        <span class="phint">What the real sizer returns right now.</span>
+      </header>
+      <div class="scroll">
+        <table>
+          <tbody id="tradeTbl"></tbody>
+        </table>
+      </div>
+      <p class="phint" id="bindNote"></p>
+    </div>
+    <div class="panel flow">
+      <header class="ptitle">
+        <h2>The asymmetry</h2>
+        <span class="phint">Median gain if the thesis is right, against the loss if it is wrong.</span>
+      </header>
+      <svg id="asym" viewBox="0 0 360 190" role="img" aria-labelledby="asymTitle">
+        <title id="asymTitle">Upside versus downside by appetite</title>
+      </svg>
+      <div class="key">
+        <span><span class="sw" style="background:var(--accent)"></span>gain when right</span>
+        <span><span class="sw" style="background:var(--danger)"></span>loss when wrong</span>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<footer>
+  <div class="wrap flow">
+    <p><b>Read this as a shape, not a forecast.</b> Trades are drawn independently; a real book
+    clusters, so a wrong thesis tends to be wrong across several positions at once — every
+    drawdown figure here is optimistic. 50 sequential trades is roughly six months at this book's
+    rate.</p>
+    <p class="mono-s">Sources: <code>docs/research_risk_appetite.md</code> ·
+    <code>tests/scaffold_risk_appetite.py</code> · paper trading only</p>
+  </div>
+</footer>
+
+<script>
+/* ══════════════════════════════════════════════════════════════
+   Data exported from the real Python simulation. The P&L pools are
+   SPY's own resampled returns applied to the fair-priced structure;
+   the tier table is `competence.assess`'s own output.
+   ══════════════════════════════════════════════════════════════ */
+const DATA = {"structure":{"debit":2.5141,"maxProfit":548.59,"maxLoss":-251.41,"perContractRisk":251.41,"b":1.8819,"stated":0.3962,"breakEven":0.347},"cal":{"n":29,"reliability":0.021926,"minSample":8},"tiers":{"explore":{"kelly":0.0,"seed":0.022,"book":0.1,"pos":0.05,"name_cap":0.08},"establish":{"kelly":0.0625,"seed":0.022,"book":0.15,"pos":0.075,"name_cap":0.12},"scale":{"kelly":0.149143,"seed":0.022,"book":0.2,"pos":0.1,"name_cap":0.16},"mature":{"kelly":0.223214,"seed":0.022,"book":0.25,"pos":0.125,"name_cap":0.2}},"clamps":{"kellyCeiling":0.5,"bookCeiling":0.35,"floorCeiling":0.05,"appetiteMin":0.25,"appetiteMax":2.0,"seedShare":0.22},"demote":{"oneTier":0.05,"toExplore":0.1},"pools":{"right":[-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-251.63,-244.47,-235.1,-228.0,-222.72,-217.17,-210.62,-203.76,-197.8,-190.43,-184.33,-173.89,-168.82,-160.23,-152.48,-142.66,-134.53,-128.19,-119.84,-110.34,-105.19,-96.69,-91.39,-85.17,-81.35,-71.07,-62.95,-59.26,-50.32,-37.77,-31.24,-22.92,-16.29,-8.96,0.96,5.01,9.72,18.71,27.51,40.19,47.81,56.47,63.16,73.67,81.07,86.93,94.45,107.83,113.73,119.72,129.43,143.21,151.2,157.48,167.76,171.42,175.37,182.55,194.34,200.52,211.94,217.65,223.84,231.15,235.72,242.34,253.77,261.73,270.11,280.52,285.62,295.52,305.75,312.64,319.16,326.01,336.54,343.54,350.94,361.51,368.85,379.22,386.79,393.95,399.61,409.42,419.91,428.48,434.81,444.16,459.72,464.91,477.13,485.47,493.1,503.64,514.61,522.79,532.68,539.66,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59],"neutral":[-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-252.68,-247.84,-242.07,-235.27,-230.44,-223.07,-218.24,-206.5,-202.25,-193.54,-188.06,-179.96,-171.42,-166.11,-159.6,-153.87,-148.39,-134.05,-124.81,-114.56,-105.7,-95.62,-88.01,-77.73,-71.86,-66.35,-59.5,-53.33,-43.79,-38.85,-29.57,-21.96,-15.05,-5.42,0.01,6.95,15.76,25.74,29.72,35.49,42.24,49.13,55.35,64.52,74.73,81.71,89.31,99.21,113.7,119.98,131.43,143.94,154.29,164.06,171.94,179.81,187.38,197.04,202.72,211.23,219.81,228.53,236.71,241.9,245.96,256.32,264.27,272.14,282.31,289.03,298.13,310.44,322.59,328.83,338.48,345.71,351.8,360.81,370.44,382.07,393.91,404.09,412.19,422.77,432.17,439.1,449.48,462.13,470.17,475.86,484.23,496.14,504.43,513.87,524.41,539.08,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59],"wrong":[-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-251.15,-244.23,-235.37,-225.6,-210.87,-203.04,-193.35,-182.09,-169.38,-161.66,-150.52,-144.04,-138.25,-131.89,-124.5,-111.35,-102.4,-89.94,-82.01,-74.09,-67.69,-59.14,-49.26,-43.12,-32.74,-25.52,-15.43,-5.24,3.77,13.95,20.3,25.22,29.82,34.74,47.48,54.64,65.35,73.74,81.43,91.23,97.53,108.2,118.03,125.11,134.43,147.77,157.1,167.04,173.52,182.78,192.31,198.2,204.77,214.17,225.24,238.9,249.15,254.96,264.15,275.13,284.73,293.04,298.96,305.63,322.35,330.01,337.72,346.51,362.36,374.16,384.91,399.78,406.32,417.17,427.58,438.71,448.27,460.54,468.66,479.62,488.86,500.05,509.14,523.34,535.53,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59]},"poolStats":{"right":{"ev":34.06,"evSampled":33.37,"pwin":0.3962,"b":1.882},"neutral":{"ev":-2.73,"evSampled":-3.46,"pwin":0.348,"b":1.841},"wrong":{"ev":-43.04,"evSampled":-43.78,"pwin":0.2968,"b":1.775}},"refs":[{"tier":"explore","a":0.25,"contracts":2,"frac":0.005028},{"tier":"explore","a":1.0,"contracts":8,"frac":0.020113},{"tier":"explore","a":2.0,"contracts":17,"frac":0.042739},{"tier":"scale","a":0.25,"contracts":2,"frac":0.005028},{"tier":"scale","a":1.0,"contracts":8,"frac":0.020113},{"tier":"scale","a":2.0,"contracts":17,"frac":0.042739},{"tier":"mature","a":0.25,"contracts":2,"frac":0.005028},{"tier":"mature","a":1.0,"contracts":9,"frac":0.022627},{"tier":"mature","a":2.0,"contracts":19,"frac":0.047768}]};
+
+/* ── the sizer, ported from src/trdrbot/sizing.py ──────────────
+   Verified against nine Python reference points on load; the badge
+   in the header says so, and says so loudly if it ever drifts. */
+const C = DATA.clamps, S = DATA.structure, CAL = DATA.cal;
+
+function shrinkProbability(stated){
+  if (CAL.n < CAL.minSample || CAL.reliability == null) return 0.5 + (stated - 0.5) * 0.5;
+  let trust = Math.max(0, 1 - CAL.reliability / 0.05);
+  trust = Math.min(1, trust);
+  trust *= Math.min(1, CAL.n / 30);
+  return 0.5 + (stated - 0.5) * (0.5 + 0.5 * trust);
+}
+function kellyFraction(p, b){ return p - (1 - p) / b; }
+
+const ADJ  = shrinkProbability(S.stated);
+const FULL = kellyFraction(ADJ, S.b);
+const GATE = kellyFraction(S.stated, S.b);
+
+/** The proposed lever: one scalar over the tier's own budget. */
+function postureFor(tier, appetite, floorMode){
+  const t = DATA.tiers[tier];
+  const a = Math.min(C.appetiteMax, Math.max(C.appetiteMin, appetite));
+  const book = Math.min(C.bookCeiling, t.book * a);
+  const seedBase = floorMode === 'derived' ? book * C.seedShare : t.seed * a;
+  return {
+    kelly: Math.min(C.kellyCeiling, t.kelly * a),
+    seed:  Math.min(C.floorCeiling, seedBase),
+    book, pos: book * 0.5, name: book * 0.8
+  };
+}
+
+/** Mirrors sizing.size_position, including the contracts<1 floor and book caps. */
+function sizePosition(equity, tier, appetite, floorMode, openRisk){
+  const p = postureFor(tier, appetite, floorMode);
+  const per = S.perContractRisk;
+  if (GATE <= 0) return {contracts:0, frac:0, bind:'no edge', posture:p};
+
+  let frac, bind;
+  if (p.kelly <= 0){                       // EXPLORE: a fixed allocation, not Kelly
+    frac = Math.min(p.seed, p.pos); bind = frac === p.pos ? 'position cap' : 'seed floor';
+  } else {
+    const k = FULL * p.kelly;
+    frac = Math.max(k, p.seed);
+    bind = k >= p.seed ? 'Kelly' : 'seed floor';
+    if (frac > p.pos){ frac = p.pos; bind = 'position cap'; }
+  }
+
+  let contracts = Math.floor((equity * frac) / per);
+  if (contracts < 1) contracts = per <= p.pos * equity ? 1 : 0;
+
+  const bookLeft = p.book * equity - (openRisk || 0);
+  const nameLeft = p.name * equity - (openRisk || 0);
+  if (bookLeft < per || nameLeft < per) return {contracts:0, frac:0, bind:'book full', posture:p};
+  const byBook = Math.floor(bookLeft / per), byName = Math.floor(nameLeft / per);
+  if (byBook < contracts){ contracts = byBook; bind = 'book cap'; }
+  if (byName < contracts){ contracts = byName; bind = 'name cap'; }
+
+  return {contracts, frac: contracts * per / equity, bind, posture:p};
+}
+
+/* ── deterministic RNG, so dragging a slider does not reshuffle
+   the world underneath the reader ─────────────────────────── */
+function mulberry32(seed){
+  return function(){
+    seed |= 0; seed = seed + 0x6D2B79F5 | 0;
+    let t = Math.imul(seed ^ seed >>> 15, 1 | seed);
+    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
+}
+
+/* ── the book, simulated ──────────────────────────────────── */
+const N_TRADES = 50;
+
+function tierAfterDrawdown(tier, dd){
+  const order = ['explore','establish','scale','mature'];
+  if (dd >= DATA.demote.toExplore) return 'explore';
+  if (dd >= DATA.demote.oneTier) return order[Math.max(0, order.indexOf(tier) - 1)];
+  return tier;
+}
+
+function runPaths(cfg, nPaths, keepPaths){
+  const {equity, tier, appetite, floorMode, belief} = cfg;
+  const R = DATA.pools.right, W = DATA.pools.wrong;
+  const rng = mulberry32(20260901);
+  const finals = [], dds = [], kept = [];
+  for (let i = 0; i < nPaths; i++){
+    let eq = equity, hw = equity, worst = 0;
+    const track = keepPaths && i < keepPaths ? [eq] : null;
+    // One belief draw per BOOK, not per trade: a thesis engine is either
+    // finding edge in this regime or it is not, and resampling that every
+    // trade would average the two worlds into a mush that never happens.
+    const pool = rng() < belief ? R : W;
+    for (let t = 0; t < N_TRADES; t++){
+      const dd = hw > 0 ? Math.max(0, 1 - eq / hw) : 0;
+      const d = sizePosition(eq, tierAfterDrawdown(tier, dd), appetite, floorMode, 0);
+      if (d.contracts) eq += d.contracts * pool[Math.floor(rng() * pool.length)];
+      if (eq <= equity * 0.01){ eq = equity * 0.01; if (track) track.push(eq); worst = 1; break; }
+      hw = Math.max(hw, eq); worst = Math.max(worst, 1 - eq / hw);
+      if (track) track.push(eq);
+    }
+    finals.push(eq); dds.push(worst);
+    if (track) kept.push(track);
+  }
+  finals.sort((a, b) => a - b);
+  const q = f => finals[Math.min(finals.length - 1, Math.floor(f * finals.length))];
+  return {
+    finals, paths: kept,
+    p5: q(0.05), p25: q(0.25), median: q(0.5), p75: q(0.75), p95: q(0.95),
+    meanDD: dds.reduce((a, b) => a + b, 0) / dds.length,
+    pdd20: dds.filter(d => d > 0.20).length / dds.length,
+    growth: finals.reduce((a, e) => a + Math.log(Math.max(e, 1) / equity), 0) / finals.length / N_TRADES
+  };
+}
+
+/** Median outcome for a pure regime — the numbers behind reward:risk. */
+function pureMedian(cfg, which){
+  return runPaths({...cfg, belief: which === 'right' ? 1 : 0}, 220, 0).median;
+}
+
+/* ── state ────────────────────────────────────────────────── */
+const state = {appetite:1, belief:0.5, tier:'scale', floorMode:'constant', equity:100000};
+const $ = id => document.getElementById(id);
+const money = v => '$' + Math.round(v).toLocaleString('en-US');
+const pct = (v, d = 1) => (v * 100).toFixed(d) + '%';
+const cssVar = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+
+const APPETITE_STOPS = [];
+for (let a = 0.25; a <= 2.001; a += 0.125) APPETITE_STOPS.push(Math.round(a * 1000) / 1000);
+
+/* ── drawing ──────────────────────────────────────────────── */
+function svgEl(tag, attrs){
+  const e = document.createElementNS('http://www.w3.org/2000/svg', tag);
+  for (const k in attrs) e.setAttribute(k, attrs[k]);
+  return e;
+}
+
+function drawCurve(curveData, best){
+  const svg = $('curve');
+  [...svg.querySelectorAll(':not(title)')].forEach(n => n.remove());
+  const W = 720, H = 260, ml = 52, mr = 16, mt = 14, mb = 34;
+  const xs = a => ml + (a - 0.25) / 1.75 * (W - ml - mr);
+  const gs = curveData.map(d => d.g);
+  let lo = Math.min(...gs), hi = Math.max(...gs);
+  if (hi - lo < 1e-6){ hi += 1e-4; lo -= 1e-4; }
+  const pad = (hi - lo) * 0.18; lo -= pad; hi += pad;
+  const ys = g => mt + (1 - (g - lo) / (hi - lo)) * (H - mt - mb);
+
+  for (let i = 0; i <= 4; i++){
+    const g = lo + (hi - lo) * i / 4, y = ys(g);
+    svg.appendChild(svgEl('line', {x1:ml, x2:W - mr, y1:y, y2:y, class:'gridline'}));
+    const tx = svgEl('text', {x:ml - 8, y:y + 3.5, class:'axis', 'text-anchor':'end'});
+    tx.textContent = (g * 100).toFixed(2) + '%';
+    svg.appendChild(tx);
+  }
+  if (lo < 0 && hi > 0){
+    svg.appendChild(svgEl('line', {x1:ml, x2:W - mr, y1:ys(0), y2:ys(0),
+      stroke:cssVar('--ink-faint'), 'stroke-width':1, 'stroke-dasharray':'3 3', opacity:.7}));
+  }
+  [0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2].forEach(a => {
+    const t = svgEl('text', {x:xs(a), y:H - mb + 18, class:'axis', 'text-anchor':'middle'});
+    t.textContent = a.toFixed(2) + '×';
+    svg.appendChild(t);
+  });
+  const d = curveData.map((p, i) => (i ? 'L' : 'M') + xs(p.a).toFixed(1) + ' ' + ys(p.g).toFixed(1)).join(' ');
+  const area = d + ` L${xs(2).toFixed(1)} ${ys(lo).toFixed(1)} L${xs(0.25).toFixed(1)} ${ys(lo).toFixed(1)} Z`;
+  svg.appendChild(svgEl('path', {d:area, fill:cssVar('--accent'), opacity:.12}));
+  svg.appendChild(svgEl('path', {d, fill:'none', stroke:cssVar('--accent'), 'stroke-width':2.5,
+    'stroke-linejoin':'round'}));
+
+  // optimum
+  svg.appendChild(svgEl('line', {x1:xs(best.a), x2:xs(best.a), y1:mt, y2:H - mb,
+    stroke:cssVar('--caution'), 'stroke-width':1.5, 'stroke-dasharray':'4 3'}));
+  svg.appendChild(svgEl('circle', {cx:xs(best.a), cy:ys(best.g), r:5,
+    fill:cssVar('--caution'), stroke:cssVar('--paper-raised'), 'stroke-width':2}));
+  const bAnchor = best.a < 0.45 ? 'start' : best.a > 1.8 ? 'end' : 'middle';
+  const bl = svgEl('text', {x:xs(best.a) + (bAnchor === 'start' ? 4 : bAnchor === 'end' ? -4 : 0),
+    y:mt + 10, class:'axis', 'text-anchor':bAnchor,
+    fill:cssVar('--caution'), 'font-weight':'600'});
+  bl.textContent = 'best ' + best.a.toFixed(2) + '×';
+  svg.appendChild(bl);
+
+  // your setting
+  const cur = curveData.reduce((m, p) => Math.abs(p.a - state.appetite) < Math.abs(m.a - state.appetite) ? p : m);
+  svg.appendChild(svgEl('line', {x1:xs(state.appetite), x2:xs(state.appetite), y1:mt, y2:H - mb,
+    stroke:cssVar('--ink'), 'stroke-width':1.5, opacity:.55}));
+  svg.appendChild(svgEl('circle', {cx:xs(state.appetite), cy:ys(cur.g), r:5.5,
+    fill:cssVar('--ink'), stroke:cssVar('--paper-raised'), 'stroke-width':2}));
+  const cl = svgEl('text', {x:xs(state.appetite), y:H - mb + 32, class:'axis',
+    'text-anchor':'middle', fill:cssVar('--ink'), 'font-weight':'600'});
+  cl.textContent = 'you'; svg.appendChild(cl);
+}
+
+function drawPaths(res){
+  const cv = $('paths'), dpr = window.devicePixelRatio || 1;
+  const w = cv.clientWidth || 720, h = 220;
+  cv.width = w * dpr; cv.height = h * dpr;
+  const ctx = cv.getContext('2d');
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, w, h);
+
+  const all = res.paths.flat().sort((a, b) => a - b);
+  const q = f => all[Math.min(all.length - 1, Math.floor(f * all.length))];
+  const lo = Math.min(state.equity * 0.72, q(0.01));
+  const hi = Math.max(state.equity * 1.12, q(0.99));
+  const X = i => (i / N_TRADES) * (w - 8) + 4;
+  const Y = v => h - 10 - ((v - lo) / (hi - lo)) * (h - 22);
+
+  ctx.strokeStyle = cssVar('--ink-faint'); ctx.globalAlpha = .5;
+  ctx.setLineDash([3, 3]); ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(0, Y(state.equity)); ctx.lineTo(w, Y(state.equity)); ctx.stroke();
+  ctx.setLineDash([]);
+
+  ctx.lineWidth = 1.1;
+  ctx.save(); ctx.beginPath(); ctx.rect(0, 0, w, h); ctx.clip();
+  for (const p of res.paths){
+    ctx.globalAlpha = .38;
+    ctx.strokeStyle = p[p.length - 1] >= state.equity ? cssVar('--accent') : cssVar('--danger');
+    ctx.beginPath();
+    p.forEach((v, i) => i ? ctx.lineTo(X(i), Y(v)) : ctx.moveTo(X(i), Y(v)));
+    ctx.stroke();
+  }
+  ctx.restore();
+  ctx.globalAlpha = 1;
+  ctx.font = '10px "IBM Plex Mono", monospace';
+  const lab = 'start ' + money(state.equity);
+  const lw = ctx.measureText(lab).width;
+  ctx.fillStyle = cssVar('--paper-raised'); ctx.globalAlpha = .85;
+  ctx.fillRect(4, Y(state.equity) - 14, lw + 8, 13);
+  ctx.globalAlpha = 1; ctx.fillStyle = cssVar('--ink-faint');
+  ctx.fillText(lab, 8, Y(state.equity) - 4);
+  const t2 = '50 trades', tw = ctx.measureText(t2).width;
+  ctx.fillStyle = cssVar('--paper-raised'); ctx.globalAlpha = .85;
+  ctx.fillRect(w - tw - 10, h - 13, tw + 8, 13);
+  ctx.globalAlpha = 1; ctx.fillStyle = cssVar('--ink-faint');
+  ctx.fillText(t2, w - tw - 6, h - 3);
+}
+
+function drawFan(res){
+  const svg = $('fan');
+  [...svg.querySelectorAll(':not(title)')].forEach(n => n.remove());
+  const W = 720, H = 96, ml = 8, mr = 8, y = 30, bh = 26;
+  const lo = Math.min(res.p5, state.equity * 0.7), hi = Math.max(res.p95, state.equity * 1.15);
+  const X = v => ml + (v - lo) / (hi - lo) * (W - ml - mr);
+
+  svg.appendChild(svgEl('rect', {x:X(res.p5), y, width:Math.max(1, X(res.p95) - X(res.p5)),
+    height:bh, fill:cssVar('--ink-faint'), opacity:.22, rx:2}));
+  svg.appendChild(svgEl('rect', {x:X(res.p25), y, width:Math.max(1, X(res.p75) - X(res.p25)),
+    height:bh, fill:cssVar('--accent'), opacity:.32, rx:2}));
+  svg.appendChild(svgEl('line', {x1:X(state.equity), x2:X(state.equity), y1:y - 8, y2:y + bh + 8,
+    stroke:cssVar('--ink-faint'), 'stroke-width':1.5, 'stroke-dasharray':'3 3'}));
+  svg.appendChild(svgEl('line', {x1:X(res.median), x2:X(res.median), y1:y - 4, y2:y + bh + 4,
+    stroke:res.median >= state.equity ? cssVar('--accent') : cssVar('--danger'), 'stroke-width':3}));
+
+  const mark = (v, lab, anchor) => {
+    const t = svgEl('text', {x:X(v), y:y + bh + 22, class:'axis', 'text-anchor':anchor});
+    t.textContent = lab; svg.appendChild(t);
+  };
+  mark(res.p5, money(res.p5), 'start');
+  mark(res.p95, money(res.p95), 'end');
+  const mt = svgEl('text', {x:X(res.median), y:y - 10, class:'axis', 'text-anchor':'middle',
+    'font-weight':'600', fill:cssVar('--ink')});
+  mt.textContent = 'median ' + money(res.median);
+  svg.appendChild(mt);
+}
+
+function drawAsym(rows){
+  const svg = $('asym');
+  [...svg.querySelectorAll(':not(title)')].forEach(n => n.remove());
+  const W = 360, H = 190, ml = 40, mr = 10, mt = 8, rowH = (H - mt - 22) / rows.length;
+  const maxAbs = Math.max(...rows.flatMap(r => [Math.abs(r.up), Math.abs(r.dn)]), 1);
+  const mid = ml + (W - ml - mr) / 2;
+  const halfW = (W - ml - mr) / 2;
+
+  svg.appendChild(svgEl('line', {x1:mid, x2:mid, y1:mt, y2:H - 22,
+    stroke:cssVar('--ink-faint'), 'stroke-width':1, opacity:.6}));
+  rows.forEach((r, i) => {
+    const y = mt + i * rowH + rowH * 0.2, bh = rowH * 0.6;
+    const uw = Math.abs(r.up) / maxAbs * halfW, dw = Math.abs(r.dn) / maxAbs * halfW;
+    svg.appendChild(svgEl('rect', {x:mid, y, width:Math.max(1, uw), height:bh,
+      fill:cssVar('--accent'), rx:1}));
+    svg.appendChild(svgEl('rect', {x:mid - Math.max(1, dw), y, width:Math.max(1, dw), height:bh,
+      fill:cssVar('--danger'), rx:1}));
+    const lb = svgEl('text', {x:ml - 6, y:y + bh * 0.78, class:'axis', 'text-anchor':'end',
+      'font-weight': Math.abs(r.a - state.appetite) < 0.06 ? '700' : '400',
+      fill: Math.abs(r.a - state.appetite) < 0.06 ? cssVar('--ink') : cssVar('--ink-faint')});
+    lb.textContent = r.a.toFixed(2) + '×';
+    svg.appendChild(lb);
+  });
+  const t1 = svgEl('text', {x:mid - 6, y:H - 6, class:'axis', 'text-anchor':'end'});
+  t1.textContent = 'loss when wrong'; svg.appendChild(t1);
+  const t2 = svgEl('text', {x:mid + 6, y:H - 6, class:'axis', 'text-anchor':'start'});
+  t2.textContent = 'gain when right'; svg.appendChild(t2);
+}
+
+/* ── render ───────────────────────────────────────────────── */
+/* Coalesce redraws to one per frame. requestAnimationFrame is throttled to
+   zero in a hidden tab, so a reader who drags, switches away and comes back
+   would otherwise find stale charts - fall back to a timer when hidden, and
+   repaint on the way back. */
+let raf = 0, rafIsTimer = false;
+function render(){
+  if (rafIsTimer) clearTimeout(raf); else cancelAnimationFrame(raf);
+  rafIsTimer = document.hidden;
+  const schedule = rafIsTimer ? (fn => setTimeout(fn, 0)) : requestAnimationFrame;
+  raf = schedule(() => {
+    const cfg = {...state};
+
+    // The decision curve: growth at every appetite, at this belief.
+    const curveData = APPETITE_STOPS.map(a => ({a, g: runPaths({...cfg, appetite:a}, 160, 0).growth}));
+    const best = curveData.reduce((m, p) => p.g > m.g ? p : m);
+
+    const res = runPaths(cfg, 400, 60);
+    const upM = pureMedian(cfg, 'right'), dnM = pureMedian(cfg, 'wrong');
+    const gain = upM - cfg.equity, loss = cfg.equity - dnM;
+    const rr = loss > 0 ? gain / loss : Infinity;
+
+    $('appetiteVal').textContent = state.appetite.toFixed(2) + '×';
+    $('beliefVal').textContent = Math.round(state.belief * 100) + '%';
+    $('appetiteSub').textContent =
+      state.appetite < 0.9 ? 'Below neutral — smaller bets, shallower drawdowns, slower compounding.'
+      : state.appetite > 1.1 ? 'Above neutral — bigger bets. The downside grows faster than the upside.'
+      : 'Neutral: the posture the competence ladder alone would pick.';
+    $('beliefSub').textContent =
+      state.belief < 0.45 ? 'You mostly doubt the edge is real.'
+      : state.belief > 0.75 ? 'You are confident the edge is real.'
+      : state.belief > 0.55 ? 'You lean towards the edge being real.'
+      : 'A coin flip on whether the edge is real.';
+
+    $('sMedian').textContent = money(res.median);
+    $('sMedian').className = 'v ' + (res.median >= cfg.equity ? 'good' : 'bad');
+    $('sMedianSub').textContent = (res.median >= cfg.equity ? '+' : '') +
+      pct(res.median / cfg.equity - 1) + ' after 50 trades';
+    $('sRR').textContent = isFinite(rr) ? rr.toFixed(2) + ' : 1' : '—';
+    $('sRR').className = 'v ' + (rr >= 1 ? 'good' : rr >= 0.7 ? 'warn' : 'bad');
+    $('sP5').textContent = money(res.p5);
+    $('sP95').textContent = money(res.p95);
+    $('sDD').textContent = pct(res.meanDD);
+    $('sDD').className = 'v ' + (res.meanDD > 0.25 ? 'bad' : res.meanDD > 0.15 ? 'warn' : '');
+    $('sPdd').textContent = pct(res.pdd20, 0);
+    $('sPdd').className = 'v ' + (res.pdd20 > 0.5 ? 'bad' : res.pdd20 > 0.2 ? 'warn' : '');
+
+    // verdict
+    const d = state.appetite - best.a;
+    const vb = $('verdictBox');
+    let cls = 'verdict', msg;
+    if (Math.abs(d) < 0.14){
+      msg = `<b>Well set.</b> At ${Math.round(state.belief*100)}% belief, ${best.a.toFixed(2)}× is
+        about the growth-maximising appetite, and you are there.`;
+    } else if (d > 0){
+      cls += ' bad';
+      msg = `<b>You are ${d.toFixed(2)}× above the optimum.</b> At ${Math.round(state.belief*100)}%
+        belief the growth-maximising setting is <b>${best.a.toFixed(2)}×</b>. Past it you are paying
+        variance for growth you do not get back — that is Kelly's fragility, not a market view.`;
+    } else {
+      cls += ' warn';
+      msg = `<b>You are ${(-d).toFixed(2)}× below the optimum.</b> At ${Math.round(state.belief*100)}%
+        belief you could justify <b>${best.a.toFixed(2)}×</b>. Under-betting a real edge is a real
+        cost — idle capital is a position too.`;
+    }
+    vb.innerHTML = `<div class="${cls}">${msg}</div>`;
+
+    // the next trade
+    const sz = sizePosition(cfg.equity, cfg.tier, cfg.appetite, cfg.floorMode, 0);
+    const p = sz.posture;
+    const inertHere = sz.bind === 'seed floor';
+    $('tradeTbl').innerHTML = `
+      <tr><th>Contracts</th><td class="n"><b>${sz.contracts}</b></td></tr>
+      <tr><th>At risk</th><td class="n">${money(sz.frac * cfg.equity)} · ${pct(sz.frac, 2)} of equity</td></tr>
+      <tr><th>What sets the size</th><td class="n"><span class="pill ${inertHere ? 'inert' : 'live'}">${sz.bind}</span></td></tr>
+      <tr><th>Kelly asks for</th><td class="n">${pct(Math.max(0, FULL * p.kelly), 2)}</td></tr>
+      <tr><th>Seed floor</th><td class="n">${pct(p.seed, 2)}</td></tr>
+      <tr><th>Caps · position / name / book</th><td class="n">${pct(p.pos,1)} / ${pct(p.name,1)} / ${pct(p.book,1)}</td></tr>`;
+    $('bindNote').innerHTML = inertHere
+      ? `The <b>seed floor</b> is setting this size, not Kelly and not the tier — so at this
+         setting the competence ladder is doing nothing. Switch the seed floor to
+         <b>tier-derived</b> and the rungs start to differ.`
+      : `Kelly is live here: the edge estimate, not a floor, is choosing the size.`;
+
+    // asymmetry
+    const rows = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2].map(a => {
+      const c2 = {...cfg, appetite:a};
+      return {a, up: pureMedian(c2, 'right') - cfg.equity, dn: pureMedian(c2, 'wrong') - cfg.equity};
+    });
+
+    drawCurve(curveData, best);
+    drawPaths(res);
+    drawFan(res);
+    drawAsym(rows);
+  });
+}
+
+/* ── wiring ───────────────────────────────────────────────── */
+$('appetite').addEventListener('input', e => { state.appetite = +e.target.value; render(); });
+$('belief').addEventListener('input', e => { state.belief = +e.target.value / 100; render(); });
+$('equity').addEventListener('input', e => {
+  const v = +e.target.value; if (v >= 5000 && v <= 10000000){ state.equity = v; render(); }
+});
+function segWire(id, key, attr){
+  $(id).addEventListener('click', e => {
+    const b = e.target.closest('button'); if (!b) return;
+    [...$(id).querySelectorAll('button')].forEach(x => x.setAttribute('aria-pressed', x === b));
+    state[key] = b.dataset[attr]; render();
+  });
+}
+segWire('tierSeg', 'tier', 'tier');
+segWire('floorSeg', 'floorMode', 'floor');
+matchMedia('(prefers-color-scheme: dark)').addEventListener('change', render);
+window.addEventListener('resize', render);
+document.addEventListener('visibilitychange', () => { if (!document.hidden) render(); });
+
+/* ── self-check: does this JS sizer still agree with Python? ── */
+(function verify(){
+  const refs = DATA.refs || [];
+  let ok = 0;
+  for (const r of refs){
+    const d = sizePosition(100000, r.tier, r.a, 'constant', 0);
+    if (d.contracts === r.contracts && Math.abs(d.frac - r.frac) < 1e-5) ok++;
+  }
+  let poolsOk = true;
+  for (const k in DATA.pools){
+    const m = DATA.pools[k].reduce((a, b) => a + b, 0) / DATA.pools[k].length;
+    if (Math.abs(m - DATA.poolStats[k].evSampled) > 0.05) poolsOk = false;
+  }
+  const el = $('verify');
+  if (!refs.length){ el.textContent = ''; return; }
+  el.innerHTML = (ok === refs.length && poolsOk)
+    ? `<span class="pill live">verified against Python — sizer ${ok}/${refs.length}, pools ok</span>`
+    : `<span class="pill inert">DRIFTED — sizer ${ok}/${refs.length}${poolsOk ? '' : ', pool means off'}</span>`;
+})();
+
+render();
+</script>
+</body>
+</html>

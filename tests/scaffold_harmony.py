@@ -36,7 +36,6 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 from trdrbot import competence, exit_rules, optmath, sizing
-from trdrbot.analytics import Snapshot
 from trdrbot.calibration import Calibration
 from trdrbot.experiments import THESIS_RIGHT_EXPRESSION_RIGHT
 from trdrbot.optmath import Leg
@@ -114,7 +113,7 @@ CASES = [
 ]
 
 decorative = []
-for name, legs, direction, level, intent in CASES:
+for name, legs, direction, level, _intent in CASES:
     frac = loss_locked_at(legs, level)
     if frac is None:
         continue

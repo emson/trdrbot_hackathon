@@ -1,0 +1,586 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The Risk Appetite Lever · trdrbot</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,440;9..144,560;9..144,650&family=Public+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<style>*,*::before,*::after{box-sizing:border-box}body{margin:0}img,svg{max-width:100%}</style>
+<style>
+/* ─────────────────────────────────────────────────────────────
+   trdrbot — LEDGER register (docs/design_system.md)
+   Sage paper, Fraunces display, Public Sans body, Plex Mono data,
+   sharp 4px radius. Light palette complete on :root.
+   ───────────────────────────────────────────────────────────── */
+:root{
+  --paper:#F1F4EF; --paper-raised:#FFFFFF; --paper-sunk:#E8EDE7; --paper-line:#D8E0D9;
+  --ink:#17242B; --ink-soft:#4B5D59; --ink-faint:#7C8C87;
+  --accent:#1F6F5C; --accent-soft:#E4EFEA;
+  --danger:#B23A2E; --danger-soft:#F7E6E3;
+  --caution:#8A6A16; --caution-soft:#F3ECD3;
+  --shadow:rgba(23,36,43,0.10);
+  --r:4px;
+  --measure:67ch;
+  --serif:"Fraunces",Georgia,"Times New Roman",serif;
+  --sans:"Public Sans",-apple-system,"Segoe UI",Roboto,sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,Menlo,monospace;
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    --paper:#101816; --paper-raised:#172220; --paper-sunk:#0B110F; --paper-line:#293530;
+    --ink:#E8EEEA; --ink-soft:#9FB0AA; --ink-faint:#6E7F79;
+    --accent:#57C7A7; --accent-soft:#17332B;
+    --danger:#E5786A; --danger-soft:#3A2321;
+    --caution:#E0BB5C; --caution-soft:#332C16;
+    --shadow:rgba(0,0,0,0.4);
+  }
+}
+:root[data-theme="dark"]{
+  --paper:#101816; --paper-raised:#172220; --paper-sunk:#0B110F; --paper-line:#293530;
+  --ink:#E8EEEA; --ink-soft:#9FB0AA; --ink-faint:#6E7F79;
+  --accent:#57C7A7; --accent-soft:#17332B;
+  --danger:#E5786A; --danger-soft:#3A2321;
+  --caution:#E0BB5C; --caution-soft:#332C16;
+  --shadow:rgba(0,0,0,0.4);
+}
+
+*{box-sizing:border-box}
+body{
+  margin:0; background:var(--paper); color:var(--ink);
+  font-family:var(--sans); font-size:17px; line-height:1.65;
+  -webkit-font-smoothing:antialiased;
+}
+.wrap{max-width:var(--measure); margin:0 auto; padding:0 24px}
+.bleed{max-width:940px; margin:0 auto; padding:0 24px}
+
+h1,h2,h3{font-family:var(--serif); font-weight:560; text-wrap:balance; margin:0}
+h1{font-size:clamp(2.1rem,5.4vw,3.1rem); line-height:1.08; letter-spacing:-.015em; font-weight:650}
+h2{font-size:clamp(1.45rem,3vw,1.9rem); line-height:1.2; letter-spacing:-.01em}
+h3{font-size:1.12rem; line-height:1.35; font-weight:650}
+p{margin:0}
+a{color:var(--accent)}
+strong{font-weight:650}
+code{font-family:var(--mono); font-size:.87em; background:var(--paper-sunk);
+  border:1px solid var(--paper-line); border-radius:3px; padding:.08em .34em}
+
+/* flow: layout owns the spacing, not per-element margins */
+.flow{display:flex; flex-direction:column; gap:1.1rem}
+.flow-tight{display:flex; flex-direction:column; gap:.55rem}
+
+/* ── masthead ─────────────────────────────────────────────── */
+.masthead{border-bottom:1px solid var(--paper-line); padding:clamp(2.6rem,7vw,4.4rem) 0 2.2rem}
+.eyebrow{font-family:var(--mono); font-size:.7rem; font-weight:500;
+  letter-spacing:.15em; text-transform:uppercase; color:var(--ink-faint)}
+.dek{font-size:1.16rem; color:var(--ink-soft); max-width:60ch}
+.verdict{
+  border-left:3px solid var(--accent); background:var(--accent-soft);
+  padding:1rem 1.15rem; border-radius:0 var(--r) var(--r) 0;
+}
+.verdict p+p{margin-top:.5rem}
+
+/* ── sections ─────────────────────────────────────────────── */
+section{padding:2.9rem 0; border-bottom:1px solid var(--paper-line)}
+section:last-of-type{border-bottom:0}
+.shead{display:flex; gap:.85rem; align-items:baseline; margin-bottom:1.15rem}
+.snum{font-family:var(--mono); font-size:.78rem; font-weight:600; color:var(--accent);
+  letter-spacing:.04em; padding-top:.35em; flex:none}
+
+/* ── callout ──────────────────────────────────────────────── */
+.note{border:1px solid var(--paper-line); border-left:3px solid var(--caution);
+  background:var(--caution-soft); padding:1rem 1.15rem; border-radius:0 var(--r) var(--r) 0}
+.note .lbl{font-family:var(--mono); font-size:.68rem; letter-spacing:.13em;
+  text-transform:uppercase; color:var(--caution); font-weight:600; display:block; margin-bottom:.4rem}
+
+/* ── finding cards ────────────────────────────────────────── */
+.finding{background:var(--paper-raised); border:1px solid var(--paper-line);
+  border-radius:var(--r); padding:1.2rem 1.3rem; box-shadow:0 1px 2px var(--shadow)}
+.finding .tag{font-family:var(--mono); font-size:.67rem; letter-spacing:.13em;
+  text-transform:uppercase; font-weight:600; display:inline-block; padding:.16em .5em;
+  border-radius:2px; margin-bottom:.6rem}
+.tag.bad{background:var(--danger-soft); color:var(--danger)}
+.tag.warn{background:var(--caution-soft); color:var(--caution)}
+
+/* ── tables ───────────────────────────────────────────────── */
+.scroll{overflow-x:auto; -webkit-overflow-scrolling:touch}
+table{border-collapse:collapse; width:100%; font-size:.9rem; min-width:min(100%,460px)}
+th,td{text-align:left; padding:.5rem .7rem; border-bottom:1px solid var(--paper-line);
+  vertical-align:baseline}
+th{font-family:var(--mono); font-size:.68rem; letter-spacing:.09em; text-transform:uppercase;
+  color:var(--ink-faint); font-weight:600; white-space:nowrap; border-bottom-width:1px}
+td.n,th.n{text-align:right; font-family:var(--mono); font-variant-numeric:tabular-nums;
+  white-space:nowrap}
+tbody tr:last-child td{border-bottom:0}
+tr.hi td{background:var(--accent-soft)}
+.pill{font-family:var(--mono); font-size:.7rem; font-weight:600; padding:.1em .45em;
+  border-radius:2px; white-space:nowrap}
+.pill.inert{background:var(--danger-soft); color:var(--danger)}
+.pill.live{background:var(--accent-soft); color:var(--accent)}
+
+/* ── the lever gauge: the page's one recurring device ─────── */
+.gauge{display:grid; grid-template-columns:4.2rem 1fr; gap:.35rem .8rem; align-items:center;
+  font-family:var(--mono); font-size:.78rem; font-variant-numeric:tabular-nums}
+.gauge .lab{text-align:right; color:var(--ink-soft)}
+.track{position:relative; height:1.45rem; background:var(--paper-sunk);
+  border:1px solid var(--paper-line); border-radius:2px}
+.mid{position:absolute; left:50%; top:-2px; bottom:-2px; width:1px; background:var(--ink-faint); opacity:.55}
+.bar{position:absolute; top:3px; bottom:3px; border-radius:1px}
+.bar.up{left:50%; background:var(--accent)}
+.bar.dn{right:50%; background:var(--danger)}
+.gkey{display:flex; gap:1.2rem; flex-wrap:wrap; font-family:var(--mono); font-size:.72rem;
+  color:var(--ink-soft); align-items:center}
+.sw{display:inline-block; width:.7rem; height:.7rem; border-radius:2px; margin-right:.35rem;
+  vertical-align:-1px}
+
+/* belief strip */
+.belief{display:grid; grid-template-columns:repeat(6,1fr); gap:2px; margin-top:.5rem}
+.belief div{font-family:var(--mono); font-size:.72rem; text-align:center; padding:.45rem .2rem;
+  background:var(--paper-sunk); color:var(--ink-faint); border-radius:2px}
+.belief div.on{background:var(--accent); color:var(--paper-raised); font-weight:600}
+:root[data-theme="dark"] .belief div.on,
+:root:not([data-theme="light"]) .belief div.on{color:var(--paper-sunk)}
+
+/* ── code block ───────────────────────────────────────────── */
+pre{margin:0; background:var(--paper-sunk); border:1px solid var(--paper-line);
+  border-radius:var(--r); padding:.95rem 1.1rem; overflow-x:auto;
+  font-family:var(--mono); font-size:.82rem; line-height:1.6; color:var(--ink)}
+pre code{background:none; border:0; padding:0; font-size:1em}
+.cmt{color:var(--ink-faint)}
+.kw{color:var(--accent)}
+
+/* ── lists ────────────────────────────────────────────────── */
+ul.clean{list-style:none; padding:0; margin:0; display:flex; flex-direction:column; gap:.75rem}
+ul.clean>li{padding-left:1.1rem; position:relative}
+ul.clean>li::before{content:""; position:absolute; left:0; top:.62em; width:.42rem; height:.42rem;
+  border:1px solid var(--accent); border-radius:1px}
+ol.steps{list-style:none; padding:0; margin:0; counter-reset:s;
+  display:flex; flex-direction:column; gap:.85rem}
+ol.steps>li{counter-increment:s; padding-left:2.1rem; position:relative}
+ol.steps>li::before{content:counter(s); position:absolute; left:0; top:.05em;
+  font-family:var(--mono); font-size:.72rem; font-weight:600; color:var(--accent);
+  border:1px solid var(--accent); border-radius:2px; width:1.45rem; height:1.45rem;
+  display:grid; place-items:center}
+
+footer{padding:2.4rem 0 3.2rem; color:var(--ink-faint); font-size:.85rem;
+  border-top:1px solid var(--paper-line)}
+.mono-s{font-family:var(--mono); font-size:.78rem}
+
+@media (max-width:560px){
+  body{font-size:16px}
+  .gauge{grid-template-columns:3.4rem 1fr}
+}
+@media (prefers-reduced-motion:reduce){*{animation:none!important; transition:none!important}}
+</style>
+</head>
+<body>
+<header class="masthead">
+  <div class="wrap flow">
+    <span class="eyebrow">trdrbot · research · 2026-09-01</span>
+    <h1>The risk appetite lever</h1>
+    <p class="dek">Can one knob make this book take more risk — more profit, more losses — and
+    less risk, safely? Yes. But three things sit upstream of it, and a lever added today would
+    be a knob wired to nothing.</p>
+    <div class="verdict">
+      <p><strong>One config number scaling two fields of one dataclass.</strong> It reaches every
+      risk scope because D-098 already made them all derive from the book cap.</p>
+      <p>It cannot ship first. The seed floor — not Kelly, not the competence ladder — is what
+      actually sizes positions today, and the drawdown brake it would rely on has no contacts.</p>
+    </div>
+    <p class="mono-s">Evidence: <code>tests/scaffold_risk_appetite.py</code> — the real
+    <code>sizing.size_position</code> and <code>competence.assess</code>, driven over SPY's own
+    resampled returns at the production estimator's holdout-fitted inflation.</p>
+  </div>
+</header>
+
+<section>
+  <div class="wrap">
+    <div class="shead"><span class="snum">00</span><h2>The trap, stated first</h2></div>
+    <div class="flow">
+      <p>The live 766/758 spread was bought for <strong>$1.67</strong> against a bootstrap fair
+      value of <strong>$2.45</strong>. Simulating it at its traded price hands the agent a 32%
+      mispricing and every setting looks brilliant — the first version of this simulation showed a
+      minimum-appetite book turning $100k into $734k, and I nearly believed it.</p>
+      <p>The legs are therefore <strong>repriced to zero EV</strong> under SPY's own history at
+      zero drift, so edge enters only through a stated drift. Verified in the scaffold header: EV
+      at zero drift is <code>+$0.3</code>/contract and P(profit) lands exactly on the break-even
+      probability.</p>
+      <div class="note">
+        <span class="lbl">Why this decides everything below</span>
+        <p>At the traded price, full Kelly on the structure is <strong>0.48</strong>. Fair-priced,
+        it is <strong>0.075</strong>. Every conclusion here turns on which number is real — and
+        the earlier <code>scaffold_risk_posture.py</code> used the first one.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <div class="shead"><span class="snum">01</span><h2>Three findings that change the design</h2></div>
+  </div>
+  <div class="bleed flow">
+
+    <div class="finding flow-tight">
+      <span class="tag bad">Finding 1 · the lever has no handle</span>
+      <h3>The seed floor is the position sizer. Kelly and the ladder are not.</h3>
+      <p>Full Kelly on a realistic claimed edge is 0.075. At SCALE the tier multiplier is 0.138, so
+      Kelly asks for <strong>1.04% of equity</strong> — below the <strong>2.2% seed floor</strong>.
+      <code>sizing</code> takes <code>max(kelly, floor)</code>, so the floor wins.</p>
+      <div class="scroll">
+        <table>
+          <thead><tr><th>×2 applied to, at SCALE</th><th class="n">size</th><th class="n">change</th></tr></thead>
+          <tbody>
+            <tr><td>book cap, and the two caps under it</td><td class="n">2.01%</td><td class="n"><span class="pill inert">inert</span></td></tr>
+            <tr><td>Kelly multiplier</td><td class="n">3.02%</td><td class="n">+50%</td></tr>
+            <tr><td>seed floor</td><td class="n">4.27%</td><td class="n">+112%</td></tr>
+            <tr><td>Kelly + caps — <em>the obvious proposal</em></td><td class="n">3.02%</td><td class="n">+50%</td></tr>
+            <tr class="hi"><td><strong>Kelly + caps + floor</strong></td><td class="n"><strong>4.27%</strong></td><td class="n"><strong>+112%</strong></td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p>A lever attached to the caps alone moves <strong>nothing</strong>. That is this project's
+      most expensive bug class — the compactor, the cache and the shared session all shipped as
+      code that ran and did nothing.</p>
+    </div>
+
+    <div class="finding flow-tight">
+      <span class="tag bad">Finding 2 · the safety net is not attached</span>
+      <h3>The drawdown circuit breaker does not brake.</h3>
+      <p><code>SEED_FRACTION</code> is one constant for all four tiers and it binds at three of
+      them, so demotion changes the tier and not the size.</p>
+      <div class="scroll">
+        <table>
+          <thead><tr><th>at neutral appetite</th><th class="n">EXPLORE</th><th class="n">ESTABLISH</th><th class="n">SCALE</th><th class="n">MATURE</th></tr></thead>
+          <tbody><tr><td>position size</td><td class="n">2.01%</td><td class="n">2.01%</td><td class="n">2.01%</td><td class="n">2.26%</td></tr></tbody>
+        </table>
+      </div>
+      <p>An 11% drawdown demotes MATURE → EXPLORE and cuts the next trade by <strong>13%</strong>.
+      The ladder is a circuit breaker with no contacts — and it is exactly what an aggressive
+      setting would be relying on.</p>
+    </div>
+
+    <div class="finding flow-tight">
+      <span class="tag warn">Finding 3 · recorded as I-69</span>
+      <h3><code>shrink_probability</code> inverts below 50%.</h3>
+      <p>The docstring says “pull toward the observed base rate”. <code>decisions.md</code> says so
+      at D-013, D-047 and D-076. <code>Calibration.base_rate</code> is computed and displayed. The
+      code hardcodes <strong>0.5</strong>, and the live base rate is <strong>28%</strong>.</p>
+      <div class="scroll">
+        <table>
+          <thead><tr><th class="n">stated</th><th class="n">shrunk</th><th>effect</th></tr></thead>
+          <tbody>
+            <tr><td class="n">20.0%</td><td class="n">26.9%</td><td><span class="pill inert">raised</span></td></tr>
+            <tr><td class="n">39.6%</td><td class="n">42.0%</td><td><span class="pill inert">raised</span></td></tr>
+            <tr><td class="n">65.0%</td><td class="n">61.6%</td><td><span class="pill live">lowered</span></td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p>For every claim below 50% — which is <em>every long debit spread</em>, the structure class
+      this book trades — the shrink makes the agent more confident and sizes it larger. Kelly on
+      the live structure is <strong>0.111 / 0.075 / 0.035</strong> depending on whether you shrink
+      to 0.5, don't shrink, or shrink to the base rate: a <strong>3× span</strong> set by one
+      constant. A lever multiplies whatever Kelly produces.</p>
+    </div>
+
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <div class="shead"><span class="snum">02</span><h2>What the lever buys</h2></div>
+    <div class="flow">
+      <p>500 paths × 50 trades, SPY's own returns, drawdown demotion live in the loop. Median
+      terminal equity from a $100,000 start, as deviation from flat.</p>
+    </div>
+  </div>
+  <div class="bleed flow" style="margin-top:1.4rem">
+    <div class="gauge">
+      <span class="lab">appetite</span>
+      <div class="gkey">
+        <span><span class="sw" style="background:var(--accent)"></span>thesis right (+$34/contract)</span>
+        <span><span class="sw" style="background:var(--danger)"></span>thesis wrong (−$43/contract)</span>
+      </div>
+
+      <span class="lab">0.25×</span>
+      <div class="track"><span class="mid"></span><span class="bar up" style="width:5.1%"></span><span class="bar dn" style="width:6.5%"></span></div>
+      <span class="lab">0.50×</span>
+      <div class="track"><span class="mid"></span><span class="bar up" style="width:9.1%"></span><span class="bar dn" style="width:12.4%"></span></div>
+      <span class="lab">0.75×</span>
+      <div class="track"><span class="mid"></span><span class="bar up" style="width:14.9%"></span><span class="bar dn" style="width:17.3%"></span></div>
+      <span class="lab">1.00×</span>
+      <div class="track"><span class="mid"></span><span class="bar up" style="width:20.4%"></span><span class="bar dn" style="width:26.4%"></span></div>
+      <span class="lab">1.50×</span>
+      <div class="track"><span class="mid"></span><span class="bar up" style="width:25.2%"></span><span class="bar dn" style="width:38.4%"></span></div>
+      <span class="lab">2.00×</span>
+      <div class="track"><span class="mid"></span><span class="bar up" style="width:34.7%"></span><span class="bar dn" style="width:50.0%"></span></div>
+    </div>
+
+    <p class="mono-s" style="color:var(--ink-soft)">At 2.00× the lever buys <strong>+$24,413</strong>
+    of median upside when the thesis is right and costs <strong>−$35,206</strong> when it is wrong.
+    The red bar overtakes the green past 1.00× and never gives it back.</p>
+
+    <div class="scroll">
+      <table>
+        <thead><tr>
+          <th>appetite</th>
+          <th class="n">median (right)</th><th class="n">mean DD</th>
+          <th class="n">median (wrong)</th><th class="n">mean DD</th><th class="n">P(DD&gt;20%)</th>
+        </tr></thead>
+        <tbody>
+          <tr><td class="n">0.25×</td><td class="n">$103,592</td><td class="n">4.2%</td><td class="n">$95,439</td><td class="n">7.1%</td><td class="n">0.0%</td></tr>
+          <tr><td class="n">1.00×</td><td class="n">$114,364</td><td class="n">16.4%</td><td class="n">$81,407</td><td class="n">26.8%</td><td class="n">76.6%</td></tr>
+          <tr><td class="n">2.00×</td><td class="n">$124,413</td><td class="n">30.9%</td><td class="n">$64,794</td><td class="n">47.1%</td><td class="n">99.0%</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <div class="shead"><span class="snum">03</span><h2>How to choose a setting</h2></div>
+    <div class="flow">
+      <p>Expected log growth under a belief mixture. The only question the operator has to answer
+      is <em>how sure are you the edge is real?</em></p>
+    </div>
+  </div>
+  <div class="bleed flow" style="margin-top:1.3rem">
+    <div class="gauge">
+      <span class="lab">belief</span>
+      <div class="belief" style="grid-template-columns:repeat(6,1fr)">
+        <div>0.25×</div><div>0.50×</div><div>0.75×</div><div>1.00×</div><div>1.50×</div><div>2.00×</div>
+      </div>
+      <span class="lab">30%</span>
+      <div class="belief"><div class="on">0.25×</div><div></div><div></div><div></div><div></div><div></div></div>
+      <span class="lab">50%</span>
+      <div class="belief"><div class="on">0.25×</div><div></div><div></div><div></div><div></div><div></div></div>
+      <span class="lab">60%</span>
+      <div class="belief"><div></div><div></div><div class="on">0.75×</div><div></div><div></div><div></div></div>
+      <span class="lab">70%</span>
+      <div class="belief"><div></div><div></div><div class="on">0.75×</div><div></div><div></div><div></div></div>
+      <span class="lab">80%</span>
+      <div class="belief"><div></div><div></div><div></div><div></div><div></div><div class="on">2.00×</div></div>
+      <span class="lab">100%</span>
+      <div class="belief"><div></div><div></div><div></div><div></div><div></div><div class="on">2.00×</div></div>
+    </div>
+  </div>
+  <div class="wrap flow" style="margin-top:1.4rem">
+    <div class="note">
+      <span class="lbl">The reading that matters today</span>
+      <p>At a coin flip on whether the edge is real, <strong>the optimal setting is the
+      minimum</strong>. That is the honest position for a book with 29 forecasts, zero attributed
+      positions, and no resolved evidence its theses carry edge. The lever's first justified use
+      is <em>downward</em>.</p>
+    </div>
+    <p>This is why the range is asymmetric — <code>[0.25, 2.0]</code> is two halvings down against
+    one doubling up. Turning it down is nearly free: at 0.25× a real edge still compounds while
+    the wrong-thesis loss more than halves. Turning it up needs ~70% confidence.</p>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <div class="shead"><span class="snum">04</span><h2>The recommendation</h2></div>
+    <div class="flow">
+      <pre><code><span class="cmt"># config.yaml</span>
+trading:
+  <span class="cmt"># 1.0 = the posture the ladder alone would choose. Clamped to [0.25, 2.0].</span>
+  risk_appetite: 1.0
+
+<span class="cmt"># competence.py</span>
+<span class="kw">def</span> with_appetite(p: Competence, a: float) -> Competence:
+    a = min(2.0, max(0.25, a))
+    <span class="kw">return</span> replace(p,
+        kelly_multiplier=min(KELLY_CEILING, p.kelly_multiplier * a),  <span class="cmt"># 0.50 = half Kelly</span>
+        book_cap=min(BOOK_CEILING, p.book_cap * a))                   <span class="cmt"># 0.35 absolute</span></code></pre>
+      <ul class="clean">
+        <li><strong>Why it is low-entropy.</strong> D-098 already made the position cap, the
+        per-name cap and (with the prerequisite below) the seed floor all derive from
+        <code>book_cap</code>. One multiplication reaches every risk scope and they cannot
+        desynchronise. One config key, one function, two assignments.</li>
+        <li><strong>Two clamps, and they are the whole safety case.</strong> Half Kelly captures
+        ~75% of the growth for ~25% of the variance, and above it estimation error dominates edge.
+        The book ceiling is an absolute share of equity in defined max loss that no appetite may
+        cross — <em>the lever moves the growth/variance tradeoff, never the ruin bound.</em></li>
+        <li><strong>It must never become a Coach lever.</strong> The Coach's charter is that it
+        touches data, never “a gate threshold, sizing math, or a sentinel”, and the
+        measured/measurer rule forbids anything it can move from scoring its own trial. Risk
+        appetite is the principal's preference. The agent should <em>see</em> it in the prompt so
+        its prose selectivity aligns; it must never set it.</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <div class="shead"><span class="snum">05</span><h2>The asymmetry that decides the shape</h2></div>
+    <div class="flow">
+      <p>Two things a lever <em>could</em> move look similar and are not.</p>
+      <ul class="clean">
+        <li><strong>Size on a +EV bet</strong> — more return <em>and</em> more variance. A genuine
+        preference: the operator picks a point on one curve.</li>
+        <li><strong>The EV gate</strong> — bets below <code>p &gt; 1/(1+b)</code> have
+        <em>lower</em> expected return <em>and</em> higher variance. There is no curve to sit on.
+        It is strictly worse on both axes, and it breaks PILLAR-1.</li>
+      </ul>
+      <p>So an “aggressive” setting that loosened the gate would not buy risk. It would buy losses.
+      Verified: maximum appetite on a structure with no claimed edge still returns
+      <strong>0 contracts</strong> — the gate sits upstream of every appetite multiplication.</p>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <div class="shead"><span class="snum">06</span><h2>Prerequisite: derive the seed floor from the tier</h2></div>
+    <div class="flow">
+      <p>The same move D-098 made for the other three scopes, at a share that leaves EXPLORE
+      untouched: <code>seed_fraction = book_cap × 0.22</code>.</p>
+    </div>
+  </div>
+  <div class="bleed flow" style="margin-top:1.2rem">
+    <div class="scroll">
+      <table>
+        <thead><tr><th>tier</th><th class="n">floor now</th><th class="n">floor derived</th></tr></thead>
+        <tbody>
+          <tr><td>EXPLORE</td><td class="n">2.2%</td><td class="n"><strong>2.2%</strong> <span class="pill live">unchanged</span></td></tr>
+          <tr><td>ESTABLISH</td><td class="n">2.2%</td><td class="n">3.3%</td></tr>
+          <tr><td>SCALE</td><td class="n">2.2%</td><td class="n">4.4%</td></tr>
+          <tr><td>MATURE</td><td class="n">2.2%</td><td class="n">5.5%</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>An 11% drawdown then cuts the next trade by <strong>63%</strong> instead of 13%. But it is
+    <em>not</em> a safety improvement on its own — it raises the base, so swapped in at the same
+    appetite it loses more, brake and all. Monte Carlo, wrong thesis:</p>
+    <div class="scroll">
+      <table>
+        <thead><tr><th>config</th><th class="n">median</th><th class="n">5th pct</th><th class="n">mean DD</th><th class="n">P(DD&gt;20%)</th></tr></thead>
+        <tbody>
+          <tr><td>constant floor, 2.00×</td><td class="n">$64,815</td><td class="n">$35,344</td><td class="n">47.3%</td><td class="n">99.0%</td></tr>
+          <tr><td>tier-derived, 2.00× <span class="pill inert">not comparable</span></td><td class="n">$60,963</td><td class="n">$33,620</td><td class="n">50.9%</td><td class="n">100.0%</td></tr>
+          <tr class="hi"><td><strong>tier-derived, 0.85× — matched peak size</strong></td><td class="n"><strong>$80,983</strong></td><td class="n"><strong>$63,239</strong></td><td class="n"><strong>27.9%</strong></td><td class="n"><strong>86.2%</strong></td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>At matched size the brake is worth a great deal: mean drawdown <strong>47% → 28%</strong>,
+    5th percentile <strong>$35k → $63k</strong>. The derived floor buys <em>responsiveness</em>;
+    the safety comes from responsiveness plus a recalibrated neutral appetite. It ships as a pair,
+    not as a drop-in.</p>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <div class="shead"><span class="snum">07</span><h2>Edge cases</h2></div>
+  </div>
+  <div class="bleed scroll" style="margin-top:.4rem">
+    <table>
+      <thead><tr><th>case</th><th>behaviour</th><th>mitigation</th></tr></thead>
+      <tbody>
+        <tr>
+          <td><strong>Appetite cut while the book exceeds the new cap</strong></td>
+          <td>Refused on the book cap; existing positions untouched — sizing gates <em>new</em> risk and never liquidates.</td>
+          <td>Correct, but the cap is a <em>target</em> on the way down, not an invariant. <strong>Must be reported</strong>, or an operator reads an over-cap book as a bug.</td>
+        </tr>
+        <tr>
+          <td>Appetite <code>0</code>, negative, or <code>100</code></td>
+          <td>Clamped to [0.25, 2.0].</td>
+          <td>Log the clamp — a silently clamped input is a config the operator thinks they set.</td>
+        </tr>
+        <tr>
+          <td><code>position ≤ underlying ≤ book</code> at every rung × appetite</td>
+          <td><span class="pill live">holds</span></td>
+          <td>Free: all three derive from <code>book_cap</code>, so one multiplication moves them together.</td>
+        </tr>
+        <tr>
+          <td>More evidence never means less size</td>
+          <td><span class="pill live">holds</span></td>
+          <td>Preserved because appetite is a uniform scalar across tiers.</td>
+        </tr>
+        <tr>
+          <td>Max appetite at MATURE</td>
+          <td>Kelly ×0.446 (ceiling 0.50), book 35% (ceiling), one position 17.5%.</td>
+          <td>Both clamps bind, and say so.</td>
+        </tr>
+        <tr>
+          <td>11% drawdown at max appetite</td>
+          <td>Still demotes to EXPLORE — appetite cannot switch the ladder off.</td>
+          <td>But the demotion must actually cut size, which needs §06.</td>
+        </tr>
+        <tr>
+          <td>Max appetite, no claimed edge</td>
+          <td><strong>0 contracts</strong></td>
+          <td>The EV gate is upstream of every multiplication.</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <div class="shead"><span class="snum">08</span><h2>Deliberately rejected</h2></div>
+    <ul class="clean">
+      <li><strong>A per-dimension knob set</strong> (size / frequency / concentration / stops).
+      Four knobs is four ways to produce a posture nobody chose — the exact failure the
+      constitution's principle 4 names. One scalar; the other dimensions derive or stay fixed.</li>
+      <li><strong>Letting appetite touch the EV gate.</strong> See §05.</li>
+      <li><strong>Making appetite a Coach lever.</strong> See §04.</li>
+      <li><strong>Named postures</strong> (<code>cautious</code>/<code>bold</code>) instead of a
+      float. Aliases can be layered over the same number later; introducing them first would put
+      two representations of one setting on disk.</li>
+    </ul>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <div class="shead"><span class="snum">09</span><h2>Sequencing</h2></div>
+    <ol class="steps">
+      <li><strong>Decide the shrink target (I-69).</strong> It moves Kelly by 3× and everything
+      downstream multiplies it. Cheapest fix, largest leverage — and it is a code/intent
+      divergence either way.</li>
+      <li><strong>Derive <code>seed_fraction</code> from the tier.</strong> Without it the ladder
+      is decorative, the drawdown brake has no contacts, and the lever needs a third field to
+      bite.</li>
+      <li><strong>Add <code>risk_appetite</code>.</strong> Now one number, two fields, and it
+      reaches everything.</li>
+      <li><strong>Recalibrate the neutral default</strong> against the raised base, then set it
+      from the belief table in §03.</li>
+    </ol>
+    <p style="margin-top:1.1rem">Steps 1 and 2 are worth doing whether or not the lever is ever
+    built.</p>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <div class="shead"><span class="snum">10</span><h2>Open questions</h2></div>
+    <ul class="clean">
+      <li>The pooled 28% base rate mixes claim types with genuinely different natural base rates.
+      A per-metric base rate would be better, and is more work. Is it worth it? (I-69)</li>
+      <li><code>SEED_SHARE = 0.22</code> reproduces today's EXPLORE exactly, which makes it a safe
+      default and an unexamined one. It has never been fitted to anything.</li>
+      <li>The Monte Carlo assumes IID trades. Real books cluster — a wrong thesis tends to be
+      wrong across several positions at once, which makes every drawdown figure here
+      <em>optimistic</em>.</li>
+      <li>50 sequential trades is ~6 months at this book's rate. The competition horizon is days,
+      so these are asymptotic properties, not a forecast of the run.</li>
+    </ul>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap flow-tight">
+    <span class="mono-s">trdrbot · paper trading only · ledger register</span>
+    <span class="mono-s"><a href="risk_appetite_explorer.html">Open the interactive explorer &rarr;</a>
+    &mdash; drag the lever and the belief dial against these same numbers.</span>
+    <span class="mono-s">Source: <code>docs/research_risk_appetite.md</code> ·
+    <code>tests/scaffold_risk_appetite.py</code> · issues I-67, I-68, I-69</span>
+  </div>
+</footer>
+</body>
+</html>

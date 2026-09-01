@@ -16,6 +16,7 @@ import random
 import tempfile
 from datetime import UTC, date, timedelta
 from pathlib import Path
+from typing import Any
 
 import pytest
 from conftest import synthetic_dates
@@ -1001,6 +1002,159 @@ def test_unscoreable_theses_do_not_buy_size():
     assert c.tier == competence.ESTABLISH
 
 
+# --- WU-8.2: unknown is not zero. Incident: `attribution.run` returned
+# `attributed 0, pending 0` for 172 CONSECUTIVE runs with three positions on
+# the book - two of them already closed and profitable - purely because their
+# thesis horizons had not arrived yet. `attributable_rate` scored that empty
+# list as 0.0, which is the grade a book of pure luck earns, and the ladder sat
+# on one rung for the whole run with no log line saying why.
+def test_an_unmeasured_attributable_rate_is_not_a_zero_one():
+    """PILLAR-4. Two states that mean opposite things must not share a value:
+    NOTHING HAS RESOLVED YET is not EVERYTHING THAT RESOLVED WAS LUCK."""
+    from trdrbot import competence
+    assert competence.attributable_rate(_hist(3, "")) == (None, 0)
+    assert competence.attributable_rate(_hist(3, LUCK_V)) == (0.0, 3)
+
+
+def test_attribution_holds_when_unmeasured_and_blocks_when_measured():
+    """PILLAR-4, and deliberately BOTH directions (admission rule 4). D-050
+    established that a statistic which cannot discriminate must not decide;
+    this is that rule applied to the sibling gate, and it must not become a
+    licence to skip attribution altogether."""
+    from trdrbot import competence
+    # too few verdicts to discriminate -> holds its peace, does not block
+    assert _comp(20, verdicts=_hist(3, GOOD_V)).tier == competence.SCALE
+    # measured and poor -> blocks, exactly as it always did
+    assert _comp(20, verdicts=_hist(2, GOOD_V) + _hist(8, LUCK_V)).tier == \
+        competence.ESTABLISH
+    # measured and good -> promotes
+    assert _comp(20, verdicts=_hist(8, GOOD_V) + _hist(2, LUCK_V)).tier == \
+        competence.SCALE
+
+
+def test_the_top_tier_still_demands_a_book_that_explained_itself():
+    """PILLAR-4. The counterweight to the test above, and the reason the fix is
+    not simply 'ignore attribution when thin': holding the gate open is right
+    while the pipeline is young, but at 40 resolved theses an empty verdict list
+    is no longer youth - it is a book that has never once explained itself."""
+    from trdrbot import competence
+    assert _comp(40, verdicts=_hist(3, GOOD_V)).tier == competence.SCALE
+    assert _comp(40, verdicts=_hist(40, GOOD_V)).tier == competence.MATURE
+
+
+# --- WU-8.2: the per-position ceiling earns like the book cap does. Incident:
+# a flat `sizing.MAX_FRACTION = 0.05` did not move with the ladder, so a MATURE
+# agent earned a bigger BOOK and the identical single POSITION as a day-one
+# one; and measured on the live 766/758 spread, quarter Kelly was 12.0% of
+# equity, so the flat ceiling sat BELOW the posture sizing.py's own docstring
+# names as correct and no record however good could reach it.
+def test_the_per_position_ceiling_rises_with_the_ladder():
+    """PILLAR-4 - more evidence never means less size, at the CEILING too. The
+    monotonicity invariant next door measures contracts at one payoff and
+    cannot see a cap that never moves."""
+    caps = [_comp(n, verdicts=_hist(max(5, n), GOOD_V)).position_cap
+            for n in (0, 5, 15, 40)]
+    assert caps == sorted(caps), f"ceiling fell as evidence grew: {caps}"
+    assert caps[0] == sizing.MAX_FRACTION, "a fresh account's first trade must not change"
+    assert caps[-1] > 0.12, "the top of the ladder must clear quarter Kelly (12.0%)"
+
+
+def test_the_three_risk_scopes_nest_at_every_rung():
+    """PILLAR-4. position <= underlying <= book, at every tier, by construction.
+
+    Caught during WU-8.2 and worth pinning because it was introduced by the
+    fix above rather than found in old code: moving the per-position ceiling
+    onto the ladder while the per-NAME cap stayed a flat 0.08 gave MATURE 12.5%
+    on one position and 8% on the name it sits on, so the tighter number was
+    the wider scope. Three constants that merely happen to be in order are not
+    an ordering."""
+    from trdrbot import competence
+    for n in (0, 5, 15, 40):
+        c = _comp(n, verdicts=_hist(max(5, n), GOOD_V))
+        assert c.position_cap <= c.underlying_cap <= c.book_cap, \
+            f"{c.tier}: {c.position_cap:.3f} / {c.underlying_cap:.3f} / {c.book_cap:.3f}"
+    # The EXPLORE rung must still reproduce the three flat constants exactly,
+    # so nothing about a day-one account moved.
+    base = _comp(0, verdicts=[])
+    assert base.tier == competence.EXPLORE
+    assert (base.position_cap, base.underlying_cap, base.book_cap) == pytest.approx(
+        (sizing.MAX_FRACTION, sizing.PER_UNDERLYING_MAX_AT_RISK, 0.10))
+
+
+def test_every_scope_refuses_when_it_is_full_at_every_rung():
+    """PILLAR-4. Each cap refuses when ITS OWN scope is full, at each tier.
+
+    Pinned because the scaffold row covering this was written against the
+    frozen constants ($19,900 book / $7,900 name) and silently stopped filling
+    the scope when the per-name cap moved onto the ladder - it passed while
+    testing nothing, which is the exact shape `health` exists to catch one
+    level up. Derived from the posture, so it cannot rot the same way."""
+    for n in (0, 5, 15, 40):
+        c = _comp(n, verdicts=_hist(max(5, n), GOOD_V))
+        book_full = c.book_cap * 100_000 - 100.0
+        name_full = c.underlying_cap * 100_000 - 100.0
+        assert _size_tier(c, n, risk=book_full).contracts == 0, f"{c.tier}: book"
+        assert "portfolio" in _size_tier(c, n, risk=book_full).reason
+        d = _size_tier(c, n, by={"SPY": name_full})
+        assert d.contracts == 0 and "concentration" in d.reason, f"{c.tier}: name"
+
+
+def test_the_ceiling_still_refuses_a_position_too_large_for_the_account():
+    """PILLAR-4, the opposite direction: a ceiling that RISES must still be a
+    ceiling. One contract past the top tier's cap is refused, not rounded to 1."""
+    from trdrbot import competence
+    c = _comp(40, verdicts=_hist(40, GOOD_V))
+    assert c.tier == competence.MATURE
+    d = _size_tier(c, 40, mp=40_000.0, ml=-13_000.0)
+    assert d.contracts == 0 and "per-position ceiling" in d.reason
+
+
+# --- WU-8.2: the book's headline risk number is the one that can bind.
+# Incident: the decide prompt led with `-3.48% of equity per 1% SPY move` and a
+# CONCENTRATED stamp, on a book whose entire max loss was 2.14% of equity. The
+# delta is a LOCAL SLOPE through a payoff that is flat past its far strike, so
+# on a defined-risk book it is unbounded above the worst case that exists - at
+# a 5% move it overstated the real mark loss by 6x. The agent declined against
+# it in 41 of 89 cycles while 86% of the actual risk budget sat unused.
+def _bg(delta=-353_978.0, pct=-3.48):
+    return {"delta_dollars": delta, "theta_dollars": -326.58, "vega_dollars": 195.95,
+            "positions_skipped": 0, "beta_weighted_delta": delta, "betas": {"SPY": 1.0},
+            "betas_assumed": [], "pct_equity_per_1pct_spy": pct}
+
+
+def test_the_book_leads_with_defined_risk_not_with_a_linear_delta():
+    """PILLAR-4. D-037 settled that risk here means dollars of DEFINED MAX LOSS
+    against equity - it is what all three sizing caps count and what the book
+    cap is denominated in. Every surface honoured that except the one the agent
+    actually read."""
+    from trdrbot import tick
+    pos = [Position(position_id="p", status="open", underlying="SPY",
+                    strategy="bear_put_spread", max_loss_usd=2171.0)]
+    out = tick._render_positions(pos, _bg(), 101_678.06,
+                                 _comp(20, verdicts=_hist(10, GOOD_V)))
+    assert "Defined risk: $2,171" in out and "2.1% of equity" in out
+    assert out.index("Defined risk") < out.index("Beta-weighted"), \
+        "the number that can bind must be read first"
+    assert "LOCAL SLOPE, not a loss" in out, "a slope presented as a loss is the bug"
+    assert "of headroom" in out, "the agent cannot weigh a budget it cannot see"
+    # The stop-word moves onto the number that is actually a limit.
+    assert "DIRECTIONAL" in out and "CONCENTRATED" not in out
+
+
+def test_the_book_still_says_stop_when_the_budget_is_genuinely_gone():
+    """PILLAR-4, the opposite direction. Relabelling the delta must not cost
+    the ability to say STOP - it moves that word onto the constraint that is
+    real. A book at 80% of its tier cap is full, and says so."""
+    from trdrbot import tick
+    c = _comp(20, verdicts=_hist(10, GOOD_V))
+    full = [Position(position_id="p", status="open", underlying="SPY",
+                     strategy="bear_put_spread", max_loss_usd=0.8 * c.book_cap * 100_000)]
+    assert "BOOK FULL" in tick._render_positions(full, _bg(), 100_000.0, c)
+    room = [Position(position_id="p", status="open", underlying="SPY",
+                     strategy="bear_put_spread", max_loss_usd=0.1 * c.book_cap * 100_000)]
+    assert "BOOK FULL" not in tick._render_positions(room, _bg(), 100_000.0, c)
+
+
 def test_poor_calibration_blocks_the_top_tier_only():
     """Reliability gates MATURE, not SCALE (D-050): below ~n=40 the statistic
     cannot separate a perfect forecaster from a badly overconfident one, so a
@@ -1053,6 +1207,19 @@ def test_next_tier_is_visible_to_the_agent():
     c = _comp(7, rel=0.06, verdicts=_hist(5, GOOD_V) + _hist(2, LUCK_V))
     needs = c.next_tier_needs()
     assert "SCALE" in needs and "15" in needs
+
+
+def test_the_next_rung_says_whether_an_unmeasured_gate_actually_blocks_it():
+    """WU-8.2. `next_tier_needs` is the only place the agent learns what it is
+    waiting on, so 'unmeasured' has to carry its consequence. The same sentence
+    under SCALE and under MATURE means opposite things, because only MATURE
+    treats silence as a verdict."""
+    from trdrbot import competence
+    to_scale = _comp(10, verdicts=_hist(2, GOOD_V)).next_tier_needs()
+    assert "SCALE needs" in to_scale and "not blocking" in to_scale
+    at_scale = _comp(20, verdicts=_hist(2, GOOD_V))
+    assert at_scale.tier == competence.SCALE
+    assert "BLOCKS this rung" in at_scale.next_tier_needs()
 
 
 # ------------------------------- D-050 calibration bias at small n
@@ -4378,7 +4545,7 @@ def test_the_gate_opens_exactly_where_ev_after_costs_does_under_a_vol_view():
     while `b` came from the market's - two measures in one Kelly. Swept across a
     real vol edge, the sign of Kelly must agree with the sign of EV after costs
     at every point, exactly as it already did for drift."""
-    spot, iv_market, days = 100.0, 0.25, 7.0
+    spot, _iv_market, days = 100.0, 0.25, 7.0
     legs = [Leg(right="P", strike=100.0, side="short", qty=1, price=_fair("P", 100.0)),
             Leg(right="P", strike=95.0, side="long", qty=1, price=_fair("P", 95.0))]
     mp, ml = optmath.max_profit_loss(legs)
@@ -4656,9 +4823,8 @@ def test_the_lock_verifies_its_own_claim_and_loses_a_race_it_did_not_win(tmp_pat
 
     with pytest.MonkeyPatch.context() as mp:
         mp.setattr(Path, "write_text", rival_wins)
-        with pytest.raises(BlockingIOError, match="999999"):
-            with tick_lock(path):
-                pytest.fail("proceeded while another process held the lock")
+        with pytest.raises(BlockingIOError, match="999999"), tick_lock(path):
+            pytest.fail("proceeded while another process held the lock")
 
     assert _json.loads(path.read_text())["pid"] == 999999, "the rival's lock was clobbered"
 

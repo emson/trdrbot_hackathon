@@ -157,6 +157,28 @@ print("p from the agent's vol, payoff `b` from the market's - two measures in on
 print("ONE MEASURE is `Thesis.vol_view`: both from the vol the thesis declares. Friction")
 print("charged either way. SCALE tier, n=20.\n")
 
+def _size(payoff, stated, mp, ml, cal20, post20):
+    """Production's path: no usable conditional payoff means REFUSE.
+
+    The max/max fallback is deliberately NOT modelled here - WU-4.2 removed it
+    from every path the agent can reach, so a scaffold that still took it would
+    be measuring dead code.
+    """
+    if payoff is None:
+        return None
+    return sizing.size_position(
+        equity=EQUITY, stated_confidence=stated, max_profit=mp, max_loss=ml,
+        calibration=cal20, posture=post20, underlying="X",
+        payoff_ratio=payoff[2])
+
+
+def _cells(d):
+    if d is None:
+        return f"{'refuse':>5} {'-':>7} {'-':>7}"
+    return (f"{'open' if d.contracts else 'shut':>5} "
+            f"{d.fraction_of_equity:>7.2%} {(d.kelly_full or 0):>+7.3f}")
+
+
 post20, cal20 = posture(20), cal(20)
 for name in ("iron condor 90-110", "put credit 95/100"):
     legs = structures(0.25, 7)[name]
@@ -175,32 +197,14 @@ for name in ("iron condor 90-110", "put credit 95/100"):
         stated = optmath.prob_profit(legs, SPOT, iv_true, 7)
         ev_true = optmath.expected_value(legs, SPOT, iv_true, 7) - fr
 
-        def _size(payoff):
-            """Production's path: no usable conditional payoff means REFUSE.
-
-            The max/max fallback is deliberately NOT modelled here - WU-4.2
-            removed it from every path the agent can reach, so a scaffold that
-            still took it would be measuring dead code.
-            """
-            if payoff is None:
-                return None
-            return sizing.size_position(
-                equity=EQUITY, stated_confidence=stated, max_profit=mp, max_loss=ml,
-                calibration=cal20, posture=post20, underlying="X",
-                payoff_ratio=payoff[2])
-
-        def _cells(d):
-            if d is None:
-                return f"{'refuse':>5} {'-':>7} {'-':>7}"
-            return (f"{'open' if d.contracts else 'shut':>5} "
-                    f"{d.fraction_of_equity:>7.2%} {(d.kelly_full or 0):>+7.3f}")
-
         # What production did before WU-4.5: p from the agent's vol, b from the
         # market's. Kept as the measured contrast, not as behaviour.
-        mixed = _size(optmath.payoff_ratio(legs, SPOT, 0.25, 7, friction=fr))
+        mixed = _size(optmath.payoff_ratio(legs, SPOT, 0.25, 7, friction=fr),
+                      stated, mp, ml, cal20, post20)
         # CHANGED (WU-4.5): the thesis carries `vol_view`, so `simulate` prices
         # the payoff under the SAME vol the stated probability came from.
-        one = _size(optmath.payoff_ratio(legs, SPOT, iv_true, 7, friction=fr))
+        one = _size(optmath.payoff_ratio(legs, SPOT, iv_true, 7, friction=fr),
+                    stated, mp, ml, cal20, post20)
 
         if one is not None and one.contracts and first_trade is None:
             first_trade = e
@@ -407,6 +411,7 @@ run_path("P5 slow bleed: eight ticks at -49% vs -50% stop (far from expiry)",
 # gamma-wall time stop closes it, so "rides to expiry unchallenged" is no
 # longer a path the book has.
 import datetime as _dt  # noqa: E402
+
 _soon = (ids.market_today() + _dt.timedelta(days=1)).isoformat()
 run_path("P5b same bleed, now 1 day from expiry",
          mkpos([{"type": "stop_loss", "threshold": "-50%"}], expiry=_soon),
@@ -482,19 +487,31 @@ if a > 0:
          f"every tier, so demotion mostly acts through the book cap "
          f"(25% -> 10%), not through the next trade's size.")
 
+# CHANGED (WU-8.2): both rows fill their scope to $100 of headroom DERIVED
+# from the posture's own cap, instead of the frozen $19,900/$7,900 that were
+# written against a 20% book cap and a flat 8% per-name constant. The property
+# under test is "a full scope refuses", not "8% refuses" - and when the
+# per-name cap moved onto the ladder the frozen figure quietly stopped filling
+# the scope, so the check passed nothing while still reading as a pass.
+p20 = posture(20)
+book_full = p20.book_cap * EQUITY - 100.0
+name_full = p20.underlying_cap * EQUITY - 100.0
 d = sizing.size_position(equity=EQUITY, stated_confidence=0.78, max_profit=mp,
-                         max_loss=ml, calibration=cal(20), posture=posture(20),
-                         underlying="X", open_risk_usd=19_900.0,
+                         max_loss=ml, calibration=cal(20), posture=p20,
+                         underlying="X", open_risk_usd=book_full,
                          payoff_ratio=pr[2] if pr else None)
 check(d.contracts == 0 and "portfolio" in d.reason,
       f"G5: portfolio cap failed to refuse: {d.reason[:90]}")
-print(f"  portfolio cap: $19,900 at risk vs 20% SCALE cap -> {d.reason[:74]}")
+print(f"  portfolio cap: ${book_full:,.0f} at risk vs {p20.book_cap:.0%} "
+      f"{p20.tier.upper()} cap -> {d.reason[:60]}")
 d = sizing.size_position(equity=EQUITY, stated_confidence=0.78, max_profit=mp,
-                         max_loss=ml, calibration=cal(20), posture=posture(20),
-                         underlying="X", open_risk_by_underlying={"X": 7_900.0},
+                         max_loss=ml, calibration=cal(20), posture=p20,
+                         underlying="X", open_risk_by_underlying={"X": name_full},
                          payoff_ratio=pr[2] if pr else None)
 check(d.contracts == 0 and "concentration" in d.reason,
       f"G5: concentration cap failed to refuse: {d.reason[:90]}")
+print(f"  per-name cap:  ${name_full:,.0f} on X vs {p20.underlying_cap:.0%} "
+      f"{p20.tier.upper()} cap -> {d.reason[:60]}")
 print(f"  concentration:  $7,900 on X vs 8% cap        -> {d.reason[:74]}")
 
 # ================================================================ G6 CORNERS
@@ -554,7 +571,9 @@ check(with_pr.contracts == 0, "G6: friction-aware path should refuse 70% on b=0.
 # produced payoff_ratio=None. Driven through the real tool, not the function.
 from trdrbot.calibration import CalibrationStore  # noqa: E402
 from trdrbot.local_tools import (  # noqa: E402
-    SharedContext, build_simulate_experiments, build_size_position,
+    SharedContext,
+    build_simulate_experiments,
+    build_size_position,
 )
 
 _shared = SharedContext()

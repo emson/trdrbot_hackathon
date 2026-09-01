@@ -4397,3 +4397,76 @@ tests, not the code: both now pass a real `SharedContext()`, the honest form.
 seam, not a stand-in). The real open SPY position driven through both `write_entry` and
 `write_outcome` end to end against a copy of the live wiki data - output read back and confirmed
 legible, not just schema-valid.
+
+## D-098 - Unknown is not zero, and one earned budget at three scopes
+
+The claim under test was "the system has become too risk averse and not in harmony." It is true,
+and `tests/scaffold_risk_posture.py` (new, the fourth scaffold) prices it: at a genuine 60% edge
+the stack captured **2.9% of the quarter-Kelly growth `sizing.py`'s own docstring names as
+policy**, with 83% of that shortfall coming from the decision NOT to trade rather than from the
+size of the trades taken.
+
+But the interesting result is where the aversion was NOT. Friction costs 1% of the Kelly
+fraction; the calibration shrink costs 9%; the bootstrap band inflation is holdout-validated.
+Those are honest work and none of them is the story. **There was one haircut worth 92%, and it
+was not a risk judgement at all** - it was a jammed pipeline being read as a verdict.
+
+**1. `attributable_rate` returned 0.0 when nothing had been attributed yet.** `attribution.run`
+had returned `attributed 0, pending 0, skipped_no_price 0` for **172 consecutive runs** with
+three positions on the book, two of them already closed and profitable - because one predates
+thesis recording (D-039) and the other two carry horizons that had not arrived. A book with
+nothing resolved scored identically to a book of pure luck, which pinned the ladder to ESTABLISH
+(Kelly x0.083 rather than x0.149) for the entire run, and no log line said so. `pending` counts
+only positions ALREADY ripe, so a position waiting on its horizon was indistinguishable from no
+position at all.
+
+Fixed as D-050's rule applied to its sibling gate: a statistic that cannot discriminate must not
+decide. Unknown is now `None`, holds its peace below `MIN_ATTR_VERDICTS = 5` - and still blocks
+MATURE, where 40 resolved theses mean an empty verdict list is no longer youth but a book that
+has never once explained itself. `coach_pkg.gauges._attributable_rate` had already reached the
+right answer for the same quantity, so this also ended a live two-definitions-one-number split.
+
+**2. The three risk scopes were a ladder and two constants.** `MAX_FRACTION = 0.05` did not move
+with the tier, so a MATURE agent earned a bigger BOOK and the identical single POSITION as a
+day-one one - the more-evidence-never-means-less-size invariant this codebase already enforces
+twice, violated where nothing checked. Measured on the live structure, quarter Kelly was **12.0%
+of equity**, so the flat 5% ceiling sat permanently BELOW the posture the module says is correct
+and no record however good could reach it. All three scopes now come off the tier's one earned
+budget at fixed shares (0.5 / 0.8 / 1.0), chosen so **the EXPLORE rung reproduces 5% / 8% / 10%
+exactly** - a fresh account's first trade is byte-identical - and `position <= underlying <=
+book` holds by construction rather than by three constants happening to be in order.
+
+That last clause is not decoration: moving only the position ceiling gave MATURE 12.5% on one
+position and 8% on the name it sits on, so the tighter number was the wider scope. The fix
+introduced that inversion and `test_the_three_risk_scopes_nest_at_every_rung` now pins it.
+
+**3. The book's headline risk number could not happen.** The decide prompt led with
+beta-weighted delta as `-3.48% of equity per 1% SPY move` under a CONCENTRATED stamp, on a book
+whose entire max loss was **2.14% of equity** - the headline was 1.63x the worst case that
+exists, and at a 5% move it overstated the real mark loss by 6x. Delta is a LOCAL SLOPE through a
+payoff that is flat past its far strike, so on a defined-risk book it is unbounded above the
+thing it describes. The agent declined against it in 41 of 89 cycles while 86% of the risk
+budget sat unused.
+
+D-037 had already settled that risk here means dollars of DEFINED max loss against equity: it is
+what all three sizing caps count and what the book cap is denominated in. Every surface honoured
+that except the one the agent actually read. Defined risk now leads and carries the flag
+(`BOOK_RISK_FLAG_SHARE`), with the headroom stated; the delta follows, labelled a local slope
+and framed as the diversification lens it is. Two numbers, two meanings, and the stop-word sits
+on the one that is a limit.
+
+**What was deliberately NOT changed.** `calibration.effective_n` says the 29 resolved forecasts
+are worth **11.8 independent** ones, and the ladder counts raw forecasts - a real tension, since
+D-080 measured that sizing on concentrated evidence overbet by 4.6x. Gating on it was refused:
+`effective_n`'s own docstring forecloses that under D-009, and overriding a documented
+report-don't-gate call while loosening a different gate is how a risk posture drifts without
+anyone choosing it. It is carried onto `Competence` and printed in `next_tier_needs` instead, so
+"15 resolved (have 29, 11.8 independent)" is what a reader sees. Recorded as I-67.
+
+Nothing here touches the sizer's refusals, the friction charge, the shrink, or the exit engine.
+
+**Verified:** 535 tests (+10), all four scaffolds green, and every fix mutation-verified by
+reverting it and watching named tests fail - including both directions of the attribution rule,
+where over-tightening and over-loosening each break a different test. Live effect on the real
+book: ESTABLISH -> SCALE, Kelly x0.083 -> x0.149, book cap 15% -> 20%, per-position 5% -> 10%,
+and the prompt now reads "$18,165 of headroom" where it read "-3.48% per 1% SPY move".

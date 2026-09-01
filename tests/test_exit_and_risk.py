@@ -8,15 +8,16 @@ that fails to parse came to mean a stop at exactly breakeven.
 
 from __future__ import annotations
 
+from datetime import timedelta
 from typing import Any
 
 from conftest import FakeMem, journal_rows, tools_for
 
-from trdrbot import exit_rules, reconcile
+from trdrbot import exit_rules, ids, reconcile
 from trdrbot.analytics import Snapshot
 from trdrbot.calibration import CalibrationStore
 from trdrbot.journal import Journal
-from trdrbot.positions import PositionStore
+from trdrbot.positions import Position, PositionStore
 from trdrbot.wiki import Wiki
 
 
@@ -218,10 +219,6 @@ def test_a_partially_dated_leg_set_is_refused_not_assumed_shared():
 # never a threshold level - the levels are the agent's own to write.
 # Governed by docs/principles_testing.md - the four pillars.
 
-from datetime import timedelta
-
-from trdrbot import ids
-from trdrbot.positions import Position
 
 
 def _spread(**kw) -> Position:

@@ -16,8 +16,7 @@ import sys
 from typing import Any
 
 from . import config as config_mod
-from . import failures
-from . import ids, mcp_client
+from . import failures, ids, mcp_client
 from . import llm as llm_mod
 from .inbox import Inbox
 from .journal import Journal

@@ -27,7 +27,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-from pathlib import Path
 from typing import Any
 
 from langgraph.prebuilt import ToolNode, create_react_agent
@@ -99,6 +98,16 @@ def _text_of(message: Any) -> str:
 #: called out as a directional bet. Reported, never gated (D-009): it bounds
 #: variance, not ruin, and defined-risk legs already bound the worst case.
 BETA_DELTA_FLAG_PCT = 1.5
+
+#: Share of the tier's book cap consumed before the book is called full. THIS
+#: is the number that is actually a limit, and it is the one the flag belongs
+#: on. The delta flag above says "these positions are one bet", which is a
+#: diversification observation; this one says "there is no budget left", which
+#: is a constraint. They had been collapsed into a single CONCENTRATED stamp
+#: attached to the delta, and the agent read the diversification observation as
+#: the constraint - declining in 41 of 89 cycles against an unbounded linear
+#: number while 86% of the actual risk budget sat unused.
+BOOK_RISK_FLAG_SHARE = 0.75
 
 #: Underlyings named in the ATTENTION query. Enough to cover a decision's real
 #: subject matter; small enough that one market-wrap article tagging eight
@@ -182,7 +191,78 @@ def _attention_query(items: list[Item], open_pos: list[Any], config: Config) -> 
     return " ".join(names[:ATTENTION_MAX_NAMES]) + " options setup"
 
 
-def _render_positions(positions: list[Any], bg: dict[str, Any] | None = None) -> str:
+def _render_book_risk(positions: list[Any], bg: dict[str, Any] | None,
+                      equity: float, posture: Any) -> list[str]:
+    """The book's risk, in the unit the whole system measures risk in, first.
+
+    D-037 settled that risk here means DOLLARS OF DEFINED MAX LOSS AGAINST
+    EQUITY: it is what the three sizing caps count, what the ladder's book cap
+    is denominated in, and what a defined-risk book can actually lose. Every
+    surface honoured that except this one, which led with beta-weighted delta.
+
+    Delta is a LOCAL SLOPE through a payoff that is flat beyond its far strike,
+    so on a defined-risk book it is unbounded above the thing it purports to
+    describe. Measured on the live 13-lot 766/758 put spread: the prompt read
+    `-3.48% of equity per 1% SPY move` against a position whose entire max loss
+    was 2.14% of equity - the headline risk number was 1.63x the worst case
+    that exists, and at a 5% move it overstated the real mark loss by 6x. The
+    agent then declined trade after trade against it while 86% of the book's
+    risk budget sat unused.
+
+    So: defined risk leads and carries the flag, because it is the constraint.
+    Delta follows, labelled as the diversification lens it actually is.
+    """
+    lines: list[str] = []
+    at_risk = sum(p.max_loss_usd or 0.0 for p in positions)
+    unpriced = sum(1 for p in positions if p.max_loss_usd is None)
+    cap = getattr(posture, "book_cap", None)
+    if equity > 0 and cap:
+        budget, used = cap * equity, at_risk / (cap * equity)
+        flag = ("  <- BOOK FULL: this is the binding limit, not the delta below"
+                if used >= BOOK_RISK_FLAG_SHARE else "")
+        lines.append(
+            f"Defined risk: ${at_risk:,.0f} of max loss = {at_risk / equity:.1%} of "
+            f"equity, against the {getattr(posture, 'tier', '').upper()} book cap of "
+            f"{cap:.0%} (${budget:,.0f}). {used:.0%} used, ${budget - at_risk:,.0f} "
+            f"of headroom." + (f" ({unpriced} position(s) carry no recorded max "
+                               f"loss and count as zero here.)" if unpriced else "")
+            + flag
+        )
+    if not bg:
+        return lines
+    skip = f" ({bg['positions_skipped']} unpriced)" if bg["positions_skipped"] else ""
+    lines.append(
+        f"Book greeks (est., entry IV): delta ${bg['delta_dollars']:+,.0f}"
+        f" | theta ${bg['theta_dollars']:+,.0f}/day"
+        f" | vega ${bg['vega_dollars']:+,.0f}/IVpt{skip}."
+    )
+    if "beta_weighted_delta" not in bg:
+        return lines
+    pct = bg.get("pct_equity_per_1pct_spy")
+    assumed = bg.get("betas_assumed") or []
+    note = (f" ({len(assumed)} beta assumed - poor fit or no history: "
+            f"{', '.join(assumed)})" if assumed else "")
+    flag = ""
+    if pct is not None and abs(pct) >= BETA_DELTA_FLAG_PCT:
+        flag = ("  <- DIRECTIONAL: these positions are one market bet, "
+                "whatever the names suggest")
+    lines.append(
+        f"Beta-weighted to SPY: ${bg['beta_weighted_delta']:+,.0f} delta"
+        + (f", i.e. {pct:+.2f}% of equity per 1% SPY move" if pct is not None else "")
+        + f". Betas {bg['betas']}{note}.{flag}"
+    )
+    lines.append(
+        "That percentage is a LOCAL SLOPE, not a loss: these are defined-risk "
+        "structures, so however far SPY moves the book's entire downside is the "
+        "defined risk above. Use the delta to ask whether a new position is a NEW "
+        "bet or more of this one; judge whether you can AFFORD it against the "
+        "headroom, which is the number that actually binds."
+    )
+    return lines
+
+
+def _render_positions(positions: list[Any], bg: dict[str, Any] | None = None,
+                      equity: float = 0.0, posture: Any = None) -> str:
     """Two-tier context (D-019): detail for what needs attention, one line for the rest.
 
     Takes what it renders. It used to take the store, the snapshot, a state
@@ -195,37 +275,13 @@ def _render_positions(positions: list[Any], bg: dict[str, Any] | None = None) ->
         return "## Our positions\n\n(none)"
 
     lines = ["## Our positions", ""]
-    # Book shape first: correlated exposure in its native units. Three
-    # bullish put spreads on three tickers LOOK diversified and ARE one
-    # +delta/-vega/+theta position - this line is where that becomes
-    # visible before a fourth one gets added (D-040).
-    if bg:
-        skip = f" ({bg['positions_skipped']} unpriced)" if bg["positions_skipped"] else ""
-        lines.append(
-            f"Book greeks (est., entry IV): delta ${bg['delta_dollars']:+,.0f}"
-            f" | theta ${bg['theta_dollars']:+,.0f}/day"
-            f" | vega ${bg['vega_dollars']:+,.0f}/IVpt{skip}. Before adding a"
-            f" position, check whether it grows or offsets these."
-        )
-        if "beta_weighted_delta" in bg:
-            pct = bg.get("pct_equity_per_1pct_spy")
-            flag = ""
-            if pct is not None and abs(pct) >= BETA_DELTA_FLAG_PCT:
-                flag = ("  <- CONCENTRATED: this book is a directional market bet, "
-                        "whatever the names suggest")
-            assumed = bg.get("betas_assumed") or []
-            note = (f" ({len(assumed)} beta assumed - poor fit or no history: "
-                    f"{', '.join(assumed)})" if assumed else "")
-            lines.append(
-                f"Beta-weighted to SPY: ${bg['beta_weighted_delta']:+,.0f} delta"
-                + (f", i.e. {pct:+.2f}% of equity per 1% SPY move" if pct is not None else "")
-                + f". Betas {bg['betas']}{note}.{flag}"
-            )
-            lines.append(
-                "Names are not exposures: three positions on correlated names are one "
-                "bet. Judge a new position by whether it offsets this number or grows it."
-            )
-        lines.append("")
+    # Book shape first: what the book has at risk, then correlated exposure in
+    # its native units. Three bullish put spreads on three tickers LOOK
+    # diversified and ARE one +delta/-vega/+theta position - this is where that
+    # becomes visible before a fourth one gets added (D-040).
+    risk_lines = _render_book_risk(positions, bg, equity, posture)
+    if risk_lines:
+        lines += [*risk_lines, ""]
     for p in positions:
         rules = ", ".join(
             # `level` for underlying stops, `threshold` for mark-based ones.
@@ -354,12 +410,14 @@ async def _build_decide_prompt(
             beta_weighted_delta=book_greeks.get("beta_weighted_delta"),
             pct_equity_per_1pct_spy=book_greeks.get("pct_equity_per_1pct_spy"),
             skipped=book_greeks.get("positions_skipped", 0))
-    prompt_parts = [snap.render(), _render_positions(open_now, book_greeks)]
+    prompt_parts = [snap.render(),
+                    _render_positions(open_now, book_greeks, snap.equity or 0.0, posture)]
     _ok, _why = competence.can_open(config.deadline, None)
     prompt_parts.append(
         f"## Competence tier: {posture.tier.upper()}\n"
         f"{posture.reason}. Book cap {posture.book_cap:.0%} of equity in defined "
-        f"max-loss; size_position enforces it - do not argue with the number it returns.\n"
+        f"max-loss, {posture.position_cap:.1%} on any one position; size_position "
+        f"enforces both - do not argue with the number it returns.\n"
         f"To earn more size: {posture.next_tier_needs()}. Size is earned by resolved, "
         f"ATTRIBUTABLE theses - a profit on a wrong view is luck and counts for nothing."
         + (f"\nHARD STOP: {_why}" if not _ok else "")
@@ -646,13 +704,23 @@ async def _run_tick(
         posture = competence.assess(
             resolved=cal_now.n, reliability=cal_now.reliability,
             positions=store.all(), equity=equity_now, high_water=hw,
+            # Reported on the ladder, never gated on (D-009). 29 forecasts
+            # across a handful of names came to 11.8 independent, and a reader
+            # told only "15 resolved (have 29)" would think the next rung was
+            # already earned.
+            effective=cal_now.n_eff,
         )
         if verbose:
             print(f"[tick {n}] competence: {posture.reason}")
         journal.append("competence", tier=posture.tier, resolved=posture.resolved,
                        reliability=posture.reliability,
+                       # None here now MEANS unmeasured rather than 0%, so the
+                       # gauge series can tell a young pipeline from a lucky
+                       # book. `verdicts` is what says which (WU-8.2).
                        attributable_rate=posture.attributable_rate,
+                       verdicts=posture.verdicts, effective=posture.effective,
                        drawdown=posture.drawdown, book_cap=posture.book_cap,
+                       position_cap=posture.position_cap,
                        kelly_multiplier=posture.kelly_multiplier,
                        seed_fraction=posture.seed_fraction,
                        equity=equity_now, high_water=hw)

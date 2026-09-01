@@ -32,6 +32,15 @@ from .calibration import Calibration
 #: Never exceed this share of equity on one position, whatever Kelly says.
 #: A hard ceiling, because every input to Kelly is an estimate and estimates
 #: fail together in exactly the conditions that matter.
+#:
+#: **This is the FALLBACK for a caller with no posture, and it is the EXPLORE
+#: rung's value.** With a posture the ceiling is `posture.position_cap`, which
+#: rises with the tier exactly as the book cap does (`competence.
+#: POSITION_SHARE_OF_BOOK`). A flat ceiling here meant a MATURE agent got a
+#: bigger book and the same single position as a day-one one, and - measured on
+#: a live structure whose quarter Kelly was 12% of equity - it also sat below
+#: the fractional-Kelly target this module's own docstring names, so no record
+#: however good could reach the posture the module says is right.
 MAX_FRACTION = 0.05
 #: Three caps, each a distinct meaning, all measured the same way: dollars of
 #: DEFINED max loss against equity (D-037). Per-position bounds a single
@@ -40,6 +49,13 @@ MAX_FRACTION = 0.05
 #: This replaced an opaque `frac /= (1 + open_count)` divisor that was a proxy
 #: for the same idea, invented before real risk was tracked - it double-counted
 #: with the portfolio cap and produced an effective limit nobody chose.
+#:
+#: **Both are FALLBACKS for a postureless caller, and both are the EXPLORE
+#: rung's values.** With a posture all three scopes come off the tier's one
+#: earned budget (`competence.POSITION_SHARE_OF_BOOK` and
+#: `UNDERLYING_SHARE_OF_BOOK`), which is what makes `position <= underlying <=
+#: book` hold at EVERY rung rather than only at the one where three flat
+#: constants happened to be in order.
 PER_UNDERLYING_MAX_AT_RISK = 0.08
 PORTFOLIO_MAX_AT_RISK = 0.15
 
@@ -158,6 +174,9 @@ def size_position(
     directions for credit and debit structures.
     """
     adj = shrink_probability(stated_confidence, calibration)
+    # The per-position ceiling is the tier's, falling back to the flat constant
+    # for callers that predate postures - the same shape as the book cap below.
+    ceiling = getattr(posture, "position_cap", None) or MAX_FRACTION
 
     # An unbounded LOSS has no Kelly fraction - the formula divides by a worst
     # case that does not exist. Refuse rather than substitute a number.
@@ -235,7 +254,10 @@ def size_position(
         # With no record the shrinkage kills the edge estimate and Kelly
         # returns ~0 - which deadlocked the system into never trading at all.
         # Exploration is a bounded cost paid for information.
-        frac = posture.seed_fraction
+        # Capped like every other path: the ceiling is the one promise sizing
+        # makes unconditionally, and an exploration allocation is not exempt
+        # from it just because it is not an edge estimate.
+        frac = min(posture.seed_fraction, ceiling)
     else:
         if posture is not None:
             mult = posture.kelly_multiplier
@@ -252,7 +274,7 @@ def size_position(
         # competence.assess's seed_fraction note).
         floor = getattr(posture, "seed_fraction", 0.0) if posture is not None else 0.0
         kelly_frac = 0.0 if full is None else full * mult
-        frac = min(max(kelly_frac, floor), MAX_FRACTION)
+        frac = min(max(kelly_frac, floor), ceiling)
     risk_budget = equity * frac
     per_contract_risk = abs(max_loss)
     contracts = int(risk_budget // per_contract_risk) if per_contract_risk > 0 else 0
@@ -265,33 +287,38 @@ def size_position(
     # is the floor; the book caps below still bound it, and the per-position
     # ceiling still refuses anything genuinely too large for the account.
     if contracts < 1:
-        if per_contract_risk <= MAX_FRACTION * equity:
+        if per_contract_risk <= ceiling * equity:
             contracts = 1
         else:
             return SizingDecision(
                 0, 0.0, full, frac, adj,
                 f"NO POSITION: one contract risks ${per_contract_risk:,.0f}, above the "
-                f"{MAX_FRACTION:.0%} per-position ceiling (${MAX_FRACTION * equity:,.0f}). "
+                f"{ceiling:.1%} per-position ceiling (${ceiling * equity:,.0f}). "
                 f"Position too large for the account.",
             )
 
     # Book caps, tightest-binding wins. Both measured in dollars of defined
     # max loss so the number means the same thing everywhere.
     same_name = (open_risk_by_underlying or {}).get(underlying.upper(), 0.0)
-    portfolio_cap = posture.book_cap if posture is not None else PORTFOLIO_MAX_AT_RISK
+    # All three scopes come off the tier's one earned budget, so they nest:
+    # position <= underlying <= book. They used to be a tier value and two flat
+    # constants, which held that order only by coincidence - and stopped
+    # holding it the moment the position ceiling learned to climb.
+    portfolio_cap = getattr(posture, "book_cap", None) or PORTFOLIO_MAX_AT_RISK
+    name_cap = getattr(posture, "underlying_cap", None) or PER_UNDERLYING_MAX_AT_RISK
     caps = [
         ("portfolio", portfolio_cap * equity - open_risk_usd,
          portfolio_cap, open_risk_usd, "the book"),
         (f"{underlying.upper() or 'underlying'} concentration",
-         PER_UNDERLYING_MAX_AT_RISK * equity - same_name,
-         PER_UNDERLYING_MAX_AT_RISK, same_name, f"{underlying.upper() or 'one name'}"),
+         name_cap * equity - same_name,
+         name_cap, same_name, f"{underlying.upper() or 'one name'}"),
     ]
     for label, budget_left, pct, already, subject in caps:
         if budget_left < per_contract_risk:
             return SizingDecision(
                 0, 0.0, full, frac, adj,
                 f"REFUSED ({label}): already carrying ${already:,.0f} of defined max-loss "
-                f"against a {pct:.0%} cap (${pct * equity:,.0f}). Adding more means "
+                f"against a {pct:.1%} cap (${pct * equity:,.0f}). Adding more means "
                 f"{subject}, not this trade, is the bet.",
             )
         contracts = min(contracts, int(budget_left // per_contract_risk))
@@ -302,7 +329,8 @@ def size_position(
                  f"{posture.seed_fraction:.1%} exploration allocation, not Kelly")
     elif posture is not None:
         track = (f"{posture.tier.upper()} tier, n={calibration.n} - "
-                 f"Kelly x{posture.kelly_multiplier:.2f} (evidence ramp)")
+                 f"Kelly x{posture.kelly_multiplier:.2f} (evidence ramp), "
+                 f"{ceiling:.1%} per-position ceiling")
     else:
         established = calibration.n >= MIN_SAMPLE and (calibration.reliability or 1.0) < 0.05
         track = (
