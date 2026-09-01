@@ -16,6 +16,7 @@
 			</div>
 			<div class="footer-links">
 				<span class="kicker">Explore</span>
+				<a href="/resources">Resources</a>
 				<a href="/notes">Notes</a>
 				<a href="/data">Data</a>
 				<a href="/glossary">Glossary</a>

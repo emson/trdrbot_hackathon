@@ -97,7 +97,7 @@
 <section class="block ledger">
 	<div class="wrap">
 		<div class="cols c2">
-			<a class="card" href="/risk-explorer.html" target="_blank" rel="noopener noreferrer">
+			<a class="card" href="/resources/risk-appetite-explorer">
 				<span class="tag code">Interactive</span>
 				<h3>Risk Appetite Explorer</h3>
 				<p class="muted">Drag the risk lever and watch what happens to the money over 50

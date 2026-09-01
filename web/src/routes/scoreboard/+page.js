@@ -10,7 +10,6 @@ export function load() {
 		competence: snapshot.competence,
 		book: snapshot.book,
 		equityCurve: snapshot.equity_curve,
-		openIssuesHtml: snapshot.docs.open_issues_html,
 		counts: snapshot.counts
 	};
 }

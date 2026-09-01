@@ -8,6 +8,7 @@
 		{ href: '/ledger', label: 'Ledger' },
 		{ href: '/scoreboard', label: 'Scoreboard' },
 		{ href: '/how-it-works', label: 'How it works' },
+		{ href: '/resources', label: 'Resources' },
 		{ href: '/build-log', label: 'Build log' },
 		{ href: '/submission', label: 'For judges' }
 	];

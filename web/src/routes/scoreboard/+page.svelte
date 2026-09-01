@@ -4,7 +4,6 @@
 	import CompetenceLadder from '$lib/components/CompetenceLadder.svelte';
 	import EquityCurve from '$lib/components/EquityCurve.svelte';
 	import Callout from '$lib/components/Callout.svelte';
-	import MarkdownBody from '$lib/components/MarkdownBody.svelte';
 	import Term from '$lib/components/Term.svelte';
 
 	let { data } = $props();
@@ -121,19 +120,6 @@
 				<span class="big">{usd(data.book.beta_weighted_delta)}</span></span></div>
 			<div class="card"><span class="stat-tile"><span class="label">Vega / Theta</span>
 				<span class="big" style="font-size:1.3rem">{usd(data.book.vega_dollars)} / {usd(data.book.theta_dollars)}</span></span></div>
-		</div>
-	</div>
-</section>
-
-<section class="block ledger" id="honest-gaps">
-	<div class="wrap">
-		<h2>Honest gaps.</h2>
-		<p class="standfirst" style="margin-top:.5rem">
-			The open items from the project's own bug ledger, published as-is — a bug found is
-			recorded the moment it's found, and removed only by the commit that fixes it.
-		</p>
-		<div style="margin-top:1.2rem">
-			<MarkdownBody html={data.openIssuesHtml} />
 		</div>
 	</div>
 </section>

@@ -154,9 +154,9 @@
 				<span class="kicker">Honest, on purpose</span>
 				<h2 style="margin-top:.5rem">What Theo doesn't do.</h2>
 				<p class="standfirst" style="margin-top:.6rem">Written down before a judge finds it —
-					published bugs, refused structures, and the calibration sample size next to every
-					number that uses it.</p>
-				<a class="btn ghost sm" style="margin-top:.9rem" href="/scoreboard#honest-gaps">Read the open issues <Icon name="arrowRight" size={14} /></a>
+					refused structures, and the calibration sample size next to every number that uses
+					it.</p>
+				<a class="btn ghost sm" style="margin-top:.9rem" href="/scoreboard">See the scoreboard <Icon name="arrowRight" size={14} /></a>
 			</div>
 			<ul class="clean" style="grid-column:span 2">
 				<li><strong>Calendar and diagonal spreads are refused</strong>, not approximated — pricing the far leg needs a model this deliberately does not have.</li>
