@@ -997,7 +997,35 @@ svg.chart{display:block; width:100%; height:auto; overflow:visible}
   const toc = document.getElementById('toc');
   let idx = 0;
 
-  slides.forEach((s, i) => { s.id = 's' + (i + 1); s.setAttribute('aria-label', s.dataset.title); });
+  /* Stable, title-derived ids (not positional "s1"/"s2"...) so an external
+     deep link - e.g. deck.html#architecture from the site's /resources
+     page - survives slides being reordered or added later. */
+  function slugify(t){
+    return t.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'slide';
+  }
+  const seenIds = new Set();
+  slides.forEach((s, i) => {
+    let id = slugify(s.dataset.title);
+    if (seenIds.has(id)) id = id + '-' + (i + 1);
+    seenIds.add(id);
+    s.id = id;
+    s.setAttribute('aria-label', s.dataset.title);
+  });
+
+  /* Land on the slide named in the URL hash, if any - BEFORE the
+     IntersectionObserver below is attached. Its mandatory initial callback
+     reports whatever is ACTUALLY in view at observe() time, and slide 1 is
+     always that, at page load, regardless of the hash - so doing this after
+     attaching the observer means that first callback silently overwrites
+     the deep link every time. Scrolling first makes slide 1 no longer the
+     visible one, so the observer's own initial report lands correctly. */
+  if (location.hash){
+    const i = slides.findIndex(s => '#' + s.id === location.hash);
+    if (i >= 0){
+      idx = i;
+      deck.scrollTo({top: slides[idx].offsetTop, behavior: 'auto'});
+    }
+  }
 
   /* Which slide are we on? Observe rather than compute from scrollTop — with
      scroll-snap the browser is the authority on that, not us. */
@@ -1046,10 +1074,6 @@ svg.chart{display:block; width:100%; height:auto; overflow:visible}
     else if (k === 'o' || k === 'O'){ openToc(); e.preventDefault(); }
   });
 
-  if (location.hash){
-    const i = slides.findIndex(s => '#' + s.id === location.hash);
-    if (i >= 0) requestAnimationFrame(() => go(i));
-  }
   paint();
 
   /* ═══ risk widget — the same engine as the research note and explorer,

@@ -11,5 +11,18 @@ export const resources = [
 		icon: 'risk',
 		embedSrc: '/resources/risk-appetite-explorer.html',
 		fullPageHref: '/resources/risk-appetite-explorer.html'
+	},
+	{
+		slug: 'system-architecture',
+		title: 'System Architecture',
+		description:
+			'Where the model sits, and how little of the system it is — the Sense → Think → Act → Learn pipeline over four memory stores, with the feedback path from Learn back into Think.',
+		// No embedSrc: this is one slide inside a 21-slide deck with its own
+		// slide-by-slide navigation - cramped and slightly odd inside a small
+		// iframe. Link straight to it instead (deck.html#architecture lands
+		// directly on the diagram, keyboard/TOC nav from there work as usual).
+		kind: 'reading',
+		icon: 'automate',
+		fullPageHref: '/deck.html#architecture'
 	}
 ];

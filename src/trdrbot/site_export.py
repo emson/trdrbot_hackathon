@@ -324,18 +324,31 @@ def export_position(pos: Position, blog_text: str | None) -> dict[str, Any]:
 
 # --------------------------------------------------------------- ledger stream
 
-def _strip_blog_header(body: str) -> str:
-    """Drop the `# Title` line and the "Opened **...** - max loss ..." line
-    `blog.write_entry` always opens with - both are already shown as styled
-    chips on the trade page, so keeping them would repeat the same two facts
-    in plain prose immediately below."""
-    lines = body.split("\n")
-    out = []
-    skipped_title = skipped_opened = False
+def _strip_leading_h1(text: str) -> str:
+    """Drop a document's own opening `# Title` line.
+
+    Every page that calls this already shows the same title as a styled
+    Svelte `<h1>` above the rendered body - trade pages, dev journals - so
+    without this the title renders TWICE, once styled and once as plain
+    markdown prose immediately below it.
+    """
+    lines = text.split("\n")
+    out, skipped = [], False
     for line in lines:
-        if not skipped_title and line.startswith("# "):
-            skipped_title = True
+        if not skipped and line.startswith("# "):
+            skipped = True
             continue
+        out.append(line)
+    return "\n".join(out)
+
+
+def _strip_blog_header(body: str) -> str:
+    """`_strip_leading_h1` plus the "Opened **...** - max loss ..." line
+    `blog.write_entry` always writes right after its title - also already
+    shown as styled chips on the trade page."""
+    lines = _strip_leading_h1(body).split("\n")
+    out, skipped_opened = [], False
+    for line in lines:
         if not skipped_opened and line.startswith("Opened **"):
             skipped_opened = True
             continue
@@ -497,7 +510,7 @@ def build_journals(dev_journals_dir: Path) -> list[dict[str, Any]]:
         standfirst = re.sub(r"\s+", " ", paras[0]).strip()[:280] if paras else ""
         out.append({
             "slug": p.stem, "date": date_match.group(1) if date_match else "",
-            "title": title, "standfirst": standfirst, "html": md(text),
+            "title": title, "standfirst": standfirst, "html": md(_strip_leading_h1(text)),
             "source_path": f"docs/dev_journals/{p.name}",
         })
     out.sort(key=lambda j: j["slug"], reverse=True)

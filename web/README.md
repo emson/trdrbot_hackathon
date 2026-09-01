@@ -26,17 +26,35 @@ npm run build
 npm run preview     # serves build/, http://localhost:4173
 ```
 
-**If you rebuild while a `preview` server is already running, restart it.**
-`vite preview` doesn't reliably notice a `build/` directory that changed
-underneath it — you'll get a page whose HTML references a CSS/JS file hash
-that no longer matches what's on disk, and the page loads with no styling at
-all (content renders, layout doesn't). Kill it and start a fresh one after
-every `npm run build`:
+**If you rebuild while a `preview` server is already running, restart it -
+and don't race the restart.** `vite preview` doesn't reliably notice a
+`build/` directory that changed underneath it, so a stale process can go on
+serving a mix of old and new files after a rebuild - some routes fine,
+others 404 on an asset that verifiably exists on disk. Symptoms range from
+"no styling at all" (a stale CSS hash) to "a page looks static and nothing
+on it responds to clicks" (a stale/failed JS entry chunk, so the client
+never hydrates at all - it's not that an interaction is broken, it's that
+no client code ran to handle it).
+
+Killing and immediately restarting on a fixed `sleep` is itself unreliable:
+`pkill` returns before the old process has actually released the port, the
+new `vite preview` can silently fall back to the *next* port instead of
+the one you're testing against, and now you're pointed at an orphaned
+zombie indefinitely. `package.json`'s `preview` script passes
+`--strict-port` for exactly this reason - a leftover process now fails
+loudly (`Port 4173 is already in use`) instead of drifting silently.
+Restart properly:
 
 ```bash
 # macOS/Linux
-pkill -f "vite preview" ; npm run preview
+pkill -f "vite preview"
+while lsof -ti:4173 >/dev/null 2>&1; do sleep 0.2; done   # wait for the port to actually free
+npm run preview
 ```
+
+If `npm run preview` still errors with "port already in use" after that,
+something else on the machine owns 4173 - find it with `lsof -i:4173`
+rather than guessing.
 
 ## Refreshing the data
 
