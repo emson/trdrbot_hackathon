@@ -4661,3 +4661,68 @@ spellings (`missing`, `null`, `""`), a typo refused, `can_open` inert, the deadl
 unobservable-and-holding, and the horizon window still bounded. The amended
 `test_forecast_window_leaves_room_to_act` carries a `# CHANGED (D-101)` note naming the reason,
 per the frozen-and-additive rule.
+
+## D-102 - The book was single-name because discovery was dead, not because it chose to be
+
+The ask was "run several positions across different assets". Nothing was stopping it. There is no
+concurrent-position limit anywhere: `tool_guard.redirect_whole_book_close` is a CLOSE guard that
+*assumes* multiple positions, `size_position` enforces dollar caps with 87% of the budget unused,
+and no symbol filter exists in `tool_guard`, `sizing` or the order path - the book had already
+traded NVDA. **62 opportunities across 40+ names reached the inbox and the agent formed theses on
+two of them.** Five mechanisms, ranked by how much they mattered.
+
+**1. Discovery had been dead for two days, and it is the only open-universe source.**
+
+```
+2026-08-31 13:39 / 15:53 / 17:58, 2026-09-01 14:03 / 16:09 / 18:15
+  hunt  opportunities=0  error=TypeError("'list' object is not callable")
+```
+
+`discovery.run` bound `section = [...]` for a per-ticker block of prose. That made `section`
+function-local for the **whole body**, including the `section(text2, ...)` call fifty lines later
+that splits the model's second reply - and `llm.section` was never imported. Introduced by a
+refactor whose commit message was "one reply-text seam, one JSON parser home".
+
+Every hunt that produced nominees crashed after two LLM calls, a bar fetch, a yfinance call and an
+option chain per nominee, and the fail-open handler printed it. Research covers a fixed five-name
+universe; the muse collides wiki concepts, and housekeeping had deprecated 25 of 30 research
+dossiers, leaving exactly those five. **Discovery was the only thing that could introduce a new
+name, so the candidate pool collapsed onto the universe and nothing said so.**
+
+Guarded by a whole-package AST check: an imported callable rebound in its own scope. That class -
+a name meaning two things in one scope - passes import, passes lint, and dies only when the branch
+runs, which is why it survived. `hunt` failures now write `degraded` rows so `trdrbot health`
+escalates them.
+
+**2. The only news feed was scoped to one name.** `sensors._fetch_alpaca_news` passed
+`symbols=",".join(config.watchlist)` - `"SPY"`. Every one of the 75 news items ever written to the
+inbox was SPY-scoped, so `## Observations this cycle` was a SPY feed by construction and the agent
+correctly concluded it had nothing new. Now the research universe.
+
+**3. A candidate arrived with no price.** `analytics.snapshot` was called with the underlyings of
+OPEN POSITIONS only, so a non-SPY candidate reached the prompt with bands and no mark, and pricing
+it cost tool calls. Measured: on both cycles where non-SPY candidates were presented the agent made
+**zero** tool calls and its summary named neither. An option it cannot see the price of is not an
+option. Now prices the universe plus every pending candidate.
+
+**4. One word.** The prompt said `- Watchlist: SPY` under a heading called `## Constraints`. It is
+the NEWS scope and nothing enforces it as a restriction. It was read as one for the entire run.
+The line now states what is true: any liquid optionable US name is tradeable, these are quoted for
+you, and candidates naming others are not second-class.
+
+**5. The delta flag was a tautology the agent obeyed.** `_render_book_risk` stamped
+`<- DIRECTIONAL: these positions are one market bet, whatever the names suggest` whenever
+beta-weighted delta cleared 1.5% of equity - including on a book holding ONE position, where it
+says nothing except that one name is one name. It was the stated reason for declining in **5 of the
+last 6 no-ops**, against a $2,052 max loss with $15,652 of budget free. Suppressed below two names,
+and replaced with the honest reading: a second name would lower this number, not raise it. The
+opposite direction is pinned - two names still get the flag.
+
+**Deliberately not changed.** The one-action-per-cycle rule (it bounds rate, not concurrency) and
+the idle ladder's review-before-hunt ordering, which starves hunting once a position is open
+(measured: 49 `position_review` items against 9 `hunt` rows, and `MATERIAL_MOVE` latches because it
+measures against `entry_spot` forever). That is real and is recorded as **I-72** rather than fixed
+inside a change that already moves five things.
+
+**Verified:** 552 tests (+3), lint clean. Mutation-verified: reinstating the shadowed name fails
+the AST guard; the single-name flag change ships with its opposite direction.
