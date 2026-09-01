@@ -1303,6 +1303,32 @@ def test_half_kelly_bounds_every_appetite_on_the_live_tables():
     assert worst <= 0.50 + 1e-12, f"appetite can reach Kelly x{worst:.3f}"
 
 
+def test_the_prompt_never_tells_the_agent_it_earned_the_operators_choice():
+    """The appetite reaches the agent's behaviour through PROSE, not the sizer.
+
+    `size_position` is consulted in 2 of 89 decide cycles (I-68), so this block
+    is where a risk posture actually lands - and it sits directly beside
+    `next_tier_needs()`, which promises more size for more resolved theses.
+    Reporting only the applied Kelly would tell the agent it EARNED a posture
+    the operator chose (D-099).
+
+    Both directions, per admission rule 4: it must say this at 0.50x, and it
+    must say NOTHING at neutral - a prompt only grows when there is something
+    to say."""
+    from trdrbot.tick import render_competence
+
+    lever = render_competence(_comp(15, verdicts=_hist(15, GOOD_V), appetite=0.5))
+    assert "earned" in lever and "applied" in lever, lever
+    assert "scales SIZE, not selectivity" in lever
+    assert "0.50x" in lever
+
+    neutral = render_competence(_comp(15, verdicts=_hist(15, GOOD_V)))
+    assert "appetite" not in neutral, neutral
+    # The hard stop is a separate concern and must survive either way.
+    assert "HARD STOP: gone" in render_competence(
+        _comp(15, verdicts=_hist(15, GOOD_V)), can_open=False, why="gone")
+
+
 def test_the_published_explorer_still_matches_the_sizer_it_claims_to_model():
     """Two copies of one definition drifting apart is this project's most
     familiar bug, and this one was on the public website (D-099).

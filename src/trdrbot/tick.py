@@ -191,6 +191,37 @@ def _attention_query(items: list[Item], open_pos: list[Any], config: Config) -> 
     return " ".join(names[:ATTENTION_MAX_NAMES]) + " options setup"
 
 
+def render_competence(posture: Any, can_open: bool = True, why: str = "") -> str:
+    """The size budget as the agent reads it. Public so it can be tested.
+
+    `posture.reason` states EARNED and APPLIED Kelly when an appetite is in
+    play, and it sits here directly beside `next_tier_needs()`, which promises
+    more size for more resolved theses. Reporting only the applied figure would
+    tell the agent it had EARNED a posture the operator chose, while the ladder
+    went on advertising a reward the appetite had already halved (D-099).
+
+    The appetite clause is stated only when there is something to state, and it
+    names the BOUNDARY rather than editorialising. `size_position` is consulted
+    in 2 of 89 decide cycles (I-68) - the other 87 decide in prose - so this is
+    where a risk posture actually reaches behaviour, and an agent that read
+    "less risk" as "trade less often" would be moving a lever nobody set.
+    Selectivity is the EV gate's business, and the gate is upstream of every
+    multiplication the appetite performs.
+    """
+    return (
+        f"## Competence tier: {posture.tier.upper()}\n"
+        f"{posture.reason}. Book cap {posture.book_cap:.0%} of equity in defined "
+        f"max-loss, {posture.position_cap:.1%} on any one position; size_position "
+        f"enforces both - do not argue with the number it returns.\n"
+        f"To earn more size: {posture.next_tier_needs()}. Size is earned by resolved, "
+        f"ATTRIBUTABLE theses - a profit on a wrong view is luck and counts for nothing."
+        + (f"\nThese caps carry an operator risk appetite of "
+           f"{posture.appetite:.2f}x. It scales SIZE, not selectivity - what is "
+           f"worth trading is unchanged." if posture.appetite != 1.0 else "")
+        + (f"\nHARD STOP: {why}" if not can_open else "")
+    )
+
+
 def _render_book_risk(positions: list[Any], bg: dict[str, Any] | None,
                       equity: float, posture: Any) -> list[str]:
     """The book's risk, in the unit the whole system measures risk in, first.
@@ -426,24 +457,7 @@ async def _build_decide_prompt(
     prompt_parts = [snap.render(),
                     _render_positions(open_now, book_greeks, snap.equity or 0.0, posture)]
     _ok, _why = competence.can_open(config.deadline, None)
-    prompt_parts.append(
-        f"## Competence tier: {posture.tier.upper()}\n"
-        f"{posture.reason}. Book cap {posture.book_cap:.0%} of equity in defined "
-        f"max-loss, {posture.position_cap:.1%} on any one position; size_position "
-        f"enforces both - do not argue with the number it returns.\n"
-        f"To earn more size: {posture.next_tier_needs()}. Size is earned by resolved, "
-        f"ATTRIBUTABLE theses - a profit on a wrong view is luck and counts for nothing."
-        # Stated only when there IS something to state. The scaled `reason`
-        # above already carries earned-vs-applied; this names the BOUNDARY,
-        # because `size_position` is consulted in 2 of 89 decide cycles (I-68)
-        # and the other 87 decide in prose. An agent that read "less risk" as
-        # "trade less" would be moving a lever nobody set - selectivity is the
-        # EV gate's business, and the gate is upstream of every multiplication.
-        + (f"\nThese caps carry an operator risk appetite of "
-           f"{posture.appetite:.2f}x. It scales SIZE, not selectivity - what is "
-           f"worth trading is unchanged." if posture.appetite != 1.0 else "")
-        + (f"\nHARD STOP: {_why}" if not _ok else "")
-    )
+    prompt_parts.append(render_competence(posture, _ok, _why))
     if config.events:
         from datetime import date as _date
         ev_lines = []
