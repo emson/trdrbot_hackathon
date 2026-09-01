@@ -13,6 +13,7 @@ import asyncio
 import json
 import os
 import sys
+from pathlib import Path
 from typing import Any
 
 from . import config as config_mod
@@ -561,6 +562,11 @@ def _report() -> int:
     return 0
 
 
+def _site(out: Path | None) -> int:
+    from . import site_export
+    return site_export.export(out=out) if out else site_export.export()
+
+
 def _modelcal(action: str) -> int:
     """The MODEL layer's calibration (D-089) - the counterpart of
     `trdrbot calibration`, which scores the agent."""
@@ -648,6 +654,10 @@ def main() -> None:
                           "tests so they terminate themselves instead of needing a kill")
     run.add_argument("--allow-fast", action="store_true",
                      help="permit an interval below the safety floor")
+    site = sub.add_parser("site", help="export the agent's record to web/src/lib/data/snapshot.json")
+    site.add_argument("action", choices=["export"], default="export", nargs="?")
+    site.add_argument("--out", type=Path, default=None, help="override the snapshot output path")
+
     con = sub.add_parser("constitution", help="the epistemic constitution in elfmem's SELF frame")
     con.add_argument("action", choices=["show", "seed", "verify", "review", "reseed"], default="show",
                      nargs="?", help="show text | seed into elfmem | verify it renders | "
@@ -676,6 +686,7 @@ def main() -> None:
     _H["run"] = lambda a: asyncio.run(_run_loop(a.interval, a.closed_interval,
                                        max_ticks=a.max_ticks, allow_fast=a.allow_fast))
     _H["constitution"] = lambda a: asyncio.run(_constitution(a.action))
+    _H["site"] = lambda a: _site(a.out)
 
     args = p.parse_args()
     sys.exit(_H[args.cmd](args))

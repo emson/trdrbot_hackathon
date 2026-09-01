@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head>
+	<meta charset="utf-8" />
+	<link rel="icon" type="image/png" href="%sveltekit.assets%/img/mark-icon-32.png" />
+	<link rel="apple-touch-icon" href="%sveltekit.assets%/img/mark-icon-180.png" />
+	<meta name="viewport" content="width=device-width, initial-scale=1" />
+	<meta name="theme-color" content="#F1F4EF" media="(prefers-color-scheme: light)" />
+	<meta name="theme-color" content="#101816" media="(prefers-color-scheme: dark)" />
+	<link rel="preconnect" href="https://fonts.googleapis.com" />
+	<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+	<link
+		rel="stylesheet"
+		href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,440;9..144,560;9..144,650&family=Fredoka:wght@500;600;700&family=Public+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap"
+	/>
+	<script>
+		try {
+			var t = localStorage.getItem('trdrbot-theme');
+			if (t === 'dark' || t === 'light') document.documentElement.setAttribute('data-theme', t);
+		} catch (e) {}
+	</script>
+	%sveltekit.head%
+</head>
+<body data-sveltekit-preload-data="hover">
+	<div style="display: contents">%sveltekit.body%</div>
+</body>
+</html>

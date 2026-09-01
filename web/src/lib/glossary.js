@@ -1,0 +1,31 @@
+// Plain-English definitions. Keep each under ~40 words - this doubles as
+// inline tooltip copy via the <Term> component.
+export const glossary = [
+	{ term: 'Bear put spread', def: 'Buy a put, sell a cheaper put at a lower strike, same expiry. Profits if the underlying falls, with both the cost and the max loss capped by the strikes.' },
+	{ term: 'Bull put spread', def: 'Sell a put, buy a cheaper put at a lower strike. Collects a credit up front; profits if the underlying stays above the higher strike.' },
+	{ term: 'Bull call spread', def: 'Buy a call, sell a costlier-to-hold call at a higher strike. Profits if the underlying rises, with the max gain capped at the strike width.' },
+	{ term: 'Debit', def: 'Net cash paid to open a position. The most you can lose on most spreads traded here, since the structure is defined-risk.' },
+	{ term: 'Credit', def: 'Net cash received to open a position, most of it kept if the position expires worthless in the seller’s favor.' },
+	{ term: 'Breakeven', def: 'The underlying price at expiry where the position’s profit is exactly zero — pure contract arithmetic, not a model.' },
+	{ term: 'Max loss', def: 'The worst-case dollar loss a defined-risk structure can produce, fixed at entry by the strikes chosen.' },
+	{ term: 'Delta', def: 'How much an option’s value moves per $1 move in the underlying. Summed across a book, in dollars, it says how much the whole portfolio behaves like stock.' },
+	{ term: 'Beta-weighted delta', def: 'Delta rescaled by how much each underlying actually moves with the market (its beta), so unrelated names can be compared on one exposure number.' },
+	{ term: 'Vega', def: 'How much an option’s value moves per 1-point change in implied volatility. Positive vega gains when the market gets more uncertain; negative vega gains when it calms down.' },
+	{ term: 'Theta', def: 'How much value an option loses per day, all else equal — the cost of time passing for a buyer, the income for a seller.' },
+	{ term: 'Implied volatility (IV)', def: 'The volatility the option’s market price implies, if you assume a standard pricing model. It is the market’s own forecast, not a measured fact.' },
+	{ term: 'Realized volatility', def: 'How much the underlying actually moved, measured after the fact from its own price history — the thing implied vol is a forecast of.' },
+	{ term: 'Brier score', def: 'Mean squared error between a stated probability and the outcome (0 or 1). Zero is a perfect forecaster; 0.25 is what a coin flip scores against a 50% base rate.' },
+	{ term: 'Murphy decomposition', def: 'Splits a Brier score into reliability (does confidence match frequency?), resolution (does it discriminate at all?), and uncertainty (the irreducible variance of the outcomes themselves).' },
+	{ term: 'Calibration', def: 'Whether stated confidence matches observed frequency. A forecaster who says "70%" and is right 70% of the time is well calibrated, regardless of whether any single call was profitable.' },
+	{ term: 'Kelly fraction', def: 'The bet size that maximizes long-run growth given a stated edge and payoff — sized down here by the agent’s own measured (not stated) reliability.' },
+	{ term: 'Conditional payoff', def: 'The average win size given a win, divided by the average loss size given a loss — used instead of the naive best-case/worst-case ratio, which is measurably biased.' },
+	{ term: 'Attribution', def: 'Scoring separately whether the market VIEW was right and whether the STRUCTURE chosen to express it was right — so a lucky win on a wrong view teaches nothing.' },
+	{ term: 'Thesis', def: 'A specific, falsifiable claim about where an underlying will be by a stated date, with a stated confidence — the thing every trade (and every decline) is checked against later.' },
+	{ term: 'Falsifiable', def: 'Stated precisely enough that a specific future observation would prove it wrong. A thesis with no invalidation condition cannot be scored, and is refused rather than recorded as one.' },
+	{ term: 'Pre-registration', def: 'Recording every thesis considered — traded or not — at the moment it’s formed, so a multiple-testing correction has the true trial count rather than only the winners.' },
+	{ term: 'Bootstrap Monte Carlo', def: 'A simulation that resamples an underlying’s own real price history, rather than assuming a textbook bell-curve, to estimate a range of future outcomes.' },
+	{ term: 'MCP (Model Context Protocol)', def: 'The open protocol this agent uses to call Alpaca’s trading tools directly — quotes, option chains, order placement — as structured tool calls rather than a bespoke API integration.' },
+	{ term: 'Paper trading', def: 'Simulated trading against real live market prices with fake money — no real capital or counterparty risk, which is why this project can publish its full record.' },
+	{ term: 'Assignment', def: 'When an option seller is required to fulfil the contract (buy or sell the underlying) because the buyer exercised it — usually because it finished in the money.' },
+	{ term: 'Pin risk', def: 'The uncertainty of whether an option finishing very close to its strike at expiry will be exercised, which can leave an unexpected stock position behind.' }
+];
