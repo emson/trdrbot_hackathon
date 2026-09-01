@@ -4612,3 +4612,52 @@ real quotes, with no market-impact term. At 46 contracts of SPY that is defensib
 less conservative as size grows, and nothing currently measures the gap.
 
 **Restore 0.50 (or 0.25, which is what the evidence argues for) when this stops being a demo.**
+
+## D-101 - Removing the deadline, and the discipline it was standing in for
+
+The competition set no requirement to stop, so `trading.deadline` is now `null` and the run
+continues indefinitely. Positions close on their own exit rules rather than on a calendar.
+
+**The removal itself was already designed for.** `can_open` is documented as "inert when there is
+no deadline, which is the normal case", and the force-close sweep is an ordinary exit rule whose
+signal, `days_to_deadline`, reads `_days_to(None)` -> `None` -> *"unobservable signal holds; it
+never fires blind"*. Two of the three things that had to be right were right before this change.
+
+**The third was not, and it is the whole entry.** `forecast_window` returned `None` with no
+deadline, and every caller carried its own fallback for that case:
+
+| caller | fallback when the window was None |
+|---|---|
+| `muse` | `latest or "10 days out"` |
+| `discovery` | `latest or deadline` (i.e. the empty string) |
+| `research` | `or ("", "", "")` -> no upper bound at all |
+
+The muse's fallback is **the exact 1-10 day range D-070 removed**, after measuring that its output
+clustered at the far end and all five of its live forecasts landed on the last useful day but one.
+So deleting the deadline would have silently restored the defect the deadline had been masking -
+and nothing would have said so, because each fallback reads as a sensible default in isolation.
+
+**A constraint whose removal reinstates the bug it replaced is not a constraint, it is a
+coincidence.** Short horizons are a property of good forecasting, not of a competition: they
+resolve while the reasoning is still checkable, and they are harder, which is the point.
+`forecast_window` therefore ALWAYS returns a window now, bounded by `MAX_HORIZON_DAYS = 10`, and a
+hard stop is one upper bound among two - `min(today + 10, deadline - 1)`. With the old deadline in
+place every previously-asserted date is unchanged; the tightening path is the same code.
+
+Three consequences worth naming:
+
+- **`discovery._options_gate` follows the window, not the deadline.** It asked "does a chain exist
+  with an expiry on/before the deadline"; with none it would have passed `expiration_date_lte=None`
+  and stopped bounding anything. It now asks the same question against the window's own `latest`,
+  which is what "can this resolve in time" actually means.
+- **`Config.deadline` is `str | None`, and a present-but-unparseable date RAISES at startup.**
+  Reading a typo as "no deadline" would disarm the sweep and every expiry gate at once - the
+  loudest absence-as-zero available in this file.
+- **The run loop loops until stopped.** `--max-ticks` remains the way to bound a smoke test, which
+  is what it was always for.
+
+**Verified:** 550 tests (+1). The new one is both directions - absence accepted cleanly on three
+spellings (`missing`, `null`, `""`), a typo refused, `can_open` inert, the deadline exit signal
+unobservable-and-holding, and the horizon window still bounded. The amended
+`test_forecast_window_leaves_room_to_act` carries a `# CHANGED (D-101)` note naming the reason,
+per the frozen-and-additive rule.
