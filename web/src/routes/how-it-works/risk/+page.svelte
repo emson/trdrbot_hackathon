@@ -76,6 +76,65 @@
 
 <section class="block ledger">
 	<div class="wrap">
+		<h2>One number the operator sets, and the agent cannot.</h2>
+		<p class="standfirst" style="margin-top:.5rem">
+			Everything above is <em>earned</em> — the ladder decides how much size the record
+			justifies. <strong>Risk appetite</strong> is the one quantity on that posture the agent
+			did not earn and may not touch: a single scalar in <span class="code">config.yaml</span>,
+			clamped to <span class="code">[0.25, 2.0]</span>, where 1.0 means "the posture the ladder
+			alone would choose".
+		</p>
+		<div class="cols c2" style="margin-top:1.2rem">
+			<div class="card pad-lg">
+				<h3>One multiplication, four scopes</h3>
+				<p class="muted">It scales the book cap, and the per-name cap, per-position cap and
+					exploration floor all <strong>derive</strong> from that — so one number reaches every
+					risk scope at once and they cannot drift apart. Two clamps in the original design
+					were dropped after measurement: one provably could never fire, and the other became
+					wrong once the floor derived. What remains is a single absolute ceiling on the share
+					of the account that can be at risk at all. <strong>The lever moves the
+					growth/variance tradeoff; it never moves the ruin bound.</strong></p>
+			</div>
+			<div class="card pad-lg">
+				<h3>It scales size, not selectivity</h3>
+				<p class="muted">The EV gate sits <em>upstream</em> of every multiplication, so no
+					setting buys a trade that isn't worth taking — maximum appetite on a structure with
+					no claimed edge still returns zero contracts. Turning it down does not make the agent
+					pickier, and that is deliberate: a lever that loosened the gate would buy bets with
+					<em>lower</em> expected return <em>and</em> higher variance. There is no curve to sit
+					on there.</p>
+			</div>
+			<div class="card pad-lg">
+				<h3>A knob that cannot silently do nothing</h3>
+				<p class="muted">Above 1.75× the book cap pins at its absolute ceiling and further
+					turns are absorbed. So the posture reports its <strong>realised</strong> appetite
+					beside the requested one, the health check flags a divergence, and the sizer now names
+					<em>which</em> of five limits set every size. This project's most expensive bug class
+					is code that runs and does nothing; a risk knob is a prime candidate for it.</p>
+			</div>
+			<div class="card pad-lg">
+				<h3>Never a self-improvement lever</h3>
+				<p class="muted">The Coach can change prompts. It cannot reach this: it writes only to
+					its own lever directory, never to config, and the rule that nothing it can move may
+					score its own trial makes that structural rather than a policy. <strong>Risk appetite
+					is the principal's preference, not the agent's.</strong> The agent is told the number
+					so its reasoning matches its budget — and told plainly that it scales size, not what
+					is worth trading.</p>
+			</div>
+		</div>
+		<p class="standfirst" style="margin-top:1.2rem">
+			It currently sits at <strong>0.50×</strong>, and the arithmetic is the argument: it
+			reproduces the book's existing position size exactly at its current rung, so the mechanism
+			landed without changing a single trade. The honest case for going lower is on the table and
+			deliberately not taken yet — at neutral, a &gt;20% drawdown becomes more likely than not
+			<em>even when the thesis is right</em>, and for a book that has resolved forecasts but
+			<strong>zero attributed positions</strong>, the growth-maximising setting is the minimum.
+		</p>
+	</div>
+</section>
+
+<section class="block ledger">
+	<div class="wrap">
 		<h2>Facts and models, never mixed.</h2>
 		<p class="standfirst" style="margin-top:.5rem">
 			Payoff at expiry, max loss, and breakevens are arithmetic on the contract — labelled

@@ -244,6 +244,15 @@ is the distinctive part: **a profit on a wrong thesis is luck, and a book of luc
 competence however good the P&L looks.** Promotion past ESTABLISH requires that most resolved
 theses were actually explicable. Drawdown demotes immediately; recovery restores.
 
+**Risk appetite is one number, and the agent does not own it.** `trading.risk_appetite` in
+`config.yaml` scales the earned posture, clamped to `[0.25, 2.0]`, where 1.0 is what the ladder
+alone would choose. It multiplies the book cap - and the per-name cap, per-position cap and
+exploration floor all derive from that, so one number reaches every risk scope and they cannot
+desynchronise. It scales SIZE only: the EV gate is upstream of it, so no setting buys a trade that
+is not worth taking, and an absolute ceiling means the lever moves the growth/variance tradeoff and
+never the ruin bound. The Coach cannot reach it - risk appetite is the principal's preference, not
+the agent's. `trdrbot risk <x>` previews any value against the live book before you set it.
+
 **Every falsifiable claim is scored, not only the ones we trade.** A thesis passed to
 `simulate_experiments` is pre-registered automatically, traded or not, so the trial count N that a
 multiple-testing correction needs cannot be lost. `record_forecast` puts a view on the record at
