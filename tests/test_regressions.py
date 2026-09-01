@@ -1443,7 +1443,73 @@ def test_the_book_leads_with_defined_risk_not_with_a_linear_delta():
     assert "LOCAL SLOPE, not a loss" in out, "a slope presented as a loss is the bug"
     assert "of headroom" in out, "the agent cannot weigh a budget it cannot see"
     # The stop-word moves onto the number that is actually a limit.
-    assert "DIRECTIONAL" in out and "CONCENTRATED" not in out
+    assert "CONCENTRATED" not in out
+    # CHANGED (D-102): DIRECTIONAL needs more than one name to be a finding.
+    # On a ONE-name book "these positions are one market bet, whatever the
+    # names suggest" is a tautology - there is one name - and the agent read it
+    # as a reason not to open the second position that would have reduced it.
+    # It was the stated rationale in 5 of the last 6 declines. The line still
+    # appears and still carries the number; it no longer calls a single
+    # position a concentration finding.
+    assert "DIRECTIONAL" not in out, "one name cannot be concentrated ACROSS names"
+    assert "this IS the position" in out, "but it must still say what it is"
+
+
+def test_no_function_shadows_a_callable_it_imports():
+    """D-102. An imported function rebound to a local value in the same body is
+    a NameError that only fires when that line RUNS - so it passes import,
+    passes lint, and dies in production on the branch nobody exercises.
+
+    The incident: `discovery.run` bound `section = [...]` for a per-ticker
+    block of prose, which made `section` function-local for the whole body -
+    including the `section(text2, ...)` call 50 lines later that splits the
+    model's reply. Every hunt that produced nominees raised
+    `TypeError: 'list' object is not callable`. Six consecutive runs over two
+    days, each burning two LLM calls, a bar fetch and an option chain per
+    nominee first, and each swallowed by a fail-open handler that printed. The
+    only source that can nominate names outside the fixed research universe was
+    dead, and the book quietly became single-name.
+
+    A whole-package AST check rather than one test for one function: the class
+    is 'a name means two things in one scope', and it is invisible to every
+    other tool in this repo."""
+    import ast
+
+    root = Path(__file__).resolve().parent.parent / "src" / "trdrbot"
+    offenders = []
+    for py in sorted(root.rglob("*.py")):
+        tree = ast.parse(py.read_text(encoding="utf-8"))
+        imported = {
+            (a.asname or a.name)
+            for node in ast.walk(tree) if isinstance(node, ast.ImportFrom)
+            for a in node.names
+        }
+        for fn in ast.walk(tree):
+            if not isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            # Names this body CALLS, and names it ASSIGNS. An imported name in
+            # both is the bug; in only one it is an ordinary local.
+            called = {n.func.id for n in ast.walk(fn)
+                      if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)}
+            assigned = {t.id for n in ast.walk(fn) if isinstance(n, ast.Assign)
+                        for t in n.targets if isinstance(t, ast.Name)}
+            for name in imported & called & assigned:
+                offenders.append(f"{py.name}:{fn.lineno} {fn.name}() shadows {name}()")
+    assert not offenders, "imported callable rebound in its own scope: " + "; ".join(offenders)
+
+
+def test_the_directional_flag_returns_the_moment_there_are_two_names():
+    """PILLAR-4, the opposite direction of the test above (admission rule 4).
+    Suppressing the flag on a one-name book must not cost the ability to say
+    'these are one bet' when there genuinely ARE several names to be one bet."""
+    from trdrbot import tick
+    two = [Position(position_id="a", status="open", underlying="SPY",
+                    strategy="bear_put_spread", max_loss_usd=1000.0),
+           Position(position_id="b", status="open", underlying="NVDA",
+                    strategy="bull_call_spread", max_loss_usd=1000.0)]
+    out = tick._render_positions(two, _bg(), 101_678.06,
+                                 _comp(20, verdicts=_hist(10, GOOD_V)))
+    assert "DIRECTIONAL" in out and "one market bet" in out
 
 
 def test_the_book_still_says_stop_when_the_budget_is_genuinely_gone():

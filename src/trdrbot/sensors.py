@@ -108,7 +108,11 @@ async def _fetch_alpaca_news(tools: dict[str, Any], config: Config) -> list[dict
     data ever reaches us - much lighter than client-side keyword matching."""
     from . import mcp_client
 
-    symbols = ",".join(config.watchlist)
+    # The RESEARCH UNIVERSE, not just the watchlist (D-102). Scoping the only
+    # news feed to one name made `## Observations this cycle` a SPY feed by
+    # construction, so every cycle's evidence was about the name already held -
+    # and the agent reasoned, correctly, that it had nothing new to act on.
+    symbols = ",".join(sorted(set(config.watchlist) | set(config.research_universe)))
     r = await mcp_client.call(
         tools, "get_news", symbols=symbols, limit=20, exclude_contentless=True, sort="desc"
     )

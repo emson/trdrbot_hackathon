@@ -200,7 +200,13 @@ trading:
   # scoring its own trial. This is the principal's preference, not the agent's.
   risk_appetite: 1.75
 
-  watchlist: ["SPY"]
+  # The names quoted to the agent every cycle and the scope of the news feed.
+  # NOT a restriction on what may be traded - nothing in tool_guard, sizing or
+  # the order path filters by symbol, and the book has traded NVDA. It was read
+  # as a restriction for the whole run because it appeared under a prompt
+  # heading called "Constraints" (D-102); the prompt now says what is true.
+  # Kept in step with research.universe so the two cannot disagree.
+  watchlist: ["SPY", "NVDA", "XLE", "XLV", "XLP"]
   # A hard stop: force-close everything on/after this date regardless of
   # position expiry (D-019). `null` means run indefinitely (D-101).
   #

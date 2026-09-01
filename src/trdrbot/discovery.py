@@ -31,7 +31,7 @@ from . import competence, evidence, ids, market_stats, mcp_client, optmath
 from .config import Config
 from .inbox import Inbox
 from .journal import Journal
-from .llm import build_model, parse_json_array, parse_json_object, text_of
+from .llm import build_model, parse_json_array, parse_json_object, section, text_of
 from .opportunity import Opportunity, admit
 from .research import dossier
 from .wiki import Concept, Wiki
@@ -222,21 +222,27 @@ async def run(
     last_close: dict[str, float] = {}
     for n in nominees:
         t = n["ticker"].upper()
-        section = [f"### {t} - {n.get('company','')}",
-                   f"Nominated because: {n.get('why_interesting','')}",
-                   f"Evidence: {'; '.join(n.get('evidence', []))[:400]}"]
+        # NOT `section` (D-102): that is `llm.section`, called below to split
+        # the second reply. Binding it to a list here made it function-local
+        # for the WHOLE body, so every hunt that produced nominees died on
+        # `TypeError: 'list' object is not callable` - six consecutive runs
+        # over two days, each burning two LLM calls, a bar fetch, a yfinance
+        # call and an option chain per nominee before crashing.
+        lines = [f"### {t} - {n.get('company','')}",
+                 f"Nominated because: {n.get('why_interesting','')}",
+                 f"Evidence: {'; '.join(n.get('evidence', []))[:400]}"]
 
         closes: list[float] = []
         dates: list[str] = []
         try:
             dates, closes = await market_stats.fetch_daily_series(tools, t)
         except Exception as exc:  # noqa: BLE001
-            section.append(f"Price history: UNAVAILABLE ({type(exc).__name__})")
+            lines.append(f"Price history: UNAVAILABLE ({type(exc).__name__})")
         if len(closes) >= 60:
             last_close[t] = closes[-1]
             market_stats.save_closes(config.paths.state, t, closes, dates=dates)
             stats = market_stats.compute_stats(t, closes)
-            section.append(f"Computed technicals: {stats.render()}")
+            lines.append(f"Computed technicals: {stats.render()}")
             # Drift-free bootstrap from the stock's OWN returns: what a
             # 5-day move looks like when the story is ignored entirely.
             fac = market_stats.bootstrap_factors(closes, 5, seed=t)
@@ -247,24 +253,24 @@ async def run(
 
                 up5 = sum(1 for f in fac if f >= 1.05) / len(fac)
                 dn5 = sum(1 for f in fac if f <= 0.95) / len(fac)
-                section.append(
+                lines.append(
                     "Bootstrap 5-day forecast (own history, no view): "
                     f"5%ile {q(0.05):+.1%}, median {q(0.5):+.1%}, 95%ile {q(0.95):+.1%} "
                     f"(as moves); P(+5% or more) {up5:.0%}, P(-5% or worse) {dn5:.0%}"
                     .replace("+1", "+").replace("1.0%", "0%")
                 )
         elif closes:
-            section.append(f"Price history: too short ({len(closes)} bars)")
+            lines.append(f"Price history: too short ({len(closes)} bars)")
 
         f = await _fundamentals(t)
-        section.append("Fundamentals (Yahoo): " + json.dumps(f))
+        lines.append("Fundamentals (Yahoo): " + json.dumps(f))
         gate = await _options_gate(tools, t, _latest)
-        section.append(
+        lines.append(
             f"Options gate (expiries on/before {_latest}): "
             + ("PASS" if gate.get("tradeable") else f"FAIL {gate}")
         )
         n["_options_ok"] = bool(gate.get("tradeable"))
-        blocks.append("\n".join(section))
+        blocks.append("\n".join(lines))
 
     # ---- LLM call 2: synthesise after the numbers ----
     # Derived, not recalled, and shared with muse and record_forecast so the

@@ -286,10 +286,19 @@ def _render_book_risk(positions: list[Any], bg: dict[str, Any] | None,
     assumed = bg.get("betas_assumed") or []
     note = (f" ({len(assumed)} beta assumed - poor fit or no history: "
             f"{', '.join(assumed)})" if assumed else "")
+    # The flag is a DIVERSIFICATION observation, so it needs something to
+    # diversify (D-102). On a one-name book "these positions are one market
+    # bet, whatever the names suggest" is a tautology - there is one name - and
+    # the agent read it as a reason not to add the second position that would
+    # have fixed it. It was the stated rationale in 5 of the last 6 declines.
+    names = {p.underlying for p in positions if p.underlying}
     flag = ""
-    if pct is not None and abs(pct) >= BETA_DELTA_FLAG_PCT:
+    if pct is not None and abs(pct) >= BETA_DELTA_FLAG_PCT and len(names) > 1:
         flag = ("  <- DIRECTIONAL: these positions are one market bet, "
                 "whatever the names suggest")
+    elif pct is not None and abs(pct) >= BETA_DELTA_FLAG_PCT:
+        flag = ("  <- one name, so this IS the position, not a concentration "
+                "finding. A second name would lower it, not raise it")
     lines.append(
         f"Beta-weighted to SPY: ${bg['beta_weighted_delta']:+,.0f} delta"
         + (f", i.e. {pct:+.2f}% of equity per 1% SPY move" if pct is not None else "")
@@ -534,7 +543,16 @@ async def _build_decide_prompt(
            "by its own exit rules and nothing else.\n")
         + f"- Useful horizons: {_win[0]} to {_win[2]}, aim around {_win[1]}. Short "
         f"horizons resolve while the reasoning is still checkable.\n"
-        f"- Watchlist: {', '.join(config.watchlist)}"
+        # NOT "Watchlist: SPY" (D-102). One word under a heading called
+        # Constraints, describing the NEWS scope, read for the whole run as a
+        # restriction on what could be traded - while nothing in tool_guard,
+        # sizing or the order path filters by symbol at all, and the book had
+        # already traded NVDA. 62 opportunities reached the inbox across 40+
+        # names and the agent formed theses on 2 of them. Say what is true.
+        + f"- Tradeable: ANY liquid, optionable US name. Quoted for you below: "
+        f"{', '.join(sorted(set(config.watchlist) | set(config.research_universe)))}.\n"
+        f"- Candidates in this cycle's observations may name others. They are "
+        f"not second-class: price them and judge them on the same terms."
     )
     if prior:
         prompt_parts.append(
@@ -564,9 +582,21 @@ async def _run_tick(
     try:
         # ---------- fast path: every tick, no LLM ----------
         sensed = await sensors.collect(tools, config, inbox, n, verbose=verbose)
+        # Price what the agent may DECIDE about, not only what it already
+        # holds (D-102). A candidate used to arrive with bands and no mark, so
+        # evaluating it cost two tool calls the agent demonstrably did not
+        # spend - measured: on both cycles where non-SPY candidates were
+        # presented, it made ZERO tool calls and its summary named neither.
+        # An option it cannot see the price of is not an option.
         snap = await analytics.snapshot(
             tools,
-            underlyings=sorted({p.underlying for p in store.open_positions() if p.underlying}),
+            underlyings=sorted(
+                {p.underlying for p in store.open_positions() if p.underlying}
+                | {s.upper() for s in config.research_universe}
+                | {str(i.payload.get("underlying") or "").upper()
+                   for i in inbox.pending() if i.type == "opportunity"}
+                - {""}
+            ),
             # So an unreadable broker leaves a `degraded` row health reads back,
             # rather than a print in an unattended run (I-55).
             journal=journal,
@@ -658,8 +688,17 @@ async def _run_tick(
                                    reason=action.reason)
                     items = inbox.pending()
                 except Exception as exc:  # noqa: BLE001 - hunting is advisory
+                    # LOUD (D-102). Hunting being advisory means a failure must
+                    # not stop the tick; it does not mean a failure may be
+                    # invisible. A shadowed name killed six consecutive hunts
+                    # over two days behind this `print`, and because discovery
+                    # is the ONLY source that nominates outside the fixed
+                    # research universe, the book quietly became single-name.
+                    # `degraded` rows escalate in `trdrbot health` on repeat.
                     print(f"[tick {n}] hunt failed, continuing: {exc!r}")
                     journal.append("hunt", opportunities=0, error=repr(exc))
+                    health.degraded(journal, "discovery", type(exc).__name__,
+                                    detail=repr(exc)[:200])
 
                 # The muse rides the same rung (D-088). It was CLI-only, so its
                 # A/B trials had no runs to feed on - a lever nothing exercises
