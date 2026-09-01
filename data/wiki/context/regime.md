@@ -1,12 +1,12 @@
 ---
 type: MarketContext
 status: stable
-stale_after: '2026-09-01T15:14:09.507566+00:00'
+stale_after: '2026-09-02T09:25:53.154553+00:00'
 sources:
 - id: src-1
   resource: computed:market_stats
   author: trdrbot/research
-  last_modified: '2026-08-31T15:14:09.506638+00:00'
+  last_modified: '2026-09-01T09:25:53.153103+00:00'
 - id: src-2
   resource: computed:market_stats
   author: trdrbot/research
@@ -20,43 +20,40 @@ sources:
   author: trdrbot/research
   last_modified: '2026-08-28T00:06:31.226038+00:00'
 generated:
-  at: '2026-08-31T15:14:09.507562+00:00'
+  at: '2026-09-01T09:25:53.154543+00:00'
 ---
 
 # Assessment
 
-The prior upgrade has moderated further but has not reversed. SPY closed at **765.84**, slipping below its 20-day average while remaining above its 50-day average. Its **+0.3% 5-day, +2.6% 21-day, and +1.0% 63-day** returns, together with RSI14 at 53, indicate consolidation within an intact intermediate trend rather than broad technical damage.
+The constructive regime remains intact but increasingly selective. SPY advanced to **766.87**, with returns of **+0.4% over five days, +2.7% over 21 days, and +1.1% over 63 days**. It remains above its 50-day average but below its 20-day average, indicating consolidation rather than a confirmed trend reversal.
 
-Index volatility remains subdued. SPY’s 21-day realized volatility is **10.3% at the 31st percentile**, and 5-day volatility has declined to 7.1%. This supports measured exposure but provides little statistical justification for aggressive uncovered volatility selling, particularly amid geopolitical tension, low-liquidity warnings, and a reported **66% probability of a September rate hike**.
+Index volatility is subdued: SPY’s 21-day realized volatility is **10.2% at the 27th percentile**, while five-day volatility has fallen to **6.5%**. Low realized movement favors measured directional spreads, but geopolitical tension, rising oil, higher yields, and hawkish policy commentary make uncovered short-volatility exposure unattractive.
 
-NVDA’s technical position has improved materially: it is now above both moving averages after gaining **5.2% over five days and 9.2% over 21 days**. However, 21-day realized volatility remains elevated at **45.3% in the 93rd percentile**, while 5-day volatility is 77.7%. Constructive AI-demand and infrastructure headlines support upside, but extreme short-term movement and a negative 63-day return require small, defined-risk positions.
+NVDA remains the strongest tactical momentum candidate, gaining **5.9% over five days and 10.0% over 21 days** while holding above both moving averages. The counterweight is exceptionally unstable price action: 21-day realized volatility is **45.5% at the 94th percentile**, five-day volatility is **77.7%**, and the 63-day return remains negative.
 
-Sector leadership remains broader than technology. XLE is above both moving averages with gains of **6.3% over 21 days and 10.4% over 63 days**, while XLV retains a strong intermediate trend despite its 2.5% weekly pullback. XLP remains below its 20-day average and nearly flat over 21 days, so the recent weakness does not yet represent a broad defensive rotation.
-
-Overall regime: **low-volatility index consolidation within an intermediate uptrend, with energy leadership, a healthcare pullback, and unusually high single-name technology volatility**. The principal near-term risk is a hawkish rate repricing amplified by geopolitical tension and thin liquidity.
+Sector leadership continues outside the broad index. XLE is above both moving averages with **+7.4% over 21 days and +11.6% over 63 days**, supported by rising oil and the SLB–Kelvion agreement. XLV’s **+15.4% 63-day** trend remains intact despite a weekly pullback, whereas XLP is below its 20-day average and lacks near-term momentum.
 
 # Drivers
 
-- **Rates:** A reported 66% probability of a September rate hike is a near-term valuation headwind. Prediction markets assign only 1% odds to a cut by the September meeting and 4% by the October meeting.
-- **Growth:** Prediction markets put recession odds at 8% by the end of 2026 and 32% by the end of 2027, indicating limited immediate recession concern but meaningful longer-horizon uncertainty.
-- **AI demand:** Micron’s favorable memory-demand outlook and other AI infrastructure headlines support NVDA’s fundamental narrative.
-- **AI concentration risk:** Warnings concerning OpenAI failure, AI security, employment disruption, and industry concentration create meaningful downside-tail risk for NVDA and related technology exposure.
-- **Geopolitics and liquidity:** U.S.-Iran tensions, weak opening odds, and warnings about seasonally poor liquidity could produce larger moves than SPY’s recent realized volatility implies.
-- **Sector breadth:** XLE and XLV remain above both key moving averages, while XLP’s weaker short-term position argues against a decisive flight into defensives.
+- **AI investment remains supportive:** U.S. business lending reached **$2.93 trillion**, up 10% year over year, with AI capital expenditure cited as a driver. Anthropic’s reported **$35 billion** Lambda agreement and OpenAI’s **$5.5 billion** in SB Energy warrants reinforce infrastructure demand.
+- **NVDA has strong catalysts but crowded risk:** Positive infrastructure, cloud, and product headlines coexist with circular-financing criticism, AI-security concerns, and extreme realized volatility.
+- **Energy has momentum and a geopolitical catalyst:** Oil is rising amid U.S.–Iran tension, while SLB agreed to acquire Kelvion for **$3.4 billion**. A reversal in crude or de-escalation would weaken the XLE thesis.
+- **Policy remains restrictive:** Prediction markets assign only **1%** odds of a cut by the September 2026 meeting and **4%** by the October meeting. These probabilities do not establish the likelihood of a hike, but they indicate little expectation of near-term easing.
+- **Macro tail risk is present but not dominant:** Crowd odds put a U.S. recession by year-end 2026 at **8%**, rising to **33%** by year-end 2027.
+- **Cross-asset pressure bears monitoring:** Oil strength, a reported 19-month high in the 10-year yield, and expectations for a stronger yen could tighten financial conditions even while equity volatility remains low.
 
 # Calendar
 
-- **Key U.S. jobs data:** unknown
-- **Federal Reserve September 2026 meeting:** unknown
-- **Federal Reserve October 2026 meeting:** unknown
-- **Broadcom fiscal Q3 earnings:** unknown
+- **unknown** — September 2026 Federal Reserve meeting; prediction markets assign a 1% probability of a cut by this meeting.
+- **unknown** — October 2026 Federal Reserve meeting; prediction markets assign a 4% probability of a cut by this meeting.
+- **Q1 2027** — Nvidia Rubin CPX accelerator production is expected to begin.
 
 # Watch
 
-- SPY’s ability to recover its 20-day average while holding above its 50-day average.
-- Any further increase in September rate-hike expectations or renewed long-duration Treasury weakness.
-- NVDA follow-through above both moving averages versus a volatility-driven reversal.
-- XLE’s ability to extend its 21-day and 63-day leadership without RSI14 becoming materially more stretched.
-- Whether XLV’s weekly decline remains a correction or develops into a break below its moving averages.
-- Whether XLP recovers its 20-day average; continued weakness would argue against a broad defensive rotation.
-- Escalation in U.S.-Iran tensions and the interaction between geopolitical headlines and low market liquidity.
+- SPY’s ability to recover its 20-day average while remaining above its 50-day average.
+- A volatility expansion from SPY’s low 27th-percentile 21-day realized-volatility reading.
+- NVDA follow-through after its 10% monthly advance; loss of the 20-day average would weaken the momentum setup.
+- XLE RSI14 at 67, which signals strong momentum but leaves less room for disappointment from crude oil or geopolitics.
+- Whether XLV stabilizes after its 2.4% weekly decline without losing its intermediate moving-average support.
+- Continued XLP weakness below its 20-day average as a possible sign that defensive demand is not yet broadening.
+- Oil, Treasury yields, yen strength, and U.S.–Iran developments as potential triggers for equity risk reduction.

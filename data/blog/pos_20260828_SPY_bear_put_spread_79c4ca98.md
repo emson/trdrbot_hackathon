@@ -70,4 +70,8 @@ _No simulated alternatives are on record for this trade - `simulate_experiments`
 
 ## Outcome
 
-_Open - this section fills in when the position resolves._
+**Closed:** external
+
+**Why:** in our records, absent at broker - no P&L observed at close
+
+**Result:** not observed at close.

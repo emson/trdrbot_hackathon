@@ -55,8 +55,26 @@ p{margin:0}
 a{color:var(--accent)}
 code{font-family:var(--mono); font-size:.86em; background:var(--paper-sunk);
   border:1px solid var(--paper-line); border-radius:3px; padding:.06em .32em}
-.wrap{max-width:1080px; margin:0 auto; padding:0 22px}
+.wrap{max-width:1380px; margin:0 auto; padding:0 22px}
 .flow{display:flex; flex-direction:column; gap:1rem}
+
+/* ── shell: controls stay put, everything that MOVES gets the width ────
+   The sliders used to sit in the hero, so dragging one scrolled its own
+   effects out of view. The rail is sticky and carries the live figures
+   beside the inputs; the charts take the horizontal room they were short of. */
+.shell{display:grid; gap:1.3rem; align-items:start; padding:1.5rem 0 3rem}
+@media(min-width:980px){ .shell{grid-template-columns:312px minmax(0,1fr)} }
+.rail{display:flex; flex-direction:column; gap:.85rem; min-width:0}
+@media(min-width:980px){
+  .rail{position:sticky; top:14px; max-height:calc(100vh - 28px); overflow-y:auto;
+        overscroll-behavior:contain; padding-right:4px}
+}
+.railbox{background:var(--paper-raised); border:1px solid var(--paper-line);
+  border-radius:var(--r); padding:1rem; display:flex; flex-direction:column; gap:1rem;
+  box-shadow:0 1px 2px var(--shadow)}
+.railh{font-family:var(--mono); font-size:.65rem; letter-spacing:.13em; text-transform:uppercase;
+  color:var(--ink-faint); font-weight:600; margin:0}
+.stack{display:flex; flex-direction:column; gap:1.1rem; min-width:0}
 .eyebrow{font-family:var(--mono); font-size:.68rem; font-weight:500; letter-spacing:.15em;
   text-transform:uppercase; color:var(--ink-faint)}
 .lede{color:var(--ink-soft); max-width:64ch}
@@ -69,7 +87,6 @@ header{border-bottom:1px solid var(--paper-line); padding:2.4rem 0 1.8rem}
 .panel>header{border:0; padding:0 0 .85rem}
 .ptitle{display:flex; align-items:baseline; gap:.6rem; flex-wrap:wrap}
 .phint{font-size:.85rem; color:var(--ink-faint)}
-main{padding:1.6rem 0 3rem; display:flex; flex-direction:column; gap:1.1rem}
 .cols{display:grid; gap:1.1rem}
 @media(min-width:900px){ .cols.two{grid-template-columns:1fr 1fr} }
 
@@ -98,15 +115,15 @@ input[type=number]{font-family:var(--mono); font-size:.9rem; padding:.4rem .55re
 input[type=number]:focus-visible{outline:2px solid var(--accent); outline-offset:1px}
 
 /* ── readout ──────────────────────────────────────────────── */
-.stats{display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); gap:1px;
-  background:var(--paper-line); border:1px solid var(--paper-line); border-radius:var(--r);
-  overflow:hidden}
-.stat{background:var(--paper-raised); padding:.8rem .9rem; display:flex; flex-direction:column; gap:.15rem}
-.stat .k{font-family:var(--mono); font-size:.63rem; letter-spacing:.11em; text-transform:uppercase;
-  color:var(--ink-faint); font-weight:600}
-.stat .v{font-family:var(--mono); font-size:1.32rem; font-weight:600;
-  font-variant-numeric:tabular-nums; line-height:1.15}
-.stat .s{font-size:.76rem; color:var(--ink-soft)}
+.stats{display:flex; flex-direction:column; gap:1px; background:var(--paper-line);
+  border:1px solid var(--paper-line); border-radius:var(--r); overflow:hidden}
+.stat{background:var(--paper-raised); padding:.5rem .7rem;
+  display:grid; grid-template-columns:1fr auto; gap:0 .6rem; align-items:baseline}
+.stat .k{grid-column:1/-1; font-family:var(--mono); font-size:.6rem; letter-spacing:.11em;
+  text-transform:uppercase; color:var(--ink-faint); font-weight:600}
+.stat .v{font-family:var(--mono); font-size:1.18rem; font-weight:600;
+  font-variant-numeric:tabular-nums; line-height:1.25}
+.stat .s{font-size:.71rem; color:var(--ink-soft); text-align:right; white-space:nowrap}
 .v.good{color:var(--accent)} .v.bad{color:var(--danger)} .v.warn{color:var(--caution)}
 
 .verdict{border-left:3px solid var(--accent); background:var(--accent-soft);
@@ -156,14 +173,14 @@ footer{border-top:1px solid var(--paper-line); padding:1.6rem 0 2.6rem;
   </div>
 </header>
 
-<main class="wrap">
+<div class="shell wrap">
 
-  <!-- ── COCKPIT ────────────────────────────────────────── -->
-  <section class="panel">
-    <div class="cols two">
+  <!-- ── controls + live figures: sticky, so dragging never hides its own effect ── -->
+  <aside class="rail">
+    <div class="railbox">
       <div class="ctl">
         <div class="row">
-          <label for="appetite">Risk appetite — what you choose</label>
+          <label for="appetite">Risk appetite</label>
           <span class="val" id="appetiteVal">1.00×</span>
         </div>
         <input type="range" id="appetite" min="0.25" max="2" step="0.05" value="1">
@@ -171,16 +188,14 @@ footer{border-top:1px solid var(--paper-line); padding:1.6rem 0 2.6rem;
       </div>
       <div class="ctl">
         <div class="row">
-          <label for="belief">Belief — how often the thesis is right</label>
+          <label for="belief">Belief the edge is real</label>
           <span class="val" id="beliefVal">50%</span>
         </div>
         <input type="range" id="belief" min="0" max="100" step="1" value="50">
         <span class="sub" id="beliefSub">A coin flip on whether the edge is real.</span>
       </div>
-    </div>
-    <div class="cols two" style="margin-top:1rem">
       <div class="ctl">
-        <label>Competence tier (earned, not chosen)</label>
+        <label>Competence tier — earned, not chosen</label>
         <div class="seg" id="tierSeg">
           <button data-tier="explore">EXPLORE</button>
           <button data-tier="establish">ESTABLISH</button>
@@ -188,99 +203,96 @@ footer{border-top:1px solid var(--paper-line); padding:1.6rem 0 2.6rem;
           <button data-tier="mature">MATURE</button>
         </div>
       </div>
-      <div class="cols two" style="gap:.9rem">
-        <div class="ctl">
-          <label for="floorMode">Seed floor</label>
-          <div class="seg" id="floorSeg">
-            <button data-floor="constant" aria-pressed="true">CONSTANT (today)</button>
-            <button data-floor="derived">TIER-DERIVED</button>
-          </div>
-        </div>
-        <div class="ctl">
-          <label for="equity">Starting equity</label>
-          <input type="number" id="equity" value="100000" min="5000" max="10000000" step="5000">
+      <div class="ctl">
+        <label>Seed floor</label>
+        <div class="seg" id="floorSeg">
+          <button data-floor="constant" aria-pressed="true">CONSTANT (today)</button>
+          <button data-floor="derived">TIER-DERIVED</button>
         </div>
       </div>
-    </div>
-  </section>
-
-  <div id="verdictBox"></div>
-
-  <!-- ── HEADLINE READOUT ───────────────────────────────── -->
-  <section class="flow">
-    <div class="stats">
-      <div class="stat"><span class="k">Median outcome</span><span class="v" id="sMedian">—</span><span class="s" id="sMedianSub">after 50 trades</span></div>
-      <div class="stat"><span class="k">Reward : risk</span><span class="v" id="sRR">—</span><span class="s">upside when right vs loss when wrong</span></div>
-      <div class="stat"><span class="k">Bad case (5th pct)</span><span class="v bad" id="sP5">—</span><span class="s">1 run in 20 is worse</span></div>
-      <div class="stat"><span class="k">Good case (95th pct)</span><span class="v good" id="sP95">—</span><span class="s">1 run in 20 is better</span></div>
-      <div class="stat"><span class="k">Mean drawdown</span><span class="v" id="sDD">—</span><span class="s">peak-to-trough, average path</span></div>
-      <div class="stat"><span class="k">Chance of −20%</span><span class="v" id="sPdd">—</span><span class="s">paths breaching a 20% drawdown</span></div>
-    </div>
-  </section>
-
-  <!-- ── DECISION CURVE ─────────────────────────────────── -->
-  <section class="panel flow">
-    <header class="ptitle">
-      <h2>Where should the lever be?</h2>
-      <span class="phint">Expected growth per trade, across every appetite setting, at your current belief.</span>
-    </header>
-    <svg id="curve" viewBox="0 0 720 260" role="img" aria-labelledby="curveTitle">
-      <title id="curveTitle">Expected growth versus risk appetite</title>
-    </svg>
-    <div class="key">
-      <span><span class="sw" style="background:var(--accent)"></span>expected growth</span>
-      <span><span class="sw" style="background:var(--caution)"></span>optimum for this belief</span>
-      <span><span class="sw" style="background:var(--ink-faint)"></span>your setting</span>
-    </div>
-  </section>
-
-  <!-- ── OUTCOMES ───────────────────────────────────────── -->
-  <section class="panel flow">
-    <header class="ptitle">
-      <h2>What happens to your money</h2>
-      <span class="phint">400 simulated books of 50 trades each, using SPY's own resampled returns.</span>
-    </header>
-    <canvas id="paths" height="220" aria-label="Simulated equity paths"></canvas>
-    <svg id="fan" viewBox="0 0 720 96" role="img" aria-labelledby="fanTitle">
-      <title id="fanTitle">Distribution of final equity</title>
-    </svg>
-    <div class="key">
-      <span><span class="sw" style="background:var(--accent)"></span>ended up</span>
-      <span><span class="sw" style="background:var(--danger)"></span>ended down</span>
-      <span><span class="sw" style="background:var(--ink-faint);opacity:.5"></span>where you started</span>
-    </div>
-  </section>
-
-  <!-- ── MECHANICS ──────────────────────────────────────── -->
-  <section class="cols two">
-    <div class="panel flow">
-      <header class="ptitle">
-        <h2>The next trade</h2>
-        <span class="phint">What the real sizer returns right now.</span>
-      </header>
-      <div class="scroll">
-        <table>
-          <tbody id="tradeTbl"></tbody>
-        </table>
+      <div class="ctl">
+        <label for="equity">Starting equity</label>
+        <input type="number" id="equity" value="100000" min="500" max="10000000" step="500"
+               aria-describedby="equityNote">
+        <span class="sub" id="equityNote"></span>
       </div>
-      <p class="phint" id="bindNote"></p>
     </div>
-    <div class="panel flow">
+
+    <div class="railbox">
+      <h2 class="railh">After 50 trades</h2>
+      <div class="stats">
+        <div class="stat"><span class="k">Median outcome</span><span class="v" id="sMedian">—</span><span class="s" id="sMedianSub">—</span></div>
+        <div class="stat"><span class="k">Reward : risk</span><span class="v" id="sRR">—</span><span class="s">right vs wrong</span></div>
+        <div class="stat"><span class="k">Bad case · 5th pct</span><span class="v bad" id="sP5">—</span><span class="s">1 in 20 worse</span></div>
+        <div class="stat"><span class="k">Good case · 95th pct</span><span class="v good" id="sP95">—</span><span class="s">1 in 20 better</span></div>
+        <div class="stat"><span class="k">Mean drawdown</span><span class="v" id="sDD">—</span><span class="s">peak to trough</span></div>
+        <div class="stat"><span class="k">Chance of −20%</span><span class="v" id="sPdd">—</span><span class="s">of all paths</span></div>
+      </div>
+    </div>
+  </aside>
+
+  <!-- ── everything that responds ────────────────────────────────────────── -->
+  <main class="stack">
+
+    <div id="verdictBox"></div>
+
+    <section class="panel flow">
       <header class="ptitle">
-        <h2>The asymmetry</h2>
-        <span class="phint">Median gain if the thesis is right, against the loss if it is wrong.</span>
+        <h2>Where should the lever be?</h2>
+        <span class="phint">Expected growth per trade, across every appetite setting, at your current belief.</span>
       </header>
-      <svg id="asym" viewBox="0 0 360 190" role="img" aria-labelledby="asymTitle">
-        <title id="asymTitle">Upside versus downside by appetite</title>
+      <svg id="curve" viewBox="0 0 720 250" role="img" aria-labelledby="curveTitle">
+        <title id="curveTitle">Expected growth versus risk appetite</title>
       </svg>
       <div class="key">
-        <span><span class="sw" style="background:var(--accent)"></span>gain when right</span>
-        <span><span class="sw" style="background:var(--danger)"></span>loss when wrong</span>
+        <span><span class="sw" style="background:var(--accent)"></span>expected growth</span>
+        <span><span class="sw" style="background:var(--caution)"></span>optimum for this belief</span>
+        <span><span class="sw" style="background:var(--ink-faint)"></span>your setting</span>
       </div>
-    </div>
-  </section>
+    </section>
 
-</main>
+    <section class="panel flow">
+      <header class="ptitle">
+        <h2>What happens to your money</h2>
+        <span class="phint">400 simulated books of 50 trades each, using SPY&rsquo;s own resampled returns.</span>
+      </header>
+      <canvas id="paths" height="250" aria-label="Simulated equity paths"></canvas>
+      <svg id="fan" viewBox="0 0 720 96" role="img" aria-labelledby="fanTitle">
+        <title id="fanTitle">Distribution of final equity</title>
+      </svg>
+      <div class="key">
+        <span><span class="sw" style="background:var(--accent)"></span>ended up</span>
+        <span><span class="sw" style="background:var(--danger)"></span>ended down</span>
+        <span><span class="sw" style="background:var(--ink-faint);opacity:.5"></span>where you started</span>
+      </div>
+    </section>
+
+    <section class="cols two">
+      <div class="panel flow">
+        <header class="ptitle">
+          <h2>The next trade</h2>
+          <span class="phint">What the real sizer returns right now.</span>
+        </header>
+        <div class="scroll"><table><tbody id="tradeTbl"></tbody></table></div>
+        <p class="phint" id="bindNote"></p>
+      </div>
+      <div class="panel flow">
+        <header class="ptitle">
+          <h2>The asymmetry</h2>
+          <span class="phint">Median gain if the thesis is right, against the loss if it is wrong.</span>
+        </header>
+        <svg id="asym" viewBox="0 0 360 190" role="img" aria-labelledby="asymTitle">
+          <title id="asymTitle">Upside versus downside by appetite</title>
+        </svg>
+        <div class="key">
+          <span><span class="sw" style="background:var(--accent)"></span>gain when right</span>
+          <span><span class="sw" style="background:var(--danger)"></span>loss when wrong</span>
+        </div>
+      </div>
+    </section>
+
+  </main>
+</div>
 
 <footer>
   <div class="wrap flow">
@@ -374,6 +386,7 @@ function mulberry32(seed){
 
 /* ── the book, simulated ──────────────────────────────────── */
 const N_TRADES = 50;
+const PATH_H = 250;   // logical CSS height of the equity-path canvas
 
 function tierAfterDrawdown(tier, dd){
   const order = ['explore','establish','scale','mature'];
@@ -441,7 +454,7 @@ function svgEl(tag, attrs){
 function drawCurve(curveData, best){
   const svg = $('curve');
   [...svg.querySelectorAll(':not(title)')].forEach(n => n.remove());
-  const W = 720, H = 260, ml = 52, mr = 16, mt = 14, mb = 34;
+  const W = 720, H = 250, ml = 52, mr = 16, mt = 14, mb = 34;
   const xs = a => ml + (a - 0.25) / 1.75 * (W - ml - mr);
   const gs = curveData.map(d => d.g);
   let lo = Math.min(...gs), hi = Math.max(...gs);
@@ -496,7 +509,11 @@ function drawCurve(curveData, best){
 
 function drawPaths(res){
   const cv = $('paths'), dpr = window.devicePixelRatio || 1;
-  const w = cv.clientWidth || 720, h = 220;
+  // PATH_H is a constant, NOT read back off the element: `cv.height = h * dpr`
+  // rewrites the height attribute, so reading it here made every redraw twice
+  // as tall as the last and collapsed the paths into vertical spikes.
+  const w = cv.clientWidth || 720, h = PATH_H;
+  cv.style.height = h + 'px';
   cv.width = w * dpr; cv.height = h * dpr;
   const ctx = cv.getContext('2d');
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -633,7 +650,7 @@ function render(){
     $('sMedian').textContent = money(res.median);
     $('sMedian').className = 'v ' + (res.median >= cfg.equity ? 'good' : 'bad');
     $('sMedianSub').textContent = (res.median >= cfg.equity ? '+' : '') +
-      pct(res.median / cfg.equity - 1) + ' after 50 trades';
+      pct(res.median / cfg.equity - 1);
     $('sRR').textContent = isFinite(rr) ? rr.toFixed(2) + ' : 1' : '—';
     $('sRR').className = 'v ' + (rr >= 1 ? 'good' : rr >= 0.7 ? 'warn' : 'bad');
     $('sP5').textContent = money(res.p5);
@@ -644,10 +661,20 @@ function render(){
     $('sPdd').className = 'v ' + (res.pdd20 > 0.5 ? 'bad' : res.pdd20 > 0.2 ? 'warn' : '');
 
     // verdict
+    const probe = sizePosition(cfg.equity, cfg.tier, cfg.appetite, cfg.floorMode, 0);
     const d = state.appetite - best.a;
     const vb = $('verdictBox');
     let cls = 'verdict', msg;
-    if (Math.abs(d) < 0.14){
+    if (probe.contracts === 0){
+      cls += ' bad';
+      const need = S.perContractRisk / probe.posture.pos;
+      msg = `<b>No position is possible at ${money(cfg.equity)}.</b> One spread risks
+        ${money(S.perContractRisk)}, which is more than the ${pct(probe.posture.pos, 1)}
+        per-position ceiling allows — the sizer refuses rather than trading a position too large
+        for the account. You would need about <b>${money(need)}</b> at this appetite and tier,
+        or a cheaper structure.`;
+      vb.innerHTML = `<div class="${cls}">${msg}</div>`;
+    } else if (Math.abs(d) < 0.14){
       msg = `<b>Well set.</b> At ${Math.round(state.belief*100)}% belief, ${best.a.toFixed(2)}× is
         about the growth-maximising appetite, and you are there.`;
     } else if (d > 0){
@@ -661,7 +688,7 @@ function render(){
         belief you could justify <b>${best.a.toFixed(2)}×</b>. Under-betting a real edge is a real
         cost — idle capital is a position too.`;
     }
-    vb.innerHTML = `<div class="${cls}">${msg}</div>`;
+    if (probe.contracts !== 0) vb.innerHTML = `<div class="${cls}">${msg}</div>`;
 
     // the next trade
     const sz = sizePosition(cfg.equity, cfg.tier, cfg.appetite, cfg.floorMode, 0);
@@ -697,7 +724,24 @@ function render(){
 $('appetite').addEventListener('input', e => { state.appetite = +e.target.value; render(); });
 $('belief').addEventListener('input', e => { state.belief = +e.target.value / 100; render(); });
 $('equity').addEventListener('input', e => {
-  const v = +e.target.value; if (v >= 5000 && v <= 10000000){ state.equity = v; render(); }
+  const raw = e.target.value.trim();
+  const v = Number(raw);
+  const note = $('equityNote');
+  if (raw === '' || !Number.isFinite(v)){
+    note.textContent = 'Enter an amount to see its effect.';
+    note.style.color = 'var(--caution)';
+    return;                                    // nothing to compute, and we say so
+  }
+  const clamped = Math.min(10000000, Math.max(500, v));
+  if (clamped !== v){
+    note.textContent = `Using ${money(clamped)} — outside the $500–$10,000,000 range.`;
+    note.style.color = 'var(--caution)';
+  } else {
+    note.textContent = '';
+    note.style.color = '';
+  }
+  state.equity = clamped;
+  render();
 });
 function segWire(id, key, attr){
   $(id).addEventListener('click', e => {

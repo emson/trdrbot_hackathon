@@ -1,0 +1,1193 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Theo · trdrbot</title>
+<meta name="description" content="An options-trading agent that knows the difference between being right and being lucky.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,440;9..144,560;9..144,650&family=Fredoka:wght@500;600;700&family=Public+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<style>
+/* ══════════════════════════════════════════════════════════════════════
+   Theo — submission deck
+   Built on docs/design_system.md. That system names TWO registers, and a
+   deck for judges needs both: BRAND (Fredoka, 18px radius, warm accent)
+   wherever Theo is being introduced, LEDGER (Fraunces, 4px, sage, tabular
+   figures) wherever Theo is being audited.
+   The register is carried by TYPE and SHAPE, never by a fixed background —
+   so both themes stay coherent. The one true brand constant, the mark's
+   cream ground, is preserved where it belongs: the elf art always sits on
+   its own cream plate and is never re-themed.
+   ══════════════════════════════════════════════════════════════════════ */
+*,*::before,*::after{box-sizing:border-box}
+
+:root{
+  /* ledger palette — light is complete here */
+  --paper:#F1F4EF; --paper-raised:#FFFFFF; --paper-sunk:#E8EDE7; --paper-line:#D8E0D9;
+  --ink:#17242B; --ink-soft:#4B5D59; --ink-faint:#7C8C87;
+  --accent:#1F6F5C; --accent-soft:#E4EFEA;
+  --danger:#B23A2E; --danger-soft:#F7E6E3;
+  --caution:#8A6A16; --caution-soft:#F3ECD3;
+  --shadow:rgba(23,36,43,.10);
+  /* brand register — warm accent, borrowed from the mark's own world */
+  --warm:#A8582C; --warm-soft:#F6EAE1;
+  /* fixed brand constants: never re-themed, per the design system */
+  --brand-paper:#FCF7F4; --brand-ink:#000000;
+
+  --r-sharp:4px; --r-round:18px;
+  --serif:"Fraunces",Georgia,"Times New Roman",serif;
+  --round:"Fredoka","Public Sans",system-ui,sans-serif;
+  --sans:"Public Sans",-apple-system,"Segoe UI",Roboto,sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,Menlo,monospace;
+
+  --d1:clamp(2.4rem,5.6vw,4.4rem);
+  --d2:clamp(1.7rem,3.4vw,2.7rem);
+  --lead:clamp(1.02rem,1.55vw,1.28rem);
+  --pad:clamp(1.4rem,4vw,4rem);
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    --paper:#101816; --paper-raised:#172220; --paper-sunk:#0B110F; --paper-line:#293530;
+    --ink:#E8EEEA; --ink-soft:#9FB0AA; --ink-faint:#6E7F79;
+    --accent:#57C7A7; --accent-soft:#17332B;
+    --danger:#E5786A; --danger-soft:#3A2321;
+    --caution:#E0BB5C; --caution-soft:#332C16;
+    --shadow:rgba(0,0,0,.4);
+    --warm:#E0A177; --warm-soft:#33231A;
+  }
+}
+:root[data-theme="dark"]{
+  --paper:#101816; --paper-raised:#172220; --paper-sunk:#0B110F; --paper-line:#293530;
+  --ink:#E8EEEA; --ink-soft:#9FB0AA; --ink-faint:#6E7F79;
+  --accent:#57C7A7; --accent-soft:#17332B;
+  --danger:#E5786A; --danger-soft:#3A2321;
+  --caution:#E0BB5C; --caution-soft:#332C16;
+  --shadow:rgba(0,0,0,.4);
+  --warm:#E0A177; --warm-soft:#33231A;
+}
+
+body{margin:0; background:var(--paper); color:var(--ink);
+  font-family:var(--sans); font-size:16px; line-height:1.6; -webkit-font-smoothing:antialiased}
+
+/* ── deck mechanics ────────────────────────────────────────────────── */
+.deck{height:100vh; overflow-y:scroll; scroll-snap-type:y mandatory; scroll-behavior:smooth}
+@media (prefers-reduced-motion:reduce){ .deck{scroll-behavior:auto} }
+.slide{min-height:100vh; scroll-snap-align:start; scroll-snap-stop:always;
+  display:flex; align-items:center; padding:calc(var(--pad) * .8) var(--pad);
+  border-bottom:1px solid var(--paper-line)}
+.inner{max-width:1180px; margin:0 auto; width:100%;
+  display:flex; flex-direction:column; gap:clamp(.9rem,1.8vw,1.5rem)}
+
+/* register modifiers — type + shape only */
+.brand h1,.brand h2{font-family:var(--round); letter-spacing:-.01em}
+.brand .kicker{color:var(--warm)}
+.brand .card{border-radius:var(--r-round)}
+.ledger h1,.ledger h2{font-family:var(--serif); font-weight:560}
+.ledger .card{border-radius:var(--r-sharp)}
+
+h1{font-size:var(--d1); line-height:1.03; margin:0; font-weight:700; text-wrap:balance}
+h2{font-size:var(--d2); line-height:1.14; margin:0; font-weight:650; text-wrap:balance}
+h3{font-size:1.02rem; margin:0; font-weight:700; font-family:var(--sans)}
+p{margin:0}
+a{color:var(--accent)}
+strong{font-weight:650}
+.kicker{font-family:var(--mono); font-size:.7rem; letter-spacing:.16em; text-transform:uppercase;
+  color:var(--accent); font-weight:600}
+.lead{font-size:var(--lead); color:var(--ink-soft); max-width:62ch; line-height:1.5}
+.tight{max-width:56ch}
+code{font-family:var(--mono); font-size:.85em; background:var(--paper-sunk);
+  border:1px solid var(--paper-line); border-radius:3px; padding:.06em .34em}
+
+/* ── shared furniture ──────────────────────────────────────────────── */
+.card{background:var(--paper-raised); border:1px solid var(--paper-line);
+  border-radius:var(--r-sharp); padding:1rem 1.1rem; box-shadow:0 1px 2px var(--shadow);
+  display:flex; flex-direction:column; gap:.4rem}
+.cols{display:grid; gap:clamp(.8rem,1.6vw,1.2rem)}
+@media(min-width:820px){
+  .cols.c2{grid-template-columns:1fr 1fr}
+  .cols.c3{grid-template-columns:repeat(3,1fr)}
+  .cols.c4{grid-template-columns:repeat(4,1fr)}
+  .cols.c5{grid-template-columns:repeat(5,1fr)}
+  .cols.side{grid-template-columns:1.15fr .85fr; align-items:center}
+  .cols.side-r{grid-template-columns:.85fr 1.15fr; align-items:center}
+}
+.num{font-family:var(--mono); font-variant-numeric:tabular-nums; font-weight:600}
+.big{font-family:var(--mono); font-size:clamp(1.7rem,3.4vw,2.6rem); font-weight:600;
+  font-variant-numeric:tabular-nums; line-height:1.05}
+.tag{font-family:var(--mono); font-size:.63rem; letter-spacing:.13em; text-transform:uppercase;
+  font-weight:600; padding:.16em .5em; border-radius:2px; align-self:flex-start}
+.tag.ai{background:var(--warm-soft); color:var(--warm)}
+.tag.code{background:var(--accent-soft); color:var(--accent)}
+.tag.good{background:var(--accent-soft); color:var(--accent)}
+.tag.bad{background:var(--danger-soft); color:var(--danger)}
+.tag.warn{background:var(--caution-soft); color:var(--caution)}
+.muted{color:var(--ink-soft); font-size:.92rem}
+.fine{color:var(--ink-faint); font-size:.82rem; font-family:var(--mono)}
+ul.clean{list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:.5rem}
+ul.clean li{padding-left:1rem; position:relative}
+ul.clean li::before{content:""; position:absolute; left:0; top:.62em; width:.38rem; height:.38rem;
+  background:var(--accent); border-radius:1px}
+
+table{border-collapse:collapse; width:100%; font-size:.9rem}
+th,td{text-align:left; padding:.5rem .65rem; border-bottom:1px solid var(--paper-line); vertical-align:top}
+th{font-family:var(--mono); font-size:.63rem; letter-spacing:.1em; text-transform:uppercase;
+  color:var(--ink-faint); font-weight:600; white-space:nowrap}
+td.n,th.n{text-align:right; font-family:var(--mono); font-variant-numeric:tabular-nums; white-space:nowrap}
+tbody tr:last-child td{border-bottom:0}
+.scroll{overflow-x:auto}
+
+/* the mark's own ground — a brand constant, deliberately not theme-aware */
+.plate{background:var(--brand-paper); border-radius:var(--r-round); padding:.6rem;
+  display:grid; place-items:center; border:1px solid rgba(0,0,0,.10)}
+.plate img{display:block; width:100%; height:auto; border-radius:calc(var(--r-round) - 6px)}
+.plate.sm{padding:.35rem; border-radius:12px}
+
+/* ── stage cards ───────────────────────────────────────────────────── */
+.stage{border-top:3px solid var(--accent)}
+.stage .n{font-family:var(--mono); font-size:.68rem; color:var(--ink-faint); font-weight:600}
+.stage h3{font-family:var(--round); font-size:1.16rem; letter-spacing:-.01em}
+
+/* ── quote ─────────────────────────────────────────────────────────── */
+.quote{border-left:3px solid var(--warm); background:var(--warm-soft);
+  padding:1rem 1.2rem; border-radius:0 var(--r-sharp) var(--r-sharp) 0}
+.quote p{font-size:clamp(1.02rem,1.5vw,1.2rem); line-height:1.5}
+.quote cite{display:block; margin-top:.5rem; font-style:normal; font-family:var(--mono);
+  font-size:.7rem; letter-spacing:.08em; color:var(--ink-faint); text-transform:uppercase}
+
+/* ── 2×2 outcome grid — thesis (held/failed) × result (profit/loss) ─── */
+.qgrid{display:grid; grid-template-columns:auto 1fr 1fr; gap:2px; background:var(--paper-line);
+  border:1px solid var(--paper-line); border-radius:var(--r-sharp); overflow:hidden}
+.qgrid > div{background:var(--paper-raised); padding:.8rem .95rem;
+  display:flex; flex-direction:column; justify-content:center; min-height:3.6rem}
+.qgrid .hd{font-family:var(--mono); font-size:.63rem; letter-spacing:.1em; text-transform:uppercase;
+  color:var(--ink-faint); font-weight:600; flex-direction:row; align-items:center; min-height:0}
+.qgrid .rh{font-family:var(--mono); font-size:.63rem; letter-spacing:.1em; text-transform:uppercase;
+  color:var(--ink-faint); font-weight:600; align-items:center; text-align:center;
+  writing-mode:vertical-rl; transform:rotate(180deg)}
+.qgrid .cell b{font-family:var(--round); font-weight:600; font-size:.96rem; display:block; margin-bottom:.15rem}
+.qgrid .cell span{font-size:.82rem; color:var(--ink-soft); line-height:1.4}
+.qgrid .cell.good{background:var(--accent-soft)}
+.qgrid .cell.good b{color:var(--accent)}
+.qgrid .cell.warn{background:var(--caution-soft)}
+.qgrid .cell.warn b{color:var(--caution)}
+.qgrid .cell.bad{background:var(--danger-soft)}
+.qgrid .cell.bad b{color:var(--danger)}
+@media(max-width:620px){ .qgrid .rh{writing-mode:horizontal-tb; transform:none} }
+
+/* ── size ladder — earned allowance, one rung per card ───────────────
+   Not a 2×2: four ORDINAL steps, so the colour encodes MAGNITUDE (how much
+   has been earned) rather than a category. Each rung mixes toward the same
+   --accent-soft the outcome grid uses for "reinforce both" - climbing this
+   ladder and landing in that top-left cell are the same colour on purpose. */
+.ladder{display:grid; grid-template-columns:repeat(4,1fr); gap:2px; background:var(--paper-line);
+  border:1px solid var(--paper-line); border-radius:var(--r-sharp); overflow:hidden}
+.rung{background:color-mix(in srgb, var(--accent-soft) calc(var(--lvl) * 25%), var(--paper-raised));
+  padding:.95rem 1.05rem; display:flex; flex-direction:column; gap:.55rem}
+.rung .tier{font-family:var(--round); font-weight:600; font-size:1.04rem; letter-spacing:-.005em}
+.rung .req{font-size:.77rem; color:var(--ink-soft); line-height:1.4; margin:0; min-height:3.3em}
+.rung .bar{height:5px; background:var(--paper-line); border-radius:3px; overflow:hidden}
+.rung .bar i{display:block; height:100%; background:var(--accent); border-radius:3px}
+.rung .caps{display:grid; grid-template-columns:1fr 1fr; gap:.3rem}
+.rung .caps b{display:block; font-family:var(--mono); font-size:1rem; font-variant-numeric:tabular-nums}
+.rung .caps span{font-family:var(--mono); font-size:.59rem; letter-spacing:.07em; text-transform:uppercase;
+  color:var(--ink-faint)}
+@media(max-width:820px){ .ladder{grid-template-columns:1fr 1fr} }
+
+/* ── chrome ────────────────────────────────────────────────────────── */
+.chrome{position:fixed; z-index:40; font-family:var(--mono); font-size:.7rem}
+.progress{top:0; left:0; right:0; height:3px; background:transparent}
+.progress i{display:block; height:100%; background:var(--accent); width:0; transition:width .25s}
+@media (prefers-reduced-motion:reduce){ .progress i{transition:none} }
+.hud{right:14px; bottom:12px; display:flex; gap:6px; align-items:center}
+.hud button{font:inherit; font-family:var(--mono); color:var(--ink-soft); cursor:pointer;
+  background:var(--paper-raised); border:1px solid var(--paper-line); border-radius:3px;
+  padding:.3rem .5rem}
+.hud button:hover{color:var(--ink); border-color:var(--ink-faint)}
+.hud button:focus-visible{outline:2px solid var(--accent); outline-offset:2px}
+.count{color:var(--ink-faint); padding:.3rem .1rem}
+
+.toc{position:fixed; inset:0; z-index:50; background:var(--paper); padding:var(--pad);
+  overflow-y:auto; display:none}
+.toc[open]{display:block}
+.toc ol{max-width:760px; margin:1.2rem auto 0; padding:0; list-style:none; counter-reset:t;
+  display:flex; flex-direction:column; gap:2px}
+.toc li{counter-increment:t}
+.toc button{width:100%; text-align:left; font:inherit; cursor:pointer; color:var(--ink);
+  background:none; border:0; border-bottom:1px solid var(--paper-line); padding:.6rem .2rem;
+  display:flex; gap:.8rem; align-items:baseline}
+.toc button::before{content:counter(t,decimal-leading-zero); font-family:var(--mono);
+  font-size:.72rem; color:var(--accent); font-weight:600}
+.toc button:hover{background:var(--paper-sunk)}
+.toc button:focus-visible{outline:2px solid var(--accent); outline-offset:-2px}
+.toc h2{max-width:760px; margin:0 auto}
+
+/* ── risk widget ───────────────────────────────────────────────────── */
+.ctl{display:flex; flex-direction:column; gap:.3rem}
+.ctl .row{display:flex; justify-content:space-between; align-items:baseline}
+.ctl label{font-family:var(--mono); font-size:.66rem; letter-spacing:.11em; text-transform:uppercase;
+  color:var(--ink-faint); font-weight:600}
+.ctl .v{font-family:var(--mono); font-weight:600; color:var(--accent); font-size:1rem}
+input[type=range]{width:100%; accent-color:var(--accent); margin:0; height:1.5rem; cursor:grab}
+input[type=range]:active{cursor:grabbing}
+input[type=range]:focus-visible{outline:2px solid var(--accent); outline-offset:3px}
+svg.chart{display:block; width:100%; height:auto; overflow:visible}
+.axis{font-family:var(--mono); font-size:10px; fill:var(--ink-faint)}
+
+@media print{
+  .deck{height:auto; overflow:visible}
+  .slide{min-height:auto; page-break-after:always; border:0; padding:1.4rem}
+  .chrome,.toc{display:none !important}
+}
+</style>
+</head>
+<body>
+
+<div class="chrome progress" aria-hidden="true"><i id="bar"></i></div>
+
+<div class="deck" id="deck">
+
+<!-- ═══ 01 ═══════════════════════════════════════════════════════════ -->
+<section class="slide brand" data-title="Theo — the one sentence">
+  <div class="inner">
+    <div class="cols side">
+      <div class="inner" style="gap:1.1rem">
+        <span class="kicker">Alpaca AI Trading Agents Hackathon · paper trading</span>
+        <h1>Theo knows the difference between being right and being lucky.</h1>
+        <p class="lead">An autonomous options-trading agent that forms a falsifiable view, prices
+        several ways to express it, sizes by a track record it has to <em>earn</em>, and afterwards
+        scores whether its <strong>view</strong> was right, its <strong>structure</strong> was
+        right — or it simply got lucky. Only the first two ever move its confidence.</p>
+        <p class="fine">trdrbot · built on Alpaca's MCP server · $100,000 paper account</p>
+      </div>
+      <div class="plate"><img src="assets/elf-coding.jpg"
+        alt="Theo, trdrbot's elf mascot, working at a laptop beside a trdrbot mug"></div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ 02 ═══════════════════════════════════════════════════════════ -->
+<section class="slide brand" data-title="The problem: P&amp;L can't tell skill from luck">
+  <div class="inner">
+    <span class="kicker">The problem</span>
+    <h2>Over one week, profit and loss cannot tell skill from luck.</h2>
+    <p class="lead">Most trading agents score themselves on P&amp;L. We measured what that
+    actually buys you over a hackathon-length window — and it is close to nothing.</p>
+    <div class="cols c3">
+      <div class="card"><span class="big" style="color:var(--caution)">69%</span>
+        <p class="muted">of the time a genuinely skilled agent with a <strong>60% edge</strong>
+        out-scores a coin flip over 20 trades. Barely better than a coin flip about the coin flip.</p></div>
+      <div class="card"><span class="big" style="color:var(--danger)">−7.8% … +8.2%</span>
+        <p class="muted">the range a <strong>zero-skill</strong> agent lands in over the same
+        window. Any result in that band proves nothing at all.</p></div>
+      <div class="card"><span class="big">1 in 3</span>
+        <p class="muted">roughly the chance a coin flip beats real skill. So a leaderboard over
+        one week ranks variance, not ability.</p></div>
+    </div>
+    <p class="lead tight">Worse: an agent that <em>learns</em> from P&amp;L alone reinforces
+    whatever story happened to correlate with money. That is how a system acquires a superstition.</p>
+  </div>
+</section>
+
+<!-- ═══ 03 ═══════════════════════════════════════════════════════════ -->
+<section class="slide brand" data-title="The idea: two questions, not one">
+  <div class="inner">
+    <span class="kicker">The idea</span>
+    <h2>Theo asks two separate questions instead of one.</h2>
+    <div class="cols side-r">
+      <div class="plate"><img src="assets/elf-thinking.jpg"
+        alt="Theo thinking, with a rising chart in a thought bubble"></div>
+      <div class="inner" style="gap:.9rem">
+        <p class="lead"><strong>Was the view right?</strong> &nbsp;and&nbsp;
+        <strong>was the way I expressed it right?</strong></p>
+        <div class="qgrid" role="img" aria-label="A 2 by 2 grid crossing thesis outcome (held or
+          failed) with trading result (profit or loss): held and profit reinforces both; held and
+          loss means the view was fine but the structure was wrong; failed and loss means the view
+          is corrected while the structure gets credit for being faithful; failed and profit —
+          highlighted red — teaches nothing, because it was luck.">
+          <div></div>
+          <div class="hd">Profit</div>
+          <div class="hd">Loss</div>
+          <div class="rh">Held</div>
+          <div class="cell good"><b>Reinforce both</b><span>the view and the structure earned it</span></div>
+          <div class="cell warn"><b>The view was fine</b><span>the strikes, width or stop were wrong</span></div>
+          <div class="rh">Failed</div>
+          <div class="cell bad"><b>Learn nothing</b><span>this was luck — and it blocks promotion</span></div>
+          <div class="cell warn"><b>Correct the view</b><span>the structure was faithful</span></div>
+        </div>
+        <p class="muted">Only one cell is unambiguous — <strong>held and profit</strong>, top left,
+        genuinely earned. The two amber cells are still useful: a loss is informative whichever
+        way it points, so both feed learning. The red cell is the trap: <strong>a profit on a
+        failed thesis</strong>. P&amp;L-based scoring treats that as strong confirmation. Here it
+        teaches nothing, and it is excluded from what lets Theo size up.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ 04 ═══════════════════════════════════════════════════════════ -->
+<section class="slide ledger" data-title="What “self-improving” actually means">
+  <div class="inner">
+    <span class="kicker">Self-improving, concretely</span>
+    <h2>Better calibration is not a dashboard metric. It is permission to bet more.</h2>
+    <div class="cols c3">
+      <div class="card"><span class="tag code">feedback loop</span>
+        <h3>Outcomes score the claim</h3>
+        <p class="muted">Every falsifiable claim is pre-registered before it resolves — traded or
+        not. When it resolves, attribution asks which of the four boxes it lands in.</p></div>
+      <div class="card"><span class="tag code">memory</span>
+        <h3>Memory keeps what was useful</h3>
+        <p class="muted">Four stores with four different jobs. Blocks that informed a decision are
+        credited or decayed by that decision's <em>verdict</em> — never by its P&amp;L.</p></div>
+      <div class="card"><span class="tag code">the lever</span>
+        <h3>Size is the reward</h3>
+        <p class="muted">Demonstrated calibration raises the Kelly fraction the agent is allowed.
+        Experience → reliability → larger size. No step rewards mere confidence.</p></div>
+    </div>
+    <div class="card" style="border-left:3px solid var(--accent)">
+      <p><strong>And the deterministic half.</strong> The model never executes anything. Code wakes
+      the agent, code runs the gauntlets, code computes Kelly, and code fires the exit rules — every
+      60 seconds, without asking. The LLM's job is narrow: <em>form a view and propose ways to
+      express it</em>. Everything downstream of that is arithmetic that cannot be talked round.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ 05 ═══════════════════════════════════════════════════════════ -->
+<section class="slide ledger" data-title="The five stages">
+  <div class="inner">
+    <span class="kicker">The loop</span>
+    <h2>Five stages, looped so the system can learn from itself.</h2>
+    <div class="cols c5">
+      <div class="card stage"><span class="n">01</span><h3>Sense</h3>
+        <p class="muted">Look at the world. Prices, positions, news, odds, technicals.</p>
+        <p class="fine">every 60s · no LLM</p></div>
+      <div class="card stage"><span class="n">02</span><h3>Think</h3>
+        <p class="muted">Form a falsifiable view; price at least two ways to express it.</p>
+        <p class="fine">~15 min · LLM + arithmetic</p></div>
+      <div class="card stage"><span class="n">03</span><h3>Act</h3>
+        <p class="muted">Place the multi-leg order, then verify it against broker truth.</p>
+        <p class="fine">Alpaca MCP</p></div>
+      <div class="card stage"><span class="n">04</span><h3>Learn</h3>
+        <p class="muted">Guard the position deterministically; then judge it honestly.</p>
+        <p class="fine">every 60s · no LLM</p></div>
+      <div class="card stage"><span class="n">05</span><h3>Remember</h3>
+        <p class="muted">Route what was learned to the store shaped to hold it.</p>
+        <p class="fine">four stores</p></div>
+    </div>
+    <svg class="chart" viewBox="0 0 920 92" role="img" aria-label="Learn feeds back into Think through calibration">
+      <defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5"
+        orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="var(--accent)"/></marker></defs>
+      <path d="M644,6 C644,56 276,56 276,12" fill="none" stroke="var(--accent)" stroke-width="2"
+        stroke-dasharray="5 4" marker-end="url(#ah)"/>
+      <text x="460" y="80" class="axis" text-anchor="middle" fill="var(--accent)"
+        style="font-weight:600">attribution → calibration → permission to size</text>
+    </svg>
+  </div>
+</section>
+
+<!-- ═══ 06 ═══════════════════════════════════════════════════════════ -->
+<section class="slide ledger" data-title="Stage 1 — Sense">
+  <div class="inner">
+    <span class="kicker">Stage 01 · Sense</span>
+    <h2>Look at the world — cheap, automatic, every minute.</h2>
+    <div class="cols c2">
+      <div class="inner" style="gap:.8rem">
+        <h3>What it does</h3>
+        <p class="lead">Refreshes account and position state from the broker, pulls news and
+        prediction-market odds, and computes technicals, realised volatility, beta and a bootstrap
+        forecast from each name's own return history.</p>
+        <h3>Why it is built this way</h3>
+        <ul class="clean">
+          <li><strong>No LLM here at all.</strong> Observation is not judgement. Sensing is
+          arithmetic, so it runs every tick for almost nothing.</li>
+          <li><strong>A stop checked hourly is worthless.</strong> The cost of not looking scales
+          with what is at risk; the cost of looking scales with LLM spend. So the cheap half runs
+          constantly and the expensive half rarely.</li>
+          <li><strong>A failure renders itself.</strong> An empty news block means the world was
+          quiet; “(unavailable)” means we could not look. Those are different claims.</li>
+        </ul>
+      </div>
+      <div class="card">
+        <span class="tag code">subsystems</span>
+        <div class="scroll"><table><tbody>
+          <tr><td><code>analytics</code></td><td class="muted">account, positions, quotes, book greeks</td></tr>
+          <tr><td><code>sensors</code></td><td class="muted">news + Polymarket odds into one inbox</td></tr>
+          <tr><td><code>market_stats</code></td><td class="muted">technicals, realised vol, beta, bootstrap</td></tr>
+          <tr><td><code>reconcile</code></td><td class="muted">our record vs the broker's truth</td></tr>
+        </tbody></table></div>
+        <p class="fine">Measured live: SPY and QQQ correlate at 0.92 — so the research universe was
+        rebuilt for <em>low mutual correlation</em>, not familiarity.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ 07 ═══════════════════════════════════════════════════════════ -->
+<section class="slide ledger" data-title="Stage 2 — Think">
+  <div class="inner">
+    <span class="kicker">Stage 02 · Think</span>
+    <h2>Three independent ways to have an idea — then one narrow job for the model.</h2>
+    <div class="cols c3">
+      <div class="card"><h3>research</h3><p class="muted">Daily, top-down. Technicals + news +
+        prediction-market odds → a regime page and company dossiers → falsifiable opportunities.</p></div>
+      <div class="card"><h3>discovery</h3><p class="muted">Bottom-up. <em>The news nominates the
+        companies.</em> Every nominee must clear a deterministic gauntlet — technicals, forecast,
+        fundamentals, options liquidity — before an LLM writes anything up.</p></div>
+      <div class="card"><h3>the muse</h3><p class="muted">Creative collision. Random concepts ×
+        news × odds, argued into domino chains, every candidate pre-registered and adversarially
+        gated. The top two graduate.</p></div>
+    </div>
+    <div class="cols c2">
+      <div class="card"><span class="tag ai">what the LLM decides</span>
+        <ul class="clean">
+          <li>A <strong>falsifiable thesis</strong> — a claim with a date and a level</li>
+          <li>At least <strong>two structurally different</strong> ways to express it</li>
+          <li>An honest <strong>probability</strong>, and a vol view if the trade is about vol</li>
+        </ul></div>
+      <div class="card"><span class="tag code">what the code decides</span>
+        <ul class="clean">
+          <li><code>simulate_experiments</code> prices every candidate under <strong>one declared
+          measure</strong> — the thesis's own drift and vol, with the market's pricing beside it</li>
+          <li><code>size_position</code> computes Kelly from the <strong>conditional</strong>
+          payoff and shrinks the claim by measured calibration</li>
+          <li>A no-op is a logged, legitimate answer. Theo declines far more often than it trades.</li>
+        </ul></div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ 08 ═══════════════════════════════════════════════════════════ -->
+<section class="slide ledger" data-title="Stage 3 — Act">
+  <div class="inner">
+    <span class="kicker">Stage 03 · Act</span>
+    <h2>Place the order, then double-check it against the broker.</h2>
+    <div class="cols c2">
+      <div class="inner" style="gap:.8rem">
+        <h3>What it does</h3>
+        <p class="lead">Submits a genuine multi-leg options order through Alpaca's MCP server,
+        stamps it with an idempotent client order id, then reconciles every leg against what the
+        broker actually filled.</p>
+        <h3>Why it is built this way</h3>
+        <ul class="clean">
+          <li><strong>The model authors every tool argument.</strong> So a guard rewrites the
+          order id before it leaves — without it, idempotency is whatever the model invented.</li>
+          <li><strong>Risk is repriced from the fill</strong>, not from the model's word. Every
+          book cap sums <code>max_loss_usd</code>; if that number came from a model and never met a
+          fill, every later cap is denominated in fiction.</li>
+          <li><strong>A whole-book close is refused</strong> above one open position, and an
+          orphan found at the broker is adopted into the managed set rather than just logged.</li>
+        </ul>
+      </div>
+      <div class="card">
+        <span class="tag code">the real order</span>
+        <div class="scroll"><table><tbody>
+          <tr><td class="muted">class</td><td><code>mleg</code> — 2-leg vertical, one ticket</td></tr>
+          <tr><td class="muted">legs</td><td><code>SPY260903P00766000</code> buy_to_open<br><code>SPY260903P00758000</code> sell_to_open</td></tr>
+          <tr><td class="muted">type</td><td>limit, net debit <span class="num">$1.70</span>, day</td></tr>
+          <tr><td class="muted">id</td><td><code>theo-spy-bps-20260828-766758</code></td></tr>
+        </tbody></table></div>
+        <p class="fine">Every position traces back to its reasoning through one
+        <code>position_id</code> — journal, wiki, memory, and back to the broker.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ 09 ═══════════════════════════════════════════════════════════ -->
+<section class="slide ledger" data-title="Stage 4 — Learn">
+  <div class="inner">
+    <span class="kicker">Stage 04 · Learn</span>
+    <h2>Guard the position without consulting the agent. Then judge it honestly.</h2>
+    <div class="cols c2">
+      <div class="card"><span class="tag code">the guard — every 60 seconds</span>
+        <p class="muted">Exit rules are the agent's own commitments, executed deterministically.
+        One signal registry: every rule reads a signal, compares to a threshold, debounces.
+        Thesis-level stops watch the <strong>underlying</strong>, not the noisy option mark.</p>
+        <p class="muted">An exit rule stated only in prose does not exist. Percentages mean what a
+        trader means — a percent of the <em>net debit paid</em>, not of gross premium. On the wrong
+        base, three of the four mark-based rules this book has ever carried could not fire at all.</p></div>
+      <div class="card"><span class="tag code">the scoring — at the thesis horizon</span>
+        <p class="muted">Attribution waits for the horizon the claim named, then asks the two
+        questions from slide 3. A profit on a wrong view is recorded as <strong>luck</strong> and
+        teaches nothing.</p>
+        <p class="muted">Calibration then scores every stated probability with a Brier score and
+        its Murphy decomposition — reliability (am I overconfident?) separated from resolution
+        (do my forecasts actually separate winners from losers?).</p></div>
+    </div>
+    <div class="quote">
+      <p>Attribution is the distinctive signal, and it is deliberately expensive to earn: promotion
+      past the second rung requires that <em>most resolved theses were actually explicable</em>.
+      A book of luck is not competence, however good the P&amp;L looks.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ 10 ═══════════════════════════════════════════════════════════ -->
+<section class="slide ledger" data-title="Stage 5 — Remember">
+  <div class="inner">
+    <span class="kicker">Stage 05 · Remember</span>
+    <h2>Four stores, one for each kind of knowledge.</h2>
+    <div class="cols c4">
+      <div class="card stage"><h3>journal</h3><p class="muted">Append-only events. What happened,
+        when, and which model said so. The record, never rewritten.</p>
+        <p class="fine">1,239 rows</p></div>
+      <div class="card stage"><h3>wiki</h3><p class="muted">Stable reference that rewrites itself:
+        position pages, company dossiers, the regime page.</p>
+        <p class="fine">markdown on disk</p></div>
+      <div class="card stage"><h3>elfmem</h3><p class="muted">Evolving memory with decay and
+        reinforcement — and a ratified constitution of epistemic principles.</p>
+        <p class="fine">credited by verdict, not P&amp;L</p></div>
+      <div class="card stage"><h3>ledger</h3><p class="muted">Every falsifiable claim ever made,
+        traded or not — so the trial count a multiple-testing correction needs cannot be lost.</p>
+        <p class="fine">48 resolved</p></div>
+    </div>
+    <p class="lead">The ledger is the quiet one that matters most. <strong>Forecasts on setups we
+    declined are scored too</strong>, at zero capital risk — and they are the only realistic route
+    to a calibration sample that means anything inside a week.</p>
+  </div>
+</section>
+
+<!-- ═══ 11 ═══════════════════════════════════════════════════════════ -->
+<section class="slide ledger" data-title="Architecture">
+  <div class="inner">
+    <span class="kicker">Architecture</span>
+    <h2>Where the model sits, and how little of the system it is.</h2>
+    <svg class="chart" viewBox="0 0 920 350" role="img"
+      aria-label="Architecture: Sense, Think, Act and Learn in a pipeline over four memory stores, with a feedback path from Learn to Think">
+      <defs>
+        <marker id="a2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7"
+          orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="var(--ink-faint)"/></marker>
+        <marker id="a3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7"
+          orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="var(--accent)"/></marker>
+      </defs>
+      <path d="M775,96 C775,20 355,20 355,90" fill="none" stroke="var(--accent)" stroke-width="2"
+        stroke-dasharray="5 4" marker-end="url(#a3)"/>
+      <text x="565" y="16" class="axis" text-anchor="middle" fill="var(--accent)"
+        style="font-weight:600">calibration &amp; attribution → the size the next trade is allowed</text>
+
+      <g>
+        <rect x="20" y="96" width="200" height="118" rx="4" fill="var(--paper-raised)" stroke="var(--paper-line)"/>
+        <rect x="20" y="96" width="200" height="3" fill="var(--accent)"/>
+        <text x="34" y="124" class="axis" style="font-size:13px;font-weight:700" fill="var(--ink)">SENSE</text>
+        <text x="34" y="146" class="axis">analytics · sensors</text>
+        <text x="34" y="162" class="axis">market_stats · reconcile</text>
+        <text x="34" y="186" class="axis" fill="var(--ink-faint)">every 60s · no LLM</text>
+      </g>
+      <line x1="224" y1="155" x2="246" y2="155" stroke="var(--ink-faint)" stroke-width="2" marker-end="url(#a2)"/>
+      <g>
+        <rect x="255" y="96" width="200" height="118" rx="4" fill="var(--paper-raised)" stroke="var(--paper-line)"/>
+        <rect x="255" y="96" width="200" height="3" fill="var(--warm)"/>
+        <text x="269" y="124" class="axis" style="font-size:13px;font-weight:700" fill="var(--ink)">THINK</text>
+        <text x="269" y="146" class="axis">research · discovery · muse</text>
+        <text x="269" y="162" class="axis">simulate → size</text>
+        <text x="269" y="186" class="axis" fill="var(--warm)">the only LLM judgement</text>
+      </g>
+      <line x1="459" y1="155" x2="481" y2="155" stroke="var(--ink-faint)" stroke-width="2" marker-end="url(#a2)"/>
+      <g>
+        <rect x="490" y="96" width="200" height="118" rx="4" fill="var(--paper-raised)" stroke="var(--paper-line)"/>
+        <rect x="490" y="96" width="200" height="3" fill="var(--accent)"/>
+        <text x="504" y="124" class="axis" style="font-size:13px;font-weight:700" fill="var(--ink)">ACT</text>
+        <text x="504" y="146" class="axis">Alpaca MCP · mleg order</text>
+        <text x="504" y="162" class="axis">tool_guard · reconcile</text>
+        <text x="504" y="186" class="axis" fill="var(--ink-faint)">idempotent, verified</text>
+      </g>
+      <line x1="694" y1="155" x2="716" y2="155" stroke="var(--ink-faint)" stroke-width="2" marker-end="url(#a2)"/>
+      <g>
+        <rect x="725" y="96" width="175" height="118" rx="4" fill="var(--paper-raised)" stroke="var(--paper-line)"/>
+        <rect x="725" y="96" width="175" height="3" fill="var(--accent)"/>
+        <text x="739" y="124" class="axis" style="font-size:13px;font-weight:700" fill="var(--ink)">LEARN</text>
+        <text x="739" y="146" class="axis">exit_rules · attribution</text>
+        <text x="739" y="162" class="axis">calibration · coach</text>
+        <text x="739" y="186" class="axis" fill="var(--ink-faint)">every 60s · no LLM</text>
+      </g>
+
+      <line x1="120" y1="214" x2="120" y2="286" stroke="var(--paper-line)" stroke-width="1.5"/>
+      <line x1="355" y1="214" x2="355" y2="286" stroke="var(--paper-line)" stroke-width="1.5"/>
+      <line x1="590" y1="214" x2="590" y2="286" stroke="var(--paper-line)" stroke-width="1.5"/>
+      <line x1="812" y1="214" x2="812" y2="286" stroke="var(--paper-line)" stroke-width="1.5"/>
+
+      <rect x="20" y="286" width="880" height="52" rx="4" fill="var(--paper-sunk)" stroke="var(--paper-line)"/>
+      <text x="34" y="312" class="axis" style="font-size:12px;font-weight:700" fill="var(--ink)">REMEMBER</text>
+      <text x="150" y="316" class="axis">journal — append-only events</text>
+      <text x="345" y="316" class="axis">wiki — stable reference</text>
+      <text x="515" y="316" class="axis">elfmem — evolving memory</text>
+      <text x="705" y="316" class="axis">ledger — every claim</text>
+    </svg>
+    <div class="cols c2">
+      <p class="fine"><strong style="color:var(--ink)">Chassis:</strong> one scheduler, a singleton
+      lock, an ordered model fallback chain, and a health probe that asks every subsystem
+      “you ran — but did you <em>produce</em> anything?”</p>
+      <p class="fine">Roughly 15,700 lines of Python · 535 offline tests · four trader-readable
+      simulation scaffolds</p>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ 12 ═══════════════════════════════════════════════════════════ -->
+<section class="slide ledger" data-title="Alpaca implementation">
+  <div class="inner">
+    <span class="kicker">Technology implementation</span>
+    <h2>How Alpaca is used — and three things that were harder than they look.</h2>
+    <div class="cols c3">
+      <div class="card"><h3>MCP, one session per tick</h3>
+        <p class="muted">Alpaca's MCP server runs as a local stdio subprocess. The adapter's default
+        starts a fresh process <em>per tool call</em> — six calls cost 12.3s. Sharing one session
+        across the tick cut it to 2.75s.</p>
+        <p class="fine">−78% wall clock, measured</p></div>
+      <div class="card"><h3>Real multi-leg options orders</h3>
+        <p class="muted">Verticals, condors and butterflies go as <code>mleg</code> tickets with
+        per-leg <code>position_intent</code>. Calendars and diagonals are <strong>refused</strong>,
+        not approximated — pricing the far leg needs a model we deliberately do not have.</p>
+        <p class="fine">a confident wrong payoff is worse than a refusal</p></div>
+      <div class="card"><h3>Only 19 of 72 tools bound</h3>
+        <p class="muted">Binding all 72 MCP tools cost ~21k tokens of schema <em>per call</em>,
+        71% of it for tools never used once — and a bigger menu measurably worsens tool selection.</p>
+        <p class="fine">$3.46 → $1.32 per decide cycle</p></div>
+    </div>
+    <div class="card" style="border-left:3px solid var(--caution)">
+      <p><strong>The lesson that generalises.</strong> All three of those had already shipped as
+      code that ran and did nothing: the option-chain compactor failed open against an envelope
+      shape it did not recognise, the session was never actually shared, and the prompt cache was
+      never asked for. Each looked healthy in the logs. That is why
+      <code>trdrbot health</code> exists and asks a different question from the tests —
+      <em>“you ran, but did you produce anything?”</em></p>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ 13 ═══════════════════════════════════════════════════════════ -->
+<section class="slide ledger" data-title="A real trade — the setup">
+  <div class="inner">
+    <span class="kicker">Worked example · 28 August 2026 · 1 of 3</span>
+    <h2>Something happened in the world, and the equity market had not priced it.</h2>
+    <div class="cols side">
+      <div class="inner" style="gap:.9rem">
+        <p class="lead">Fed funds futures flipped intraday to price a September <em>hike</em> as
+        more likely than a hold. Gold, Bitcoin and TLT all sold off. SPY did not — it had printed
+        775.30 before the remarks and sat at 769.07, down 0.3%, after a +5.7% run.</p>
+        <p class="lead"><strong>That asymmetry is the trade.</strong> Not a chart shape — a dated,
+        causal claim that one market had repriced and another had not.</p>
+        <div class="card"><span class="tag ai">the thesis, as recorded</span>
+          <p><em>“SPY drifts modestly lower into 2026-09-03 as equities digest fed funds futures
+          repricing.”</em></p>
+          <p class="fine">horizon 2026-09-03 · falsifiable · pre-registered before any order</p></div>
+      </div>
+      <div class="card">
+        <span class="tag code">Sense → Think, the actual tool calls</span>
+        <div class="scroll"><table><tbody>
+          <tr><td class="n muted">1</td><td><code>get_stock_snapshot</code></td></tr>
+          <tr><td class="n muted">2</td><td><code>get_stock_bars</code></td></tr>
+          <tr><td class="n muted">3</td><td><code>get_clock</code></td></tr>
+          <tr><td class="n muted">4</td><td><code>get_news</code></td></tr>
+          <tr><td class="n muted">5</td><td><code>get_option_chain</code></td></tr>
+          <tr><td class="n muted">6</td><td><code>simulate_experiments</code></td></tr>
+          <tr><td class="n muted">7</td><td><code>size_position</code></td></tr>
+          <tr><td class="n muted">8</td><td><code>place_option_order</code></td></tr>
+          <tr><td class="n muted">9</td><td><code>record_position</code></td></tr>
+        </tbody></table></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ 14 ═══════════════════════════════════════════════════════════ -->
+<section class="slide ledger" data-title="A real trade — priced and sized">
+  <div class="inner">
+    <span class="kicker">Worked example · 2 of 3</span>
+    <h2>Three ways to trade it. The easy-looking one failed the math.</h2>
+    <div class="scroll">
+      <table>
+        <thead><tr><th>Candidate</th><th class="n">Win rate</th><th class="n">Pays</th><th class="n">Risks</th><th>Verdict</th></tr></thead>
+        <tbody>
+          <tr><td>775/780 call credit spread</td><td class="n">76–92%</td><td class="n">$95</td><td class="n">$283</td>
+            <td><span class="tag bad">rejected</span> looks safe <em>because</em> it usually wins</td></tr>
+          <tr><td>760 butterfly</td><td class="n">low</td><td class="n">—</td><td class="n">$70 debit</td>
+            <td><span class="tag bad">rejected</span> needs the fall to stop <em>exactly</em> at 760; $22 of 4-leg friction</td></tr>
+          <tr style="background:var(--accent-soft)"><td><strong>766/758 put debit spread</strong></td><td class="n">42%</td>
+            <td class="n">2.85 : 1</td><td class="n">$2,171</td>
+            <td><span class="tag good">taken</span> EV-positive even at the market's own drift</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="cols c2">
+      <div class="quote">
+        <p>“Honest confidence <strong>0.42</strong>. This loses more often than it wins. That is
+        fine — it is the same trade logic as a 38% call spread with 3.8:1 payoff. I resisted
+        rounding up to make it feel better; <strong>the number is scored</strong>.”</p>
+        <cite>Theo's own decision record, 28 August</cite>
+      </div>
+      <div class="card"><span class="tag code">then size_position, not the agent</span>
+        <ul class="clean">
+          <li>Kelly from the <strong>conditional</strong> payoff — E[win|win] / E[loss|loss], not
+          the max/max ratio, which is measurably biased toward buying premium</li>
+          <li>The stated 42% shrunk by measured calibration before it sets size</li>
+          <li>Capped three ways at once: per-position, per-underlying, whole book</li>
+          <li><strong>13 contracts. $2,171 max loss — 2.14% of equity.</strong> The agent did not
+          choose that number.</li>
+        </ul></div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ 15 ═══════════════════════════════════════════════════════════ -->
+<section class="slide ledger" data-title="A real trade — guarded and scored">
+  <div class="inner">
+    <span class="kicker">Worked example · 3 of 3</span>
+    <h2>Five rules took over. Two questions get answered when the trade closes.</h2>
+    <div class="cols c2">
+      <div class="card"><span class="tag code">the guard, from the moment of the fill</span>
+        <div class="scroll"><table><tbody>
+          <tr><td>profit target</td><td class="n">+140% of debit</td></tr>
+          <tr><td>stop</td><td class="n">−65% of debit</td></tr>
+          <tr><td><strong>underlying stop</strong></td><td class="n">SPY above 776</td></tr>
+          <tr><td>time stop</td><td class="n">expiry day</td></tr>
+          <tr><td>leg divergence</td><td class="n">broker truth vs ours</td></tr>
+        </tbody></table></div>
+        <p class="muted">The agent named the underlying stop as the one it trusts most: <em>if SPY
+        makes new highs, the premise that equities haven't discounted the hike is simply false, and
+        the position should die regardless of what the mark says.</em></p></div>
+      <div class="inner" style="gap:.9rem">
+        <div class="card"><span class="tag good">where it stands</span>
+          <p><span class="big" style="color:var(--accent)">+19.6%</span></p>
+          <p class="muted">on net debit at last mark. But the P&amp;L is <strong>not</strong> the
+          question that moves anything.</p></div>
+        <div class="card"><span class="tag warn">what actually gets asked on 3 September</span>
+          <ul class="clean">
+            <li>Did SPY close below the level the thesis named? → <strong>was the view right?</strong></li>
+            <li>Given that answer, did this structure express it well? → <strong>was the expression right?</strong></li>
+          </ul>
+          <p class="fine">a profit with a wrong view scores as luck and moves nothing</p></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ 16 ═══════════════════════════════════════════════════════════ -->
+<section class="slide ledger" data-title="Size is earned">
+  <div class="inner">
+    <span class="kicker">Risk</span>
+    <h2>Position size is earned, not chosen — and it is the only reward on offer.</h2>
+
+    <div class="ladder">
+      <div class="rung" style="--lvl:1">
+        <div class="tier">EXPLORE</div>
+        <p class="req">nothing — the starting allocation</p>
+        <div class="bar"><i style="width:40%"></i></div>
+        <div class="caps">
+          <div><b>10%</b><span>book</span></div>
+          <div><b>5%</b><span>one position</span></div>
+        </div>
+      </div>
+      <div class="rung" style="--lvl:2">
+        <div class="tier">ESTABLISH</div>
+        <p class="req">≥5 resolved theses</p>
+        <div class="bar"><i style="width:60%"></i></div>
+        <div class="caps">
+          <div><b>15%</b><span>book</span></div>
+          <div><b>7.5%</b><span>one position</span></div>
+        </div>
+      </div>
+      <div class="rung" style="--lvl:3">
+        <div class="tier">SCALE</div>
+        <p class="req">≥15 resolved, ≥60% <em>attributable</em></p>
+        <div class="bar"><i style="width:80%"></i></div>
+        <div class="caps">
+          <div><b>20%</b><span>book</span></div>
+          <div><b>10%</b><span>one position</span></div>
+        </div>
+      </div>
+      <div class="rung" style="--lvl:4">
+        <div class="tier">MATURE</div>
+        <p class="req">≥40 resolved, ≥70% attributable, reliability &lt;0.04</p>
+        <div class="bar"><i style="width:100%"></i></div>
+        <div class="caps">
+          <div><b>25%</b><span>book</span></div>
+          <div><b>12.5%</b><span>one position</span></div>
+        </div>
+      </div>
+    </div>
+    <p class="muted">Colour deepens with earned trust — MATURE's tint is the same green this deck
+    uses for a genuinely earned outcome, nowhere else. Climbing costs <strong>evidence</strong>,
+    not confidence: each rung names exactly what must be demonstrated, and none of them can be
+    talked round.</p>
+
+    <div class="cols c2">
+      <ul class="clean">
+        <li><strong>Monotonic in evidence.</strong> More knowledge can never mean less size. Two
+        separate ladder inversions shipped and were caught by an invariant test that sweeps the
+        whole ladder rather than checking examples.</li>
+        <li><strong>Asymmetric.</strong> Promotion needs a sustained record; a 5% drawdown demotes
+        a whole tier immediately, and 10% goes back to the start.</li>
+      </ul>
+      <div class="inner" style="gap:.6rem">
+        <p class="muted"><strong>Attribution is a promotion criterion, not a metric.</strong> This
+        is the rung that makes “right vs lucky” cost something real.</p>
+        <p class="fine">Kelly refuses any structure with unbounded LOSS outright. Unbounded profit
+        is fine — a long call is not a naked short.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ 17 ═══════════════════════════════════════════════════════════ -->
+<section class="slide ledger" data-title="Risk and reward, interactive">
+  <div class="inner">
+    <span class="kicker">Risk / reward · drag the sliders</span>
+    <h2>How much risk to take depends on how sure you are the edge is real.</h2>
+    <div class="cols side">
+      <div class="inner" style="gap:.9rem">
+        <div class="cols c2">
+          <div class="ctl">
+            <div class="row"><label for="wA">Risk appetite</label><span class="v" id="wAV">1.00×</span></div>
+            <input type="range" id="wA" min="0.25" max="2" step="0.05" value="1">
+          </div>
+          <div class="ctl">
+            <div class="row"><label for="wB">Belief the edge is real</label><span class="v" id="wBV">50%</span></div>
+            <input type="range" id="wB" min="0" max="100" step="1" value="50">
+          </div>
+        </div>
+        <svg class="chart" id="wAsym" viewBox="0 0 460 200" role="img"
+          aria-label="Median gain when the thesis is right against the loss when it is wrong, by appetite"></svg>
+        <p class="fine">SPY's own resampled returns, fair-priced structure, the production sizer.
+        <a href="risk_appetite_explorer.html">Full explorer →</a></p>
+      </div>
+      <div class="inner" style="gap:.7rem">
+        <div class="card"><span class="tag code">reward : risk</span>
+          <span class="big" id="wRR">—</span>
+          <p class="muted">median gain when the view is right, against the loss when it is wrong</p></div>
+        <div class="card" id="wVerdict"><span class="tag warn">the honest reading</span>
+          <p class="muted">—</p></div>
+        <p class="fine" id="wNote"></p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ 18 ═══════════════════════════════════════════════════════════ -->
+<section class="slide ledger" data-title="Results, reported plainly">
+  <div class="inner">
+    <span class="kicker">Results · paper account · as of 31 Aug 2026, 18:00 UTC</span>
+    <h2>The P&amp;L, and why we will not use it as proof.</h2>
+    <div class="cols c4">
+      <div class="card"><span class="tag code">equity</span><span class="big">$101,678</span>
+        <p class="muted">from a $100,000 start</p></div>
+      <div class="card"><span class="tag good">return</span>
+        <span class="big" style="color:var(--accent)">+1.68%</span>
+        <p class="muted">peak $102,432 · max drawdown 0.7%</p></div>
+      <div class="card"><span class="tag code">positions</span><span class="big">3</span>
+        <p class="muted">2 closed at +8.2% and +52.8% on debit; 1 open at +19.6%</p></div>
+      <div class="card"><span class="tag code">decide cycles</span><span class="big">95</span>
+        <p class="muted">82 ended in a deliberate no-op</p></div>
+    </div>
+    <div class="card" style="border-left:3px solid var(--caution)">
+      <p><strong>Three positions over five days is not evidence of skill, and we can prove it
+      rather than merely say it.</strong> That is exactly the range in which a zero-skill agent
+      lands somewhere between −7.8% and +8.2%. We report the number plainly because it is real —
+      and we built the calibration and attribution machinery precisely so there is something
+      better than this number to judge us on.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ 19 ═══════════════════════════════════════════════════════════ -->
+<section class="slide ledger" data-title="What the record actually says">
+  <div class="inner">
+    <span class="kicker">The uncomfortable slide</span>
+    <h2>The record says something we would rather it did not. Here it is anyway.</h2>
+    <div class="cols c2">
+      <div class="inner" style="gap:.8rem">
+        <div class="scroll"><table>
+          <thead><tr><th>Measure</th><th class="n">Value</th><th>Reading</th></tr></thead>
+          <tbody>
+            <tr><td>resolved forecasts</td><td class="n">48</td><td class="muted">12.4 <em>effective</em> — concentrated in a few names</td></tr>
+            <tr><td>Brier score</td><td class="n">0.225</td><td class="muted">0.25 is a coin flip</td></tr>
+            <tr><td>reliability</td><td class="n">0.000</td><td><span class="tag good">well calibrated</span> not overconfident</td></tr>
+            <tr><td><strong>resolution</strong></td><td class="n">0.000</td><td><span class="tag bad">no discrimination</span> forecasts are not separating winners from losers</td></tr>
+          </tbody>
+        </table></div>
+      </div>
+      <div class="inner" style="gap:.8rem">
+        <p class="lead">Theo says 40% and it happens about 40% of the time — <strong>honest</strong>.
+        But it has not yet shown that its 60%s come in more often than its 30%s — <strong>not yet
+        skilful</strong>. Those are different claims, and only a decomposed score can tell them apart.</p>
+        <div class="card" style="border-left:3px solid var(--accent)">
+          <p><strong>The size ladder already reflects this.</strong> Theo is still on the second
+          rung of four. It has not promoted itself on a good week, because the criterion is
+          attribution, not profit. The system that would let us hide this is the same system that
+          found it.</p>
+        </div>
+        <p class="fine">Every threshold that matters needs ~50 resolved forecasts. The record is
+        young and the ladder correctly says so.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ 20 ═══════════════════════════════════════════════════════════ -->
+<section class="slide ledger" data-title="Known limits">
+  <div class="inner">
+    <span class="kicker">Honest limitations</span>
+    <h2>What Theo does not do — written down before a judge finds it.</h2>
+    <div class="cols c3">
+      <div class="card"><h3>Calendars are refused</h3><p class="muted">Pricing the far leg needs a
+        model we deliberately do not have. A confident wrong payoff is worse than a refusal.</p></div>
+      <div class="card"><h3>One vol, not a smile</h3><p class="muted">Per-leg IVs set the greeks and
+        the vega-weighted vol, with the EV span across legs printed beside it — but a
+        smile-consistent terminal distribution is refused for the same reason.</p></div>
+      <div class="card"><h3>The first position can never be attributed</h3><p class="muted">No thesis
+        was recorded at entry. Fabricating one retroactively would be worse than the gap.</p></div>
+      <div class="card"><h3>Declines are not yet scored</h3><p class="muted">12 theses simulated, 1
+        traded. A decline that was right about vol and one that was right about direction are
+        currently indistinguishable. Logged as an open issue.</p></div>
+      <div class="card"><h3>No approval gate, by choice</h3><p class="muted">Paper account, and
+        gates block the feedback loop. What replaces it is stricter: the agent cannot execute a
+        mistake the arithmetic refuses to compute.</p></div>
+      <div class="card"><h3>Everything above is in the repo</h3><p class="muted">A living bug ledger
+        records every defect the moment it is found and removes it only in the commit that fixes
+        it. 69 numbered issues so far.</p></div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ 21 ═══════════════════════════════════════════════════════════ -->
+<section class="slide brand" data-title="Close">
+  <div class="inner">
+    <div class="cols side-r">
+      <div class="plate"><img src="assets/elf-success.jpg"
+        alt="Theo celebrating with both fists raised"></div>
+      <div class="inner" style="gap:1rem">
+        <span class="kicker">In one sentence</span>
+        <h2>Any agent can make money for a week. Theo can tell you whether it deserved to.</h2>
+        <p class="lead">The distinctive thing here is not the strategy. It is that every claim is
+        written down before it resolves, scored afterwards on whether the <em>reasoning</em> held,
+        and allowed to change how much capital the next decision gets — with a lucky win worth
+        exactly nothing.</p>
+        <div class="scroll"><table><tbody>
+          <tr><td class="muted">Repo</td><td><code>github.com/…/trdrbot</code></td></tr>
+          <tr><td class="muted">Deep dive</td><td><a href="research_risk_appetite.html">the risk research note</a> · <a href="risk_appetite_explorer.html">the interactive explorer</a></td></tr>
+          <tr><td class="muted">Account</td><td>Alpaca paper · $100,000 start</td></tr>
+        </tbody></table></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+</div><!-- /deck -->
+
+<div class="chrome hud">
+  <button id="btnToc" aria-haspopup="dialog">contents</button>
+  <button id="btnPrev" aria-label="Previous slide">←</button>
+  <button id="btnNext" aria-label="Next slide">→</button>
+  <span class="count" id="count">1 / 21</span>
+</div>
+
+<div class="toc" id="toc" role="dialog" aria-modal="true" aria-label="Contents">
+  <h2 style="font-family:var(--serif)">Contents</h2>
+  <ol id="tocList"></ol>
+</div>
+
+<script>
+(function(){
+  'use strict';
+  const deck = document.getElementById('deck');
+  const slides = [...deck.querySelectorAll('.slide')];
+  const bar = document.getElementById('bar');
+  const count = document.getElementById('count');
+  const toc = document.getElementById('toc');
+  let idx = 0;
+
+  slides.forEach((s, i) => { s.id = 's' + (i + 1); s.setAttribute('aria-label', s.dataset.title); });
+
+  /* Which slide are we on? Observe rather than compute from scrollTop — with
+     scroll-snap the browser is the authority on that, not us. */
+  const io = new IntersectionObserver(es => {
+    es.forEach(e => { if (e.isIntersecting){ idx = slides.indexOf(e.target); paint(); } });
+  }, {root: deck, threshold: .55});
+  slides.forEach(s => io.observe(s));
+
+  function paint(){
+    count.textContent = (idx + 1) + ' / ' + slides.length;
+    bar.style.width = ((idx + 1) / slides.length * 100) + '%';
+    if (history.replaceState) history.replaceState(null, '', '#' + slides[idx].id);
+  }
+  const reduced = matchMedia('(prefers-reduced-motion: reduce)');
+  function go(i){
+    idx = Math.max(0, Math.min(slides.length - 1, i));
+    deck.scrollTo({top: slides[idx].offsetTop,
+                   behavior: (document.hidden || reduced.matches) ? 'auto' : 'smooth'});
+    paint();
+  }
+
+  document.getElementById('btnNext').addEventListener('click', () => go(idx + 1));
+  document.getElementById('btnPrev').addEventListener('click', () => go(idx - 1));
+  document.getElementById('btnToc').addEventListener('click', openToc);
+
+  const list = document.getElementById('tocList');
+  slides.forEach((s, i) => {
+    const li = document.createElement('li');
+    const b = document.createElement('button');
+    b.textContent = s.dataset.title;
+    b.addEventListener('click', () => { closeToc(); go(i); });
+    li.appendChild(b); list.appendChild(li);
+  });
+  function openToc(){ toc.setAttribute('open',''); list.querySelector('button').focus(); }
+  function closeToc(){ toc.removeAttribute('open'); }
+
+  addEventListener('keydown', e => {
+    const tgt = e.target;
+    if (tgt instanceof Element && tgt.matches('input,textarea,button,select')) return;
+    const k = e.key;
+    if (toc.hasAttribute('open')){ if (k === 'Escape'){ closeToc(); e.preventDefault(); } return; }
+    if (k === 'ArrowRight' || k === 'PageDown' || k === ' '){ go(idx + 1); e.preventDefault(); }
+    else if (k === 'ArrowLeft' || k === 'PageUp'){ go(idx - 1); e.preventDefault(); }
+    else if (k === 'Home'){ go(0); e.preventDefault(); }
+    else if (k === 'End'){ go(slides.length - 1); e.preventDefault(); }
+    else if (k === 'o' || k === 'O'){ openToc(); e.preventDefault(); }
+  });
+
+  if (location.hash){
+    const i = slides.findIndex(s => '#' + s.id === location.hash);
+    if (i >= 0) requestAnimationFrame(() => go(i));
+  }
+  paint();
+
+  /* ═══ risk widget — the same engine as the research note and explorer,
+     with the same Python-verified sizer, presented at slide scale. ═══ */
+  const DATA = {"structure":{"debit":2.5141,"maxProfit":548.59,"maxLoss":-251.41,"perContractRisk":251.41,"b":1.8819,"stated":0.3962,"breakEven":0.347},"cal":{"n":29,"reliability":0.021926,"minSample":8},"tiers":{"explore":{"kelly":0.0,"seed":0.022,"book":0.1,"pos":0.05,"name_cap":0.08},"establish":{"kelly":0.0625,"seed":0.022,"book":0.15,"pos":0.075,"name_cap":0.12},"scale":{"kelly":0.149143,"seed":0.022,"book":0.2,"pos":0.1,"name_cap":0.16},"mature":{"kelly":0.223214,"seed":0.022,"book":0.25,"pos":0.125,"name_cap":0.2}},"clamps":{"kellyCeiling":0.5,"bookCeiling":0.35,"floorCeiling":0.05,"appetiteMin":0.25,"appetiteMax":2.0,"seedShare":0.22},"demote":{"oneTier":0.05,"toExplore":0.1},"pools":{"right":[-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-251.63,-244.47,-235.1,-228.0,-222.72,-217.17,-210.62,-203.76,-197.8,-190.43,-184.33,-173.89,-168.82,-160.23,-152.48,-142.66,-134.53,-128.19,-119.84,-110.34,-105.19,-96.69,-91.39,-85.17,-81.35,-71.07,-62.95,-59.26,-50.32,-37.77,-31.24,-22.92,-16.29,-8.96,0.96,5.01,9.72,18.71,27.51,40.19,47.81,56.47,63.16,73.67,81.07,86.93,94.45,107.83,113.73,119.72,129.43,143.21,151.2,157.48,167.76,171.42,175.37,182.55,194.34,200.52,211.94,217.65,223.84,231.15,235.72,242.34,253.77,261.73,270.11,280.52,285.62,295.52,305.75,312.64,319.16,326.01,336.54,343.54,350.94,361.51,368.85,379.22,386.79,393.95,399.61,409.42,419.91,428.48,434.81,444.16,459.72,464.91,477.13,485.47,493.1,503.64,514.61,522.79,532.68,539.66,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59],"neutral":[-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-252.68,-247.84,-242.07,-235.27,-230.44,-223.07,-218.24,-206.5,-202.25,-193.54,-188.06,-179.96,-171.42,-166.11,-159.6,-153.87,-148.39,-134.05,-124.81,-114.56,-105.7,-95.62,-88.01,-77.73,-71.86,-66.35,-59.5,-53.33,-43.79,-38.85,-29.57,-21.96,-15.05,-5.42,0.01,6.95,15.76,25.74,29.72,35.49,42.24,49.13,55.35,64.52,74.73,81.71,89.31,99.21,113.7,119.98,131.43,143.94,154.29,164.06,171.94,179.81,187.38,197.04,202.72,211.23,219.81,228.53,236.71,241.9,245.96,256.32,264.27,272.14,282.31,289.03,298.13,310.44,322.59,328.83,338.48,345.71,351.8,360.81,370.44,382.07,393.91,404.09,412.19,422.77,432.17,439.1,449.48,462.13,470.17,475.86,484.23,496.14,504.43,513.87,524.41,539.08,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59],"wrong":[-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-254.41,-251.15,-244.23,-235.37,-225.6,-210.87,-203.04,-193.35,-182.09,-169.38,-161.66,-150.52,-144.04,-138.25,-131.89,-124.5,-111.35,-102.4,-89.94,-82.01,-74.09,-67.69,-59.14,-49.26,-43.12,-32.74,-25.52,-15.43,-5.24,3.77,13.95,20.3,25.22,29.82,34.74,47.48,54.64,65.35,73.74,81.43,91.23,97.53,108.2,118.03,125.11,134.43,147.77,157.1,167.04,173.52,182.78,192.31,198.2,204.77,214.17,225.24,238.9,249.15,254.96,264.15,275.13,284.73,293.04,298.96,305.63,322.35,330.01,337.72,346.51,362.36,374.16,384.91,399.78,406.32,417.17,427.58,438.71,448.27,460.54,468.66,479.62,488.86,500.05,509.14,523.34,535.53,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59,545.59]},"poolStats":{"right":{"ev":34.06,"evSampled":33.37,"pwin":0.3962,"b":1.882},"neutral":{"ev":-2.73,"evSampled":-3.46,"pwin":0.348,"b":1.841},"wrong":{"ev":-43.04,"evSampled":-43.78,"pwin":0.2968,"b":1.775}}};
+  const C = DATA.clamps, S = DATA.structure, CAL = DATA.cal;
+
+  function shrink(p){
+    if (CAL.n < CAL.minSample || CAL.reliability == null) return .5 + (p - .5) * .5;
+    let t = Math.min(1, Math.max(0, 1 - CAL.reliability / .05));
+    t *= Math.min(1, CAL.n / 30);
+    return .5 + (p - .5) * (.5 + .5 * t);
+  }
+  const kelly = (p, b) => p - (1 - p) / b;
+  const FULL = kelly(shrink(S.stated), S.b), GATE = kelly(S.stated, S.b);
+
+  function posture(tier, a){
+    const t = DATA.tiers[tier];
+    a = Math.min(C.appetiteMax, Math.max(C.appetiteMin, a));
+    const book = Math.min(C.bookCeiling, t.book * a);
+    return {kelly: Math.min(C.kellyCeiling, t.kelly * a),
+            seed: Math.min(C.floorCeiling, t.seed * a), book, pos: book * .5};
+  }
+  function size(eq, tier, a){
+    const p = posture(tier, a), per = S.perContractRisk;
+    if (GATE <= 0) return 0;
+    let f = p.kelly <= 0 ? Math.min(p.seed, p.pos)
+                         : Math.min(Math.max(FULL * p.kelly, p.seed), p.pos);
+    let n = Math.floor(eq * f / per);
+    if (n < 1) n = per <= p.pos * eq ? 1 : 0;
+    return Math.min(n, Math.floor(p.book * eq / per));
+  }
+  function rng32(s){ return function(){ s |= 0; s = s + 0x6D2B79F5 | 0;
+    let t = Math.imul(s ^ s >>> 15, 1 | s); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+    return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+
+  const EQ = 100000, N = 50, SIMS = 220;
+  function median(pool, a){
+    const r = rng32(20260901), out = [];
+    for (let i = 0; i < SIMS; i++){
+      let eq = EQ;
+      for (let t = 0; t < N; t++){
+        const n = size(eq, 'scale', a);
+        if (n) eq += n * pool[Math.floor(r() * pool.length)];
+        if (eq <= EQ * .01){ eq = EQ * .01; break; }
+      }
+      out.push(eq);
+    }
+    out.sort((x, y) => x - y);
+    return out[out.length >> 1];
+  }
+  function growth(a, belief){
+    const r = rng32(7717), R = DATA.pools.right, W = DATA.pools.wrong;
+    let g = 0;
+    for (let i = 0; i < SIMS; i++){
+      let eq = EQ; const pool = r() < belief ? R : W;
+      for (let t = 0; t < N; t++){
+        const n = size(eq, 'scale', a);
+        if (n) eq += n * pool[Math.floor(r() * pool.length)];
+        if (eq <= EQ * .01){ eq = EQ * .01; break; }
+      }
+      g += Math.log(Math.max(eq, 1) / EQ);
+    }
+    return g / SIMS / N;
+  }
+
+  const STOPS = [.25, .5, .75, 1, 1.25, 1.5, 1.75, 2];
+  const cache = new Map();
+  const med = (which, a) => {
+    const k = which + a;
+    if (!cache.has(k)) cache.set(k, median(DATA.pools[which], a));
+    return cache.get(k);
+  };
+  const money = v => '$' + Math.round(v).toLocaleString('en-US');
+  const el = id => document.getElementById(id);
+  const cssv = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+  const SVGNS = 'http://www.w3.org/2000/svg';
+  const mk = (t, a) => { const e = document.createElementNS(SVGNS, t);
+    for (const k in a) e.setAttribute(k, a[k]); return e; };
+
+  let raf = 0, isTimer = false;
+  function draw(){
+    if (isTimer) clearTimeout(raf); else cancelAnimationFrame(raf);
+    isTimer = document.hidden;
+    const run = () => {
+      const a = +el('wA').value, belief = +el('wB').value / 100;
+      el('wAV').textContent = a.toFixed(2) + '×';
+      el('wBV').textContent = Math.round(belief * 100) + '%';
+
+      const rows = STOPS.map(x => ({a:x, up: med('right', x) - EQ, dn: EQ - med('wrong', x)}));
+      const cur = rows.reduce((m, r) => Math.abs(r.a - a) < Math.abs(m.a - a) ? r : m);
+      const rr = cur.dn > 0 ? cur.up / cur.dn : Infinity;
+      el('wRR').textContent = isFinite(rr) ? rr.toFixed(2) + ' : 1' : '—';
+      el('wRR').style.color = rr >= .9 ? cssv('--accent') : rr >= .6 ? cssv('--caution') : cssv('--danger');
+
+      const best = STOPS.reduce((m, x) =>
+        growth(x, belief) > growth(m, belief) ? x : m, STOPS[0]);
+      el('wVerdict').querySelector('p').innerHTML = Math.abs(best - a) < .2
+        ? `At <strong>${Math.round(belief*100)}%</strong> belief, <strong>${best.toFixed(2)}×</strong>
+           maximises long-run growth — and that is where you are.`
+        : `At <strong>${Math.round(belief*100)}%</strong> belief the growth-maximising setting is
+           <strong>${best.toFixed(2)}×</strong>, not ${a.toFixed(2)}×.`;
+      el('wNote').textContent = belief <= .55
+        ? 'At a coin flip on whether the edge is real, the right setting is the minimum. That is where Theo stands today.'
+        : 'Raising appetite only pays once you are genuinely confident the edge is real — the wrong-thesis branch loses faster than the right one gains.';
+
+      const svg = el('wAsym');
+      [...svg.childNodes].forEach(n => n.remove());
+      const W = 460, H = 200, ml = 42, mr = 8, mt = 6, rowH = (H - mt - 24) / rows.length;
+      const maxAbs = Math.max(...rows.flatMap(r => [r.up, r.dn]), 1);
+      const mid = ml + (W - ml - mr) / 2, half = (W - ml - mr) / 2;
+      svg.appendChild(mk('line', {x1:mid, x2:mid, y1:mt, y2:H - 24,
+        stroke:cssv('--ink-faint'), 'stroke-width':1, opacity:.6}));
+      rows.forEach((r, i) => {
+        const y = mt + i * rowH + rowH * .18, bh = rowH * .62, on = Math.abs(r.a - a) < .06;
+        svg.appendChild(mk('rect', {x:mid, y, width:Math.max(1, r.up / maxAbs * half),
+          height:bh, fill:cssv('--accent'), rx:1, opacity: on ? 1 : .55}));
+        svg.appendChild(mk('rect', {x:mid - Math.max(1, r.dn / maxAbs * half), y,
+          width:Math.max(1, r.dn / maxAbs * half), height:bh, fill:cssv('--danger'), rx:1,
+          opacity: on ? 1 : .55}));
+        const tx = mk('text', {x:ml - 6, y:y + bh * .8, class:'axis', 'text-anchor':'end',
+          'font-weight': on ? '700' : '400', fill: on ? cssv('--ink') : cssv('--ink-faint')});
+        tx.textContent = r.a.toFixed(2) + '×';
+        svg.appendChild(tx);
+      });
+      const l1 = mk('text', {x:mid - 6, y:H - 6, class:'axis', 'text-anchor':'end'});
+      l1.textContent = 'loss when wrong'; svg.appendChild(l1);
+      const l2 = mk('text', {x:mid + 6, y:H - 6, class:'axis', 'text-anchor':'start'});
+      l2.textContent = 'gain when right'; svg.appendChild(l2);
+    };
+    raf = isTimer ? setTimeout(run, 0) : requestAnimationFrame(run);
+  }
+  el('wA').addEventListener('input', draw);
+  el('wB').addEventListener('input', draw);
+  matchMedia('(prefers-color-scheme: dark)').addEventListener('change', draw);
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) draw(); });
+  draw();
+})();
+</script>
+</body>
+</html>

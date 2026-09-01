@@ -4,7 +4,7 @@ sources:
 - id: src-1
   resource: computed:market_stats
   author: trdrbot/research
-  last_modified: '2026-08-31T15:14:09.509510+00:00'
+  last_modified: '2026-09-01T09:25:53.157269+00:00'
 - id: src-2
   resource: computed:market_stats
   author: trdrbot/research
@@ -18,22 +18,22 @@ sources:
   author: trdrbot/research
   last_modified: '2026-08-28T00:06:31.229258+00:00'
 generated:
-  at: '2026-08-31T15:14:09.510356+00:00'
-stale_after: '2026-09-01T15:14:09.510359+00:00'
+  at: '2026-09-01T09:25:53.158191+00:00'
+stale_after: '2026-09-02T09:25:53.158195+00:00'
 status: stable
 ---
 
 # What it is
-SPY is an exchange-traded fund designed to track the S&P 500 Index. It provides broad exposure to large-cap U.S. equities.
+SPY is an exchange-traded fund designed to track the S&P 500 and provide broad exposure to large U.S. companies. Its diversified composition makes it a primary gauge of U.S. equity risk appetite. (model knowledge)
 
 # Bull case
-Positive 21-day and 63-day returns, a position above the 50-day average, and neutral RSI support an intact intermediate uptrend. Low realized volatility and limited near-term recession odds could allow the index to consolidate before resuming higher.
+SPY has positive returns across all supplied horizons and remains above its 50-day average, supporting an intact intermediate trend. Low realized volatility and 10% year-over-year growth in business lending provide a constructive backdrop if financial conditions remain orderly.
 
 # Bear case
-The price is now below its 20-day average, showing that short-term momentum has weakened. Hawkish rate expectations, geopolitical tension, and poor liquidity could cause a volatility expansion from currently subdued levels.
+The price remains below its 20-day average, so near-term momentum has not fully recovered. Rising oil, a reported 19-month high in the 10-year yield, hawkish policy commentary, and weak September seasonality could produce a volatility reset.
 
 # People
-Kevin Warsh is central to the immediate rates narrative because his Jackson Hole speech reportedly increased September rate-hike expectations. Justin Wolfers has publicly criticized Warsh’s stance, while Owen Lamont’s liquidity warning contributes to near-term caution.
+Tom Lee expects markets could rally strongly in September if the Fed holds rates, while Louis Navellier urged caution about the possibility of a September hike. Scott Bessent also expects movement toward a stronger yen as Japanese yields reach a 30-year high.
 
 # Environment
-The index environment combines low realized volatility with conflicting macro headlines and a reported 66% probability of a September rate hike. Prediction markets show low 2026 recession odds but materially higher recession risk by the end of 2027.
+Prediction markets show little expectation of monetary easing, with only 1% odds of a cut by the September meeting and 4% by the October meeting. Recession odds remain low for 2026 at 8%, although the 2027 probability rises to 33%.
