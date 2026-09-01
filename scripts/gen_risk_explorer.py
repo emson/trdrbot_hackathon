@@ -36,14 +36,13 @@ import json
 import re
 import statistics
 import sys
-from datetime import date
 from pathlib import Path
 from types import SimpleNamespace
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 
-from trdrbot import competence, market_stats, optmath, sizing  # noqa: E402
+from trdrbot import competence, ids, market_stats, optmath, sizing  # noqa: E402
 from trdrbot.calibration import Calibration  # noqa: E402
 from trdrbot.experiments import THESIS_RIGHT_EXPRESSION_RIGHT  # noqa: E402
 from trdrbot.optmath import Leg  # noqa: E402
@@ -165,7 +164,9 @@ def build_market() -> dict:
     b = statistics.fmean(wins) / statistics.fmean(losses)
     stated = len(wins) / len(pools["right"])
     return {
-        "asOf": date.today().isoformat(),
+        # ids.market_today(), not date.today(): the same date discipline the
+        # rest of the project runs on (D-032).
+        "asOf": ids.market_today().isoformat(),
         "structure": {"maxProfit": round(mp, 2), "maxLoss": round(ml, 2),
                       "perContractRisk": round(abs(ml), 2), "b": round(b, 4),
                       "stated": round(stated, 4), "breakEven": round(1 / (1 + b), 4)},

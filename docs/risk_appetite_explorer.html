@@ -665,9 +665,10 @@ function render(){
       <tr><th>Exploration floor</th><td class="n">${pct(p.seed, 2)}</td></tr>
       <tr><th>Caps · position / name / book</th><td class="n">${pct(p.pos,1)} / ${pct(p.name,1)} / ${pct(p.book,1)}</td></tr>`;
     $('bindNote').innerHTML = inertHere
-      ? `The <b>seed floor</b> is setting this size, not Kelly and not the tier — so at this
-         setting the competence ladder is doing nothing. Switch the seed floor to
-         <b>tier-derived</b> and the rungs start to differ.`
+      ? `The <b>exploration floor</b> is setting this size, not Kelly — and that is the normal
+         case for this book: every position it has ever opened was sized by the floor. Since the
+         floor derives from the tier's own book cap, the rungs differ and the appetite moves it.
+         Before that it was one flat constant and three of four rungs sized identically.`
       : `Kelly is live here: the edge estimate, not a floor, is choosing the size.`;
 
     // asymmetry

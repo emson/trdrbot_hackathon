@@ -35,10 +35,9 @@ from typing import Any
 import markdown as _md
 import yaml
 
-from . import competence
+from . import competence, optmath
 from . import config as config_mod
 from . import ledger as ledger_mod
-from . import optmath
 from .attribution import _horizon_passed  # noqa: F401 (documents the horizon rule reused below)
 from .calibration import CalibrationStore
 from .experiments import (
