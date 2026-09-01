@@ -1,0 +1,49 @@
+{
+    "schema_version": "1.0",
+    "template_version": "1.0",
+    "project_name": "trdrbot-com",
+    "domain": "trdrbot.com",
+    "site_url": "https://trdrbot.com",
+    "site_name": "",
+    "site_hero": "Welcome",
+    "site_subtitle": "",
+    "site_description": "",
+    "category": "",
+    "tags": "",
+    "cta_button": "Open Link",
+    "email": "",
+    "nameserver_service": "namecheap",
+    "hosting_service": "cloudflare",
+    "fathom_site_id": "",
+    "indexnow_key": "",
+    "features": [
+        ""
+    ],
+    "faqs": [],
+    "launch": {
+        "gates": {
+            "domain_setup": {
+                "completed_at": "2026-09-01T18:36:44+00:00",
+                "meta": {
+                    "zone_id": "904c367b4515e01cf1d03dfb8977f9de",
+                    "nameservers": [
+                        "clay.ns.cloudflare.com",
+                        "connie.ns.cloudflare.com"
+                    ],
+                    "outcome": "ok"
+                }
+            },
+            "nameservers_setup": {
+                "completed_at": "2026-09-01T18:37:41+00:00",
+                "meta": {
+                    "nameservers": [
+                        "clay.ns.cloudflare.com",
+                        "connie.ns.cloudflare.com"
+                    ],
+                    "outcome": "updated"
+                }
+            }
+        }
+    },
+    "cloudflare": {}
+}
