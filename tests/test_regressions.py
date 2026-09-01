@@ -1059,6 +1059,45 @@ def test_the_per_position_ceiling_rises_with_the_ladder():
     assert caps[-1] > 0.12, "the top of the ladder must clear quarter Kelly (12.0%)"
 
 
+# --- D-099: the sizer could say what it decided but never which of five limits
+# decided it, so a risk lever moving an INERT constraint was indistinguishable
+# from one that worked - the class that shipped the compactor, the cache and the
+# shared session dead. Measured consequence: all four positions this book has
+# ever opened were set by the exploration floor and none by Kelly, and nothing
+# in the record said so.
+def test_the_sizer_names_the_constraint_that_set_the_size():
+    """PILLAR-4. Each of the five limits, reached on purpose, names itself - and
+    a refusal names none, because a refusal has no size."""
+    from trdrbot import competence
+
+    explore, mature = _comp(0, verdicts=[]), _comp(40, verdicts=_hist(40, GOOD_V))
+    assert explore.tier == competence.EXPLORE and mature.tier == competence.MATURE
+
+    # EXPLORE is the fixed allocation: the floor IS the answer, not a fallback.
+    assert _size_tier(explore, 0).binding == "exploration floor"
+    # All three outcomes of the fraction decision, in Kelly mode. The middle one
+    # is the case that matters: a positive edge whose Kelly lands BELOW the
+    # floor, which is what every position this book has actually opened did.
+    assert _size_tier(mature, 40).binding == "Kelly"
+    assert _size_tier(mature, 40, mp=700.0, ml=-1200.0).binding == "exploration floor"
+    assert _size_tier(mature, 40, mp=4000.0, ml=-500.0).binding == "position ceiling"
+    # A payoff too rich to refuse but too thin to size: the fraction buys less
+    # than one contract, and indivisibility - not the fraction - sets the size.
+    assert _size_tier(mature, 40, mp=6_000.0, ml=-11_000.0).binding == \
+        "one contract (indivisible)"
+    # Book nearly full -> the portfolio cap trims a size the fraction allowed.
+    trimmed = _size_tier(mature, 40, risk=mature.book_cap * 100_000 - 1_500.0)
+    assert trimmed.contracts > 0 and trimmed.binding == "portfolio"
+    # Same, one scope in: the name cap is tighter than the book here.
+    named = _size_tier(mature, 40, by={"SPY": mature.underlying_cap * 100_000 - 1_500.0})
+    assert named.contracts > 0 and named.binding == "SPY concentration"
+
+    # The invariant that keeps the field honest: non-empty IFF there is a size.
+    for d in (_size_tier(explore, 0), trimmed, named,
+              _size_tier(mature, 40, risk=mature.book_cap * 100_000)):
+        assert bool(d.binding) == (d.contracts > 0), d.reason
+
+
 def test_the_three_risk_scopes_nest_at_every_rung():
     """PILLAR-4. position <= underlying <= book, at every tier, by construction.
 

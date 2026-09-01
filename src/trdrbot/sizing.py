@@ -80,11 +80,23 @@ class SizingDecision:
     kelly_used: float
     adjusted_probability: float
     reason: str
+    #: WHICH of the five limits actually set the size. The stack could say what
+    #: it decided and never which constraint decided it, so a change that moved
+    #: an INERT constraint was indistinguishable from one that worked - the bug
+    #: class that shipped the compactor, the cache and the shared session dead
+    #: (D-099). It also answers I-68's question directly: of the trades this
+    #: book has made, every one was set by the exploration floor and none by
+    #: Kelly, which is measurable from these rows and was not before.
+    #:
+    #: Non-empty if and only if `contracts > 0`: a refusal has no size, so it
+    #: has no binding constraint - its cause is in `reason`.
+    binding: str = ""
 
     def explain(self) -> str:
         return (
             f"{self.contracts} contract(s) = {self.fraction_of_equity:.2%} of equity. "
             f"{self.reason}"
+            + (f" [size set by: {self.binding}]" if self.binding else "")
         )
 
 
@@ -258,6 +270,8 @@ def size_position(
         # makes unconditionally, and an exploration allocation is not exempt
         # from it just because it is not an edge estimate.
         frac = min(posture.seed_fraction, ceiling)
+        binding = ("exploration floor" if frac == posture.seed_fraction
+                   else "position ceiling")
     else:
         if posture is not None:
             mult = posture.kelly_multiplier
@@ -274,7 +288,10 @@ def size_position(
         # competence.assess's seed_fraction note).
         floor = getattr(posture, "seed_fraction", 0.0) if posture is not None else 0.0
         kelly_frac = 0.0 if full is None else full * mult
-        frac = min(max(kelly_frac, floor), ceiling)
+        frac = max(kelly_frac, floor)
+        binding = "Kelly" if kelly_frac >= floor else "exploration floor"
+        if frac > ceiling:
+            frac, binding = ceiling, "position ceiling"
     risk_budget = equity * frac
     per_contract_risk = abs(max_loss)
     contracts = int(risk_budget // per_contract_risk) if per_contract_risk > 0 else 0
@@ -288,7 +305,7 @@ def size_position(
     # ceiling still refuses anything genuinely too large for the account.
     if contracts < 1:
         if per_contract_risk <= ceiling * equity:
-            contracts = 1
+            contracts, binding = 1, "one contract (indivisible)"
         else:
             return SizingDecision(
                 0, 0.0, full, frac, adj,
@@ -321,7 +338,12 @@ def size_position(
                 f"against a {pct:.1%} cap (${pct * equity:,.0f}). Adding more means "
                 f"{subject}, not this trade, is the bet.",
             )
-        contracts = min(contracts, int(budget_left // per_contract_risk))
+        # Only claim the binding when the cap actually BITES. A cap that leaves
+        # more headroom than the size already asked for decided nothing, and
+        # recording it would report a limit that was never reached.
+        capped = int(budget_left // per_contract_risk)
+        if capped < contracts:
+            contracts, binding = capped, label
 
     actual = (contracts * per_contract_risk) / equity
     if posture is not None and not posture.uses_kelly:
@@ -356,7 +378,8 @@ def size_position(
                    f"whole-region probability)")
     return SizingDecision(
         contracts, actual, full, frac, adj,
-        f"stated {stated_confidence:.0%} -> calibration-adjusted {adj:.0%}; "
+        binding=binding,
+        reason=f"stated {stated_confidence:.0%} -> calibration-adjusted {adj:.0%}; "
         f"{payoff}; full Kelly {full:.3f}; {track}{warn}"
         + (f"; ${open_risk_usd:,.0f} already at risk in the book"
            f" (${same_name:,.0f} on {underlying.upper()})" if open_risk_usd else ""),

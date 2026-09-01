@@ -929,6 +929,10 @@ def build_size_position(
                         result="sized" if d.contracts > 0 else "no_position",
                         contracts=d.contracts, structure=structure_name,
                         fraction=round(d.fraction_of_equity, 5),
+                        # WHICH limit set the number, not just what the number
+                        # was (D-099). Without it a risk lever that moved an
+                        # inert constraint looked identical to one that worked.
+                        binding=d.binding,
                         payoff_ratio=match.payoff_ratio)
         return d.explain()
 
