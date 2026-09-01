@@ -14,15 +14,12 @@ export const resources = [
 	},
 	{
 		slug: 'system-architecture',
-		title: 'System Architecture',
+		title: 'The Trdrbot Loop',
 		description:
-			'Where the model sits, and how little of the system it is — the Sense → Think → Act → Learn pipeline over four memory stores, with the feedback path from Learn back into Think.',
-		// No embedSrc: this is one slide inside a 21-slide deck with its own
-		// slide-by-slide navigation - cramped and slightly odd inside a small
-		// iframe. Link straight to it instead (deck.html#architecture lands
-		// directly on the diagram, keyboard/TOC nav from there work as usual).
-		kind: 'reading',
+			'The whole system, explained from the top down. Click any stage of the Sense → Think → Act → Learn loop to open it, step through one real trade end to end — the actual thesis, strikes and exit rules — then find every one of the ~45 modules by name.',
+		kind: 'interactive',
 		icon: 'automate',
-		fullPageHref: '/deck.html#architecture'
+		embedSrc: '/resources/architecture-explorer.html',
+		fullPageHref: '/resources/architecture-explorer.html'
 	}
 ];

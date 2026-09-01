@@ -1,0 +1,899 @@
+<!doctype html>
+<!--
+  The Trdrbot Loop - the interactive architecture explorer (D-097 era, see
+  docs/dev_journals/2026-08-30_submission.md "The architecture map").
+
+  Self-hosted copy of the published artifact
+  https://claude.ai/code/artifact/99c8c3f2-bead-42fc-8ef1-cafd6ea92036
+  with the claude.ai artifact-viewer runtime stripped (it postMessages to a
+  parent shell that does not exist here, dynamic-imports /_runtime/*.js, and
+  intercepts link clicks) and a real <head> restored. Re-themed onto the
+  trdrbot design system by remapping its CSS custom properties only - the
+  markup, geometry and behaviour below are the artifact's own, unchanged.
+
+  Hosted at /resources/architecture-explorer.html by web/scripts/sync-static.mjs.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>The Trdrbot Loop · trdrbot</title>
+<meta name="description" content="An interactive walkthrough of trdrbot's architecture: the Sense/Think/Act/Learn loop, one real trade traced end to end, and every subsystem by name.">
+<meta name="theme-color" content="#F1F4EF" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#101816" media="(prefers-color-scheme: dark)">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,440;9..144,560;9..144,650&family=Public+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+</head>
+<body>
+<style>
+:root{
+  --bg:#F5F7F9; --surface:#FFFFFF; --ink:#1B2430; --muted:#5B6B7C;
+  --line:#D7E0E8; --accent:#0E6B8C; --accent-bg:#E3EEF2; --warn:#9C6414; --warn-bg:#F7EEDF;
+  --code-bg:#EDF1F4; --good:#146B52; --good-bg:#E4F0EA; --bad:#B23A2A; --bad-bg:#F7E8E4;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#11161B; --surface:#19212A; --ink:#E7EDF2; --muted:#93A4B4;
+    --line:#2A3945; --accent:#5FB8DA; --accent-bg:#1A2C36; --warn:#E0A855; --warn-bg:#312817;
+    --code-bg:#202A32; --good:#4FCBA0; --good-bg:#1A2E26; --bad:#E36A54; --bad-bg:#361F1B;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#11161B; --surface:#19212A; --ink:#E7EDF2; --muted:#93A4B4;
+  --line:#2A3945; --accent:#5FB8DA; --accent-bg:#1A2C36; --warn:#E0A855; --warn-bg:#312817;
+  --code-bg:#202A32; --good:#4FCBA0; --good-bg:#1A2E26; --bad:#E36A54; --bad-bg:#361F1B;
+}
+*{box-sizing:border-box}
+body{margin:0; background:var(--bg); color:var(--ink);
+  font-family:"Libre Franklin",system-ui,sans-serif; font-size:16.5px; line-height:1.65}
+main{max-width:58rem; margin:0 auto; padding:2.75rem 1.25rem 5rem; overflow-wrap:break-word}
+.eyebrow{font-family:"IBM Plex Mono",ui-monospace,monospace; font-size:.72rem;
+  letter-spacing:.14em; text-transform:uppercase; color:var(--accent); font-weight:600}
+h1{font-size:2.05rem; font-weight:700; line-height:1.2; margin:.35rem 0 .6rem; text-wrap:balance}
+h2{font-size:1.35rem; font-weight:700; margin:0 0 .4rem; text-wrap:balance}
+h3{font-size:1rem; font-weight:700; margin:1.35rem 0 .4rem}
+h4{font-size:.83rem; font-weight:700; margin:1.1rem 0 .35rem; letter-spacing:.06em;
+  text-transform:uppercase; color:var(--muted); font-family:"IBM Plex Mono",monospace}
+p{margin:.6rem 0}
+a{color:var(--accent)}
+code{font-family:"IBM Plex Mono",ui-monospace,monospace; font-size:.85em;
+  background:var(--code-bg); padding:.1em .38em; border-radius:3px}
+
+.lede{font-size:1.06rem; margin:0 0 1.4rem; max-width:44rem}
+.lede strong{font-weight:700}
+
+/* ---------- overview ---------- */
+.overview{background:var(--surface); border:1px solid var(--line); border-radius:12px;
+  padding:1.4rem 1.5rem; margin:0 0 2rem}
+.overview h2{font-size:1.1rem; margin-bottom:.5rem}
+.overview p{font-size:.98rem; margin:.5rem 0}
+.overview p:last-child{margin-bottom:0}
+.plain{border-left:3px solid var(--accent); padding-left:.95rem; margin:.9rem 0;
+  color:var(--ink)}
+
+/* ---------- diagrams ---------- */
+figure{margin:0 0 .5rem}
+.diagram-wrap{background:var(--surface); border:1px solid var(--line); border-radius:10px;
+  padding:1.15rem 1rem .75rem; overflow-x:auto}
+svg{display:block; width:100%; min-width:520px; height:auto}
+figcaption{font-size:.87rem; color:var(--muted); margin:.75rem 0 1.6rem; text-align:center;
+  max-width:46rem; margin-left:auto; margin-right:auto}
+
+.node rect{fill:var(--surface); stroke:currentColor; stroke-width:1.7; color:var(--ink)}
+.node{cursor:pointer}
+.node:hover rect{stroke:var(--accent); stroke-width:2.4}
+.node.active rect{stroke:var(--accent); stroke-width:2.8; fill:var(--accent-bg)}
+.node .n-title{font-family:"Libre Franklin",sans-serif; font-weight:700; font-size:18px;
+  fill:var(--ink); text-anchor:middle}
+.node .n-sub{font-family:"IBM Plex Mono",monospace; font-size:10.5px; fill:var(--muted);
+  text-anchor:middle}
+.node .n-open{font-family:"IBM Plex Mono",monospace; font-size:9.5px; fill:var(--accent);
+  text-anchor:middle; letter-spacing:.08em}
+.flow{stroke:var(--muted); stroke-width:1.7; fill:none}
+.flow-head{fill:var(--muted)}
+.loopline{stroke:var(--accent); stroke-width:1.7; fill:none}
+.loop-head{fill:var(--accent)}
+.spoke{stroke:var(--muted); stroke-width:1.2; stroke-dasharray:4,4; opacity:.65}
+.alabel{font-family:"IBM Plex Mono",monospace; font-size:10px; fill:var(--muted);
+  text-anchor:middle}
+.hub rect{fill:var(--accent-bg); stroke:var(--accent); stroke-width:1.7}
+.hub{cursor:pointer}
+.hub .h-title{font-family:"Libre Franklin",sans-serif; font-weight:700; font-size:16px;
+  fill:var(--accent); text-anchor:middle}
+.hub .h-store{font-family:"IBM Plex Mono",monospace; font-size:11px; fill:var(--ink);
+  text-anchor:middle}
+.hub .h-note{font-family:"IBM Plex Mono",monospace; font-size:9.5px; fill:var(--muted);
+  text-anchor:middle}
+.m-box{fill:var(--surface); stroke:currentColor; color:var(--ink); stroke-width:1.5}
+.m-title{font-family:"Libre Franklin",sans-serif; font-weight:700; font-size:14px;
+  fill:var(--ink); text-anchor:middle}
+.m-code{font-family:"IBM Plex Mono",monospace; font-weight:600; font-size:12.5px;
+  fill:var(--ink); text-anchor:middle}
+.m-sub{font-family:"IBM Plex Mono",monospace; font-size:10px; fill:var(--muted);
+  text-anchor:middle}
+.m-flow{stroke:var(--accent); stroke-width:1.7; fill:none}
+.m-head{fill:var(--accent)}
+.cell{stroke:var(--line); stroke-width:1.2}
+.cell-label{font-family:"Libre Franklin",sans-serif; font-size:13.5px; font-weight:600;
+  text-anchor:middle; fill:var(--ink)}
+.cell-head{font-family:"IBM Plex Mono",monospace; font-size:10.5px; fill:var(--muted);
+  text-anchor:middle; letter-spacing:.05em}
+
+.hint{font-family:"IBM Plex Mono",monospace; font-size:.79rem; color:var(--muted);
+  text-align:center; margin:-1rem 0 2rem}
+
+/* ---------- stage panels ---------- */
+.panel{display:none; background:var(--surface); border:1px solid var(--line);
+  border-top:3px solid var(--accent); border-radius:10px; padding:1.5rem 1.6rem 1.7rem;
+  margin-bottom:1.6rem; scroll-margin-top:1rem}
+.panel.open{display:block}
+.panel .kicker{font-family:"IBM Plex Mono",monospace; font-size:.71rem; letter-spacing:.1em;
+  text-transform:uppercase; color:var(--accent); font-weight:600; margin-bottom:.25rem}
+.panel .role{color:var(--muted); margin:0 0 1rem; font-size:.99rem}
+.eg{background:var(--good-bg); border-left:3px solid var(--good); padding:.75rem 1rem;
+  margin:.9rem 0; font-size:.93rem}
+.eg .tag{font-family:"IBM Plex Mono",monospace; font-size:.67rem; font-weight:600;
+  letter-spacing:.09em; text-transform:uppercase; color:var(--good); display:block;
+  margin-bottom:.25rem}
+.why{background:var(--accent-bg); border-left:3px solid var(--accent); padding:.75rem 1rem;
+  margin:.9rem 0; font-size:.93rem}
+.why .tag{font-family:"IBM Plex Mono",monospace; font-size:.67rem; font-weight:600;
+  letter-spacing:.09em; text-transform:uppercase; color:var(--accent); display:block;
+  margin-bottom:.25rem}
+.mods{display:flex; flex-wrap:wrap; gap:.4rem; margin:.5rem 0 0}
+.mods .m{font-family:"IBM Plex Mono",monospace; font-size:.76rem; background:var(--code-bg);
+  border:1px solid var(--line); border-radius:20px; padding:.2rem .65rem; color:var(--ink)}
+.mods .m b{font-weight:600; color:var(--accent)}
+
+/* ---------- worked example stepper ---------- */
+.stepper{background:var(--surface); border:1px solid var(--line); border-radius:12px;
+  padding:1.4rem 1.5rem 1.5rem; margin:.6rem 0 1.2rem}
+.step-nav{display:flex; align-items:center; gap:.6rem; flex-wrap:wrap; margin-bottom:1.1rem}
+.step-nav button{font-family:"IBM Plex Mono",monospace; font-size:.78rem; font-weight:600;
+  padding:.4rem .85rem; border-radius:6px; border:1px solid var(--line);
+  background:var(--bg); color:var(--ink); cursor:pointer}
+.step-nav button:hover:not(:disabled){border-color:var(--accent); color:var(--accent)}
+.step-nav button:disabled{opacity:.4; cursor:default}
+.step-dots{display:flex; gap:.3rem; margin-left:auto}
+.step-dots i{width:8px; height:8px; border-radius:50%; background:var(--line); display:block}
+.step-dots i.on{background:var(--accent)}
+.step{display:none}
+.step.on{display:block}
+.step .stage-tag{font-family:"IBM Plex Mono",monospace; font-size:.7rem; font-weight:600;
+  letter-spacing:.09em; text-transform:uppercase; color:var(--accent)}
+.step h3{margin:.2rem 0 .5rem; font-size:1.08rem}
+.step p{font-size:.97rem}
+.data{font-family:"IBM Plex Mono",monospace; font-size:.82rem; background:var(--code-bg);
+  border-radius:8px; padding:.8rem 1rem; margin:.8rem 0; line-height:1.85;
+  overflow-x:auto; white-space:pre}
+.quote{border-left:3px solid var(--muted); padding-left:1rem; margin:.9rem 0; font-style:italic;
+  color:var(--ink); font-size:.95rem}
+
+/* ---------- subsystem reference ---------- */
+.sub-group{margin-bottom:1.4rem}
+.sub-group h4{margin-top:0}
+table.mods-t{width:100%; border-collapse:collapse; font-size:.92rem}
+table.mods-t td{padding:.42rem .6rem .42rem 0; border-bottom:1px solid var(--line);
+  vertical-align:top}
+table.mods-t tr:last-child td{border-bottom:none}
+table.mods-t td.f{font-family:"IBM Plex Mono",monospace; font-size:.82rem; color:var(--accent);
+  white-space:nowrap; width:11.5rem; font-weight:500}
+table.mods-t td.d{color:var(--muted)}
+
+.foot{margin-top:2.5rem; padding-top:1rem; border-top:1px solid var(--line);
+  font-family:"IBM Plex Mono",monospace; font-size:.73rem; color:var(--muted); line-height:1.9}
+</style>
+
+<style>
+/* ══════════════════════════════════════════════════════════════════════
+   Brand alignment — docs/design_system.md.
+   The explorer is entirely token-driven (even its SVG fills are var()),
+   so re-theming it is a token remap plus the type faces: not one line of
+   its markup, geometry or behaviour changes. LEDGER register — Fraunces
+   display, Public Sans body, IBM Plex Mono data, sage accent, sharp
+   edges — because this is a document being AUDITED, not a pitch.
+   ══════════════════════════════════════════════════════════════════════ */
+:root{
+  color-scheme:light;
+  --bg:#F1F4EF; --surface:#FFFFFF; --ink:#17242B; --muted:#4B5D59;
+  --line:#D8E0D9; --accent:#1F6F5C; --accent-bg:#E4EFEA;
+  --warn:#8A6A16; --warn-bg:#F3ECD3; --code-bg:#E8EDE7;
+  --good:#1F6F5C; --good-bg:#E4EFEA; --bad:#B23A2E; --bad-bg:#F7E6E3;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    color-scheme:dark;
+    --bg:#101816; --surface:#172220; --ink:#E8EEEA; --muted:#9FB0AA;
+    --line:#293530; --accent:#57C7A7; --accent-bg:#17332B;
+    --warn:#E0BB5C; --warn-bg:#332C16; --code-bg:#0B110F;
+    --good:#57C7A7; --good-bg:#17332B; --bad:#E5786A; --bad-bg:#3A2321;
+  }
+}
+:root[data-theme="dark"]{
+  color-scheme:dark;
+  --bg:#101816; --surface:#172220; --ink:#E8EEEA; --muted:#9FB0AA;
+  --line:#293530; --accent:#57C7A7; --accent-bg:#17332B;
+  --warn:#E0BB5C; --warn-bg:#332C16; --code-bg:#0B110F;
+  --good:#57C7A7; --good-bg:#17332B; --bad:#E5786A; --bad-bg:#3A2321;
+}
+
+/* Type. h3/h4 are left alone: h3 inherits the body face (design system
+   keeps h3 in the UI face, not the editorial one) and h4 is already mono. */
+body{font-family:"Public Sans",-apple-system,"Segoe UI",Roboto,sans-serif}
+h1,h2{font-family:"Fraunces",Georgia,"Times New Roman",serif; font-weight:560}
+h1{font-weight:650}
+/* Diagram labels are UI chrome, so they take the UI face, not the serif. */
+.node .n-title,.hub .h-title,.m-title,.cell-label{
+  font-family:"Public Sans",-apple-system,"Segoe UI",Roboto,sans-serif}
+
+/* Sharp edges — the ledger register reads as precise because its edges are.
+   Pills (.mods .m) keep their radius: the system calls for pill badges. */
+.overview,.diagram-wrap,.panel,.stepper,.data,.step-nav button{border-radius:4px}
+
+/* The attribution 2×2 is the single most load-bearing diagram here, and it
+   encodes THREE states by tint: reinforce (good), luck (bad), and a neutral
+   "informative" pair for the two loss cells. The source palette had a
+   separate accent and good; this one deliberately has a single signature
+   colour, so those two would collapse into one tint and the grid would lose
+   a distinction it is entirely about. The loss cells therefore take the
+   sunk/neutral tone instead — which also matches how the site's own
+   Attribution2x2 component renders the same four cells. */
+rect.cell[fill="var(--accent-bg)"]{fill:var(--code-bg)}
+</style>
+
+<main>
+<span class="eyebrow">trdrbot &middot; how the system works</span>
+<h1>The Trdrbot Loop</h1>
+<p class="lede">An autonomous options-trading agent, explained from the top down — the loop, then
+each stage, then one real trade traced end to end, then every subsystem by name.</p>
+
+<div class="overview">
+<h2>Start here: what this actually is</h2>
+<p>trdrbot is a program that wakes up every 60 seconds, looks at the market and the news, and
+occasionally decides to buy or sell an options position through a broker — on its own, with no
+human in the loop. It runs on a <strong>paper trading account</strong>: real market data,
+simulated money.</p>
+<div class="plain">
+<p style="margin-top:0"><strong>The one idea everything else follows from.</strong> Most trading
+bots score themselves on profit. Over a single week, profit is mostly luck — we measured it: an
+agent with a genuine skill edge only beats a coin flip about 69% of the time over 20 trades. So a
+bot that learns from profit alone will happily learn superstitions.</p>
+<p style="margin-bottom:0">trdrbot instead separates two questions that profit blurs together:
+<strong>"was my view of the world right?"</strong> and <strong>"was the trade I built to express
+it right?"</strong> It scores those separately — and when it makes money on a view that turned
+out to be <em>wrong</em>, it deliberately learns nothing from it, and that trade is barred from
+earning it permission to bet bigger.</p>
+</div>
+<p>Everything below is machinery in service of that: three different ways of coming up with an
+idea, arithmetic that refuses to flatter a bad one, and a scoring loop that only counts evidence
+that actually teaches something.</p>
+</div>
+
+<h2>The loop at a glance</h2>
+<p>Four stages run in a fixed order, over and over. The expensive thinking happens rarely; the
+cheap safety checks happen constantly.</p>
+
+<figure>
+<div class="diagram-wrap">
+<svg viewBox="0 0 1040 520" role="img" aria-label="The trdrbot loop: Sense feeds Think, which feeds Act, which feeds Learn, and what Learn discovers flows back to shape the next cycle. All four stages read and write a shared Remember layer holding Alpaca, Journal, Wiki and elfmem.">
+  <defs>
+    <marker id="ah" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" class="flow-head"/>
+    </marker>
+    <marker id="ahAcc" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" class="loop-head"/>
+    </marker>
+  </defs>
+
+  <path d="M 925 80 C 925 30, 115 30, 115 80" class="loopline" marker-end="url(#ahAcc)"/>
+  <text x="520" y="24" class="alabel" fill="var(--accent)">what it learned shapes the next cycle</text>
+
+  <line x1="115" y1="210" x2="115" y2="380" class="spoke"/>
+  <line x1="385" y1="210" x2="385" y2="380" class="spoke"/>
+  <line x1="655" y1="210" x2="655" y2="380" class="spoke"/>
+  <line x1="925" y1="210" x2="925" y2="380" class="spoke"/>
+
+  <line x1="213" y1="145" x2="287" y2="145" class="flow" marker-end="url(#ah)"/>
+  <text x="250" y="132" class="alabel">what it saw</text>
+  <line x1="483" y1="145" x2="557" y2="145" class="flow" marker-end="url(#ah)"/>
+  <text x="520" y="132" class="alabel">one action</text>
+  <line x1="753" y1="145" x2="827" y2="145" class="flow" marker-end="url(#ah)"/>
+  <text x="790" y="132" class="alabel">outcomes</text>
+
+  <g class="node" data-target="sense" tabindex="0" role="button" aria-label="Open the Sense stage">
+    <rect x="25" y="80" width="180" height="130" rx="9"/>
+    <text x="115" y="122" class="n-title">SENSE</text>
+    <text x="115" y="146" class="n-sub">look at the world</text>
+    <text x="115" y="164" class="n-sub">no AI · every 60s</text>
+    <text x="115" y="192" class="n-open">CLICK TO OPEN</text>
+  </g>
+
+  <g class="node" data-target="think" tabindex="0" role="button" aria-label="Open the Think stage">
+    <rect x="295" y="80" width="180" height="130" rx="9"/>
+    <text x="385" y="122" class="n-title">THINK</text>
+    <text x="385" y="146" class="n-sub">form + price a plan</text>
+    <text x="385" y="164" class="n-sub">AI · every 15 min</text>
+    <text x="385" y="192" class="n-open">CLICK TO OPEN</text>
+  </g>
+
+  <g class="node" data-target="act" tabindex="0" role="button" aria-label="Open the Act stage">
+    <rect x="565" y="80" width="180" height="130" rx="9"/>
+    <text x="655" y="122" class="n-title">ACT</text>
+    <text x="655" y="146" class="n-sub">place + verify</text>
+    <text x="655" y="164" class="n-sub">no AI · every 60s</text>
+    <text x="655" y="192" class="n-open">CLICK TO OPEN</text>
+  </g>
+
+  <g class="node" data-target="learn" tabindex="0" role="button" aria-label="Open the Learn stage">
+    <rect x="835" y="80" width="180" height="130" rx="9"/>
+    <text x="925" y="122" class="n-title">LEARN</text>
+    <text x="925" y="146" class="n-sub">guard + score</text>
+    <text x="925" y="164" class="n-sub">no AI · every 60s</text>
+    <text x="925" y="192" class="n-open">CLICK TO OPEN</text>
+  </g>
+
+  <g class="node hub" data-target="remember" tabindex="0" role="button" aria-label="Open the Remember layer">
+    <rect x="25" y="380" width="990" height="95" rx="9"/>
+    <text x="520" y="408" class="h-title">REMEMBER — the shared memory</text>
+    <text x="149" y="435" class="h-store">Alpaca</text>
+    <text x="396" y="435" class="h-store">Journal</text>
+    <text x="644" y="435" class="h-store">Wiki</text>
+    <text x="891" y="435" class="h-store">elfmem</text>
+    <text x="520" y="459" class="h-note">four stores, four different questions — every stage reads and writes here</text>
+  </g>
+</svg>
+</div>
+</figure>
+<p class="hint">↑ click any stage to open it — or press Tab, then Enter</p>
+
+<!-- ===================== SENSE ===================== -->
+<section id="panel-sense" class="panel">
+  <div class="kicker">Stage 1 of 4 · runs every 60 seconds · no AI</div>
+  <h2>Sense — look at the world</h2>
+  <p class="role">Collect information and compute every number that doesn't need judgement.</p>
+
+  <h4>How it works</h4>
+  <p>A <em>sensor</em> is a declared source of information — Alpaca's market data, Alpaca's news
+  feed, Polymarket's prediction-market odds. Each declares how often it runs, how much to trust
+  it, and how to filter what it finds. Everything they return lands in a single inbox as
+  typed items. In parallel, pure-Python analytics recomputes the state of the book: current
+  prices, per-position Greeks, and total portfolio exposure.</p>
+
+  <div class="eg"><span class="tag">Example</span>
+  At 17:32 on 28 Aug, the Alpaca news sensor picked up coverage of Fed Chair Warsh's Jackson Hole
+  speech and wrote it into the inbox. At the same tick, analytics recorded SPY at
+  <strong>769.05</strong> with implied volatility at <strong>10%</strong>. Neither step involved
+  an AI model — one is a fetch, the other is arithmetic.</div>
+
+  <div class="why"><span class="tag">Why it's built this way</span>
+  Adding a new information source should never mean rewriting the pipeline — it's one registry
+  entry. And if a source is down or slow, that sensor is skipped and the rest of the tick
+  continues: <strong>one broken feed can never stop the system from managing open positions.</strong></div>
+
+  <h4>The actual subsystems</h4>
+  <div class="mods">
+    <span class="m"><b>sensors</b> registry</span>
+    <span class="m"><b>polymarket</b> odds</span>
+    <span class="m"><b>news_extract</b> structuring</span>
+    <span class="m"><b>analytics</b> book state</span>
+    <span class="m"><b>market_stats</b> technicals</span>
+    <span class="m"><b>inbox</b> queue</span>
+  </div>
+</section>
+
+<!-- ===================== THINK ===================== -->
+<section id="panel-think" class="panel">
+  <div class="kicker">Stage 2 of 4 · runs every ~15 minutes · the only routine AI cost</div>
+  <h2>Think — form a plan and price it</h2>
+  <p class="role">Turn information into a falsifiable thesis, then into a specific, sized trade —
+  or, very often, into a documented decision to do nothing.</p>
+
+  <h3>Part 1 — three ways to have an idea</h3>
+  <p>Three independent generators propose trade ideas. They exist separately because each is
+  blind in a different way, and all three feed one shared inbox with one shared admission gate.</p>
+
+  <figure>
+  <div class="diagram-wrap">
+  <svg viewBox="0 0 760 300" role="img" aria-label="Research, Discovery and Muse each generate theses independently and all three converge into one inbox governed by a single admission gate.">
+    <defs>
+      <marker id="ah2" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse">
+        <path d="M0,0 L10,5 L0,10 z" class="m-head"/>
+      </marker>
+    </defs>
+    <rect class="m-box" x="25" y="20" width="220" height="118" rx="8"/>
+    <text x="135" y="52" class="m-title">Research</text>
+    <text x="135" y="76" class="m-sub">top-down · daily</text>
+    <text x="135" y="94" class="m-sub">regime + news + odds</text>
+    <text x="135" y="112" class="m-sub">on a fixed watchlist</text>
+
+    <rect class="m-box" x="270" y="20" width="220" height="118" rx="8"/>
+    <text x="380" y="52" class="m-title">Discovery</text>
+    <text x="380" y="76" class="m-sub">bottom-up</text>
+    <text x="380" y="94" class="m-sub">the news names a</text>
+    <text x="380" y="112" class="m-sub">company, gates filter</text>
+
+    <rect class="m-box" x="515" y="20" width="220" height="118" rx="8"/>
+    <text x="625" y="52" class="m-title">Muse</text>
+    <text x="625" y="76" class="m-sub">deliberate randomness</text>
+    <text x="625" y="94" class="m-sub">two unrelated ideas,</text>
+    <text x="625" y="112" class="m-sub">forced together</text>
+
+    <line x1="135" y1="138" x2="330" y2="210" class="m-flow" marker-end="url(#ah2)"/>
+    <line x1="380" y1="138" x2="380" y2="210" class="m-flow" marker-end="url(#ah2)"/>
+    <line x1="625" y1="138" x2="430" y2="210" class="m-flow" marker-end="url(#ah2)"/>
+
+    <rect class="m-box" x="270" y="215" width="220" height="62" rx="8"
+          fill="var(--accent-bg)" stroke="var(--accent)"/>
+    <text x="380" y="242" class="m-title" fill="var(--accent)">one inbox</text>
+    <text x="380" y="262" class="m-sub">one gate · no favourites</text>
+  </svg>
+  </div>
+  <figcaption>Research can only find what its watchlist points at. Discovery can only find what's
+  in the news. The Muse exists to find what neither would ever look for.</figcaption>
+  </figure>
+
+  <div class="eg"><span class="tag">Example — how the Muse works</span>
+  It picks two unrelated concepts from the system's own knowledge base, adds recent news, and
+  forces the question <em>"if this is true, who does it hurt or help three steps later?"</em>
+  Every candidate it invents must then survive a deterministic gauntlet — real price history, a
+  liquidity check, a probability sanity check — before it's allowed anywhere near a decision.
+  Only the top 2 per run survive.</div>
+
+  <h3>Part 2 — inside one decision</h3>
+  <p>When the decide cycle runs, the AI's job is deliberately narrow: <strong>state a thesis,
+  propose at least two genuinely different ways to trade it, and state an honest
+  probability.</strong> Everything after that is arithmetic it doesn't get a vote on.</p>
+
+  <figure>
+  <div class="diagram-wrap">
+  <svg viewBox="0 0 800 165" role="img" aria-label="The three tools of a decision in sequence: simulate_experiments prices the candidate structures, size_position computes how many contracts, and record_position writes the exit rules.">
+    <defs>
+      <marker id="ah3" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse">
+        <path d="M0,0 L10,5 L0,10 z" class="m-head"/>
+      </marker>
+    </defs>
+    <rect class="m-box" x="20" y="30" width="230" height="100" rx="8"/>
+    <text x="135" y="60" class="m-code">simulate_experiments</text>
+    <text x="135" y="84" class="m-sub">prices every candidate</text>
+    <text x="135" y="102" class="m-sub">facts vs. estimates,</text>
+    <text x="135" y="120" class="m-sub">costs charged upfront</text>
+
+    <line x1="250" y1="80" x2="281" y2="80" class="m-flow" marker-end="url(#ah3)"/>
+
+    <rect class="m-box" x="285" y="30" width="230" height="100" rx="8"/>
+    <text x="400" y="60" class="m-code">size_position</text>
+    <text x="400" y="84" class="m-sub">how many contracts —</text>
+    <text x="400" y="102" class="m-sub">Kelly, shrunk by its</text>
+    <text x="400" y="120" class="m-sub">own track record</text>
+
+    <line x1="515" y1="80" x2="546" y2="80" class="m-flow" marker-end="url(#ah3)"/>
+
+    <rect class="m-box" x="550" y="30" width="230" height="100" rx="8"/>
+    <text x="665" y="60" class="m-code">record_position</text>
+    <text x="665" y="84" class="m-sub">writes the exit rules</text>
+    <text x="665" y="102" class="m-sub">and locks the thesis</text>
+    <text x="665" y="120" class="m-sub">in, to be scored later</text>
+  </svg>
+  </div>
+  <figcaption>The model supplies judgement. The code supplies every number.</figcaption>
+  </figure>
+
+  <div class="why"><span class="tag">Why "at least two structures"</span>
+  If the agent could simulate one idea and stop, that's just a slower way of deciding first and
+  justifying afterwards. Requiring a genuine comparison forces the choice to actually happen.</div>
+
+  <h4>The actual subsystems</h4>
+  <div class="mods">
+    <span class="m"><b>research</b> top-down</span>
+    <span class="m"><b>discovery</b> news-led</span>
+    <span class="m"><b>muse</b> collision</span>
+    <span class="m"><b>opportunity</b> the gate</span>
+    <span class="m"><b>experiments</b> compare</span>
+    <span class="m"><b>optmath</b> options maths</span>
+    <span class="m"><b>sizing</b> Kelly</span>
+    <span class="m"><b>competence</b> size ladder</span>
+    <span class="m"><b>llm</b> model gateway</span>
+  </div>
+</section>
+
+<!-- ===================== ACT ===================== -->
+<section id="panel-act" class="panel">
+  <div class="kicker">Stage 3 of 4 · reconcile every 60s · orders only on a decision</div>
+  <h2>Act — place the order, then verify reality</h2>
+  <p class="role">Submit through Alpaca, then continuously check that what we think we own
+  matches what the broker says we own.</p>
+
+  <h4>How it works</h4>
+  <p>Orders go through the Alpaca MCP server — one connection shared for a whole tick rather than
+  reopened for every call. Every order carries an ID computed deterministically from the decision
+  that caused it, so if the process crashes and retries, it resubmits <em>the same order</em>
+  instead of accidentally opening a second position. Then, every single tick, the reconciler
+  diffs the broker's actual holdings against trdrbot's own records.</p>
+
+  <div class="eg"><span class="tag">Example</span>
+  The SPY order was submitted at 17:34. Seven minutes later, reconciliation confirmed the legs
+  were really there and stamped the position <code>verified by trdrbot/reconcile</code> — the
+  position went from "we think we placed this" to "the broker agrees this exists."</div>
+
+  <div class="why"><span class="tag">Why reconcile runs FIRST, before anything else</span>
+  Options can be assigned or expire without asking you. If the exit-rule checker ran first, it
+  could act on a position the broker had already closed hours ago — selling something you no
+  longer own. Running reconciliation first means <strong>the ordering itself prevents the bug</strong>,
+  rather than a check bolted on to catch it.</div>
+
+  <h4>The actual subsystems</h4>
+  <div class="mods">
+    <span class="m"><b>mcp_client</b> Alpaca link</span>
+    <span class="m"><b>tool_guard</b> order IDs</span>
+    <span class="m"><b>reconcile</b> broker truth</span>
+    <span class="m"><b>positions</b> status machine</span>
+    <span class="m"><b>lock</b> one tick at a time</span>
+  </div>
+</section>
+
+<!-- ===================== LEARN ===================== -->
+<section id="panel-learn" class="panel">
+  <div class="kicker">Stage 4 of 4 · guards every 60s · scores at the thesis horizon</div>
+  <h2>Learn — guard the position, then judge it honestly</h2>
+  <p class="role">Enforce the exits the agent promised, and afterwards work out what — if
+  anything — the outcome actually taught.</p>
+
+  <h3>Part 1 — the guard</h3>
+  <p>When the agent opens a position it must also write its own exit conditions. A deterministic
+  evaluator then checks them every 60 seconds — far faster than the AI runs — and closes the
+  position when one triggers. Crucially, thesis-level stops watch <strong>the underlying stock
+  price</strong>, not the option's own quoted price, which on a thin option can swing wildly for
+  no real reason.</p>
+
+  <div class="eg"><span class="tag">Example — the live SPY position's five rules</span>
+  Stop loss at −65% · profit target at +140% · close on expiry day · and a thesis stop: <strong>close
+  if SPY trades above 776</strong> — the exact level the agent said would prove its view wrong.
+  Plus one rule it can't override: close if a leg disappears at the broker.</div>
+
+  <h3>Part 2 — the scoring that makes profit honest</h3>
+  <p>At the thesis's own stated deadline — <em>not</em> when the position closes — the system asks
+  two separate questions, and the four possible answers are treated very differently.</p>
+
+  <figure>
+  <div class="diagram-wrap">
+  <svg viewBox="0 0 560 400" role="img" aria-label="A two by two grid. Thesis held and profit: reinforce both view and structure. Thesis held and loss: the view was fine, the structure or sizing was wrong. Thesis failed and loss: correct the view. Thesis failed but profit: learn nothing, this was luck.">
+    <text x="255" y="20" class="cell-head">THESIS HELD</text>
+    <text x="445" y="20" class="cell-head">THESIS FAILED</text>
+    <text x="72" y="130" class="cell-head" transform="rotate(-90 72 130)">PROFIT</text>
+    <text x="72" y="290" class="cell-head" transform="rotate(-90 72 290)">LOSS</text>
+
+    <rect class="cell" x="160" y="36" width="190" height="160" fill="var(--good-bg)"/>
+    <text x="255" y="105" class="cell-label">right, and</text>
+    <text x="255" y="126" class="cell-label">well-built</text>
+    <text x="255" y="152" class="cell-head">reinforce both</text>
+
+    <rect class="cell" x="350" y="36" width="190" height="160" fill="var(--bad-bg)"/>
+    <text x="445" y="105" class="cell-label">LUCK</text>
+    <text x="445" y="126" class="cell-label">learn nothing</text>
+    <text x="445" y="152" class="cell-head">cannot earn size</text>
+
+    <rect class="cell" x="160" y="196" width="190" height="160" fill="var(--accent-bg)"/>
+    <text x="255" y="265" class="cell-label">view was fine</text>
+    <text x="255" y="286" class="cell-label">build was not</text>
+    <text x="255" y="312" class="cell-head">fix the structure</text>
+
+    <rect class="cell" x="350" y="196" width="190" height="160" fill="var(--accent-bg)"/>
+    <text x="445" y="265" class="cell-label">honest miss</text>
+    <text x="445" y="286" class="cell-label">faithful build</text>
+    <text x="445" y="312" class="cell-head">correct the view</text>
+  </svg>
+  </div>
+  <figcaption>The top-right cell is the whole point: a profit on a view that turned out wrong
+  teaches nothing, and is excluded from what earns the agent permission to trade bigger.</figcaption>
+  </figure>
+
+  <div class="why"><span class="tag">Why size has to be earned</span>
+  Position size is set by a four-tier ladder. Climbing it needs resolved theses, demonstrated
+  calibration (when it says 70%, does it happen 70% of the time?), and — the unusual part — a
+  high <strong>attribution rate</strong>: proof the agent could explain <em>why</em> it was right.
+  A losing streak demotes it immediately.</div>
+
+  <h4>The actual subsystems</h4>
+  <div class="mods">
+    <span class="m"><b>exit_rules</b> the guard</span>
+    <span class="m"><b>attribution</b> view vs build</span>
+    <span class="m"><b>calibration</b> Brier score</span>
+    <span class="m"><b>ledger</b> pre-registration</span>
+    <span class="m"><b>learn</b> credit assignment</span>
+    <span class="m"><b>coach</b> self-improvement</span>
+    <span class="m"><b>health</b> silent-failure alarm</span>
+  </div>
+</section>
+
+<!-- ===================== REMEMBER ===================== -->
+<section id="panel-remember" class="panel">
+  <div class="kicker">The shared layer · every stage reads and writes it</div>
+  <h2>Remember — four stores, four different questions</h2>
+  <p class="role">Deliberately not one database doing four jobs, because the four jobs have
+  genuinely different rules.</p>
+
+  <table class="mods-t">
+    <tr><td class="f">Alpaca</td><td class="d"><strong>"What do I actually hold?"</strong> The broker is the
+      only authority on this. Real-time, external, and always trusted over our own records.</td></tr>
+    <tr><td class="f">Journal</td><td class="d"><strong>"What happened, in order?"</strong> An append-only log,
+      never edited. Every decision is written here <em>before</em> the order is placed, so a crash
+      can always be reconstructed.</td></tr>
+    <tr><td class="f">Wiki</td><td class="d"><strong>"What's the story?"</strong> Human-readable pages: one per
+      position with its full thesis, plus market context and accumulated lessons.</td></tr>
+    <tr><td class="f">elfmem</td><td class="d"><strong>"What do I know that matters right now?"</strong> Evolving
+      memory whose confidence in each stored pattern moves with real outcomes.</td></tr>
+  </table>
+
+  <div class="why"><span class="tag">Why this matters</span>
+  Every tick is a cold start — nothing is held in memory between runs. Continuity lives entirely
+  in these files, which is why the system can be killed and restarted mid-week and lose nothing
+  but the seconds it was down.</div>
+
+  <h4>The actual subsystems</h4>
+  <div class="mods">
+    <span class="m"><b>journal</b> event log</span>
+    <span class="m"><b>wiki</b> narrative store</span>
+    <span class="m"><b>elfmem_adapter</b> memory</span>
+    <span class="m"><b>constitution</b> principles</span>
+    <span class="m"><b>lessons</b> seeded knowledge</span>
+    <span class="m"><b>store</b> atomic writes</span>
+  </div>
+</section>
+
+<!-- ===================== WORKED EXAMPLE ===================== -->
+<h2 style="margin-top:2.6rem">A worked example: one real trade, start to finish</h2>
+<p>This is an actual position the system opened on 28 August 2026 — real numbers, taken from its
+own records. Step through it to see all four stages do their job.</p>
+
+<div class="stepper">
+  <div class="step-nav">
+    <button id="prev" type="button">← Back</button>
+    <button id="next" type="button">Next →</button>
+    <span id="stepcount" style="font-family:'IBM Plex Mono',monospace; font-size:.78rem; color:var(--muted)"></span>
+    <span class="step-dots" id="dots"></span>
+  </div>
+
+  <div class="step on" data-step="1">
+    <span class="stage-tag">Sense · 17:32</span>
+    <h3>Something happens in the world</h3>
+    <p>The news sensor picks up coverage of Fed Chair Warsh's Jackson Hole speech. Fed funds
+    futures have flipped to price a September rate <em>hike</em> as more likely than a hold —
+    roughly 60%. Gold, Bitcoin and long-dated Treasuries all sell off.</p>
+    <p>At the same moment, analytics records the market state — no AI involved, just arithmetic.</p>
+    <div class="data">SPY spot      769.05
+implied vol   10%
+recent run    +5.7% over 21 days</div>
+  </div>
+
+  <div class="step" data-step="2">
+    <span class="stage-tag">Think · the thesis</span>
+    <h3>The agent forms a falsifiable claim</h3>
+    <p>It notices a mismatch: everything <em>else</em> repriced for a hike, but SPY is only −0.3%
+    after touching 775. Its view is that equities have barely discounted the news.</p>
+    <div class="quote">"I expect modest multiple compression, SPY drifting to ~758–765 by 9/3.
+    INVALIDATED if SPY makes new highs above 776 — that says the tape has decided a
+    hike-on-strength is fine, and the premise is dead."</div>
+    <p>Note what makes this a <em>thesis</em> and not a hunch: it names a target range, a
+    deadline, and — most importantly — the exact price that would prove it wrong.</p>
+    <div class="data">claim band    745 – 766
+horizon       2026-09-03
+expected move -0.9%
+invalidation  SPY above 776</div>
+  </div>
+
+  <div class="step" data-step="3">
+    <span class="stage-tag">Think · pricing</span>
+    <h3>Several ways to trade it, priced honestly</h3>
+    <p>The agent must propose at least two genuinely different structures. Each is priced with
+    <strong>trading costs charged up front</strong>, not after — because at this scale the cost of
+    getting in and out is often the same size as the entire edge.</p>
+    <p>The winner is a <em>bear put spread</em>: buy the SPY 766 put, sell the 758 put, both
+    expiring 3 September. Buying one and selling the other caps both the cost and the maximum
+    possible loss.</p>
+    <div class="data">structure     SPY 766/758 put spread
+breakeven     764.33  (−0.6%)
+payoff        2.85 : 1  after real costs</div>
+  </div>
+
+  <div class="step" data-step="4">
+    <span class="stage-tag">Think · sizing</span>
+    <h3>How big? Not the agent's choice</h3>
+    <p>The agent states its honest probability; the code decides the size. That probability is
+    <em>shrunk toward its measured track record</em> — an agent that has not yet proven itself
+    gets a fraction of what its confidence would otherwise justify.</p>
+    <p>The result is checked against three caps at once: this position, this underlying, and the
+    whole book — all measured in <strong>dollars that can actually be lost</strong>.</p>
+    <div class="data">contracts     13
+max loss      $2,171   ← the true worst case, fixed at entry
+theta         −$182 / day
+vega          +$218 per vol point</div>
+  </div>
+
+  <div class="step" data-step="5">
+    <span class="stage-tag">Act · execution</span>
+    <h3>Placed, then verified against the broker</h3>
+    <p>The order goes out through Alpaca's MCP server at 17:34, tagged with an ID derived from
+    the decision itself. The decision was written to the journal <em>before</em> the order was
+    sent — so if the process died mid-flight, a restart would find the record and resume the
+    same order rather than open a second one.</p>
+    <p>Seven minutes later, reconciliation confirms the broker really shows both legs.</p>
+    <div class="data">17:34:00   order submitted
+17:39:23   verified by trdrbot/reconcile
+status     open  (broker agrees)</div>
+  </div>
+
+  <div class="step" data-step="6">
+    <span class="stage-tag">Learn · the guard</span>
+    <h3>Five rules now watch it, every 60 seconds</h3>
+    <p>The agent wrote these itself at entry. From this point they run without it — no AI call
+    needed to close a position that has gone wrong.</p>
+    <div class="data">stop loss        −65%
+profit target   +140%
+time stop        close on expiry day
+thesis stop      SPY above 776   ← the invalidation level
+system rule      close if a leg vanishes at the broker</div>
+    <p>The thesis stop is the interesting one: it watches <strong>SPY itself</strong>, not the
+    option's price. The agent said 776 would prove it wrong, so 776 is what gets watched.</p>
+  </div>
+
+  <div class="step" data-step="7">
+    <span class="stage-tag">Learn · the verdict</span>
+    <h3>On 3 September, two separate questions</h3>
+    <p>At the thesis's own deadline — not when the trade closed — the system asks:</p>
+    <p><strong>1. Was the view right?</strong> Did SPY actually land between 745 and 766?
+    That's a yes/no about the world, and it's the question that moves the calibration score.</p>
+    <p><strong>2. Was the structure right?</strong> Given what the market did, was a 766/758 put
+    spread a good way to express it?</p>
+    <p>If it made money but SPY finished at 790, the answer is: <em>this was luck.</em> The system
+    records that plainly, learns nothing from it, and that trade cannot count toward earning the
+    right to trade bigger.</p>
+    <div class="data">at horizon    2026-09-03
+scored on     did the BAND hold, not did it profit
+feeds         calibration · attribution rate · the size ladder</div>
+  </div>
+</div>
+
+<div class="why" style="margin-bottom:2.4rem"><span class="tag">And the trades it turns down</span>
+Most of what the agent does is decline. Here it is refusing a tempting-looking credit spread,
+in its own words from a live run:
+<div class="quote" style="margin-bottom:0">"Both negative after costs, so I stopped before
+size_position. The call credit spread is exactly the trap: collect $51 to risk $449 needs ~90%
+accuracy to break even […] Call-side IV is 7.4% vs put-side 16.5% — selling upside calls here
+means selling the cheap wing of a heavily skewed surface into an earnings print."</div>
+</div>
+
+<!-- ===================== SUBSYSTEM REFERENCE ===================== -->
+<h2>Every subsystem, by name</h2>
+<p>The concepts above map onto real modules. This is the whole system — roughly 45 modules,
+grouped by the stage they serve.</p>
+
+<div class="sub-group">
+<h4>Sense — gather and compute</h4>
+<table class="mods-t">
+  <tr><td class="f">sensors</td><td class="d">The registry of information sources. Adding one is an entry, not new code.</td></tr>
+  <tr><td class="f">polymarket</td><td class="d">Prediction-market odds — crowd probabilities, free and unauthenticated.</td></tr>
+  <tr><td class="f">news_extract</td><td class="d">Turns raw headlines into dense structured signal with citations.</td></tr>
+  <tr><td class="f">evidence</td><td class="d">The shared "what do I look at first" gatherer used by all three thesis sources.</td></tr>
+  <tr><td class="f">analytics</td><td class="d">Portfolio state, per-position Greeks, beta-weighted book exposure.</td></tr>
+  <tr><td class="f">market_stats</td><td class="d">Technicals, realized volatility, and a bootstrap Monte Carlo from real history.</td></tr>
+  <tr><td class="f">inbox</td><td class="d">The file queue everything lands in — also the system's main testing seam.</td></tr>
+</table>
+</div>
+
+<div class="sub-group">
+<h4>Think — decide</h4>
+<table class="mods-t">
+  <tr><td class="f">research</td><td class="d">Daily top-down cycle: regime → company dossiers → falsifiable opportunities.</td></tr>
+  <tr><td class="f">discovery</td><td class="d">The news nominates companies; a deterministic gauntlet filters before any write-up.</td></tr>
+  <tr><td class="f">muse</td><td class="d">Creative collision — unrelated concepts forced together, then adversarially gated.</td></tr>
+  <tr><td class="f">opportunity</td><td class="d">The single admission gate all three sources must pass through.</td></tr>
+  <tr><td class="f">experiments</td><td class="d">Thesis → candidate structures → ranked, comparable results.</td></tr>
+  <tr><td class="f">optmath</td><td class="d">Options maths, split hard into exact facts vs. modelled estimates.</td></tr>
+  <tr><td class="f">sizing</td><td class="d">Kelly on the conditional payoff, shrunk by measured calibration.</td></tr>
+  <tr><td class="f">competence</td><td class="d">The four-tier ladder: size is earned by resolved, explicable results.</td></tr>
+  <tr><td class="f">local_tools</td><td class="d">The three tools the agent actually calls: simulate, size, record.</td></tr>
+  <tr><td class="f">llm</td><td class="d">Model gateway with an ordered fallback chain across providers.</td></tr>
+  <tr><td class="f">compact</td><td class="d">Shrinks heavy tool results before they ever reach the model's context.</td></tr>
+  <tr><td class="f">idle</td><td class="d">What to do when nothing has happened — sleep, review, or hunt.</td></tr>
+  <tr><td class="f">tick</td><td class="d">The loop itself: what runs every 60s, what runs every 15 minutes.</td></tr>
+</table>
+</div>
+
+<div class="sub-group">
+<h4>Act — execute</h4>
+<table class="mods-t">
+  <tr><td class="f">mcp_client</td><td class="d">One Alpaca MCP session per tick, not one per call.</td></tr>
+  <tr><td class="f">tool_guard</td><td class="d">Forces deterministic order IDs so a retry can't double a position.</td></tr>
+  <tr><td class="f">reconcile</td><td class="d">Broker truth vs. our records — and it runs first, every tick.</td></tr>
+  <tr><td class="f">positions</td><td class="d">Position pages and the status machine that guarantees one resolution.</td></tr>
+  <tr><td class="f">lock</td><td class="d">Single-flight tick lock, breakable if a previous run died.</td></tr>
+</table>
+</div>
+
+<div class="sub-group">
+<h4>Learn — guard and score</h4>
+<table class="mods-t">
+  <tr><td class="f">exit_rules</td><td class="d">The agent's own commitments, executed every 60s against the underlying.</td></tr>
+  <tr><td class="f">attribution</td><td class="d">The view-vs-structure verdict, at the thesis horizon.</td></tr>
+  <tr><td class="f">calibration</td><td class="d">Brier score and Murphy decomposition on every stated probability.</td></tr>
+  <tr><td class="f">ledger</td><td class="d">Pre-registration: every thesis recorded, traded or not.</td></tr>
+  <tr><td class="f">learn</td><td class="d">Credit assignment — which memories and sources get reinforced.</td></tr>
+  <tr><td class="f">coach</td><td class="d">Paired A/B trials on its own prompts; promotes only on real evidence.</td></tr>
+  <tr><td class="f">housekeeping</td><td class="d">Runs while markets are closed: interim scoring, memory consolidation.</td></tr>
+  <tr><td class="f">health</td><td class="d">Asks of every subsystem: did it run <em>and</em> produce, or run and do nothing?</td></tr>
+  <tr><td class="f">report</td><td class="d">One self-contained HTML page: gauges over time with the Coach's actions marked.</td></tr>
+</table>
+</div>
+
+<div class="sub-group">
+<h4>Remember — the substrate</h4>
+<table class="mods-t">
+  <tr><td class="f">journal</td><td class="d">Append-only event log; decisions written before orders are sent.</td></tr>
+  <tr><td class="f">wiki</td><td class="d">Position pages, market context and lessons, in a documented format.</td></tr>
+  <tr><td class="f">elfmem_adapter</td><td class="d">Evolving memory whose confidence moves with scored outcomes.</td></tr>
+  <tr><td class="f">constitution</td><td class="d">Ten epistemic principles — how to reason, remember, and change.</td></tr>
+  <tr><td class="f">lessons</td><td class="d">Measured lessons seeded into memory, each carrying its own numbers.</td></tr>
+  <tr><td class="f">store</td><td class="d">Atomic writes, so a crash mid-save can't corrupt a state file.</td></tr>
+</table>
+</div>
+
+<div class="sub-group">
+<h4>Chassis — keeping it alive</h4>
+<table class="mods-t">
+  <tr><td class="f">config</td><td class="d">One place for models, watchlist, cadences and secrets.</td></tr>
+  <tr><td class="f">cli</td><td class="d">Every human-facing command: doctor, health, report, calibration, coach.</td></tr>
+  <tr><td class="f">usage</td><td class="d">Token and cost accounting across every provider and role.</td></tr>
+  <tr><td class="f">failures</td><td class="d">Classifies errors so a transient blip isn't treated like a permanent one.</td></tr>
+  <tr><td class="f">ids</td><td class="d">The provenance spine — one ID threading a position through every store.</td></tr>
+  <tr><td class="f">prompts</td><td class="d">Fingerprints every prompt, so decisions stay comparable across changes.</td></tr>
+</table>
+</div>
+
+<div class="foot">trdrbot &middot; paper trading, real market data &middot; numbers in the worked
+example are taken from the system's own position records for 2026-08-28</div>
+</main>
+
+<script>
+(function(){
+  /* ---- stage panels ---- */
+  var nodes = document.querySelectorAll('.node');
+  var panels = document.querySelectorAll('.panel');
+  function select(target){
+    nodes.forEach(function(n){ n.classList.toggle('active', n.dataset.target === target); });
+    panels.forEach(function(p){ p.classList.toggle('open', p.id === 'panel-' + target); });
+    var panel = document.getElementById('panel-' + target);
+    if (panel) panel.scrollIntoView({behavior:'smooth', block:'start'});
+  }
+  nodes.forEach(function(n){
+    n.addEventListener('click', function(){ select(n.dataset.target); });
+    n.addEventListener('keydown', function(e){
+      if (e.key === 'Enter' || e.key === ' '){ e.preventDefault(); select(n.dataset.target); }
+    });
+  });
+
+  /* ---- worked-example stepper ---- */
+  var steps = Array.prototype.slice.call(document.querySelectorAll('.step'));
+  var prev = document.getElementById('prev');
+  var next = document.getElementById('next');
+  var count = document.getElementById('stepcount');
+  var dots = document.getElementById('dots');
+  var i = 0;
+
+  steps.forEach(function(){ var d = document.createElement('i'); dots.appendChild(d); });
+  var dotEls = Array.prototype.slice.call(dots.children);
+
+  function render(){
+    steps.forEach(function(s, n){ s.classList.toggle('on', n === i); });
+    dotEls.forEach(function(d, n){ d.classList.toggle('on', n === i); });
+    prev.disabled = (i === 0);
+    next.disabled = (i === steps.length - 1);
+    count.textContent = 'step ' + (i + 1) + ' of ' + steps.length;
+  }
+  prev.addEventListener('click', function(){ if (i > 0){ i--; render(); } });
+  next.addEventListener('click', function(){ if (i < steps.length - 1){ i++; render(); } });
+  render();
+})();
+</script>
+</body>
+</html>

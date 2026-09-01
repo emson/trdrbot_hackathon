@@ -36,6 +36,10 @@
 				<p class="muted">Route what was learned to the store shaped to hold it.</p>
 				<p class="fine">four stores</p></div>
 		</div>
+		<p class="muted" style="margin-top:1.1rem">
+			Prefer to explore it? <a href="/resources/system-architecture">The Trdrbot Loop</a> is the
+			same system as a clickable diagram, with one real trade stepped through end to end.
+		</p>
 	</div>
 </section>
 

@@ -20,6 +20,13 @@ const FILES = [
 		backHref: '/resources',
 		backLabel: 'Resources'
 	},
+	{
+		src: 'docs/architecture_explorer.html',
+		dest: 'resources/architecture-explorer.html',
+		label: 'The Trdrbot Loop',
+		backHref: '/resources',
+		backLabel: 'Resources'
+	},
 	{ src: 'docs/research_risk_appetite.html', dest: 'risk-research.html', label: 'Risk appetite — research' },
 	{ src: 'docs/design_system.html', dest: 'design-system.html', label: 'Theo design system' }
 ];
