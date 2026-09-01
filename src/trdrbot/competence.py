@@ -65,10 +65,43 @@ EXPLORE, ESTABLISH, SCALE, MATURE = "explore", "establish", "scale", "mature"
 _ORDER = (EXPLORE, ESTABLISH, SCALE, MATURE)
 
 #: Exploration allocation while the record is too thin for Kelly to mean
-#: anything. Deliberately a fixed fraction, not an edge estimate: with no
+#: anything - as a SHARE of the tier's book cap, which is the same move D-098
+#: made for the other three scopes. Deliberately not an edge estimate: with no
 #: record the shrinkage collapses any stated edge to zero, and a system that
 #: cannot place a first trade can never earn a record (measured, D-047).
-SEED_FRACTION = 0.022
+#:
+#: It replaced ONE constant (0.022) held flat across all four rungs, and that
+#: flatness had two consequences nobody chose. The drawdown circuit breaker was
+#: a breaker with no contacts: an 11% drawdown demoted MATURE to EXPLORE and cut
+#: the next trade by 13%. And EXPLORE, ESTABLISH and SCALE sized IDENTICALLY, so
+#: promotion changed the tier and not the size - the ladder was decorative in
+#: the one direction it exists for. Derived, the same demotion cuts 62%.
+#:
+#: 0.22 is not a new opinion: 0.10 book cap x 0.22 = 0.022, today's constant
+#: exactly, so the EXPLORE rung is unchanged at neutral appetite. Every rung
+#: above it now inherits the shape instead of a number.
+#:
+#: NOT YET FITTED TO ANYTHING (I-70). Because the floor binds above Kelly at
+#: every rung for this book's structure class, this share now sets the size of
+#: every trade it makes. Recorded so it is decided deliberately, not inherited.
+SEED_SHARE = 0.22
+
+#: The operator's size preference, applied to the earned posture. 1.0 means
+#: "the posture the ladder alone would choose" - a definition, not a taste.
+#: Two halvings down, one doubling up, and the asymmetry is measured: turning
+#: it down is nearly free, turning it up needs ~70% confidence that the edge is
+#: real (docs/research_risk_appetite.md SS6).
+APPETITE_MIN, APPETITE_MAX = 0.25, 2.0
+
+#: An absolute share of equity in defined max loss that NO appetite may cross.
+#: The lever moves the growth/variance tradeoff; it must never move the ruin
+#: bound. This is the ONE runtime clamp, and it is deliberately the only one:
+#: a half-Kelly ceiling cannot fire (max(TIERS.kelly) x APPETITE_MAX = 0.25 x
+#: 2.0 = 0.50 exactly, reachable only as resolved -> infinity), so it is pinned
+#: as a test instead of carried as dead code; and a separate ceiling on the
+#: seed floor would re-introduce a fourth independent constant, breaking the
+#: property that everything derives from `book_cap`. See D-099.
+BOOK_CEILING = 0.35
 
 TIERS: dict[str, dict[str, Any]] = {
     EXPLORE:   {"cap": 0.10, "kelly": 0.00, "min_n": 0,  "max_rel": None,
@@ -175,10 +208,32 @@ class Competence:
     #: operator reading "15 resolved (have 29)" deserves to see that the 29 is
     #: 11.8 independent bets before concluding the next rung is nearly earned.
     effective: float | None = None
+    #: The operator's size preference, ALREADY CLAMPED to [APPETITE_MIN,
+    #: APPETITE_MAX] and already applied to the fields above. The agent sees it,
+    #: the Coach cannot reach it (it writes only data/state/levers/, and the
+    #: measured/measurer rule forbids anything it can move from scoring its own
+    #: trial), and nothing in this module may set it. It is the principal's
+    #: preference, not the agent's.
+    appetite: float = 1.0
 
     @property
     def uses_kelly(self) -> bool:
         return self.kelly_multiplier > 0
+
+    @property
+    def realised_appetite(self) -> float:
+        """What the appetite actually came to, after `BOOK_CEILING`.
+
+        Set 2.0 at MATURE and the book cap pins at 0.35, so the realised
+        appetite is 1.40 and turning the knob further does nothing at all. A
+        number the operator set and the system silently absorbed is exactly the
+        bug class this project keeps finding, so it is computed and reported
+        rather than left to be inferred from two figures that look unrelated.
+
+        No stored copy of the earned cap is needed: it is `TIERS[tier]["cap"]`,
+        and one number that can disagree with another is how they start to.
+        """
+        return self.book_cap / TIERS[self.tier]["cap"]
 
     @property
     def position_cap(self) -> float:
@@ -300,6 +355,30 @@ def _demote(tier: str, drawdown: float) -> tuple[str, str]:
     return tier, ""
 
 
+def _appetite_note(requested: float, applied: float, earned_cap: float,
+                   book_cap: float, earned_kelly: float, kelly: float) -> str:
+    """What the operator's appetite did to the EARNED posture, in prose.
+
+    Empty at neutral, because a prompt should only grow when there is something
+    to say. Non-empty it must state BOTH numbers: `reason` is fed verbatim to
+    the decide agent, and `next_tier_needs()` right beside it promises more size
+    for more resolved theses. Reporting only the applied Kelly would tell the
+    agent it EARNED a posture the operator chose, and leave the ladder promising
+    a reward the appetite has already halved.
+    """
+    if requested == 1.0:
+        return ""
+    parts = [f"risk appetite x{applied:.2f} (operator-set)"]
+    if requested != applied:
+        parts.append(f"clamped from x{requested:.2f}")
+    if book_cap < earned_cap * applied - 1e-12:
+        parts.append(f"book capped at {BOOK_CEILING:.0%}, so realised "
+                     f"x{book_cap / earned_cap:.2f}")
+    if earned_kelly:
+        parts.append(f"Kelly x{earned_kelly:.2f} earned -> x{kelly:.2f} applied")
+    return "; " + ", ".join(parts)
+
+
 def assess(
     *,
     resolved: int,
@@ -308,11 +387,19 @@ def assess(
     equity: float,
     high_water: float,
     effective: float | None = None,
+    appetite: float = 1.0,
 ) -> Competence:
     """Where the agent sits on the ladder right now. Deterministic, no LLM.
 
     `effective` is the independent-equivalent forecast count. It is carried
     onto the result and shown, never gated on - see `Competence.effective`.
+
+    `appetite` is the operator's size preference, and it is a PARAMETER rather
+    than a transform applied afterwards on purpose. A `with_appetite(posture)`
+    helper every caller must remember to call is the "ran and did nothing" bug
+    class by construction - this project has shipped it three times. Here there
+    is exactly one way to obtain a posture and it is always the operative one.
+    The default of 1.0 leaves every existing caller byte-identical.
     """
     attr, verdicts = attributable_rate(positions)
     drawdown = max(0.0, 1.0 - equity / high_water) if high_water > 0 else 0.0
@@ -326,21 +413,43 @@ def assess(
     if t["kelly"] > 0 and resolved:
         kelly = max(kelly, TIERS[ESTABLISH]["kelly"] * 0.5)
 
+    # THE OPERATOR'S PREFERENCE, applied exactly here and nowhere else.
+    #
+    # Clamped ONCE, at the point of use, so no caller can hold an unclamped
+    # value and no second place has to agree about the range. Two scaled
+    # quantities and the third DERIVED from one of them, which is what keeps
+    # all four risk scopes in step: position, per-name and the exploration
+    # floor all come off `book_cap`, so one multiplication reaches them
+    # together and they cannot desynchronise.
+    #
+    # The floor is scaled ONCE, THROUGH the cap. Multiplying it by the appetite
+    # again would give an a-squared response and change WHICH constraint binds -
+    # the easiest mistake here to make and not notice.
+    #
+    # NaN clamps to the safe end: `max(0.25, nan)` is 0.25, because the
+    # comparison is False and the first argument survives.
+    earned_kelly, earned_cap = kelly, t["cap"]
+    a = min(APPETITE_MAX, max(APPETITE_MIN, appetite))
+    book_cap = min(BOOK_CEILING, earned_cap * a)
+    kelly = earned_kelly * a
+    seed = book_cap * SEED_SHARE
+
     attr_note = (f"{attr:.0%} attributable" if attr is not None
                  else f"attribution unmeasured ({verdicts} verdicts)")
     if demotion:
         reason = f"{tier.upper()} ({demotion}; earned {earned.upper()})"
     elif tier == EXPLORE:
-        reason = (f"EXPLORE - {resolved} resolved theses, fixed {SEED_FRACTION:.1%} "
+        reason = (f"EXPLORE - {resolved} resolved theses, {seed:.1%} "
                   f"exploration allocation paid for the record")
     else:
         reason = (f"{tier.upper()} - {resolved} resolved, {attr_note}, "
-                  f"Kelly x{kelly:.2f}")
+                  f"Kelly x{earned_kelly:.2f}")
+    reason += _appetite_note(appetite, a, earned_cap, book_cap, earned_kelly, kelly)
 
     return Competence(
         tier=tier, resolved=resolved, reliability=reliability,
         attributable_rate=attr, drawdown=drawdown,
-        book_cap=t["cap"], kelly_multiplier=kelly,
+        book_cap=book_cap, kelly_multiplier=kelly,
         # The exploration allocation is a FLOOR, not an alternative. It used to
         # zero out the moment Kelly engaged, which inverted the ladder at its
         # very first rung: at n=4 a 1:1 payoff at 62% confidence sized 4
@@ -353,10 +462,11 @@ def assess(
         # `test_size_is_monotonic_in_evidence` asserted exactly this property
         # and missed it: it measured integer CONTRACTS at one payoff where the
         # `contracts < 1 -> 1` floor pinned every rung to the same value.
-        seed_fraction=SEED_FRACTION,
+        seed_fraction=seed,
         reason=reason,
         verdicts=verdicts,
         effective=effective,
+        appetite=a,
     )
 
 

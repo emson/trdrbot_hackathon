@@ -953,11 +953,12 @@ def _hist(n, verdict=GOOD_V):
     return [Position(position_id=f"h{i}", attribution=verdict) for i in range(n)]
 
 
-def _comp(resolved, rel=0.02, verdicts=None, equity=100_000, hw=100_000):
+def _comp(resolved, rel=0.02, verdicts=None, equity=100_000, hw=100_000,
+          appetite=1.0):
     from trdrbot import competence
     pos = verdicts if verdicts is not None else _hist(max(1, resolved))
     return competence.assess(resolved=resolved, reliability=rel, positions=pos,
-                             equity=equity, high_water=hw)
+                             equity=equity, high_water=hw, appetite=appetite)
 
 
 def _size_tier(comp, resolved, mp=800.0, ml=-1200.0, risk=0.0, by=None):
@@ -1075,11 +1076,13 @@ def test_the_sizer_names_the_constraint_that_set_the_size():
 
     # EXPLORE is the fixed allocation: the floor IS the answer, not a fallback.
     assert _size_tier(explore, 0).binding == "exploration floor"
-    # All three outcomes of the fraction decision, in Kelly mode. The middle one
-    # is the case that matters: a positive edge whose Kelly lands BELOW the
-    # floor, which is what every position this book has actually opened did.
-    assert _size_tier(mature, 40).binding == "Kelly"
-    assert _size_tier(mature, 40, mp=700.0, ml=-1200.0).binding == "exploration floor"
+    # All three outcomes of the fraction decision, in Kelly mode. Payoffs chosen
+    # to land either side of the MATURE rung's own floor (5.5%) and ceiling
+    # (12.5%); the middle case is the one that matters, because a positive edge
+    # whose Kelly lands BELOW the floor is what every position this book has
+    # actually opened did.
+    assert _size_tier(mature, 40, mp=1100.0, ml=-1000.0).binding == "Kelly"
+    assert _size_tier(mature, 40, mp=840.0, ml=-1200.0).binding == "exploration floor"
     assert _size_tier(mature, 40, mp=4000.0, ml=-500.0).binding == "position ceiling"
     # A payoff too rich to refuse but too thin to size: the fraction buys less
     # than one contract, and indivisibility - not the fraction - sets the size.
@@ -1118,6 +1121,201 @@ def test_the_three_risk_scopes_nest_at_every_rung():
     assert base.tier == competence.EXPLORE
     assert (base.position_cap, base.underlying_cap, base.book_cap) == pytest.approx(
         (sizing.MAX_FRACTION, sizing.PER_UNDERLYING_MAX_AT_RISK, 0.10))
+
+
+# --- D-099: the risk-appetite lever. These exist because the suite was BLIND:
+# applying the derived exploration floor on its own left all 535 tests green
+# while the allocation went 2.2% -> 5.5% at MATURE, a 2.5x size increase nothing
+# objected to. No test referenced `seed_fraction`, and the monotonicity check
+# next door measures integer contracts, where the `contracts < 1 -> 1` promotion
+# flattens every rung. A green suite was not evidence; these are.
+APPETITES = (0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0)
+RUNGS = (0, 5, 15, 40)
+
+
+def _ladder(appetite):
+    """The four rungs at one appetite, each at the evidence that earns it."""
+    return [_comp(n, verdicts=_hist(max(5, n), GOOD_V), appetite=appetite)
+            for n in RUNGS]
+
+
+def test_appetite_scales_size_without_changing_which_constraint_binds():
+    """PILLAR-4. The lever's central guarantee: it moves size and NOTHING else.
+
+    `floor = cap x a x SEED_SHARE` and `kelly = full x mult x a`, so the `a`
+    cancels in the comparison between them and the binding constraint is
+    invariant. That is what makes it a scale knob rather than a shape knob, and
+    it is the first property that breaks if anyone scales the floor
+    independently of the cap - including by the a-squared route of multiplying
+    the derived floor by the appetite a second time.
+
+    Measured on a FINE contract grid ($100 of risk per contract) so the property
+    under test is the policy and not the integer arithmetic on top of it - the
+    coarse-grid interaction is real and is pinned separately below."""
+    for i, n in enumerate(RUNGS):
+        seen = {_size_tier(_ladder(a)[i], n, mp=70.0, ml=-100.0).binding
+                for a in APPETITES}
+        assert len(seen) == 1, f"rung n={n}: appetite changed the binding: {seen}"
+    # And it genuinely MOVES: same constraint, different size, monotonically.
+    sizes = [_size_tier(_ladder(a)[2], 15, mp=70.0, ml=-100.0).fraction_of_equity
+             for a in APPETITES]
+    assert sizes == sorted(sizes) and sizes[-1] > sizes[0] * 3
+
+
+def test_one_contract_is_the_floor_of_the_lever_on_a_coarse_grid():
+    """The lever's honest lower limit, pinned so it is not rediscovered.
+
+    Contracts are indivisible, so on a structure whose per-contract risk is
+    large relative to the fraction, turning the appetite DOWN stops delivering
+    the full cut: the fraction keeps shrinking but the size cannot go below one
+    contract while one contract is still affordable. At EXPLORE with $1,200 of
+    risk per contract, 0.25x asks for $550 and gets $1,200.
+
+    This is the `contracts < 1 -> 1` promotion working as designed (an earned
+    record must never size smaller than an unproven one), not the lever
+    failing - but it means a low appetite on a coarse grid under-delivers, and
+    `binding` now says so instead of leaving it to be inferred."""
+    thin = _size_tier(_ladder(0.25)[0], 0)
+    assert thin.contracts == 1 and thin.binding == "one contract (indivisible)"
+    assert thin.fraction_of_equity > _ladder(0.25)[0].seed_fraction
+    # On a fine grid at the same appetite the fraction is delivered exactly.
+    fine = _size_tier(_ladder(0.25)[0], 0, mp=70.0, ml=-100.0)
+    assert fine.binding == "exploration floor"
+
+
+def test_more_evidence_never_means_less_size_at_any_appetite():
+    """PILLAR-4, the ladder's stated invariant, now swept over the whole
+    appetite range instead of only the neutral column production does not run.
+
+    Measured on FRACTIONS, not contracts: the sibling test measures integer
+    contracts at one payoff, and that is exactly how a 2.5x change in the
+    exploration floor passed unnoticed."""
+    for a in APPETITES:
+        rungs = _ladder(a)
+        for field in ("book_cap", "position_cap", "underlying_cap",
+                      "seed_fraction", "kelly_multiplier"):
+            vals = [getattr(c, field) for c in rungs]
+            assert vals == sorted(vals), f"appetite {a}: {field} fell: {vals}"
+        fracs = [_size_tier(c, n).fraction_of_equity
+                 for c, n in zip(rungs, RUNGS, strict=True)]
+        assert fracs == sorted(fracs), f"appetite {a}: size fell: {fracs}"
+
+
+def test_the_three_risk_scopes_still_nest_at_every_appetite():
+    """PILLAR-4. One multiplication reaches all four scopes, so they cannot
+    desynchronise - the property D-098 built and this change must not break."""
+    for a in APPETITES:
+        for c in _ladder(a):
+            assert c.position_cap <= c.underlying_cap <= c.book_cap, \
+                f"appetite {a}, {c.tier}"
+            assert c.seed_fraction <= c.position_cap, \
+                f"appetite {a}, {c.tier}: the floor outgrew the ceiling above it"
+
+
+def test_no_appetite_may_cross_the_ruin_bound():
+    """PILLAR-4, and the counterweight to the two tests above (admission rule 4:
+    anything pushing toward more size ships with its opposite).
+
+    The lever moves the growth/variance tradeoff. It must never move the bound
+    on how much of the book can be lost at once, whatever is fed to it."""
+    from trdrbot import competence
+    for a in (2.0, 100.0, 1e9, float("inf"), float("nan")):
+        for c in _ladder(a):
+            assert c.book_cap <= competence.BOOK_CEILING + 1e-12, f"{a} at {c.tier}"
+
+
+def test_a_garbage_appetite_clamps_to_the_boundary_and_says_so():
+    """A silently clamped input is a config the operator thinks they set. NaN
+    must land on the SAFE end, which it does because `max(0.25, nan)` is 0.25 -
+    the comparison is False, so the first argument survives."""
+    from trdrbot import competence
+    for given, want in ((0.0, 0.25), (-5.0, 0.25), (100.0, 2.0),
+                        (float("nan"), 0.25), (float("inf"), 2.0)):
+        c = _comp(15, verdicts=_hist(15, GOOD_V), appetite=given)
+        assert c.appetite == want, f"{given} -> {c.appetite}, wanted {want}"
+        assert "clamped from" in c.reason, f"{given} clamped in silence: {c.reason}"
+    # Neutral says nothing at all: a prompt only grows when there is something
+    # to say, and "risk appetite x1.00" is not something to say.
+    assert "appetite" not in _comp(15, verdicts=_hist(15, GOOD_V)).reason
+
+
+def test_the_posture_reports_the_appetite_the_ceiling_actually_allowed():
+    """The knob's own silent-no-op. Above 1.40x at MATURE the book cap is pinned
+    at the ruin bound, so turning it further does nothing - and a number the
+    operator set and the system absorbed is the bug class this project keeps
+    finding. Computed and reported, never left to be inferred."""
+    from trdrbot import competence
+    top = _comp(40, verdicts=_hist(40, GOOD_V), appetite=2.0)
+    assert top.tier == competence.MATURE
+    assert top.book_cap == pytest.approx(competence.BOOK_CEILING)
+    assert top.realised_appetite == pytest.approx(1.4)
+    assert "realised x1.40" in top.reason
+    # Where the ceiling does not bind, asked-for and realised agree exactly.
+    mid = _comp(40, verdicts=_hist(40, GOOD_V), appetite=1.0)
+    assert mid.realised_appetite == pytest.approx(1.0)
+
+
+def test_appetite_cannot_change_the_sizers_regime_or_open_the_gate():
+    """PILLAR-1 and PILLAR-4 together. Maximum appetite may not promote EXPLORE
+    into Kelly mode, and - the one that matters - it may not buy a trade with no
+    claimed edge. The EV gate reads the STATED probability and sits upstream of
+    every multiplication, so there is nothing for a lever to push against."""
+    from trdrbot import competence
+    bold = _comp(0, verdicts=[], appetite=2.0)
+    assert bold.tier == competence.EXPLORE and not bold.uses_kelly
+    assert _comp(40, verdicts=_hist(40, GOOD_V), appetite=0.25).uses_kelly
+    # 30% stated against a payoff needing 55% to break even: no edge claimed.
+    from trdrbot import sizing
+    from trdrbot.sizing import Calibration
+    cal = Calibration(n=40, brier=0.2, reliability=0.02, resolution=0.05,
+                      uncertainty=0.24, base_rate=0.5)
+    d = sizing.size_position(
+        equity=100_000, underlying="SPY", stated_confidence=0.30,
+        max_profit=800.0, max_loss=-1000.0, calibration=cal,
+        posture=_comp(40, verdicts=_hist(40, GOOD_V), appetite=2.0))
+    assert d.contracts == 0 and d.binding == "" and "no edge" in d.reason
+
+
+def test_the_drawdown_brake_now_has_contacts():
+    """PILLAR-4. The reason the floor had to derive from the tier at all.
+
+    `SEED_FRACTION` was one constant across four rungs, so demotion changed the
+    tier and not the size: an 11% drawdown dropped MATURE to EXPLORE and cut the
+    next trade by 13%. A circuit breaker with no contacts, and precisely what an
+    aggressive appetite would be relying on."""
+    calm = _comp(40, verdicts=_hist(40, GOOD_V))
+    hit = _comp(40, verdicts=_hist(40, GOOD_V), equity=89_000, hw=100_000)
+    from trdrbot import competence
+    assert hit.tier == competence.EXPLORE, "an 11% drawdown must reach the bottom"
+    before = _size_tier(calm, 40).fraction_of_equity
+    after = _size_tier(hit, 40).fraction_of_equity
+    assert after < before * 0.5, f"demotion cut only {1 - after / before:.0%}"
+
+
+def test_half_kelly_bounds_every_appetite_on_the_live_tables():
+    """The clamp that is a test instead of code (D-099). `sizing.py`'s own
+    docstring names fractional Kelly as a CEILING, and half Kelly is where the
+    literature puts it. A runtime clamp for this cannot fire - the tables make
+    the maximum exactly 0.50 - so carrying one would be dead code. Pinned here
+    so raising a tier's Kelly or APPETITE_MAX fails loudly instead of quietly
+    walking past the bound."""
+    from trdrbot import competence
+    worst = max(t["kelly"] for t in competence.TIERS.values()) * competence.APPETITE_MAX
+    assert worst <= 0.50 + 1e-12, f"appetite can reach Kelly x{worst:.3f}"
+
+
+def test_the_coach_cannot_reach_the_risk_appetite():
+    """The measured/measurer rule (specs/notes/015). Risk appetite is the
+    principal's preference; a Coach that could turn it would be optimising its
+    own reward. The exclusion is STRUCTURAL - the Coach writes only
+    data/state/levers/ - but state.py carries a 'TO REGISTER A NEW LEVER'
+    recipe, and one contributor following it is all it would take."""
+    from trdrbot import coach
+    assert "risk_appetite" not in {lv.name for lv in coach.LEVERS}
+    root = Path(__file__).resolve().parent.parent / "src" / "trdrbot" / "coach_pkg"
+    for py in root.glob("*.py"):
+        assert "config.yaml" not in py.read_text(encoding="utf-8"), \
+            f"{py.name} references config.yaml - the Coach must never write it"
 
 
 def test_every_scope_refuses_when_it_is_full_at_every_rung():

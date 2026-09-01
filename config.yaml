@@ -158,6 +158,36 @@ events:
   - { date: "2026-09-04", name: "US nonfarm payrolls (first Friday - rule-derived); also the competition deadline" }
 
 trading:
+  # Operator risk appetite (D-099). 1.0 = the posture the competence ladder
+  # alone would choose; clamped to [0.25, 2.0]. It scales the book cap - and
+  # through it the per-name cap, the per-position cap and the exploration floor,
+  # which all derive from it - plus the Kelly multiplier.
+  #
+  # It scales SIZE ONLY. The EV gate sits upstream of every multiplication, so
+  # no setting can buy a trade that is not worth taking, and turning this down
+  # does NOT make the agent decline more often - selectivity is chosen in prose,
+  # in the 87 of 89 decide cycles that never call size_position (I-68).
+  #
+  # Takes effect on the NEXT TICK under run.sh (a fresh process per tick); needs
+  # a RESTART under `trdrbot run`, which loads config once before its loop.
+  # `trdrbot risk <x>` previews any value against the live book before you set
+  # it, and the applied number is journalled every tick.
+  #
+  # 0.50 is not neutral, and that is the point. Deriving the exploration floor
+  # from the tier raises it from a flat 2.2% to 4.4% at SCALE, and 0.50 x that
+  # is 2.2% - so this lands the MECHANISM with the live book's size unchanged,
+  # and any behaviour change afterwards is a bug rather than the knob. It holds
+  # today's size at today's RUNG, not forever: on demotion the floor falls with
+  # the tier, which is the brake this change bought. The measured belief table
+  # (docs/research_risk_appetite.md SS6) says a book at a coin flip on whether
+  # its edge is real belongs at the MINIMUM; moving to 0.25 is a separate
+  # one-line commit. See docs/plan_risk_appetite.md SS8.
+  #
+  # NOT a Coach lever, ever: the Coach writes only data/state/levers/, and the
+  # measured/measurer rule (specs/notes/015) forbids anything it can move from
+  # scoring its own trial. This is the principal's preference, not the agent's.
+  risk_appetite: 0.50
+
   watchlist: ["SPY"]
   # Force-close everything on/after this date regardless of position expiry
   # (D-019). Without it a conventional-DTE position never resolves inside the

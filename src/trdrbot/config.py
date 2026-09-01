@@ -87,6 +87,31 @@ class Config:
         return self.raw["trading"]["deadline"]
 
     @property
+    def risk_appetite(self) -> float:
+        """The operator's size preference. 1.0 = the posture the competence
+        ladder alone would choose (D-099).
+
+        Clamped in `competence.assess`, deliberately NOT here: one clamp, at the
+        point of use, so no caller can hold an unclamped value and no second
+        place has to agree about the range.
+
+        An ABSENT key means 1.0, never 0 - the same rule `coach` states, for the
+        same reason. A non-numeric value raises here, at process start, before
+        any trade: that is where a config typo should stop things.
+
+        `bool` is rejected explicitly because YAML's `true` is a plausible typo
+        for a numeric knob and `float(True)` is 1.0 - which would read as
+        "neutral" and change the book's risk in silence.
+        """
+        raw = (self.raw.get("trading") or {}).get("risk_appetite", 1.0)
+        if isinstance(raw, bool):
+            raise RuntimeError(
+                f"trading.risk_appetite is {raw!r}; it is a number in "
+                f"[{0.25}, {2.0}] where 1.0 is neutral, not a flag."
+            )
+        return float(raw)
+
+    @property
     def max_retries(self) -> int:
         return int(self.raw["inbox"]["max_retries"])
 

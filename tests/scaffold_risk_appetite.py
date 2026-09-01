@@ -104,47 +104,54 @@ FULL_KELLY = sizing.kelly_fraction(STATED, MP, ML, payoff_ratio=B) or 0.0
 
 
 def posture(n: int, *, verdicts: int = 20, equity: float = EQUITY,
-            hw: float = EQUITY) -> competence.Competence:
+            hw: float = EQUITY, appetite: float = 1.0) -> competence.Competence:
     pos = [SimpleNamespace(attribution=THESIS_RIGHT_EXPRESSION_RIGHT)] * verdicts
     return competence.assess(resolved=n, reliability=RELIABILITY, positions=pos,
-                             equity=equity, high_water=hw)
+                             equity=equity, high_water=hw, appetite=appetite)
 
 
-# ------------------------------------------------------- the PROPOSED lever
+# ------------------------------------------------ the lever, AS IT SHIPPED
 #
-# Applied to the posture, which after D-098 is the single place all three risk
-# scopes come from - so one multiplication reaches book, per-name and
-# per-position caps together and cannot desynchronise them.
+# This file proposed it; D-099 built it, and it now lives in
+# `competence.assess(appetite=...)` - so this scaffold drives the real thing
+# rather than a model of it. Three differences from what was proposed here,
+# each measured in docs/plan_risk_appetite.md SS1:
 #
-# It scales THREE fields, and A1 is the argument for why fewer will not do.
-# Two clamps, and they are the whole safety case:
-#   * KELLY_CEILING - half Kelly. Not arbitrary: half Kelly captures ~75% of
-#     the growth for ~25% of the variance, and above it the curve is dominated
-#     by estimation error rather than edge. `sizing.py` already cites it.
-#   * BOOK_CEILING - an absolute share of equity in defined max loss no
-#     appetite may cross, so the lever moves the growth/variance tradeoff and
-#     never the ruin bound.
-APPETITE_MIN, APPETITE_MAX = 0.25, 2.0
-KELLY_CEILING = 0.50
-BOOK_CEILING = 0.35
-FLOOR_CEILING = 0.05
+#   * ONE runtime clamp, not three. KELLY_CEILING cannot fire (max tier Kelly
+#     x APPETITE_MAX is exactly 0.50), so it is pinned as a test instead of
+#     carried as dead code; FLOOR_CEILING became WRONG once the floor derived
+#     from the cap, because it would re-introduce a fourth loose constant.
+#   * The floor is scaled ONCE, THROUGH the cap - `book_cap * SEED_SHARE` -
+#     not multiplied by the appetite a second time.
+#   * The appetite is a PARAMETER of `assess`, never a transform applied
+#     afterwards, so no caller can hold an un-appetised posture.
+APPETITE_MIN, APPETITE_MAX = competence.APPETITE_MIN, competence.APPETITE_MAX
+BOOK_CEILING = competence.BOOK_CEILING
 
 
-def with_appetite(p: competence.Competence, a: float) -> competence.Competence:
-    a = min(APPETITE_MAX, max(APPETITE_MIN, a))
-    return replace(
-        p,
-        kelly_multiplier=min(KELLY_CEILING, p.kelly_multiplier * a),
-        seed_fraction=min(FLOOR_CEILING, p.seed_fraction * a),
-        book_cap=min(BOOK_CEILING, p.book_cap * a),
-    )
+#: The posture as it was BEFORE D-099 - one flat exploration floor for all four
+#: rungs. Kept only so A6 can show what deriving it bought; nothing in
+#: production produces this shape any more.
+def flat_floor(p: competence.Competence) -> competence.Competence:
+    return replace(p, seed_fraction=0.022)
+
+
+def at_appetite(p: competence.Competence, a: float) -> competence.Competence:
+    """The same agent at a different appetite, through the REAL ladder.
+
+    Rebuilt from the inputs that produced `p` rather than patched on top of it,
+    so this scaffold cannot drift from `assess` the way its own JavaScript port
+    did (D-099).
+    """
+    hw = EQUITY / (1.0 - p.drawdown) if p.drawdown else EQUITY
+    return posture(p.resolved, verdicts=p.verdicts, equity=EQUITY, hw=hw, appetite=a)
 
 
 def size_at(p: competence.Competence, a: float, *, equity: float = EQUITY,
             open_risk: float = 0.0) -> sizing.SizingDecision:
     return sizing.size_position(
         equity=equity, stated_confidence=STATED, max_profit=MP, max_loss=ML,
-        calibration=CAL, posture=with_appetite(p, a), underlying="SPY",
+        calibration=CAL, posture=at_appetite(p, a), underlying="SPY",
         payoff_ratio=B, open_risk_usd=open_risk)
 
 
@@ -189,15 +196,18 @@ def probe(label: str, p: competence.Competence) -> float:
 
 print(f"{'x2 applied to':<48} {'size':>8} {'change vs baseline':>24}")
 print("-" * 96)
-probe("book cap (0.20 -> 0.40), and the two caps under it",
+# Labels DERIVED, never typed: a hardcoded "0.149 -> 0.298" was already stale
+# against the live ladder, which is the same drift this whole change is about.
+probe(f"book cap ({base.book_cap:.2f} -> {base.book_cap * 2:.2f}), and the caps under it",
       replace(base, book_cap=base.book_cap * 2))
-probe("Kelly multiplier (0.149 -> 0.298)",
+probe(f"Kelly multiplier ({base.kelly_multiplier:.3f} -> {base.kelly_multiplier * 2:.3f})",
       replace(base, kelly_multiplier=base.kelly_multiplier * 2))
-probe("seed floor (2.2% -> 4.4%)", replace(base, seed_fraction=base.seed_fraction * 2))
+probe(f"seed floor ({base.seed_fraction:.1%} -> {base.seed_fraction * 2:.1%})",
+      replace(base, seed_fraction=base.seed_fraction * 2))
 probe("Kelly + caps (the OBVIOUS proposal)",
       replace(base, kelly_multiplier=base.kelly_multiplier * 2,
               book_cap=base.book_cap * 2))
-probe("Kelly + caps + floor (what actually works)", with_appetite(base, 2.0))
+probe("Kelly + caps + floor - what SHIPPED (D-099)", at_appetite(base, 2.0))
 print(f"{'the EV gate (p > 1/(1+b))':<48} {'-':>8} {'REFUSED - see A4':>24}")
 
 print(f"\nWhy: full Kelly on a realistic claimed edge is {FULL_KELLY:.3f}. At SCALE the")
@@ -221,7 +231,7 @@ print("-" * 96)
 for name, p in RUNGS:
     fracs = [size_at(p, a).fraction_of_equity for a in APPETITES]
     lo, hi = min(fracs), max(fracs)
-    top = with_appetite(p, APPETITES[-1])
+    top = at_appetite(p, APPETITES[-1])
     binds = ("seed floor" if abs(hi - top.seed_fraction) < 2e-3
              else "position cap" if abs(hi - top.position_cap) < 2e-3 else "Kelly")
     print(f"{name:<11}" + "".join(f"{x:>11.2%}" for x in fracs)
@@ -332,7 +342,7 @@ note(f"A4': the lever is NOT symmetric. Raising appetite above 1.0x only pays if
 report("A5  Edge cases - run, not asserted")
 cases: list[tuple[str, str]] = []
 
-p_hi = with_appetite(posture(20), 2.0)
+p_hi = at_appetite(posture(20), 2.0)
 d = size_at(posture(20), 0.5, open_risk=p_hi.book_cap * EQUITY * 0.9)
 cases.append((
     "appetite CUT while the open book already exceeds the new cap",
@@ -341,15 +351,15 @@ cases.append((
     f"liquidation. The book runs over-cap until positions expire."))
 
 for bad, desc in ((0.0, "zero"), (-3.0, "negative"), (100.0, "absurdly large")):
-    p = with_appetite(posture(20), bad)
+    p = at_appetite(posture(20), bad)
     cases.append((f"appetite set to {desc} ({bad})",
                   f"clamped to [{APPETITE_MIN}, {APPETITE_MAX}] -> Kelly "
                   f"x{p.kelly_multiplier:.3f}, floor {p.seed_fraction:.2%}, "
                   f"book {p.book_cap:.0%}"))
 
 bad_nest = [n for n, p in RUNGS for a in APPETITES
-            if not (with_appetite(p, a).position_cap <= with_appetite(p, a).underlying_cap
-                    <= with_appetite(p, a).book_cap)]
+            if not (at_appetite(p, a).position_cap <= at_appetite(p, a).underlying_cap
+                    <= at_appetite(p, a).book_cap)]
 cases.append(("position <= underlying <= book, at every rung x every appetite",
               "HOLDS - all three derive from `book_cap`, so one multiplication moves "
               "them together" if not bad_nest else f"BROKEN at {set(bad_nest)}"))
@@ -362,20 +372,20 @@ for a in APPETITES:
 cases.append(("more evidence never means less size, at every appetite",
               "HOLDS across all rungs" if not mono else f"BROKEN at appetite {mono}"))
 
-top = with_appetite(posture(50, verdicts=50), APPETITE_MAX)
+top = at_appetite(posture(50, verdicts=50), APPETITE_MAX)
 cases.append((f"appetite {APPETITE_MAX}x at MATURE (the most the lever can ask)",
-              f"Kelly x{top.kelly_multiplier:.3f} (ceiling {KELLY_CEILING}), floor "
+              f"Kelly x{top.kelly_multiplier:.3f} (half-Kelly bound 0.50), floor "
               f"{top.seed_fraction:.1%}, book {top.book_cap:.0%} (ceiling "
               f"{BOOK_CEILING:.0%}), one position {top.position_cap:.1%}"))
 
-dd = with_appetite(posture(50, verdicts=50, equity=89_000.0), APPETITE_MAX)
+dd = at_appetite(posture(50, verdicts=50, equity=89_000.0), APPETITE_MAX)
 cases.append(("an 11% drawdown at maximum appetite",
               f"demoted to {dd.tier.upper()}, book {dd.book_cap:.0%} - the ladder's "
               f"own feedback still fires and appetite cannot switch it off"))
 
 zero_edge = sizing.size_position(
     equity=EQUITY, stated_confidence=1 / (1 + B) - 0.01, max_profit=MP, max_loss=ML,
-    calibration=CAL, posture=with_appetite(posture(50, verdicts=50), APPETITE_MAX),
+    calibration=CAL, posture=at_appetite(posture(50, verdicts=50), APPETITE_MAX),
     underlying="SPY", payoff_ratio=B)
 cases.append(("maximum appetite on a structure with NO claimed edge",
               f"{zero_edge.contracts} contracts - '{zero_edge.reason[:60]}...'. The "
@@ -396,48 +406,43 @@ note("A5: the one case with no clean answer is the CUT - lowering appetite can "
 report("A6  The drawdown brake - does demotion actually cut size?")
 print("A3 shows a wrong thesis at 2.00x averaging a ~47% drawdown despite the")
 print("ladder demoting all the way to EXPLORE at a 10% loss. A2 says why: the")
-print("EXPLORE, ESTABLISH and SCALE rows are IDENTICAL, because `SEED_FRACTION`")
-print("is one constant for every tier and it binds at all three. So demotion")
-print("changes the tier and not the size. The safety argument for an aggressive")
-print("lever - 'the ladder contains it' - is false as the code stands.\n")
+print("EXPLORE, ESTABLISH and SCALE rows WERE IDENTICAL before D-099, because")
+print("`SEED_FRACTION` was one constant for every tier and it binds at all three.")
+print("So demotion changed the tier and not the size, and the safety argument for")
+print("an aggressive lever - 'the ladder contains it' - was false. Now fixed; the")
+print("rows below are the before/after that justified the change.\n")
 
-#: The proposed repair, and it is the same move D-098 already made for the
-#: other three scopes: derive the floor from the tier's own budget instead of
-#: pinning it to a constant. 0.22 is chosen so EXPLORE keeps exactly today's
+#: SHIPPED as `competence.SEED_SHARE` (D-099): the same move D-098 already made
+#: for the other three scopes - derive the floor from the tier's own budget
+#: instead of pinning it to a constant. 0.22 keeps EXPLORE at exactly today's
 #: 2.2%, so a fresh account is unchanged.
-SEED_SHARE = competence.SEED_FRACTION / competence.TIERS[competence.EXPLORE]["cap"]
+SEED_SHARE = competence.SEED_SHARE
 
 
-def tier_floor(p: competence.Competence) -> competence.Competence:
-    return replace(p, seed_fraction=p.book_cap * SEED_SHARE)
-
-
-print(f"{'tier':<12} {'floor NOW':>11} {'floor DERIVED':>14}   size at 1.00x now -> derived")
+print(f"{'tier':<12} {'floor BEFORE':>12} {'floor SHIPPED':>14}   size at 1.00x before -> shipped")
 print("-" * 96)
 for name, p in RUNGS:
-    now = size_at(p, 1.0).fraction_of_equity
-    der = sizing.size_position(
+    der = size_at(p, 1.0).fraction_of_equity
+    now = sizing.size_position(
         equity=EQUITY, stated_confidence=STATED, max_profit=MP, max_loss=ML,
-        calibration=CAL, posture=tier_floor(with_appetite(p, 1.0)), underlying="SPY",
+        calibration=CAL, posture=flat_floor(p), underlying="SPY",
         payoff_ratio=B).fraction_of_equity
-    print(f"{name:<12} {p.seed_fraction:>11.2%} {tier_floor(p).seed_fraction:>14.2%}   "
+    print(f"{name:<12} {flat_floor(p).seed_fraction:>11.2%} {p.seed_fraction:>14.2%}   "
           f"{now:>10.2%} -> {der:.2%}")
 
 top = posture(50, verdicts=50)
 dd_post = posture(50, verdicts=50, equity=89_000.0)
-now_full = size_at(top, 1.0).fraction_of_equity
-now_dd = size_at(dd_post, 1.0, equity=89_000.0).fraction_of_equity
-der_full = sizing.size_position(
+der_full = size_at(top, 1.0).fraction_of_equity
+der_dd = size_at(dd_post, 1.0, equity=89_000.0).fraction_of_equity
+now_full = sizing.size_position(
     equity=EQUITY, stated_confidence=STATED, max_profit=MP, max_loss=ML, calibration=CAL,
-    posture=tier_floor(with_appetite(top, 1.0)), underlying="SPY", payoff_ratio=B
-).fraction_of_equity
-der_dd = sizing.size_position(
+    posture=flat_floor(top), underlying="SPY", payoff_ratio=B).fraction_of_equity
+now_dd = sizing.size_position(
     equity=89_000.0, stated_confidence=STATED, max_profit=MP, max_loss=ML, calibration=CAL,
-    posture=tier_floor(with_appetite(dd_post, 1.0)), underlying="SPY", payoff_ratio=B
-).fraction_of_equity
+    posture=flat_floor(dd_post), underlying="SPY", payoff_ratio=B).fraction_of_equity
 print("\nAn 11% drawdown, MATURE -> EXPLORE:")
-print(f"  today:   {now_full:.2%} -> {now_dd:.2%}  ({1 - now_dd / now_full:+.0%} change)")
-print(f"  derived: {der_full:.2%} -> {der_dd:.2%}  ({1 - der_dd / der_full:+.0%} change)")
+print(f"  flat floor (before): {now_full:.2%} -> {now_dd:.2%}  ({1 - now_dd / now_full:+.0%} change)")
+print(f"  derived  (SHIPPED):  {der_full:.2%} -> {der_dd:.2%}  ({1 - der_dd / der_full:+.0%} change)")
 
 # The comparison has to be at MATCHED SIZE or it measures the wrong thing: a
 # derived floor is 5.5% at MATURE against today's flat 2.2%, so running both at
@@ -455,9 +460,9 @@ def run_variant(p_pool, appetite, rng, derived: bool):
     eq = hw = EQUITY
     worst = 0.0
     for _ in range(N_TRADES):
-        post = with_appetite(posture(RESOLVED, equity=eq, hw=hw), appetite)
-        if derived:
-            post = tier_floor(post)
+        post = posture(RESOLVED, equity=eq, hw=hw, appetite=appetite)
+        if not derived:
+            post = flat_floor(post)
         d = sizing.size_position(
             equity=eq, stated_confidence=STATED, max_profit=MP, max_loss=ML,
             calibration=CAL, posture=post, underlying="SPY", payoff_ratio=B)
@@ -481,7 +486,7 @@ for label, derived, app in VARIANTS:
     print(f"{label:<28} {eqs[len(eqs) // 2]:>10,.0f} {eqs[int(0.05 * len(eqs))]:>10,.0f} "
           f"{statistics.fmean(dds):>8.1%} {sum(1 for d in dds if d > 0.20) / len(dds):>10.1%}")
 
-note("A6: `SEED_FRACTION` is a single constant across all four tiers, so promotion "
+note("A6 (FIXED by D-099): `SEED_FRACTION` was a single constant across all four tiers, so promotion "
      "and DEMOTION both leave size unchanged wherever the floor binds - which A1 "
      "shows is everywhere below MATURE for a realistic edge. An 11% drawdown "
      "currently cuts the next trade by 13%; with the floor derived from the tier it "

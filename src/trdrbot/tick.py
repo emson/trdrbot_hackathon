@@ -709,6 +709,9 @@ async def _run_tick(
             # told only "15 resolved (have 29)" would think the next rung was
             # already earned.
             effective=cal_now.n_eff,
+            # The operator's size preference (D-099). The ONE thing on this
+            # posture the agent did not earn, and the one it may not set.
+            appetite=config.risk_appetite,
         )
         if verbose:
             print(f"[tick {n}] competence: {posture.reason}")
@@ -723,6 +726,17 @@ async def _run_tick(
                        position_cap=posture.position_cap,
                        kelly_multiplier=posture.kelly_multiplier,
                        seed_fraction=posture.seed_fraction,
+                       # THREE numbers, because they can differ and each
+                       # difference means something (D-099): what the operator
+                       # asked for, what survived the clamp, and what survived
+                       # the ruin bound. A row where all three agree is the
+                       # normal case; one where they do not is a knob that was
+                       # partly or wholly absorbed, and `trdrbot health` says
+                       # so. Rows before D-099 carry no appetite key at all -
+                       # absent means pre-lever, and the journal is append-only.
+                       appetite=posture.appetite,
+                       appetite_config=config.risk_appetite,
+                       realised_appetite=round(posture.realised_appetite, 4),
                        equity=equity_now, high_water=hw)
         size_tool = local_tools.build_size_position(
             calib, equity_now,
