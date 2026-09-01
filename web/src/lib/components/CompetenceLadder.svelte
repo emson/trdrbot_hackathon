@@ -3,36 +3,56 @@
 
 	let { competence = {} } = $props();
 
-	// Static gate definitions (src/trdrbot/competence.py TIERS) - a design
-	// constant of the sizing system, not a number this export derives.
-	const RUNGS = [
-		{ key: 'explore', tier: 'Explore', cap: 0.1, minN: 0, req: 'Fixed 2.2% exploration allocation while the record is too thin for Kelly to mean anything.' },
-		{ key: 'establish', tier: 'Establish', cap: 0.15, minN: 5, req: '5 resolved theses. Kelly engages, capped at 10% of the calculated fraction.' },
-		{ key: 'scale', tier: 'Scale', cap: 0.2, minN: 15, req: '15 resolved theses, 60% attributable (view actually explicable, not just profitable).' },
-		{ key: 'mature', tier: 'Mature', cap: 0.25, minN: 40, req: '40 resolved theses, reliability <0.04, 70% attributable — strictly enforced.' }
-	];
+	// The rungs come from `competence.ladder` in the snapshot, which the
+	// exporter reads straight off `competence.TIERS` (D-099). They used to be
+	// hardcoded here - a fourth copy of the sizing policy, on a public page -
+	// and the derived exploration floor made the copy wrong at three of four
+	// rungs while the appetite-SCALED Kelly rendered right beside the earned
+	// caps. Prose is copy and stays here; every number is data.
+	const REQ = {
+		explore: 'The starting allocation, while the record is too thin for Kelly to mean anything.',
+		establish: '5 resolved theses. Kelly engages, capped at 10% of the calculated fraction.',
+		scale: '15 resolved theses, 60% attributable (view actually explicable, not just profitable).',
+		mature: '40 resolved theses, reliability <0.04, 70% attributable — strictly enforced.'
+	};
+	const title = (s) => s.charAt(0).toUpperCase() + s.slice(1);
 
-	let currentIdx = $derived(RUNGS.findIndex((r) => r.key === competence.tier));
+	let rungs = $derived(competence.ladder ?? []);
+	let currentIdx = $derived(rungs.findIndex((r) => r.key === competence.tier));
+	// 1.0 means the operator has not moved it; anything else and the caps
+	// rendered below are EARNED, not the ones being enforced.
+	let appetite = $derived(competence.appetite ?? 1);
 </script>
 
 <div class="ladder">
-	{#each RUNGS as r, i}
+	{#each rungs as r, i}
 		<div class="rung {i === currentIdx ? 'current' : ''}" style="--lvl:{i}">
-			<span class="tier">{r.tier}</span>
-			<p class="req">{r.req}</p>
+			<span class="tier">{title(r.key)}</span>
+			<p class="req">{REQ[r.key] ?? ''}</p>
 			<div class="caps">
 				<div><b>{pct(r.cap, { digits: 0, sign: false })}</b><span>book cap</span></div>
-				<div><b>{r.minN}</b><span>min resolved</span></div>
+				<div><b>{pct(r.seed, { digits: 1, sign: false })}</b><span>floor</span></div>
+				<div><b>{r.min_n}</b><span>min resolved</span></div>
 			</div>
 		</div>
 	{/each}
 </div>
 {#if currentIdx >= 0}
 	<p class="muted" style="margin-top:.7rem; font-size:.86rem">
-		Currently <strong>{RUNGS[currentIdx].tier}</strong> — {competence.resolved ?? 0} resolved theses,
+		Currently <strong>{title(rungs[currentIdx].key)}</strong> — {competence.resolved ?? 0} resolved
+		theses,
 		{competence.attributable_rate === null || competence.attributable_rate === undefined
 			? 'attribution not yet measurable'
 			: `${pct(competence.attributable_rate, { digits: 0, sign: false })} attributable`},
 		Kelly ×{(competence.kelly_multiplier ?? 0).toFixed(2)}.
 	</p>
+	{#if appetite !== 1}
+		<p class="muted" style="margin-top:.35rem; font-size:.86rem">
+			The rungs above are what each tier <em>earns</em>. An operator risk appetite of
+			<strong>×{appetite.toFixed(2)}</strong> is applied on top, so the book cap actually enforced
+			is <strong>{pct(competence.book_cap, { digits: 1, sign: false })}</strong> and the
+			exploration floor <strong>{pct(competence.seed_fraction, { digits: 1, sign: false })}</strong
+			>. It scales size, not selectivity.
+		</p>
+	{/if}
 {/if}

@@ -1303,6 +1303,49 @@ def test_half_kelly_bounds_every_appetite_on_the_live_tables():
     assert worst <= 0.50 + 1e-12, f"appetite can reach Kelly x{worst:.3f}"
 
 
+def test_the_published_explorer_still_matches_the_sizer_it_claims_to_model():
+    """Two copies of one definition drifting apart is this project's most
+    familiar bug, and this one was on the public website (D-099).
+
+    `docs/risk_appetite_explorer.html` used to re-implement the sizer, the
+    calibration shrink, the tier table and the demotion ladder in JavaScript.
+    It had drifted three ways - a tier table back-solving to three different
+    `resolved` counts, a floor ceiling the Python does not apply, and demotion
+    that borrowed a neighbouring rung's Kelly instead of keeping its own
+    evidence - while its own on-load badge printed "verified against Python",
+    because the nine reference points it checked covered none of them.
+
+    Rebuilt at the STAMPED market inputs, not today's: the policy table is a
+    pure function of code plus those inputs, so this pins CODE drift and stays
+    quiet on data drift, which regeneration handles. Checking against live data
+    would fail on a clean tree the next time a thesis resolves.
+
+    Modelled on `test_the_attributable_gauge_agrees_with_the_ladder_it_mirrors`.
+    """
+    import importlib.util
+    import json
+    import re
+
+    root = Path(__file__).resolve().parent.parent
+    page = (root / "docs" / "risk_appetite_explorer.html").read_text(encoding="utf-8")
+    m = re.search(r"const DATA = (\{.*?\});\n/\* END GENERATED \*/", page, re.S)
+    assert m, "the explorer has no generated DATA block - run scripts/gen_risk_explorer.py"
+    data = json.loads(m.group(1))
+
+    spec = importlib.util.spec_from_file_location(
+        "gen_risk_explorer", root / "scripts" / "gen_risk_explorer.py")
+    gen = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(gen)
+
+    fresh = gen.build_policy(data["market"]["structure"], data["market"]["cal"])
+    assert fresh == data["policy"], (
+        "the published risk explorer no longer matches the sizer it claims to "
+        "model - run `uv run python scripts/gen_risk_explorer.py`")
+    # And the fork really is gone, not merely bypassed.
+    for dead in ("shrinkProbability", "kellyFraction", "postureFor", "sizePosition"):
+        assert dead not in page, f"{dead} is back in the explorer - policy belongs in Python"
+
+
 def test_the_coach_cannot_reach_the_risk_appetite():
     """The measured/measurer rule (specs/notes/015). Risk appetite is the
     principal's preference; a Coach that could turn it would be optimising its

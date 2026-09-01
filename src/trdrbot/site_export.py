@@ -35,6 +35,7 @@ from typing import Any
 import markdown as _md
 import yaml
 
+from . import competence
 from . import config as config_mod
 from . import ledger as ledger_mod
 from . import optmath
@@ -696,6 +697,21 @@ def export(out: Path = DEFAULT_OUT, *, strict: bool = True) -> int:
             "book_cap": latest_comp.get("book_cap"),
             "appetite": latest_comp.get("appetite"),
             "realised_appetite": latest_comp.get("realised_appetite"),
+            # The EARNED ladder, straight off `competence.TIERS` (D-099).
+            # `CompetenceLadder.svelte` hardcoded these four caps and the prose
+            # "Fixed 2.2% exploration allocation" - a fourth copy of this policy,
+            # on a public page, which the derived floor made wrong at three of
+            # four rungs while rendering the appetite-SCALED Kelly right beside
+            # it. Shipped as data so the component cannot disagree with the
+            # ladder it draws. Unscaled on purpose: these are what each rung
+            # EARNS, and the applied numbers sit above under `book_cap`.
+            "ladder": [
+                {"key": key, "cap": t["cap"], "min_n": t["min_n"],
+                 "kelly_ceiling": t["kelly"], "min_attr": t["min_attr"],
+                 "max_rel": t["max_rel"], "strict_attr": t["strict_attr"],
+                 "seed": round(t["cap"] * competence.SEED_SHARE, 5)}
+                for key, t in competence.TIERS.items()
+            ],
             "as_of": latest_comp.get("ts"),
         },
         "book": {
