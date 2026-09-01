@@ -3486,8 +3486,62 @@ def test_forecast_window_leaves_room_to_act():
     e2, p2, l2 = competence.forecast_window(deadline, datetime.date(2026, 9, 2))
     assert e2 == p2 == l2 == "2026-09-03"
 
-    assert competence.forecast_window(None) is None
-    assert competence.forecast_window("not-a-date") is None
+    # CHANGED (D-101): a hard stop TIGHTENS the window, it does not create it.
+    # This used to assert `forecast_window(None) is None`, and that was the bug:
+    # every caller then fell back to its own default, and the muse's default was
+    # the literal "10 days out" - the exact 1-10 day range D-070 removed after
+    # its output clustered at the far end. Deleting the deadline silently
+    # reinstated the behaviour the deadline was masking, so the discipline now
+    # stands on its own and the deadline is one upper bound among two.
+    for absent in (None, "", "not-a-date"):
+        e, p, latest = competence.forecast_window(absent, today)
+        assert e == "2026-08-29" and p == "2026-08-31", f"window lost for {absent!r}"
+        assert latest == "2026-09-07", "no hard stop still means a bounded horizon"
+    # And the tighter of the two always wins.
+    assert competence.forecast_window("2026-09-04", today)[2] == "2026-09-03"
+    assert competence.forecast_window("2027-01-01", today)[2] == "2026-09-07"
+
+
+def test_no_deadline_is_a_first_class_state_not_a_disarmed_one(tmp_path):
+    """D-101. Running indefinitely must remove the HARD STOP and nothing else.
+
+    Deleting a constraint is where safety quietly leaves: the deadline was the
+    only thing bounding forecast horizons, the discovery options gate, and the
+    run loop, and each had its own fallback for when it was missing. The muse's
+    was the string "10 days out" - the exact range D-070 deleted.
+
+    Both directions, per admission rule 4: absence must be accepted cleanly,
+    and a TYPO must not be read as absence."""
+    from types import SimpleNamespace
+
+    import yaml
+
+    from trdrbot import competence, exit_rules
+    from trdrbot import config as config_mod
+
+    def cfg_with(trading: dict):
+        (tmp_path / "config.yaml").write_text(yaml.safe_dump({"trading": trading}))
+        return config_mod.Config(raw=yaml.safe_load((tmp_path / "config.yaml").read_text()),
+                                 paths=config_mod.Paths.build(tmp_path))
+
+    # Absent, null and empty all mean "no hard stop".
+    for absent in ({}, {"deadline": None}, {"deadline": ""}):
+        assert cfg_with(absent).deadline is None
+    assert cfg_with({"deadline": "2026-09-04"}).deadline == "2026-09-04"
+
+    # A typo is NOT absence. Silently reading it as "no deadline" would disarm
+    # the force-close sweep and every expiry gate at once.
+    with pytest.raises(RuntimeError, match="not an ISO date"):
+        _ = cfg_with({"deadline": "2026-13-99"}).deadline
+
+    # The position-level check is inert, by design, and says nothing.
+    assert competence.can_open(None, "2099-01-01")[0] is True
+    # The deadline EXIT rule reads an unobservable signal, which holds rather
+    # than firing blind - so no position is force-closed by a stop that is gone.
+    assert exit_rules.EXIT_SIGNALS["days_to_deadline"].read(
+        SimpleNamespace(expiry="2099-01-01"), None, None) is None
+    # But the horizon window survives: no deadline is not unbounded horizons.
+    assert competence.forecast_window(None)[2] is not None
 
 
 def test_every_thesis_source_asks_the_same_question():

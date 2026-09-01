@@ -257,7 +257,7 @@ async def run(
     # gate - so the D-035 defect (percentage moves emitted as dollar bands,
     # making holds_at always-False and scoring every thesis as failed) was
     # still open on the path whose output the agent reads every morning.
-    latest = (competence.forecast_window(config.deadline, ids.today()) or ("", "", ""))[2]
+    latest = competence.forecast_window(config.deadline, ids.today())[2]
     for raw in raw_opps:
         o = Opportunity.from_payload(raw)
         if o is None:

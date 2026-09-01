@@ -525,9 +525,15 @@ async def _build_decide_prompt(
             f"and it is the same number size_position shrinks your claim against.\n"
             f"Sample: {cal_now.sample_note()}."
         )
+    _win = competence.forecast_window(config.deadline)
     prompt_parts.append(
-        f"## Constraints\n- Competition deadline: {config.deadline} "
-        f"(everything is force-closed then, so prefer expiries well inside it).\n"
+        "## Constraints\n"
+        + (f"- Hard stop: {config.deadline} - everything is force-closed then, so "
+           f"prefer expiries well inside it.\n" if config.deadline else
+           "- No hard stop: the run continues indefinitely, so a position is closed "
+           "by its own exit rules and nothing else.\n")
+        + f"- Useful horizons: {_win[0]} to {_win[2]}, aim around {_win[1]}. Short "
+        f"horizons resolve while the reasoning is still checkable.\n"
         f"- Watchlist: {', '.join(config.watchlist)}"
     )
     if prior:

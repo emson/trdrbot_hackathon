@@ -36,8 +36,8 @@ from .opportunity import Opportunity, admit
 from .research import dossier
 from .wiki import Concept, Wiki
 
-NOMINATE_PROMPT = """You are scouting for an options trading agent (paper account, all positions \
-must close by {deadline}). Below is broad market news and prediction-market odds.
+NOMINATE_PROMPT = """You are scouting for an options trading agent (paper account; {horizon}). \
+Below is broad market news and prediction-market odds.
 
 Nominate 3-5 individual companies (liquid US-listed, optionable) that the material makes \
 INTERESTING - a catalyst, a dislocation, a misprice, an overreaction. Not the biggest names, \
@@ -70,11 +70,11 @@ options-chain check. Do not contradict computed numbers.
 
 Task: forecast each candidate's potential over the next 5 trading days, then propose 0-3 \
 OPPORTUNITIES total (across all candidates - only where evidence, technicals and the forecast \
-line up; an empty array is a valid answer). All positions are force-closed on {deadline}. \
+line up; an empty array is a valid answer). {horizon} \
 **Every horizon must fall between {earliest} and {latest} inclusive; outside that is rejected.** \
-Aim the bulk at {preferred} or sooner. A thesis resolving on the deadline itself can never inform \
-a decision - it needs room after it to be worth forming - and one dated today resolves in zero \
-days. Candidates that failed the options gate cannot be opportunities.
+Aim the bulk at {preferred} or sooner. A thesis needs room AFTER it resolves to be worth forming, \
+and one dated today resolves in zero days. Candidates that failed the options gate cannot be \
+opportunities.
 
 Respond with EXACTLY this structure:
 
@@ -136,8 +136,14 @@ async def _fundamentals(ticker: str) -> dict[str, Any]:
         return {"unavailable": type(exc).__name__}
 
 
-async def _options_gate(tools: dict[str, Any], ticker: str, deadline: str) -> dict[str, Any]:
-    """Does a chain exist with an expiry on/before the deadline?
+async def _options_gate(tools: dict[str, Any], ticker: str, latest: str) -> dict[str, Any]:
+    """Does a chain exist with an expiry on/before `latest`?
+
+    `latest` is the forecast window's own upper bound, not the deadline
+    (D-101). The question the gate asks is "can a thesis on this name resolve
+    while it is still worth acting on", and that has an answer whether or not a
+    competition is running - the hard stop merely tightens it when one exists.
+    Passing the raw deadline meant this gate had no bound at all without one.
 
     Counts real contracts, by parsing the OCC keys the chain is actually keyed
     by. It used to count the SUBSTRING "symbol" in `str(response)`, which made
@@ -151,7 +157,7 @@ async def _options_gate(tools: dict[str, Any], ticker: str, deadline: str) -> di
     try:
         r = await mcp_client.call(
             tools, "get_option_chain", underlying_symbol=ticker,
-            expiration_date_lte=deadline,
+            expiration_date_lte=latest,
         )
         snaps = r.get("snapshots") if isinstance(r, dict) else None
         if isinstance(snaps, dict):
@@ -180,6 +186,11 @@ async def run(
     *, verbose: bool = True,
 ) -> dict[str, Any]:
     deadline = config.deadline
+    _earliest, _preferred, _latest = competence.forecast_window(
+        deadline, ids.utc_now().date())
+    horizon = (f"all positions are force-closed on {deadline}"
+               if deadline else
+               "there is no hard stop, so a position is closed by its own exit rules")
     exclude = sorted(set(config.research_universe) | set(config.watchlist))
     model = build_model(config, role="discovery")
 
@@ -188,7 +199,7 @@ async def run(
         tools, config, symbols=None, news_limit=40, journal=journal)
     # ---- LLM call 1: nominate from evidence ----
     text = text_of(await model.ainvoke(NOMINATE_PROMPT.format(
-        deadline=deadline, exclude=", ".join(exclude),
+        horizon=horizon, exclude=", ".join(exclude),
         news_block=news_block,
         odds_block=odds_block,
     )))
@@ -247,9 +258,9 @@ async def run(
 
         f = await _fundamentals(t)
         section.append("Fundamentals (Yahoo): " + json.dumps(f))
-        gate = await _options_gate(tools, t, deadline)
+        gate = await _options_gate(tools, t, _latest)
         section.append(
-            f"Options gate (expiries on/before {deadline}): "
+            f"Options gate (expiries on/before {_latest}): "
             + ("PASS" if gate.get("tradeable") else f"FAIL {gate}")
         )
         n["_options_ok"] = bool(gate.get("tradeable"))
@@ -258,12 +269,9 @@ async def run(
     # ---- LLM call 2: synthesise after the numbers ----
     # Derived, not recalled, and shared with muse and record_forecast so the
     # three thesis sources cannot drift apart on what "in time" means.
-    _window = competence.forecast_window(deadline, ids.utc_now().date())
-    _earliest, _preferred, _latest = _window or ("", "", "")
     reply2 = await model.ainvoke(SYNTH_PROMPT.format(
-        candidates_block="\n\n".join(blocks), deadline=deadline,
-        earliest=_earliest or "tomorrow", preferred=_preferred or "3 days out",
-        latest=_latest or deadline))
+        candidates_block="\n\n".join(blocks), horizon=horizon,
+        earliest=_earliest, preferred=_preferred, latest=_latest))
     text2 = text_of(reply2)
 
     # `section` rather than two inline regexes: one parser for one LABEL:

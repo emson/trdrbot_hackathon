@@ -481,10 +481,21 @@ MIN_DAYS_TO_ACT_ON = 1
 #: than drift.
 PREFERRED_HORIZON_DAYS = 3
 
+#: The furthest useful horizon when NO hard stop exists (D-101). Short horizons
+#: are a property of good forecasting, not of a competition: they resolve while
+#: the reasoning is still checkable, and they are harder, which is the point.
+#:
+#: This exists because removing the deadline used to remove the window with it.
+#: `forecast_window` returned None, and the callers' own fallbacks took over -
+#: the muse's was the literal string "10 days out", which is precisely the
+#: 1-10 day range whose output clustered at the far end and which D-070 removed.
+#: Deleting a constraint quietly restored the bug the constraint replaced.
+MAX_HORIZON_DAYS = 10
+
 
 def forecast_window(deadline: str | None, today: date | None = None
-                    ) -> tuple[str, str, str] | None:
-    """(earliest, preferred, latest) as ISO dates, or None with no deadline.
+                    ) -> tuple[str, str, str]:
+    """(earliest, preferred, latest) as ISO dates. ALWAYS a window.
 
     Derived, never recalled - the same date discipline D-032 imposed after the
     agent dated horizons from memory. Every thesis source asks this rather than
@@ -499,17 +510,30 @@ def forecast_window(deadline: str | None, today: date | None = None
     that exactly as written and dated a candidate TODAY, which resolves in zero
     days and was thrown out by the very next gate. A one-sided instruction
     invites the degenerate end of it; a window has two sides.
+
+    **A hard stop TIGHTENS this window; it does not create it (D-101).** The
+    previous version returned None with no deadline, which handed the question
+    back to each caller's own fallback - and the muse's fallback was the string
+    "10 days out", restoring the exact range D-070 had removed. A constraint
+    whose removal silently reinstates the bug it replaced is not a constraint,
+    it is a coincidence. The horizon discipline now stands on its own reasoning
+    and the deadline is one more upper bound among two.
     """
-    if not deadline:
-        return None
-    today = today or ids.market_today()
-    try:
-        stop = date.fromisoformat(deadline)
-    except (ValueError, TypeError):
-        return None
     from datetime import timedelta
 
-    latest = stop - timedelta(days=MIN_DAYS_TO_ACT_ON)
+    today = today or ids.market_today()
+    latest = today + timedelta(days=MAX_HORIZON_DAYS)
+    if deadline:
+        try:
+            stop = date.fromisoformat(deadline)
+        except (ValueError, TypeError):
+            # Unreachable from production - `Config.deadline` refuses an
+            # unparseable date at load, where a config typo should stop a
+            # process. Tolerated here so a direct caller degrades to the
+            # no-deadline window rather than losing the window entirely.
+            pass
+        else:
+            latest = min(latest, stop - timedelta(days=MIN_DAYS_TO_ACT_ON))
     earliest = min(today + timedelta(days=1), latest)
     preferred = min(today + timedelta(days=PREFERRED_HORIZON_DAYS), latest)
     return (earliest.isoformat(), preferred.isoformat(), latest.isoformat())

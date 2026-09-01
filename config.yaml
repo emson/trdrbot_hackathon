@@ -201,10 +201,27 @@ trading:
   risk_appetite: 1.75
 
   watchlist: ["SPY"]
-  # Force-close everything on/after this date regardless of position expiry
-  # (D-019). Without it a conventional-DTE position never resolves inside the
-  # competition and the learning loop produces nothing.
-  deadline: "2026-09-04"
+  # A hard stop: force-close everything on/after this date regardless of
+  # position expiry (D-019). `null` means run indefinitely (D-101).
+  #
+  # REMOVED 2026-09-01: the judges set no requirement to stop, so the run
+  # continues and positions are closed by their own exit rules rather than by a
+  # calendar. This removes ONE thing - the sweep - and deliberately nothing
+  # else. `can_open` goes inert, the deadline exit rule reads an unobservable
+  # signal and holds (it never fires blind), and `trdrbot run` loops until it
+  # is stopped.
+  #
+  # What it must NOT remove is the forecast horizon window. That window used to
+  # be derived from this date, and every caller carried its own fallback for
+  # when it was absent - the muse's was the literal string "10 days out", the
+  # exact 1-10 day range D-070 deleted after its output clustered at the far
+  # end. Deleting the deadline would have silently reinstated the bug the
+  # deadline was masking. `competence.forecast_window` now always returns a
+  # window (MAX_HORIZON_DAYS = 10) and a hard stop only TIGHTENS it.
+  #
+  # Set a date back here to re-arm the sweep; a typo raises at startup rather
+  # than being read as "no deadline".
+  deadline: null
 
 decide:
   # Tools bound to the decide agent. Binding all 72 MCP tools cost ~21k tokens

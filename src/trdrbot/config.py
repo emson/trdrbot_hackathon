@@ -83,8 +83,33 @@ class Config:
         return list(self.raw["trading"]["watchlist"])
 
     @property
-    def deadline(self) -> str:
-        return self.raw["trading"]["deadline"]
+    def deadline(self) -> str | None:
+        """A hard stop, or None to run indefinitely (D-101).
+
+        None is a FIRST-CLASS state, not a degraded one: `can_open` is inert
+        without it, the deadline exit rule reads an unobservable signal and
+        holds, and `forecast_window` still returns a window because short
+        horizons are a property of good forecasting rather than of a
+        competition. What None must never mean is "unbounded horizons".
+
+        A present-but-unparseable date raises here, at process start, before
+        any trade - the same rule `risk_appetite` follows. Silently treating a
+        typo as "no deadline" would disarm the force-close sweep and every
+        expiry gate at once, which is the loudest thing in this file.
+        """
+        raw = (self.raw.get("trading") or {}).get("deadline")
+        if raw in (None, "", False):
+            return None
+        from datetime import date as _date
+        try:
+            _date.fromisoformat(str(raw))
+        except (ValueError, TypeError) as exc:
+            raise RuntimeError(
+                f"trading.deadline is {raw!r}, which is not an ISO date "
+                f"(YYYY-MM-DD). Remove the key or set it to null to run with "
+                f"no hard stop; do not leave it unparseable."
+            ) from exc
+        return str(raw)
 
     @property
     def risk_appetite(self) -> float:

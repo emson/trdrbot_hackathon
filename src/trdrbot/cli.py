@@ -30,7 +30,7 @@ async def _doctor() -> int:
     cfg = config_mod.load()
     print(f"  model:     {cfg.model}")
     print(f"  watchlist: {cfg.watchlist}")
-    print(f"  deadline:  {cfg.deadline}")
+    print(f"  deadline:  {cfg.deadline or 'none - running indefinitely'}")
     print(f"  data:      {cfg.paths.data}")
 
     print("\n[doctor] connecting to Alpaca MCP (spawns `uvx alpaca-mcp-server`)...")
@@ -277,12 +277,16 @@ async def _run_loop(interval: int, closed_interval: int, *,
 
     lock_path = cfg.paths.state / "tick.lock"
     outer_timeout = cfg.watchdog_seconds * OUTER_WATCHDOG_FACTOR
-    deadline = date.fromisoformat(cfg.deadline)
+    # None means run indefinitely (D-101). The loop's job is to keep ticking;
+    # a hard stop, when there is one, is an upper bound on that and not the
+    # reason it exists. `--max-ticks` remains the way to bound a smoke test.
+    deadline = date.fromisoformat(cfg.deadline) if cfg.deadline else None
     n = 0
-    print(f"[run] pid {os.getpid()} looping until {deadline}; "
-          f"open={interval}s closed={closed_interval}s watchdog={outer_timeout}s"
+    print(f"[run] pid {os.getpid()} looping "
+          + (f"until {deadline}" if deadline else "indefinitely (no deadline)")
+          + f"; open={interval}s closed={closed_interval}s watchdog={outer_timeout}s"
           + (f"; stopping after {max_ticks} ticks" if max_ticks else ""), flush=True)
-    while ids.market_today() <= deadline:
+    while deadline is None or ids.market_today() <= deadline:
         if max_ticks and n >= max_ticks:
             print(f"[run] reached --max-ticks {max_ticks}, stopping", flush=True)
             break
@@ -303,7 +307,8 @@ async def _run_loop(interval: int, closed_interval: int, *,
         except Exception as exc:  # noqa: BLE001 - a bad tick must not end the run
             print(f"[run] tick {n} failed, continuing: {exc!r}", flush=True)
         await asyncio.sleep(interval if open_now else closed_interval)
-    print(f"[run] deadline {deadline} reached after {n} ticks", flush=True)
+    print(f"[run] stopped after {n} ticks"
+          + (f" - deadline {deadline} reached" if deadline else ""), flush=True)
     return 0
 
 

@@ -283,8 +283,10 @@ thesis, and exit rules. This is not paperwork: those exit rules are evaluated \
 automatically every tick and will close the position without consulting you. \
 An exit rule stated only in prose does not exist. An order placed without \
 calling `record_position` leaves a position nothing can manage.
-- Choose expiries well inside the competition deadline given below. Everything \
-still open at the deadline is force-closed regardless of P&L, so a position \
+- Choose expiries inside the useful-horizon window given below. A thesis that \
+resolves while its reasoning is still checkable teaches something; one that \
+resolves months later mostly measures drift. If a hard stop is stated, \
+everything still open at it is force-closed regardless of P&L, so a position \
 expiring after it can never resolve on its own terms.
 - If nothing is worth doing, say so plainly and take no action. A no-op is a \
 valid and frequently correct outcome - you are not rewarded for trading.

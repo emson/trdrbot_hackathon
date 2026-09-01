@@ -402,8 +402,8 @@ async def _evaluate(
                 evaluated.append(verdict)
                 continue
             if latest and str(cand.get("horizon", "")) > latest:
-                verdict["fate"] = (f"rejected: horizon {cand.get('horizon')} resolves too late "
-                                   f"to act on before {config.deadline} (latest useful {latest})")
+                verdict["fate"] = (f"rejected: horizon {cand.get('horizon')} resolves too late"
+                                   f" to be worth acting on (latest useful {latest})")
                 _reject(ledger, entry, verdict["fate"])
                 evaluated.append(verdict)
                 continue
@@ -534,12 +534,14 @@ async def run(
         tools, config, symbols=None, news_limit=30, journal=journal)
     # Derived, not recalled (D-032's date discipline), and shared with every
     # other thesis source so the three cannot drift apart again.
-    window = competence.forecast_window(config.deadline, ids.utc_now().date())
-    earliest, preferred, latest = window or ("", "", "")
+    # No `or (...)` fallback: `forecast_window` always returns a window now,
+    # and the fallback this replaced was the literal "10 days out" - the exact
+    # range D-070 removed, which deleting the deadline would have restored.
+    earliest, preferred, latest = competence.forecast_window(
+        config.deadline, ids.utc_now().date())
     fields = dict(
         today=ids.utc_now().date().isoformat(),
-        earliest=earliest or "tomorrow", preferred=preferred or "3 days out",
-        latest=latest or "10 days out",
+        earliest=earliest, preferred=preferred, latest=latest,
         n=len(concepts), k=CANDIDATES, concepts=concept_block,
         news=news_block, odds=odds_block,
     )
