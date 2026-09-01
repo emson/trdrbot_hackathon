@@ -258,3 +258,141 @@ pool from five names to ten.
 The thing I keep re-learning on this project is that "why isn't it doing X" is almost never a
 preference. Four of the five findings today were surfaces telling the agent something false, and
 the fifth was a corpse.
+
+---
+
+## Evening: three more corpses, and a constant that was counting something else
+
+"Let it run more than five trades, keep the researched dossiers, and check whether theses get
+promoted by the learning loop." Four questions, and three of them turned out to be the same shape
+as the discovery bug from this afternoon: something already broken, running, and reporting healthy.
+
+### The constant that was secretly a position limit
+
+`SEED_SHARE` looks like a size. It is a count. Every sized trade takes at least
+`book_cap x SEED_SHARE`, and the book may hold at most `book_cap`, so at most `1 / SEED_SHARE`
+positions fit. At 0.22 that is **four**, and the number does not move:
+
+```
+appetite   book cap    floor   cap/floor
+    0.25       5.0%    1.10%       4.55
+    1.00      20.0%    4.40%       4.55
+    1.75      35.0%    7.70%       4.55
+```
+
+The risk appetite **cancels**. It scales the cap and the floor together, so turning risk up makes
+each position bigger and never makes room for another one. All of this morning's work on the
+appetite lever could not have produced a fifth position at any setting.
+
+0.22 was never fitted to anything - it was reverse-engineered so `0.10 x 0.22` reproduced the flat
+constant it replaced. 0.15 gives six. What made it safe to move was checking what it was actually
+load-bearing for: the drawdown brake is a *proportional* cut, so it is share-invariant and stays at
+50%; Kelly's crossover falls from a shrunk 52.5% to 46.7%, which is I-70 getting better rather than
+a new risk; nesting is untouched. The only real cost is a smaller day-one allocation.
+
+I keep meeting constants in this codebase that are load-bearing for something other than the thing
+they are named after.
+
+### The ladder that could never reach its third rung
+
+The idle ladder decides what to do when nothing has happened: review a position, or hunt for new
+ones. The review rung fires on a "material move" of 0.4% in a held underlying - measured against
+**entry price**. So once a held name has drifted 0.4% from entry, that condition is true forever,
+and the ladder returned "review" on every tick for the rest of the position's life. It never
+reached the hunt again while anything was open.
+
+49 reviews against 9 hunts. Twenty-two muse opportunities expired unread at 3,100-3,800 minutes
+old. The agent spent its cycles re-reading the position it already had.
+
+The fix is a reordering, and what makes it *safe* is a relationship that already existed: the hunt
+cooldown (120 min) is longer than the maximum silence before a mandatory review (90 min), so a
+hunt can defer at most one look before oversight fires anyway - and the exit rules run every tick
+regardless, so stops were never what was being deferred. That ordering is now a test of its own,
+because it is the whole safety argument and it is two constants apart.
+
+### The self-improvement loop had been deadlocked for two days
+
+This one is my favourite, in the way that a really clean bug is a favourite.
+
+The Coach runs paired A/B trials. Each trial row carries a `run_nonce` so a crash between recording
+and journalling cannot double-count one run. The nonce is "how many muse runs today". The dedupe
+is over **the whole life of the experiment**.
+
+So the counter resets at midnight and the dedupe does not. The first day happened to produce nine
+runs against a cap of three - itself a recorded incident - which consumed nonces 0 through 8.
+Every trial written since has replayed a nonce already seen and been discarded as a duplicate.
+Live: runs frozen at 9, six voided, posterior stuck at **0.379** - above the refute bar, below the
+promote bar, and unable to reach the run count that would time it out. The loop could not promote,
+could not refute, could not conclude.
+
+And it was not free. While an experiment is open, every muse run pays for **both arms** - a second
+full LLM call and a complete gate cascade - and every one of those results went into the void. A
+dead experiment that still bills, for two days, with `trdrbot report` printing "needs 0 more runs".
+
+A guard against counting something twice had become a guard against counting at all. The fix is to
+date-qualify the key. The already-voided rows stay voided, because the log is append-only and that
+is the point of it.
+
+### The vault was forgetting what it was still betting on
+
+Research dossiers perish after 24 hours, and `status: deprecated` has exactly one consumer: it
+removes a concept from the muse's random-collision pool. The only thing that shielded a page was
+**holding** that name.
+
+So the system would form a thesis on MU, register it, leave it unresolved - and tombstone the MU
+dossier the next morning. Twenty-five of thirty-five pages deprecated while the ledger carried live
+claims on twelve names. It was deleting its own working notes on open bets.
+
+A stated unresolved claim now protects the dossier, and the daily research cycle refreshes the
+configured universe plus up to five claimed names. Keeping a page and refreshing it are two halves
+of the same promise - protecting a page nothing revisits just preserves a staler snapshot.
+
+The interesting constraint was *which* claims count. A muse candidate is registered **before** any
+gate runs, because the multiple-testing correction needs the trials that failed. Protect on "any
+unresolved trial" and you shield 37 of 37 names - the sweep becomes a no-op, which is this repo's
+signature bug, introduced by the fix for another instance of it. Protecting on `probability_stated`
+- the ledger's own word for a claim that survived every gate - protects twelve and still tombstones
+twenty-three.
+
+### And the question I was asked to answer rather than fix
+
+Do theses get promoted or demoted by the learning loop? **No**, and after tracing it I think that
+is right.
+
+The Coach's entire lever set is one string: the muse's collision prompt. Its challenger arm writes
+to a shadow ledger - no rows, no inbox, nothing - so a variant cannot touch the thesis record at
+all. Seventy-five ledger entries stamped with the incumbent variant; zero with the challenger.
+
+What happens to a thesis is three different things that are easy to run together. It gets *stated*
+(gate survival, once, at birth - the ledger's own docstring calls this "promote"). It gets
+*resolved* (outcomes, at horizon). And the *size ladder* promotes and demotes on outcomes - but
+book-wide, never per name. So outcomes move one global tier and nothing else. There is no per-name
+feedback anywhere in the system: the research universe is a config literal, discovery deliberately
+excludes names already covered, and the muse samples uniformly with an entropy sentinel
+specifically to stop it converging on what has been working.
+
+And a thesis-selection lever must not be built, which is the part worth writing down. The muse
+writes theses into the ledger; the ledger's resolved rows *are* the calibration sample; calibration
+gates the size ladder. A lever that changed which theses get stated would be changing the
+population its own reward is computed over - a variant selecting its own exam paper. That is
+exactly the defect `mark_stated` was built to close, and exactly why the shadow ledger exists.
+
+There is one safe candidate and it is already half-built. A rejected thesis is registered with
+`probability_stated=False`, so it never enters calibration - but it keeps its band and horizon, so
+it still resolves. "We refused it and it would have held" is a reward computed from resolutions the
+gate cannot influence: a genuinely disjoint measurer. The data structure exists and carries nine
+rows. Nothing computes it. That is I-73, and it is the most interesting unbuilt thing in the
+system.
+
+Per-name skill weighting is the other obvious idea, and it is blocked on evidence rather than
+machinery: 57 resolved theses across thirty names, SPY deepest at eight, against this project's own
+stated threshold of about fifty to measure anything at all. The right move is to wait for the
+sample, not to build an index that would confidently report noise.
+
+---
+
+**Where it ends up:** the book can hold six concurrent positions instead of four, the ladder can
+reach its hunt rung again, discovery is alive, the Coach's experiment can conclude, and the vault
+keeps the pages for the bets it still has open. 555 tests, lint clean, and four fixes that were all
+the same bug wearing different clothes: something that ran, returned, logged healthily, and did
+nothing.
