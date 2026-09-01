@@ -18,11 +18,27 @@ log_row() {
 		>> "$LOG"
 }
 
-exec 9>"$LOCK"
-if ! flock -n 9; then
-	echo "[publish] another publish is already running - skipping"
-	exit 0
+# A DIRECTORY is the lock, because `mkdir` is atomic on every POSIX filesystem
+# and needs no external tool. The previous spelling was `flock -n 9`, and
+# `flock` does not exist on macOS - so `if ! flock` was taking the "someone else
+# is publishing" branch on a `command not found`, and this script exited 0
+# announcing a conflict that could not happen. It had never once published from
+# this machine. Failing OPEN on a missing binary is bad; failing open into a
+# message that says the opposite is worse, and it is the exact bug class this
+# project keeps finding.
+LOCKDIR="$LOCK.d"
+if ! mkdir "$LOCKDIR" 2>/dev/null; then
+	# Stale locks are breakable: a crashed publish must not wedge the site
+	# forever, and there is no pid in a directory to check liveness with.
+	if [ -n "$(find "$LOCKDIR" -maxdepth 0 -mmin +30 2>/dev/null)" ]; then
+		echo "[publish] breaking a stale lock older than 30 minutes"
+		rm -rf "$LOCKDIR" && mkdir "$LOCKDIR"
+	else
+		echo "[publish] another publish is already running - skipping"
+		exit 0
+	fi
 fi
+trap 'rm -rf "$LOCKDIR"' EXIT
 
 cd "$ROOT"
 
@@ -64,8 +80,19 @@ if [ ! -f "$WEB/build/ledger.html" ]; then
 	exit 1
 fi
 
-echo "[publish] deploying to Cloudflare Pages"
-if (cd "$WEB" && npx wrangler pages deploy build --project-name trdrbot --commit-dirty=true); then
+# `--branch main` is what makes this a PRODUCTION deploy rather than a preview.
+# For a direct upload the branch is only a label Cloudflare matches against the
+# project's production branch; without it wrangler labels the deploy with the
+# current git branch, and work done on a feature branch lands on a preview URL
+# that trdrbot.com never serves. This script is called `publish` - publishing is
+# its whole job, so it says so rather than inheriting an answer from git.
+#
+# The project name is `trdrbot-com`, not `trdrbot`. That was wrong here from the
+# start and nobody saw it, because the broken lock above returned before ever
+# reaching this line: one silent no-op hiding another.
+echo "[publish] deploying to Cloudflare Pages (production)"
+if (cd "$WEB" && npx wrangler pages deploy build --project-name trdrbot-com \
+		--branch main --commit-dirty=true); then
 	log_row "deployed" "hash ${AFTER_HASH:0:12}"
 	echo "[publish] done"
 else
