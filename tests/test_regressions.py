@@ -1174,12 +1174,20 @@ def test_drawdown_demotes_immediately_and_recovers():
 
 def test_the_ladder_has_no_calendar_in_it():
     """The previous design keyed on days-to-deadline and would have entered a
-    no-new-risk phase permanently once the date passed."""
+    no-new-risk phase permanently once the date passed.
+
+    WORD BOUNDARIES, not substrings (D-099). The original spelling was
+    `"date" not in src`, which fires on `update`, `candidate`, `validate`,
+    `mandate`, `outdated` and `consolidate` - so writing an ordinary comment
+    inside `assess` failed a test whose message talks about calendars. Caught
+    while adding the risk-appetite parameter; the thing it guards is real, it
+    was just guarded by a substring."""
     import inspect
+    import re
 
     from trdrbot import competence
     src = inspect.getsource(competence.assess)
-    assert "date" not in src and "deadline" not in src
+    assert not re.search(r"\bdate\b|\bdeadline\b", src)
 
 
 def test_hard_stop_is_a_position_check_not_a_sizing_regime():
