@@ -5138,3 +5138,55 @@ now reads the provider's own stop reason.
 
 **Verified:** 599 tests (+27), lint clean, the whole-system scaffold at 0 failing checks,
 tomorrow's suite green, the live loop restarted onto this commit.
+
+## D-114 - Health answers about the system that is running, and the attribution queue drains
+
+Every FAIL and every WARN `trdrbot health` reported on the morning of 2026-09-02 named something
+that had already stopped. Three errors from 2026-08-26. Fourteen opportunities rejected as
+`horizon_too_late` by a deadline D-102 had removed, produced by the process D-108 found forty hours
+stale - re-run against the config actually on disk, all fourteen are admitted. One `learn_error`
+whose guard had shipped the same day. The single remaining finding was permanent by construction
+and could never clear at all. **A detector whose findings never clear is a detector nobody reads**,
+which is the exact failure health exists to prevent, and six days was enough to get there.
+
+**Recurrences are scored over the running process.** Health asks one question - is anything
+silently doing nothing - and an append-only journal answers it with a lifetime total, which is a
+different question. The boundary is the process rather than a wall-clock window because that is
+what actually separates "the system as it is now" from "the system that had that bug": a fix lands
+as a restart, not as a timeout. `run.json` already records it (D-108). A two-day window would have
+kept those fourteen rejections failing for two more days after they had become impossible.
+
+Nothing is deleted. A cause with no occurrences in the current era reports at OK carrying its
+lifetime count and the age of the last one - history, kept and visible, simply not a problem with
+the system that is running. Scoping must never become a way of switching a detector off, so the
+same cause still occurring still escalates on the same rule (once is weather, three times is a
+pattern), and with no live process - a one-shot CLI run, a test, a stopped loop - there is no "now"
+to speak of and the whole journal is the honest scope, which is also what every caller had before.
+The report header states which system it is describing. Four tallies had grown the same six-line
+loop, each with its own escalation and none with any notion of *when*; there is one shape now, in
+one place.
+
+**The attribution queue drains completely.** `pending()` required a thesis claim AND a parseable
+horizon, so a closed position missing either was never pending, never attributed and never counted.
+A permanently stuck item and a permanently empty queue are the same observation from outside, and
+health could only say so once, forever, about a state that nothing would ever change. A closed
+position is now in exactly one of three states rather than four: scoreable and due, scoreable and
+not yet due, or **unscoreable** - which gets an answer, once, carrying the reason. The verdict
+already existed and already meant precisely this: `UNSCOREABLE` carries signal `None`, "we could not
+judge it, assert nothing", and `attributable_rate` already excluded it from what the loop learned.
+Writing it does three things silence did not: the queue drains, the position page says what happened
+instead of looking like one still waiting for its horizon, and `attributable_rate` - which gates the
+top rung - stops flattering itself by ignoring the outcomes it could not explain. The health finding
+is now self-clearing, so if it fails to clear, the sweep is not running, which is worth the same
+alarm for a reason that can be acted on.
+
+**One clock for "how old is this row"** (`ids.age_days`). The Coach's gauge window (D-113) and
+health's era scoring were asking the same question of the same `ts` field, and a clock this project
+keeps two copies of is one it eventually disagrees with itself about. Both keep the same rule for
+the empty case: an unknown age is not evidence of staleness, because dropping unstamped rows would
+switch a detector off silently, which is worse than leaving it noisy.
+
+**Verified:** 609 tests (+10), lint clean, the whole-system scaffold at 0 failing checks, tomorrow's
+suite green. Live: health went from 3 problems and 3 warnings to **0 and 0** with nothing deleted,
+and the sweep attributed `pos_20260826_SPY_bull_put_spread_ebf0dcde` as unscoreable - "no thesis was
+recorded at entry" - the first attribution row this book has ever produced.
