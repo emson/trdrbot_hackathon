@@ -4833,3 +4833,57 @@ Per-name skill weighting is the other obvious candidate and is blocked on eviden
 57 resolved theses across ~30 names, SPY the deepest at n=8, against this project's own stated
 thresholds of ~50 to measure anything and 152 to tell 60% from a coin flip. `effective_n` exists
 and would say so. Build the index when the sample can carry it.
+
+## D-104 - Gate regret, computed
+
+I-73 said it plainly: the one self-improvement signal that does not violate the measured/measurer
+rule was recorded and never computed. Now it is. `ledger.gate_regret()` classifies the prose in
+`rejected_by` to a stable gate - the ledger is append-only, so the gate is recovered from the text
+and every historical row classifies the same way a new one does - counts refused / resolved /
+held per gate, and returns the **baseline** it must be read against: the hold rate of ADMITTED
+claims, because that is the counterfactual. A gate whose refusals hold as often as its admissions
+is throttling, not filtering. Below `MIN_GATE_RESOLVED = 5` a gate is reported as unmeasured,
+never zeroed. Surfaced on `trdrbot ledger` and as Coach gauges (measured gates only).
+
+First live reading: **`no_chain` refused theses that held 40% of the time against 42% admitted -
+not discriminating.** With the deadline gone that gate now bounds on the horizon window instead,
+so its future regret is a different number; the past one says it was a throttle.
+
+Pinned by mutation both ways: letting a rejected row into `as_forecasts` fails; computing the
+baseline over everything fails. The safety argument is the first assertion: a refused thesis never
+enters calibration, so a gate scored by its regret is scored by outcomes it cannot reach.
+
+## D-105 - The loop was open exactly where money crossed it
+
+`tests/scaffold_whole_system.py` drives every deterministic stage against a fake broker on a
+throwaway copy of the real data and asks one question at each seam: does the loop close. Eight
+scenarios - the happy path, the stop in and out of session, an unreadable broker, two names at
+once, the wiki's sweep/protect/revive, the Coach across a day boundary, gate regret, the risk
+posture. All pass now. **S1 did not pass the first time**, on the check that matters most.
+
+A thesis the agent had traded resolved, and calibration did not move.
+
+`simulate_experiments` pre-registers a thesis at a 0.5 placeholder with
+`probability_stated=False` - correct, D-052: the trial must count for N whether or not it is ever
+stated. `record_position` then received the agent's `confidence` - the same number
+`size_position` had just sized against, and a number the tool's own docstring told the agent *"is
+scored ... Brier/Murphy calibration"* - and only **linked** the position. The row stayed at 0.5,
+unstated. Confirmed live: 13 `thesis` rows, 2 traded, **0 stated**; one had resolved TRUE and did
+not count, while 105 muse candidates the agent never touched did.
+
+So the theses with money behind them were the only theses outside the record that decides how
+much money goes behind the next. Trading is the strongest statement of a probability there is;
+`mark_traded` now records it, and the row enters calibration at the confidence it was traded at.
+
+**Also learned from the scaffold, and NOT changed:** `record_position` accepts a position whose
+structure was never simulated - no `max_loss_usd`, no thesis. That is correct, because at that
+point the order has already filled and refusing to record it would orphan real exposure with no
+exit rules; `trdrbot health` reports it as BAD and the caps read it as zero risk, loudly. And the
+mark-based stop is N-of-M debounced (I-42), so it needs two evaluations to fire - the scaffold's
+S4 tripped on that before it tripped on anything real.
+
+**And the suite had been counting down.** Eight tests hardcoded dates that were "tomorrow" when
+written; the calendar rolled overnight and they crossed the zero-day-horizon and 1-day time-stop
+branches on a clean tree. D-032's rule now applies to fixtures: `conftest.days_out(n)`.
+
+**Verified:** 557 tests (+3), lint clean, the scaffold at 0 failing checks, mutation-verified.
