@@ -47,8 +47,13 @@ def pos(**kw):
     return Position(position_id="t", **kw)
 
 
-def snap(mark_pnl=None, underlying=None, prev_close=100.0):
-    s = Snapshot()
+def snap(mark_pnl=None, underlying=None, prev_close=100.0, market_open=True):
+    # `market_open=True` is stated rather than inherited from the dataclass
+    # default: every test here is simulating a LIVE tick, and the debounce
+    # history is only written for a price signal while the session is running
+    # (I-76). An unstated False made these fixtures silently exercise the
+    # overnight path.
+    s = Snapshot(market_open=market_open)
     if underlying is not None:
         s.underlying_prices = {"SPY": underlying}
         # Corroboration measures the SESSION move now, not the drift since
@@ -819,7 +824,7 @@ def test_the_tick_lock_refuses_a_second_live_holder():
     proc = subprocess.Popen(["sleep", "30"])  # a definitely-live OTHER process
     try:
         lock_file.write_text(json.dumps({"pid": proc.pid, "ts": time.time()}))
-        with pytest.raises(BlockingIOError, match="already running"), tick_lock(lock_file):
+        with pytest.raises(BlockingIOError, match="already running"), tick_lock(lock_file, stale_after=600):
             raise AssertionError("entered a lock another live process holds")
     finally:
         proc.terminate()
@@ -841,12 +846,12 @@ def test_the_tick_lock_takes_over_a_stale_lock():
 
     lock_file = Path(tempfile.mkdtemp()) / "tick.lock"
     lock_file.write_text(json.dumps({"pid": 999999, "ts": time.time()}))  # dead pid
-    with tick_lock(lock_file):
+    with tick_lock(lock_file, stale_after=600):
         pass
 
     import os
     lock_file.write_text(json.dumps({"pid": os.getpid(), "ts": time.time() - 99999}))
-    with tick_lock(lock_file):  # alive, but far past the stale window
+    with tick_lock(lock_file, stale_after=600):  # alive, but far past the stale window
         pass
 
 
@@ -858,7 +863,7 @@ def test_the_tick_lock_survives_a_corrupt_lock_file():
 
     lock_file = Path(tempfile.mkdtemp()) / "tick.lock"
     lock_file.write_text("not-json-at-all")
-    with tick_lock(lock_file):
+    with tick_lock(lock_file, stale_after=600):
         pass
     assert not lock_file.exists(), "the lock must be released on exit"
 
@@ -5547,7 +5552,7 @@ def test_the_lock_verifies_its_own_claim_and_loses_a_race_it_did_not_win(tmp_pat
 
     with pytest.MonkeyPatch.context() as mp:
         mp.setattr(Path, "write_text", rival_wins)
-        with pytest.raises(BlockingIOError, match="999999"), tick_lock(path):
+        with pytest.raises(BlockingIOError, match="999999"), tick_lock(path, stale_after=600):
             pytest.fail("proceeded while another process held the lock")
 
     assert _json.loads(path.read_text())["pid"] == 999999, "the rival's lock was clobbered"

@@ -38,6 +38,13 @@ from .journal import Journal
 from .positions import Position, PositionStore
 from .wiki import Wiki
 
+#: N-of-M debounce. **N of the last M OBSERVATIONS, and a frozen mark is one
+#: observation repeated** (I-76). The history is therefore only appended to
+#: while the signal can actually change: outside the session the mark and the
+#: underlying are the same closing print read again, so ~30 overnight
+#: housekeeping ticks used to leave the window pre-satisfied at [T,T,T] by
+#: 09:30 - one wide print at 15:59 and the second healthy-looking print of the
+#: next morning closed the position, at the widest quotes of the day.
 WINDOW = 3  # M
 NEEDED = 2  # N
 
@@ -162,10 +169,17 @@ class ExitSignal:
     render: Callable[[float], str]
     #: Second opinion on a decisive breach, for signals noisy enough that
     #: "far past the threshold" and "bad print" are the same observation.
-    #: (pos, snap, direction) -> True to confirm, False to debounce, None when
-    #: it cannot be judged (which debounces too). Absent on signals that print
-    #: cleanly - the underlying and the calendar need no corroborating.
+    #: (pos, snap, direction) -> True to confirm, False to refuse, None when it
+    #: cannot be judged (which falls back to the debounce). Absent on signals
+    #: that print cleanly - the underlying and the calendar need no
+    #: corroborating.
     corroborate: Callable[[Position, Snapshot, str], bool | None] | None = None
+    #: Does this signal's value change while the market is CLOSED? A price
+    #: does not: after the bell every read returns the same closing print, so
+    #: appending it to the debounce history counts one observation as many
+    #: (I-76). Dates and broker-holding counts do change, and their rules must
+    #: keep accumulating overnight.
+    frozen_when_closed: bool = False
 
 
 #: The registry. A new rule type usually needs no new signal at all.
@@ -176,12 +190,14 @@ EXIT_SIGNALS: dict[str, ExitSignal] = {
         "position_mark", lambda p, s, d: position_pnl_fraction(p.symbols, s),
         1.0, lambda v: f"{v:+.1%}",
         corroborate=_mark_corroborated,
+        frozen_when_closed=True,
     ),
     # What a professional actually exits on: the underlying breaking the level
     # that invalidates the thesis. Prints continuously and tightly.
     "underlying": ExitSignal(
         "underlying", lambda p, s, d: s.underlying_prices.get(p.underlying),
         0.01, lambda v: f"{v:.2f}",
+        frozen_when_closed=True,
     ),
     "days_to_expiry": ExitSignal(
         "days_to_expiry", lambda p, s, d: _days_to(p.expiry),
@@ -317,11 +333,11 @@ def evaluate(pos: Position, snap: Snapshot, deadline: str,
 
     `stats` is an optional counter bag the caller owns. It exists because the
     interesting event here does NOT produce a close and therefore leaves no exit
-    row: a decisive mark breach that the underlying refused to corroborate is a
-    position NOT closed, and without a count nothing downstream could ever see
-    it happening (WU-4.6). The keys are `mark_breach_suppressed`,
-    `mark_breach_confirmed`, and one `blind:<signal>` per rule whose signal
-    could not be read at all.
+    row: a mark breach that the underlying refused to corroborate is a position
+    NOT closed, and without a count nothing downstream could ever see it
+    happening (WU-4.6). The keys are `mark_breach_suppressed`,
+    `mark_breach_confirmed`, `mark_breach_unjudged`, and one `blind:<signal>`
+    per rule whose signal could not be read at all.
     """
     pnl = position_pnl_fraction(pos.symbols, snap)
     # Remember the last time we could see it. A position that closes outside
@@ -405,27 +421,60 @@ def evaluate(pos: Position, snap: Snapshot, deadline: str,
         # Debounce state is keyed by the WHOLE rule, not its type: two
         # underlying stops at different levels are different rules and must
         # not share a history (they did, before the registry).
+        #
+        # PERSISTED only when this observation is a NEW one (I-76). A price
+        # does not move while the market is shut, so the ~30 overnight
+        # housekeeping ticks all read the same closing print - and appending
+        # each of them left the window pre-satisfied at the open, where the
+        # very next wide quote closed the position on one artifact at the
+        # widest spreads of the day. Detection is untouched: the rule is still
+        # evaluated off-hours (I-56), it simply stops counting one observation
+        # as many.
         key = f"{sig_name}:{direction}:{thr:g}"
         history = list(pos.exit_state.get(key, []))[-(WINDOW - 1):] + [breached]
-        pos.exit_state[key] = history
+        if snap.market_open or not signal.frozen_when_closed:
+            pos.exit_state[key] = history
         if not breached:
             continue
 
+        # CORROBORATION APPLIES TO EVERY MARK BREACH, not only the decisive one
+        # (I-77). The debounce protects against a TRANSIENT artifact; a stale
+        # or wide quote on an illiquid strike persists for hours, so two ticks
+        # of the same bad print satisfied 2-of-3 and closed a healthy spread on
+        # an underlying that had moved 0.00 that session. The underlying is the
+        # disambiguator either way, so it is asked either way:
+        #
+        #   True   the underlying agrees - close now, no debounce needed
+        #   False  the underlying refuses - hold, and the debounce cannot
+        #          overrule testimony from the signal that prints cleanly
+        #   None   it cannot be judged - fall back to the N-of-M debounce,
+        #          which is the documented conservative direction
+        #
+        # All three are counted, not just the decisive ones: a one-sided tally
+        # cannot tune `CORROBORATION_FRACTION`, which is what these counters
+        # exist for (I-65).
         decisive = _overshoot(x, thr, direction) >= signal.immediate_overshoot
         confirmed: bool | None = None
-        if decisive and signal.corroborate is not None:
+        if signal.corroborate is not None:
             confirmed = signal.corroborate(pos, snap, direction)
-            decisive = confirmed is True
             if stats is not None:
-                key = "mark_breach_confirmed" if decisive else "mark_breach_suppressed"
-                stats[key] = stats.get(key, 0) + 1
-        if decisive or sum(history) >= NEEDED:
-            note = ""
-            if decisive and confirmed is True:
-                note = ", underlying confirms"
-            elif confirmed is not None and not decisive:
-                note = " - the underlying has not confirmed it, so this is the"\
-                       " debounce, not the print"
+                counter = ("mark_breach_confirmed" if confirmed is True
+                           else "mark_breach_suppressed" if confirmed is False
+                           else "mark_breach_unjudged")
+                stats[counter] = stats.get(counter, 0) + 1
+
+        debounced = sum(history) >= NEEDED
+        if signal.corroborate is None:
+            fires, note = (decisive or debounced), ""
+        elif confirmed is True:
+            fires, decisive, note = True, True, ", underlying confirms"
+        elif confirmed is False:
+            fires, note = False, ""
+        else:
+            fires, decisive = debounced, False
+            note = (" - the underlying could not be judged, so this is the"
+                    " debounce, not the print")
+        if fires:
             why = (
                 f"{sig_name} {signal.render(x)} {direction} {signal.render(thr)}"
                 + (f" - decisive, immediate{note}" if decisive
@@ -655,6 +704,13 @@ async def run(
                        # the data that will eventually tune its fraction.
                        mark_breach_suppressed=stats.get("mark_breach_suppressed", 0),
                        mark_breach_confirmed=stats.get("mark_breach_confirmed", 0),
+                       # The third outcome, and the one whose absence made the
+                       # tally one-sided (I-77): the underlying could not be
+                       # judged at all, so the N-of-M debounce decided instead.
+                       # A rising share here says the corroboration rule is
+                       # mostly not running, which is a different problem from
+                       # a fraction set too tight.
+                       mark_breach_unjudged=stats.get("mark_breach_unjudged", 0),
                        # A rule that PARSED and whose signal could not be read.
                        # `invalid_rules` above cannot see these: the rule is
                        # perfectly well-formed, and the observable it names is

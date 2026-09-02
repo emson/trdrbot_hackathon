@@ -78,11 +78,17 @@ def decide(
     last_decision_at: datetime | None,
     last_hunt_at: datetime | None,
     open_risk_usd: float,
-    equity: float,
+    equity: float | None,
     risk_cap_fraction: float,
     minutes_to_close_: float | None = None,
 ) -> IdleAction:
-    """Pick the rung. Deterministic, no LLM, safe to run every tick."""
+    """Pick the rung. Deterministic, no LLM, safe to run every tick.
+
+    `equity` is None when the account could not be read (I-75). There is then
+    no deployable room to speak of - a hunt would generate candidates sizing
+    refuses anyway - so the ladder falls back to the oversight rungs, which
+    need no bankroll to be worth climbing.
+    """
     if not market_open:
         return IdleAction("sleep", "market closed - housekeeping owns this window", {})
 
@@ -101,11 +107,11 @@ def decide(
     # Deliberately gated on being ABLE to act. Hunting while the book is at its
     # risk cap generates candidates that sizing will refuse - spend with no
     # possible outcome. Do not hunt when you cannot shoot.
-    room = risk_cap_fraction * equity - open_risk_usd
+    room = None if equity is None else risk_cap_fraction * equity - open_risk_usd
     hunt_cooled = (_minutes_since(last_hunt_at) or 1e9) >= HUNT_COOLDOWN_MIN
     late = (minutes_to_close_ is not None
             and minutes_to_close_ <= NO_NEW_POSITIONS_BEFORE_CLOSE_MIN)
-    can_hunt = room > 0 and hunt_cooled and not late
+    can_hunt = room is not None and room > 0 and hunt_cooled and not late
 
     # ---- L2: gone quiet while holding risk. THE OVERSIGHT GUARANTEE ----
     # Checked first and never yielded, because it is the promise that a held
@@ -142,7 +148,7 @@ def decide(
         )
 
     # ---- L3: capital idle and deployable ----
-    if can_hunt:
+    if can_hunt and room is not None:
         return IdleAction(
             "hunt",
             f"${room:,.0f} of risk budget unused"
@@ -152,7 +158,9 @@ def decide(
 
     # ---- L0 ----
     why = "nothing at risk and nothing to deploy"
-    if open_positions:
+    if room is None:
+        why = "the account could not be read - no bankroll, so nothing is deployable"
+    elif open_positions:
         why = "positions healthy, tape quiet, looked recently"
     elif late:
         why = f"{minutes_to_close_:.0f}min to the close - too late to open new risk"

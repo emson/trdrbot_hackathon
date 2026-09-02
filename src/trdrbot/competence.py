@@ -402,10 +402,11 @@ def assess(
     resolved: int,
     reliability: float | None,
     positions: list[Any],
-    equity: float,
+    equity: float | None,
     high_water: float,
     effective: float | None = None,
     appetite: float = 1.0,
+    last_drawdown: float = 0.0,
 ) -> Competence:
     """Where the agent sits on the ladder right now. Deterministic, no LLM.
 
@@ -418,9 +419,20 @@ def assess(
     class by construction - this project has shipped it three times. Here there
     is exactly one way to obtain a posture and it is always the operative one.
     The default of 1.0 leaves every existing caller byte-identical.
+
+    `equity` is None when the account could not be read (I-75). Drawdown is
+    then HELD at `last_drawdown` - the figure on the last journalled
+    `competence` row - rather than recomputed against a fabricated equity: a
+    tier that moves on a number nobody measured is worse than a tier that does
+    not move at all, and the ladder's other three inputs (resolved,
+    reliability, attribution) do not depend on the account read.
     """
     attr, verdicts = attributable_rate(positions)
-    drawdown = max(0.0, 1.0 - equity / high_water) if high_water > 0 else 0.0
+    unreadable = equity is None
+    if unreadable:
+        drawdown = max(0.0, last_drawdown)
+    else:
+        drawdown = max(0.0, 1.0 - equity / high_water) if high_water > 0 else 0.0
 
     earned = _earned_tier(resolved, reliability, attr, verdicts)
     tier, demotion = _demote(earned, drawdown)
@@ -463,6 +475,9 @@ def assess(
         reason = (f"{tier.upper()} - {resolved} resolved, {attr_note}, "
                   f"Kelly x{earned_kelly:.2f}")
     reason += _appetite_note(appetite, a, earned_cap, book_cap, earned_kelly, kelly)
+    if unreadable:
+        reason += (f" [the account could not be read this tick, so the drawdown is "
+                   f"HELD at the last measured {drawdown:.1%} rather than recomputed]")
 
     return Competence(
         tier=tier, resolved=resolved, reliability=reliability,
@@ -589,8 +604,17 @@ def high_water_path(state_dir: Path) -> Path:
     return state_dir / "high_water.json"
 
 
-def update_high_water(state_dir: Path, equity: float, journal: Any = None) -> float:
+def update_high_water(state_dir: Path, equity: float | None, journal: Any = None) -> float:
     """The peak equity drawdown is measured against. Corruption is LOUD.
+
+    `equity` here is REALISED equity - cash plus cost basis - not the marked
+    figure the broker reports (I-86, `analytics.Snapshot.realised_equity`). A
+    running max over marked equity latches on one wide option quote: a
+    one-tick +5.5% mark inflation set a peak no fill could reach and demoted
+    the ladder a rung indefinitely, which is the exact noise-latching the exit
+    rules were debounced against. None means the peak cannot be advanced this
+    tick (an unreadable account or an unreadable broker), so the stored peak
+    is returned unchanged rather than being moved by a guess.
 
     A corrupt file used to reset `hw` to 0.0, at which point `equity > hw` was
     trivially true and the peak became today's equity - so drawdown computed
@@ -614,7 +638,7 @@ def update_high_water(state_dir: Path, equity: float, journal: Any = None) -> fl
                 journal.append("state_corrupt", file="high_water.json",
                                consequence="drawdown_unguarded", error=repr(exc)[:200])
             hw = 0.0
-    if equity > hw:
+    if equity is not None and equity > hw:
         hw = equity
         store.write_atomic(p, json.dumps({"high_water": hw}))
     return hw

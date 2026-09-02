@@ -22,10 +22,17 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 import trdrbot.ids as ids  # noqa: E402
 
 N = int(sys.argv[1]) if len(sys.argv) > 1 else 1
-_t0, _m0, _u0 = ids.today, ids.market_today, ids.utc_now
-ids.today = lambda: _t0() + timedelta(days=N)
-ids.market_today = lambda: _m0() + timedelta(days=N)
-ids.utc_now = lambda: _u0() + timedelta(days=N)
+_SHIFT = timedelta(days=N)
+_m0, _u0 = ids.market_today, ids.utc_now
+# `today` is derived from the ORIGINAL `utc_now`, never from the patched one.
+# `ids.today()` is defined as `utc_now().date()`, so wrapping the existing
+# `ids.today` shifted it TWICE - the UTC clock moved N days and the wrapper
+# added N more. Every fixture built with `conftest.days_out` therefore sat N
+# days beyond the market clock the code compares it against, which is a
+# fabricated failure in the one tool whose whole job is to find real ones.
+ids.utc_now = lambda: _u0() + _SHIFT
+ids.today = lambda: (_u0() + _SHIFT).date()
+ids.market_today = lambda: _m0() + _SHIFT
 
 import pytest  # noqa: E402
 

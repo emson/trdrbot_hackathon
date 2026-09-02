@@ -5190,3 +5190,74 @@ switch a detector off silently, which is worse than leaving it noisy.
 suite green. Live: health went from 3 problems and 3 warnings to **0 and 0** with nothing deleted,
 and the sweep attributed `pos_20260826_SPY_bull_put_spread_ebf0dcde` as unscoreable - "no thesis was
 recorded at entry" - the first attribution row this book has ever produced.
+
+## D-115 - Capital protection: absence refuses, a repeated observation is not evidence, one order one id
+
+Six defects from the 2026-09-02 adversarial audit (I-75, I-76, I-77, I-86, I-101, I-102 with
+I-110/I-111), all on the path that can lose money before anything else is touched. They share three
+shapes this project keeps re-finding, so they are fixed as three rules rather than six patches. Plan:
+`docs/plan_defect_remediation.md` W1.
+
+**Absence refuses; it never becomes a number.** `analytics.snapshot` left `account={}` on a failed
+read, so `snap.equity` was 0.0 - and `tick` read `snap.equity or 100000.0`, twice. Measured: against
+a real 11.6% drawdown that should demote to EXPLORE, the fallback read 3.9%, the tier held at MATURE,
+and the same structure sized **47 contracts against 12**. This is D-038's absence-as-a-number on the
+one input every cap, the Kelly gate and the drawdown brake share. `Snapshot.account_readable` is the
+I-55 shape one field over: `size_position` refuses ("there is no bankroll to size against"), the
+ladder holds its last journalled drawdown rather than recomputing against a fabricated equity, the
+idle ladder has no deployable room, and the failed read writes the `degraded` row the positions,
+orders and clock reads one line either side already wrote. **Not a guardrail (D-009):** the sizer is
+declining to answer a question it has no input for.
+
+**A frozen observation is one observation, however many times it is read.** `exit_rules.evaluate`
+appended to the debounce history on every tick while `run()` gated only the broker call on
+`market_open` - so ~30 overnight housekeeping ticks all wrote the same closing mark, and the window
+was pre-satisfied at [T,T,T] by 09:30. Live: 182 of one day's 308 `exit_run` rows were written
+outside the session. A wide print at 15:59 plus one wide print at 09:35 closed a healthy spread on
+one artifact at the widest quotes of the day. **N-of-M means N of the last M OBSERVATIONS**, stated
+now in the constant's own docstring, and the history is written only for a signal that can actually
+change: `ExitSignal.frozen_when_closed`. Detection is untouched - I-56's fix survives, the calendar
+rules still fire off-hours and wait for the session to submit.
+
+**Corroboration applies to every mark breach, not only the decisive one.** I-42 routed the DECISIVE
+branch through `_mark_corroborated` and left the hole beside it: `evaluate` also fired on
+`sum(history) >= NEEDED`, which never consulted the underlying. A wide quote on an illiquid strike
+persists for hours, so the second identical print satisfied 2-of-3 and closed on an underlying that
+had moved 0.00 that session - the same artifact the debounce exists for, one tick later. The rule is
+now: the underlying confirms (close), refuses (hold), or cannot be judged (the N-of-M debounce is the
+fallback, which is the documented conservative direction). All three outcomes are counted -
+`mark_breach_unjudged` is new - because a one-sided tally cannot tune `CORROBORATION_FRACTION`, which
+is what those counters exist for. **The fraction itself is NOT tuned here** (I-65 is a separate
+measurement); this changes its remit, not its value.
+
+**The high-water mark anchors on realised equity.** Alpaca's `equity` includes open options at their
+current mark, so one wide print set a peak no fill could reach and the drawdown brake latched on
+noise indefinitely - measured, a one-tick +5.5% mark inflation demoted SCALE to ESTABLISH for good.
+`Snapshot.realised_equity` (cash plus cost basis) is what ratchets the peak; the drawdown is still
+measured against the current mark, so an open loss still brakes.
+
+**One order, one id.** `tool_guard._wrap` computed `ids.client_order_id(batch)` once per tool and
+stamped it on every call, so close-A-then-open-B could not execute: the broker refused the second as
+a duplicate of the first and the agent's own retry id was overwritten and refused again. The live
+journal already carries a two-order cycle. The id now derives from the batch AND the order's own
+sorted `(symbol, side, qty)` triples - stable across a crash-retry of the same intent (INV-18 and
+FM-24 hold unchanged), distinct for a different order, and still collapsing two identical orders to
+one, which is the safe direction. `tool_guard.enforced_order_id` is the single definition both the
+wrapper and the journal call, so the record and the wire cannot disagree; a tool that bears no such
+field is journalled with `None` rather than with an id that was never sent.
+
+**The lock outlives the tick it guards, and the single-shot path is bounded.** `stale_after`
+defaulted to 600s while `_run_loop` permits `watchdog_seconds x 4`; a second invocation read the live
+holder as stale at 601s and ran beside it. It is now a required argument - no default to inherit -
+and the release unlinks only a lock we still hold, so a process whose lock was broken can no longer
+delete the breaker's. `cli._tick`, the run.sh/launchd path, gets the same `asyncio.wait_for` bound
+the loop has (I-110), `--closed-interval` honours the same floor as `--interval` (I-111), and the
+loop stops with rc 2 after three consecutive CONFIG- or BUG-classified failures rather than looping
+on our own deterministic bug forever with rc 0.
+
+**One test was deliberately rewritten.** `test_one_wide_print_no_longer_closes_a_healthy_spread`
+asserted that a second identical print "confirms it the ordinary way" - the I-77 defect stated as a
+requirement. It is now `test_a_persistent_wide_print_on_an_unmoved_underlying_never_closes`, paired
+with `test_an_unjudgeable_breach_still_debounces_to_a_close` so the debounce stays load-bearing and
+"closes too eagerly" cannot be fixed into "never closes". Two fixtures that built snapshots without
+`market_open` now state it: they always meant a live tick.

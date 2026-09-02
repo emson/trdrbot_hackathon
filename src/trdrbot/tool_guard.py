@@ -70,6 +70,46 @@ def redirect_whole_book_close(tools: Sequence[Any], count_open: callable) -> lis
     return out
 
 
+def enforced_order_id(batch: str, name: str, args: dict[str, Any]) -> str | None:
+    """The id this order call must carry, or None if the tool takes none.
+
+    THE one definition (I-101). `tick` journals `client_order_id_enforced` on
+    every order call and used to compute it with its own
+    `ids.client_order_id(batch)` - so the live 2026-08-27 row records an
+    enforced id on `close_all_positions`, a tool that takes no such field and
+    was never wrapped: a record of something that never happened. Both the
+    wrapper below and the journal call this, so the record and the wire cannot
+    disagree.
+    """
+    if name not in _ID_BEARING:
+        return None
+    return ids.client_order_id(batch, _order_identity(args))
+
+
+def _order_identity(args: dict[str, Any]) -> list[tuple[str, str, int]]:
+    """An order's `(symbol, side, qty)` triples, as the model supplied them.
+
+    Both payload shapes: a multi-leg option order carries `legs` with a
+    per-leg `ratio_qty` against one top-level `qty`; a single-leg order carries
+    the symbol, side and quantity at the top level. An unreadable quantity
+    counts as 0 rather than raising - this runs on the submit path, and a
+    malformed argument is the broker's to reject, not this wrapper's.
+    """
+    def _int(v: Any, default: int = 0) -> int:
+        try:
+            return int(float(v))
+        except (TypeError, ValueError):
+            return default
+
+    qty = _int(args.get("qty") or args.get("quantity"))
+    legs = [l for l in (args.get("legs") or []) if isinstance(l, dict)]
+    if legs:
+        return [(str(l.get("symbol", "")), str(l.get("side", "")),
+                 qty * _int(l.get("ratio_qty"), 1)) for l in legs]
+    return [(str(args.get("symbol") or args.get("symbol_or_asset_id") or ""),
+             str(args.get("side", "")), qty)]
+
+
 def _accepts_client_order_id(tool: Any) -> bool:
     """True if the tool takes a client_order_id argument.
 
@@ -98,9 +138,13 @@ def enforce_order_ids(tools: Sequence[Any], batch: str) -> list[Any]:
 
 def _wrap(tool: Any, batch: str) -> Any:
     original = tool.coroutine
-    forced_id = ids.client_order_id(batch)
 
     async def _forced(*args: Any, **kwargs: Any) -> Any:
+        # Computed PER CALL, from this order's own content (I-101). Hoisting it
+        # out of the closure - which is where it lived - stamped one id on
+        # every call the cycle made, so a second, genuinely different order was
+        # refused by the broker as a duplicate of the first.
+        forced_id = enforced_order_id(batch, tool.name, kwargs) or ""
         supplied = kwargs.get("client_order_id")
         if supplied and supplied != forced_id:
             print(

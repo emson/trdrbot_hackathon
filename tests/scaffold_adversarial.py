@@ -10,9 +10,14 @@ label states the defect, and the check asserts the code exhibits it. When a
 defect is fixed its check flips to FAIL, which is the signal to move the row
 into a pinned regression test.
 
-  X1   a persistent wide option quote on an unmoved underlying closes a spread in two ticks
-  X2   the frozen overnight mark saturates the debounce, so one print at the open closes
-  X3   an unreadable account silently becomes $100,000 equity for sizing and the ladder
+Rows are DELETED as their defect is fixed and its scenario is pinned as a
+regression test - the file is the burn-down chart, and the goal state is an
+empty one. Gone so far: X1 and X2 (I-77/I-76, now
+tests/test_exit_and_risk.py::test_a_persistent_wide_print_on_an_unmoved_underlying_never_closes
+and ::test_the_overnight_mark_does_not_pre_satisfy_the_debounce_window), X3
+(I-75, ::test_an_unreadable_account_sizes_nothing_and_says_why and its three
+siblings), X17 (I-86, ::test_the_high_water_mark_ignores_an_unrealisable_option_print).
+
   X4   a close that has not filled is re-adopted as an orphan and scored twice
   X5   an order that never filled is attributed at its horizon and credits memory
   X6   one traded thesis enters calibration twice, with outcomes that can disagree
@@ -26,14 +31,12 @@ into a pinned regression test.
   X14  a missing expiry blinds every calendar rule and the tool does not say so
   X15  record_position called twice for one fill: two pages, double risk, double scoring
   X16  crash between order and record: orphan adoption races the resume
-  X17  one wide mark sets an equity high-water no fill can reach; the brake latches
 """
 from __future__ import annotations
 
 import asyncio
 import contextlib
 import io
-import json
 import shutil
 import sys
 from datetime import UTC, date, datetime
@@ -55,7 +58,6 @@ from trdrbot import (  # noqa: E402
     ids,
     local_tools,
     reconcile,
-    sizing,
 )
 from trdrbot import config as config_mod  # noqa: E402
 from trdrbot import ledger as ledger_mod  # noqa: E402
@@ -343,132 +345,6 @@ def clock_at(et_str: str):
         ids.utc_now, ids.market_today, ids.today = saved
 
 
-# ============================================================== X1
-h("X1  a PERSISTENT wide option quote on an UNMOVED underlying (the I-42 artifact, held for 10 min)")
-w = World("x1")
-try:
-    expiry, horizon = days_out(7), days_out(3)
-    spot = w.broker.prices["SPY"]
-    run(w.decide_open(underlying="SPY", spot=spot, expiry=expiry, long_k=round(spot - 4),
-                      short_k=round(spot - 12), stated=0.42, horizon=horizon))
-    # the underlying has not moved at all this session
-    w.broker.prev_closes["SPY"] = spot
-    w.broker.mark("SPY", -0.70)                 # stop is -65%; a wide quote prints -70%
-    _, _, c1 = run(w.fast_path())
-    _, _, c2 = run(w.fast_path())
-    check(c1 == [], "tick 1: the artifact print holds (debounce armed)")
-    check(c2 != [], "tick 2: the SAME persistent print closes the position - no corroboration on the debounce path",
-          f"closed={c2}; SPY moved {w.broker.prices['SPY'] - w.broker.prev_closes['SPY']:+.2f} this session")
-    xr = rows(w.journal, "exit")[-1] if rows(w.journal, "exit") else {}
-    print(f"  exit row: {xr.get('explanation')}")
-    # and the DECISIVE variant: a -140% print (overshoot > 1.0) on an unmoved underlying
-    w2 = World("x1b")
-    run(w2.decide_open(underlying="SPY", spot=spot, expiry=expiry, long_k=round(spot - 4),
-                       short_k=round(spot - 12), stated=0.42, horizon=horizon))
-    w2.broker.prev_closes["SPY"] = spot
-    w2.broker.mark("SPY", -1.40)
-    _, _, d1 = run(w2.fast_path())
-    _, _, d2 = run(w2.fast_path())
-    hb = rows(w2.journal, "exit_run")
-    check(d1 == [], "decisive print, tick 1: suppressed by corroboration (underlying unmoved)",
-          f"suppressed={hb[-2].get('mark_breach_suppressed') if len(hb) > 1 else '?'}")
-    check(d2 != [], "decisive print, tick 2: closes anyway via the 2-of-3 debounce - corroboration bought ONE tick",
-          f"closed={d2}")
-    w2.cleanup()
-    NOTES.append("X1: a wide quote that persists for two ticks closes a healthy spread on an unmoved "
-                 "underlying; corroboration guards only the immediate path, so it delays by one tick.")
-finally:
-    w.cleanup()
-
-# ============================================================== X2
-h("X2  overnight: the frozen closing mark feeds the debounce ~30 times, so ONE print at the open closes")
-w = World("x2")
-try:
-    expiry, horizon = days_out(7), days_out(3)
-    spot = w.broker.prices["SPY"]
-    run(w.decide_open(underlying="SPY", spot=spot, expiry=expiry, long_k=round(spot - 4),
-                      short_k=round(spot - 12), stated=0.42, horizon=horizon))
-    w.broker.prev_closes["SPY"] = spot
-    pos = w.store.open_positions()[0]
-    # last in-session tick: a wide closing mark, one breach on the history
-    w.broker.mark("SPY", -0.70)
-    _, _, c = run(w.fast_path())
-    check(c == [], "15:59 wide close mark: one breach, holds")
-    w.broker.market_open = False
-    for _ in range(6):                         # overnight housekeeping ticks: same frozen mark
-        _, _, c = run(w.fast_path())
-    pos = w.store.load(pos.position_id)
-    hist = pos.exit_state.get("position_mark:below:-0.65")
-    check(c == [] and pos.status == "open", "off-hours: nothing submitted", f"status={pos.status}")
-    check(hist == [True, True, True], "but the debounce window is now SATURATED by the frozen mark",
-          f"history={hist}")
-    # at the open the quote normalises: nothing fires (correct)
-    w.broker.market_open = True
-    w.broker.mark("SPY", -0.30)
-    _, _, c = run(w.fast_path())
-    check(c == [], "09:30 healthy mark: holds")
-    pos = w.store.load(pos.position_id)
-    hist = pos.exit_state.get("position_mark:below:-0.65")
-    print(f"  history after healthy open print: {hist}")
-    # a single wide print 5 min later, underlying still unmoved
-    w.broker.mark("SPY", -0.70)
-    _, _, c = run(w.fast_path())
-    check(c != [], "09:35 ONE wide print closes the position: the overnight saturation counts as confirmation",
-          f"closed={c}, history before={hist}")
-    # control: the same single print with a clean in-session history holds
-    w3 = World("x2b")
-    run(w3.decide_open(underlying="SPY", spot=spot, expiry=expiry, long_k=round(spot - 4),
-                       short_k=round(spot - 12), stated=0.42, horizon=horizon))
-    w3.broker.prev_closes["SPY"] = spot
-    w3.broker.mark("SPY", -0.30)
-    run(w3.fast_path())
-    run(w3.fast_path())
-    w3.broker.mark("SPY", -0.70)
-    _, _, c3 = run(w3.fast_path())
-    check(c3 == [], "CONTROL: the same single print on a clean history holds", f"closed={c3}")
-    w3.cleanup()
-    NOTES.append("X2: exit_rules.evaluate appends to the debounce history on every closed-market tick "
-                 "against a frozen mark, so the 2-of-3 rule is pre-satisfied at the open.")
-finally:
-    w.cleanup()
-
-# ============================================================== X3
-h("X3  the account read fails: equity silently becomes $100,000 for sizing, the ladder and the idle ladder")
-w = World("x3")
-try:
-    hw_path = competence.high_water_path(w.paths.state)
-    hw_path.write_text(json.dumps({"high_water": 104_060.0}))
-    w.broker.equity = 92_000.0          # a real 11.6% drawdown -> should demote to EXPLORE
-    w.broker.account_readable = False
-    snap = run(w.snapshot())
-    check(snap.equity == 0.0, "snapshot.equity reads 0.0 when the account call fails", f"{snap.equity}")
-    deg = [r for r in rows(w.journal, "degraded") if "account" in str(r)]
-    check(len(deg) == 0, "and NO `degraded` row is written for it (positions/orders/clock all get one)",
-          f"degraded rows mentioning account: {len(deg)}")
-    # exactly what tick._run_tick does next:
-    equity_now = snap.equity or 100000.0
-    hw = competence.update_high_water(w.paths.state, equity_now, w.journal)
-    cal = w.calib.score([])
-    p_fallback = competence.assess(resolved=40, reliability=0.02,
-                                   positions=[SimpleNamespace(attribution="thesis_right_expression_right")] * 10,
-                                   equity=equity_now, high_water=hw, appetite=1.75)
-    p_truth = competence.assess(resolved=40, reliability=0.02,
-                                positions=[SimpleNamespace(attribution="thesis_right_expression_right")] * 10,
-                                equity=92_000.0, high_water=104_060.0, appetite=1.75)
-    check(p_truth.tier == "explore" and p_fallback.tier != "explore",
-          "a real 11.6% drawdown that should demote to EXPLORE is read as 3.9% and the tier holds",
-          f"truth={p_truth.tier} ({p_truth.drawdown:.1%})  with fallback={p_fallback.tier} ({p_fallback.drawdown:.1%})")
-    d = sizing.size_position(equity=equity_now, stated_confidence=0.6, max_profit=300.0, max_loss=-200.0,
-                             calibration=cal, posture=p_fallback, underlying="SPY", payoff_ratio=1.5)
-    d2 = sizing.size_position(equity=92_000.0, stated_confidence=0.6, max_profit=300.0, max_loss=-200.0,
-                              calibration=cal, posture=p_truth, underlying="SPY", payoff_ratio=1.5)
-    check(d.contracts > d2.contracts, "and the next trade is sized on $100k at the un-demoted tier",
-          f"{d.contracts} contracts vs {d2.contracts} on the truth")
-    NOTES.append("X3: tick.py `equity_now = snap.equity or 100000.0` substitutes a constant when the "
-                 "account read fails; nothing journals it; drawdown protection and every cap read it.")
-finally:
-    w.cleanup()
-
 # ============================================================== X4
 h("X4  a close that has not filled yet: the terminal page stops claiming its legs, so reconcile ADOPTS them")
 w = World("x4")
@@ -691,8 +567,8 @@ try:
     run(w.fast_path())
     _, _, c = run(w.fast_path())
     check(c == [pid], "a -2% mark closes the position", f"closed={c}")
-    ex = rows(w.journal, "exit")[-1]
-    print(f"  exit: {ex['explanation']}")
+    for ex in rows(w.journal, "exit")[-1:]:
+        print(f"  exit: {ex['explanation']}")
     NOTES.append("X11: record_position formats stop_loss_pct as f'{x}%' unconditionally; confidence is a "
                  "0-1 fraction in the same call, so a mixed-units call arms a stop at -0.65%.")
 finally:
@@ -861,30 +737,6 @@ try:
     check(len(refl) == 2, "two reflections, two lessons for one trade", f"{len(refl)}")
     NOTES.append("X16: after a crash between order and record, the next tick's orphan adoption and the resumed "
                  "cycle's record_position both claim the fill; nothing merges them.")
-finally:
-    w.cleanup()
-
-# ============================================================== X17
-h("X17 a wide option mark inflates broker equity for ONE tick: the high-water mark keeps it forever")
-w = World("x17")
-try:
-    hw0 = 104_060.0
-    competence.high_water_path(w.paths.state).write_text(json.dumps({"high_water": hw0}))
-    # a 13-lot spread whose short leg prints a wide bid for one tick: equity +5.5%
-    w.broker.equity = hw0 * 1.055
-    snap = run(w.snapshot())
-    hw = competence.update_high_water(w.paths.state, snap.equity, w.journal)
-    w.broker.equity = hw0                       # the quote normalises
-    snap = run(w.snapshot())
-    hw = competence.update_high_water(w.paths.state, snap.equity, w.journal)
-    p = competence.assess(resolved=20, reliability=0.02,
-                          positions=[SimpleNamespace(attribution="thesis_right_expression_right")] * 6,
-                          equity=snap.equity, high_water=hw, appetite=1.75)
-    check(hw > hw0 and p.drawdown >= competence.DEMOTE_ONE_TIER_AT and "drawdown" in p.reason,
-          "with real equity unchanged the ladder now reads a 5.2% drawdown and demotes a tier",
-          f"hw={hw:,.0f} drawdown={p.drawdown:.1%} -> {p.tier} ({p.reason[:60]})")
-    NOTES.append("X17: update_high_water is a running max of Alpaca's marked equity, which includes option "
-                 "marks; one wide print sets a peak no fill can reach and the drawdown brake latches.")
 finally:
     w.cleanup()
 

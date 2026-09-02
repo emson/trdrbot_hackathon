@@ -227,3 +227,137 @@ def test_every_subcommand_parses_and_has_a_handler():
 
     assert len(parser_names) == 18
     assert isinstance(argparse.ArgumentParser(), argparse.ArgumentParser)
+
+
+# --------------------------------------------------------- I-101, I-102, I-110
+#
+# The chassis guarantees the run loop had and the single-shot path did not, and
+# the two ids one cycle can need.
+
+def test_two_different_orders_in_one_cycle_get_two_ids():
+    """I-101: `tool_guard._wrap` computed `ids.client_order_id(batch)` ONCE per
+    tool and stamped it on every call, so close-A-then-open-B could not
+    execute - the broker refused the second as a duplicate of the first, and
+    the agent's own fresh retry id was overwritten and refused again. The live
+    journal already carries a two-order cycle."""
+    from trdrbot import tool_guard
+
+    close = {"qty": 3, "legs": [{"symbol": "SPY260909P00636000",
+                                 "side": "buy_to_close", "ratio_qty": 1}]}
+    open_ = {"qty": 2, "legs": [{"symbol": "SPY260916C00700000",
+                                 "side": "buy_to_open", "ratio_qty": 1}]}
+
+    a = tool_guard.enforced_order_id("bat_1", "place_option_order", close)
+    b = tool_guard.enforced_order_id("bat_1", "place_option_order", open_)
+
+    assert a and b and a != b, "two different orders must be two ids"
+
+
+def test_the_same_order_resubmitted_keeps_its_id():
+    """INV-18, unchanged and the reason the id is derived at all: a crash-retry
+    re-invokes a nondeterministic LLM, so the id must come from the batch and
+    the intent, never from the decision."""
+    from trdrbot import tool_guard
+
+    args = {"qty": 2, "legs": [{"symbol": "SPY260916C00700000",
+                                "side": "buy_to_open", "ratio_qty": 1}]}
+    reordered = {"qty": 2, "legs": [dict(args["legs"][0])]}
+
+    assert (tool_guard.enforced_order_id("bat_1", "place_option_order", args)
+            == tool_guard.enforced_order_id("bat_1", "place_option_order", reordered))
+    assert (tool_guard.enforced_order_id("bat_2", "place_option_order", args)
+            != tool_guard.enforced_order_id("bat_1", "place_option_order", args))
+
+
+def test_a_tool_that_bears_no_order_id_is_journalled_without_one():
+    """I-101's secondary. `tick` journalled `client_order_id_enforced` for
+    every ORDER_TOOLS call, including `close_position`, `cancel_order_by_id`
+    and `close_all_positions` - which take no such field and are never wrapped.
+    The live 2026-08-27 row records an enforced id on `close_all_positions`
+    that was never sent: a record of something that never happened."""
+    from trdrbot import tool_guard
+
+    assert tool_guard.enforced_order_id(
+        "bat_1", "close_all_positions", {}) is None
+    assert tool_guard.enforced_order_id(
+        "bat_1", "close_position", {"symbol_or_asset_id": "SPY..."}) is None
+
+
+def test_the_lock_outlives_the_longest_tick_the_watchdog_permits(tmp_path):
+    """I-102: `stale_after` defaulted to 600s while `_run_loop` permits
+    `watchdog_seconds x OUTER_WATCHDOG_FACTOR`. A second invocation - run.sh
+    under launchd beside `trdrbot run`, the scenario `_run_loop`'s own
+    docstring names - read the live holder as stale at 601s, broke the lock and
+    ran beside it: two decide cycles on one inbox batch, two submissions."""
+    import json
+    import os
+    import time
+
+    import pytest as _pytest
+
+    from trdrbot import cli
+    from trdrbot.lock import tick_lock
+
+    permitted = 600.0 * cli.OUTER_WATCHDOG_FACTOR
+    lock_file = tmp_path / "tick.lock"
+    # A live holder, well past the OLD 600s window but inside what a tick may
+    # legitimately take.
+    lock_file.write_text(json.dumps({"pid": os.getpid(), "ts": time.time() - 900}))
+
+    with _pytest.raises(BlockingIOError, match="already running"), \
+            tick_lock(lock_file, stale_after=permitted):
+        raise AssertionError("broke a lock the watchdog still permits")
+
+
+def test_releasing_a_lock_we_no_longer_hold_leaves_the_new_holder_alone(tmp_path):
+    """I-102's tail. The `finally` unlinked whatever lock file was there, so a
+    process whose lock had been broken as stale deleted the BREAKER's lock on
+    its way out - and a third process walked in behind both."""
+    import json
+
+    from trdrbot.lock import tick_lock
+
+    lock_file = tmp_path / "tick.lock"
+    with tick_lock(lock_file, stale_after=600):
+        lock_file.write_text(json.dumps({"pid": 999999, "ts": 9e9}))  # broken as stale
+
+    assert lock_file.exists(), "we released a lock another process now holds"
+    assert json.loads(lock_file.read_text())["pid"] == 999999
+
+
+def test_the_single_shot_tick_is_bounded_by_the_same_watchdog(monkeypatch, tmp_path):
+    """I-110: `cli._tick` - the run.sh / launchd path - called `run_tick` bare.
+    FM-26's outer bound existed only in `_run_loop`, so a wedged MCP subprocess
+    spawn or a hung broker read stalled that process indefinitely, holding the
+    lock until I-102's staleness let the next cron tick run beside it."""
+    import asyncio as _asyncio
+    import dataclasses
+
+    from trdrbot import cli
+    from trdrbot import config as config_mod
+
+    live = config_mod.load()
+    cfg = dataclasses.replace(
+        live,
+        raw={**live.raw, "tick": {**live.raw["tick"], "watchdog_seconds": 0.05}},
+        paths=dataclasses.replace(live.paths, state=tmp_path))
+
+    async def _hangs(*a: Any, **k: Any) -> Any:
+        await _asyncio.sleep(3600)
+
+    monkeypatch.setattr(cli, "run_tick", _hangs)
+    monkeypatch.setattr(cli.config_mod, "load", lambda *a, **k: cfg)
+
+    assert _asyncio.run(cli._tick()) == 1, "a hung tick must exit non-zero, not hang"
+
+
+def test_the_closed_cadence_honours_the_same_floor_as_the_open_one():
+    """I-111: the 30s floor guarded `--interval` only, so `--closed-interval 0`
+    ticked back to back all weekend - the same live broker, the same LLM spend,
+    through the argument nobody thought of as the polling one."""
+    import asyncio as _asyncio
+
+    from trdrbot import cli
+
+    assert _asyncio.run(cli._run_loop(300, 0, max_ticks=1)) == 2
+    assert _asyncio.run(cli._run_loop(0, 1800, max_ticks=1)) == 2

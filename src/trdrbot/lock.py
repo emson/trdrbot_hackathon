@@ -23,8 +23,25 @@ def _alive(pid: int) -> bool:
     return True
 
 
+def _held_by_us(path: Path) -> bool:
+    try:
+        return json.loads(path.read_text(encoding="utf-8")).get("pid") == os.getpid()
+    except (OSError, json.JSONDecodeError, KeyError):
+        return True  # unreadable: treat it as ours and clear it
+
+
 @contextmanager
-def tick_lock(path: Path, stale_after: int = 600) -> Iterator[None]:
+def tick_lock(path: Path, stale_after: float) -> Iterator[None]:
+    """Single-flight around one tick. `stale_after` is CALLER-SUPPLIED (I-102).
+
+    It must be at least the longest a permitted tick can run, which is the
+    caller's outer watchdog - and the default it replaces was 600s against a
+    permitted 2,400s. A second invocation (run.sh under launchd beside
+    `trdrbot run`, or a manual `trdrbot tick`) therefore read the live holder
+    as stale at 601s, broke the lock and ran beside it: two decide cycles on
+    one inbox batch, two submissions. Making it an argument with no default is
+    what stops a caller silently inheriting a bound shorter than its own.
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
     if path.exists():
         try:
@@ -65,4 +82,10 @@ def tick_lock(path: Path, stale_after: int = 600) -> Iterator[None]:
     try:
         yield
     finally:
-        path.unlink(missing_ok=True)
+        # UNLINK ONLY OUR OWN (I-102). A bare unlink released whoever holds the
+        # lock NOW - so a process whose lock had been broken as stale went on
+        # to delete the breaker's lock on its way out, letting a third process
+        # in behind both. The read-back is the same check the acquisition does;
+        # an unreadable file is cleaned up, as before.
+        if _held_by_us(path):
+            path.unlink(missing_ok=True)

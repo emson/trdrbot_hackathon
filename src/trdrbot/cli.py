@@ -126,12 +126,23 @@ def _inject(args: argparse.Namespace) -> int:
 
 async def _tick(force: bool = False) -> int:
     cfg = config_mod.load()
+    # THE SAME TWO BOUNDS THE RUN LOOP HAS (I-110, I-102). This is the
+    # run.sh/launchd path, and it had neither: `run_tick` was awaited bare, so
+    # a wedged MCP subprocess spawn or a hung broker read stalled the process
+    # indefinitely while holding the lock. The lock's staleness window is the
+    # same watchdog, or a second cron tick would break a lock this process is
+    # still legitimately holding.
+    outer_timeout = cfg.watchdog_seconds * OUTER_WATCHDOG_FACTOR
     try:
-        with tick_lock(cfg.paths.state / "tick.lock"):
-            await run_tick(cfg, force_decide=force)
+        with tick_lock(cfg.paths.state / "tick.lock", stale_after=outer_timeout):
+            await asyncio.wait_for(run_tick(cfg, force_decide=force),
+                                   timeout=outer_timeout)
     except BlockingIOError as exc:
         print(f"[tick] {exc}")
         return 0
+    except TimeoutError:
+        print(f"[tick] exceeded the {outer_timeout}s watchdog and was cancelled")
+        return 1
     except Exception as exc:  # noqa: BLE001 - the loop degrades; so does this
         # `run.sh` points cron/launchd at this path, where a raw traceback is
         # the least useful thing an operator can be handed. The run loop has
@@ -238,6 +249,14 @@ MIN_INTERVAL_SECONDS = 30
 #: it would fire first and mask it. 4x is a backstop, not a second policy.
 OUTER_WATCHDOG_FACTOR = 4
 
+#: Consecutive CONFIG/BUG-classified tick failures before the loop gives up.
+#: A transient must never stop an unattended run (INV-8), but a failure in our
+#: own config or code is deterministic - it fails identically next tick, so
+#: "keep going" becomes "never trade again, quietly, with rc 0" (I-104).
+#: Three, for the same reason `ORDERS_WITHOUT_SIZING` is three: one is an
+#: artifact and two is a coincidence.
+OWN_FAULT_LIMIT = 3
+
 
 async def _run_loop(interval: int, closed_interval: int, *,
                     max_ticks: int = 0, allow_fast: bool = False) -> int:
@@ -273,11 +292,16 @@ async def _run_loop(interval: int, closed_interval: int, *,
     from .tick import run_tick
 
     cfg = config_mod.load()
-    if interval < MIN_INTERVAL_SECONDS and not allow_fast:
-        print(f"[run] refusing interval {interval}s - floor is {MIN_INTERVAL_SECONDS}s "
-              f"(pass --allow-fast to override). Polling a live broker faster than "
-              f"this is never legitimate.", flush=True)
-        return 2
+    # BOTH cadences (I-111). The floor guarded `--interval` only, so
+    # `--closed-interval 0` ticked back to back all weekend - the same live
+    # broker, the same LLM spend, through the argument nobody thought of as
+    # the polling one.
+    for name, seconds in (("--interval", interval), ("--closed-interval", closed_interval)):
+        if seconds < MIN_INTERVAL_SECONDS and not allow_fast:
+            print(f"[run] refusing {name} {seconds}s - floor is {MIN_INTERVAL_SECONDS}s "
+                  f"(pass --allow-fast to override). Polling a live broker faster than "
+                  f"this is never legitimate.", flush=True)
+            return 2
 
     lock_path = cfg.paths.state / "tick.lock"
     outer_timeout = cfg.watchdog_seconds * OUTER_WATCHDOG_FACTOR
@@ -308,27 +332,52 @@ async def _run_loop(interval: int, closed_interval: int, *,
           + (f"until {deadline}" if deadline else "indefinitely (no deadline)")
           + f"; open={interval}s closed={closed_interval}s watchdog={outer_timeout}s"
           + (f"; stopping after {max_ticks} ticks" if max_ticks else ""), flush=True)
+    # The market state the LAST tick observed (I-111). A failed tick knows
+    # nothing about the clock, and assuming "open" made every failure poll on
+    # the 5-minute cadence through a closed weekend. The last observation is
+    # the best available answer; a lock SKIP still forces the open cadence,
+    # because it means another process is actively trading right now.
+    open_now = True
+    consecutive_ours = 0
     while deadline is None or ids.market_today() <= deadline:
         if max_ticks and n >= max_ticks:
             print(f"[run] reached --max-ticks {max_ticks}, stopping", flush=True)
             break
         n += 1
-        # A skipped tick means another process is actively trading right now,
-        # so check back on the OPEN cadence rather than sleeping half an hour.
-        open_now = True
+        skipped = False
         try:
-            with tick_lock(lock_path):
+            with tick_lock(lock_path, stale_after=outer_timeout):
                 r = await asyncio.wait_for(run_tick(cfg, verbose=True),
                                            timeout=outer_timeout)
             open_now = bool(r.get("market_open", r.get("status") != "housekeeping"))
+            consecutive_ours = 0
         except BlockingIOError as exc:
             print(f"[run] {exc}", flush=True)
+            skipped = True
         except TimeoutError:
             print(f"[run] tick {n} exceeded the {outer_timeout}s watchdog and was "
                   f"cancelled - continuing", flush=True)
+            consecutive_ours = 0
         except Exception as exc:  # noqa: BLE001 - a bad tick must not end the run
             print(f"[run] tick {n} failed, continuing: {exc!r}", flush=True)
-        await asyncio.sleep(interval if open_now else closed_interval)
+            # A FAILURE THAT IS OURS DOES NOT GET RETRIED FOREVER (I-104). A
+            # transient deserves the loop's whole point - keep ticking, an
+            # eight-day run meets provider blips - but a CONFIG or BUG failure
+            # is deterministic: it will fail identically next tick, and the
+            # loop returned 0 forever while never deciding, never archiving the
+            # inbox, and reading green because the decision row it wrote before
+            # failing counted as output. Three in a row is not weather.
+            cause = failures.classify(exc)
+            consecutive_ours = (consecutive_ours + 1
+                                if cause in (failures.Cause.CONFIG, failures.Cause.BUG)
+                                else 0)
+            if consecutive_ours >= OWN_FAULT_LIMIT:
+                print(f"\n[run] STOPPING: {consecutive_ours} consecutive {cause.value} "
+                      f"failures - this is ours, not the market's, and it will fail "
+                      f"identically next tick.\n\n  {failures.advice(cause, exc)}\n",
+                      flush=True)
+                return 2
+        await asyncio.sleep(interval if (open_now or skipped) else closed_interval)
     print(f"[run] stopped after {n} ticks"
           + (f" - deadline {deadline} reached" if deadline else ""), flush=True)
     return 0

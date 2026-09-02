@@ -6,18 +6,21 @@ Two ids carry the whole design:
   elfmem, and Alpaca. Alpaca has no multi-leg position concept, so this is the
   only thing tying the legs of a spread to one another and to a thesis.
 
-- ``client_order_id`` derives from the inbox BATCH, never from the decision.
-  A crash-retry re-invokes a nondeterministic LLM, which may decide something
-  different; a decision-derived id would then differ and Alpaca would accept a
-  second, different position. Batch-derivation makes any resubmission from the
-  same batch carry the same id, so the broker rejects the duplicate. Safe
-  because a cycle produces at most one action.
+- ``client_order_id`` derives from the inbox BATCH and the ORDER'S OWN
+  CONTENT, never from the decision. A crash-retry re-invokes a
+  nondeterministic LLM, which may decide something different; a
+  decision-derived id would then differ and Alpaca would accept a second,
+  different position. Batch-derivation makes any resubmission of the SAME
+  intent from the same batch carry the same id, so the broker rejects the
+  duplicate - while a genuinely different order in the same cycle gets a
+  different id and can actually execute.
 """
 
 from __future__ import annotations
 
 import hashlib
 import uuid
+from collections.abc import Sequence
 from datetime import UTC, date, datetime
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -80,14 +83,31 @@ def batch_id(item_ids: list[str]) -> str:
     return f"bat_{_short_hash(*sorted(item_ids), n=12)}"
 
 
-def client_order_id(batch: str, leg: int = 0) -> str:
-    """Derived from the batch (INV-18).
+def client_order_id(batch: str, legs: Sequence[tuple[str, str, int]] = ()) -> str:
+    """Derived from the batch AND the order's own content (INV-18).
+
+    `legs` is the order as `(symbol, side, qty)` triples, sorted here so leg
+    order cannot change the id. Three properties, and the third is why this
+    argument exists (I-101):
+
+    - **Stable across a crash-retry of the same intent.** Same batch, same
+      legs, same id - the broker rejects the duplicate, which is the whole
+      guarantee.
+    - **Distinct for a genuinely different order in the same cycle.** The id
+      used to be computed once per tool and stamped on every call, so
+      close-A-then-open-B could not execute: the second order was refused as a
+      duplicate of the first, and the model's own retry id was overwritten and
+      refused again. The live journal already carries a two-order cycle.
+    - **Identical for two IDENTICAL orders in one cycle**, which collapse to
+      one submission. That is the safe direction and is exactly what "at most
+      one action per situation" already meant.
 
     Kept short deliberately: Alpaca's length limit for this field is not yet
-    verified, and a short hash fits any plausible limit. If the limit turns out
-    to be generous we can make this more readable.
+    verified, and a short hash fits any plausible limit.
     """
-    return f"trdr-{_short_hash(batch, str(leg), n=16)}"
+    parts = sorted(f"{str(sym).strip().upper()}|{str(side).strip().lower()}|{int(qty)}"
+                   for sym, side, qty in legs)
+    return f"trdr-{_short_hash(batch, *parts, n=16)}"
 
 
 def journal_id(kind: str) -> str:

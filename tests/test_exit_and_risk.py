@@ -12,7 +12,7 @@ from datetime import timedelta
 from typing import Any
 
 import pytest
-from conftest import FakeMem, journal_rows, tools_for
+from conftest import FakeMem, days_out, journal_rows, tools_for
 
 from trdrbot import analytics, exit_rules, ids, reconcile
 from trdrbot.analytics import Snapshot
@@ -238,8 +238,13 @@ def _spread(**kw) -> Position:
 
 
 def _mark(pnl_fraction: float, underlying: float,
-          prev_close: float = 100.0) -> Snapshot:
+          prev_close: float = 100.0, market_open: bool = True) -> Snapshot:
     """A tick: what the position marks at, and where the underlying is.
+
+    `market_open=True` is stated rather than inherited from the dataclass
+    default, for the same reason the sibling fixture states it: these are LIVE
+    ticks, and a price signal's debounce history is only written while the
+    session is running (I-76).
 
     `prev_close` defaults to the entry level, which is what every test here
     already meant by "the underlying has not moved". Corroboration measures the
@@ -249,31 +254,67 @@ def _mark(pnl_fraction: float, underlying: float,
     while claiming to answer one about quote artifacts.
     """
     return Snapshot(
+        market_open=market_open,
         broker_positions=[{"symbol": "A", "cost_basis": 1000.0,
                            "unrealized_pl": 1000.0 * pnl_fraction}],
         underlying_prices={"X": underlying},
         prev_closes={"X": prev_close})
 
 
-def test_one_wide_print_no_longer_closes_a_healthy_spread(monkeypatch):
-    """I-42: `position_mark`'s immediate_overshoot of 1.0 and its own comment
-    about "-100%-of-credit on a HEALTHY spread" name the SAME number, so the
-    single most common quote artifact skipped the debounce built for it and
-    closed the position on one print, at the worst quote of the day."""
-    pos, stats = _spread(), {}
+def test_a_persistent_wide_print_on_an_unmoved_underlying_never_closes(monkeypatch):
+    """PILLAR-3. I-42 routed the DECISIVE branch through corroboration; I-77
+    found the hole beside it - `evaluate` also fired on `sum(history) >=
+    NEEDED`, which never consulted the underlying at all. A wide or stale
+    quote on an illiquid strike persists for hours, so the second identical
+    print satisfied 2-of-3 and closed a healthy spread on an underlying that
+    had moved 0.00 that session. That is the SAME artifact the debounce exists
+    for, arriving one tick later.
 
-    # -100% of net against a -50% stop is exactly overshoot 1.0 - and the
-    # underlying has not moved at all, so nothing corroborates it.
-    reason, why, _ = exit_rules.evaluate(pos, _mark(-1.00, 100.0), "2099-01-01",
+    **This test previously asserted the opposite second half** ("a second print
+    confirms it the ordinary way"), which is the defect stated as a
+    requirement. Corroboration now applies to every mark breach: the debounce
+    is the fallback when the underlying cannot be judged, not an override for
+    when it has spoken. Its balancing pair is
+    `test_a_real_gap_still_closes_on_the_first_print` below - and the debounce
+    itself is still load-bearing, pinned by
+    `test_an_unjudgeable_breach_still_debounces_to_a_close`.
+    """
+    # A breach just past the stop, so it is NOT decisive - the exact shape
+    # I-42's fix did not cover, and the one an illiquid strike's wide quote
+    # actually prints. The underlying has not moved at all this session.
+    pos, stats = _spread(exit_rules=[{"type": "stop_loss", "threshold": "-65%"}]), {}
+    for _ in range(5):
+        reason, why, _ = exit_rules.evaluate(pos, _mark(-0.70, 100.0), "2099-01-01",
+                                             stats=stats)
+        assert reason is None, why
+    assert stats["mark_breach_suppressed"] == 5
+    assert sum(pos.exit_state["position_mark:below:-0.65"]) >= 2, \
+        "the debounce window IS satisfied - corroboration is what holds it"
+
+    # The decisive shape (I-42's own case) is held for the same reason.
+    deep, stats = _spread(), {}
+    reason, why, _ = exit_rules.evaluate(deep, _mark(-1.00, 100.0), "2099-01-01",
                                          stats=stats)
-
     assert reason is None, why
     assert stats["mark_breach_suppressed"] == 1
 
-    # ...and it is HELD, not ignored: a second print confirms it the ordinary
-    # way, which is what the 2-of-3 debounce has always been for.
-    reason, _why, _ = exit_rules.evaluate(pos, _mark(-1.00, 100.0), "2099-01-01")
+
+def test_an_unjudgeable_breach_still_debounces_to_a_close(monkeypatch):
+    """The other side of I-77, and the reason it is not "never close": when the
+    underlying CANNOT be judged - no previous close, an unpriced name, a legacy
+    row with no entry greeks - the N-of-M debounce is still the fallback and
+    still closes. Corroboration replaces the debounce only where it has
+    something to say."""
+    pos, stats = _spread(), {}
+    blind = _mark(-1.00, 100.0)
+    blind.prev_closes = {}  # the snapshot endpoint was unavailable
+
+    assert exit_rules.evaluate(pos, blind, "2099-01-01", stats=stats)[0] is None
+    reason, _why, _ = exit_rules.evaluate(pos, blind, "2099-01-01", stats=stats)
+
     assert reason == "stop_loss"
+    assert stats["mark_breach_unjudged"] == 2
+    assert not stats.get("mark_breach_suppressed")
 
 
 def test_a_real_gap_still_closes_on_the_first_print():
@@ -825,7 +866,8 @@ def test_without_a_previous_close_the_breach_debounces_rather_than_guessing():
     returns no previous close whenever the snapshot endpoint is unavailable and
     the latest-trade fallback answers instead."""
     pos = _spread()
-    blind = Snapshot(broker_positions=[{"symbol": "A", "cost_basis": 1000.0,
+    blind = Snapshot(market_open=True,
+                     broker_positions=[{"symbol": "A", "cost_basis": 1000.0,
                                         "unrealized_pl": -1000.0}],
                      underlying_prices={"X": 96.0})  # no prev_closes at all
 
@@ -955,3 +997,193 @@ def test_a_deadline_that_exists_is_still_watched_on_every_position():
                                          (ids.market_today()).isoformat())
 
     assert reason == "deadline", why
+
+
+# ---------------------------------------------------------------- I-76, I-86
+#
+# PILLAR-3, both of them: the exit engine and the drawdown brake driven as
+# PATHS across a session boundary, which is where a repeated observation and a
+# repeated mark stop being the same thing as new evidence.
+
+def test_the_overnight_mark_does_not_pre_satisfy_the_debounce_window():
+    """PILLAR-3. I-76, live-confirmed: 182 of one day's 308 `exit_run` rows
+    were written outside the session. `evaluate` appended to the debounce
+    history on every closed-market tick against a mark that cannot move, so a
+    wide print at 15:59 left the window [T,T,T] by 09:30 - the first healthy
+    open print held, and the very next wide print closed the position on one
+    artifact at the widest quotes of the day.
+
+    N-of-M means N of the last M OBSERVATIONS, and a frozen mark is one
+    observation repeated.
+    """
+    pos = _spread()
+
+    # 15:59: one wide print, in session, on an unmoved underlying.
+    exit_rules.evaluate(pos, _mark(-1.00, 100.0), "2099-01-01")
+    overnight = list(pos.exit_state["position_mark:below:-0.5"])
+
+    # ...then six housekeeping ticks with the market shut, all reading the
+    # same closing mark back.
+    for _ in range(6):
+        reason, why, _ = exit_rules.evaluate(
+            pos, _mark(-1.00, 100.0, market_open=False), "2099-01-01")
+        assert reason is None, why
+
+    assert pos.exit_state["position_mark:below:-0.5"] == overnight, \
+        "a mark that cannot change must not accumulate debounce evidence"
+
+    # 09:30: a healthy print, then one wide print. Two genuinely separate
+    # in-session observations, one of which is fine - so it holds.
+    exit_rules.evaluate(pos, _mark(-0.10, 100.0), "2099-01-01")
+    reason, why, _ = exit_rules.evaluate(pos, _mark(-1.00, 100.0), "2099-01-01")
+    assert reason is None, why
+
+
+def test_a_calendar_rule_still_accumulates_while_the_market_is_shut():
+    """The opposite direction (testing rule 3). Freezing the history is about
+    signals that CANNOT change overnight; a date can and does. I-56's fix must
+    survive: the calendar rules still fire off-hours and wait for the session
+    to submit."""
+    pos = _spread(expiry=days_out(0), exit_rules=[
+        {"type": "time_stop", "days_before_expiry": 1}])
+
+    reason, why, _ = exit_rules.evaluate(
+        pos, _mark(0.0, 100.0, market_open=False), "2099-01-01")
+
+    assert reason == "time_stop", why
+    assert pos.exit_state["days_to_expiry:below:1"], \
+        "a signal that changes overnight must keep its history"
+
+
+def test_the_high_water_mark_ignores_an_unrealisable_option_print(tmp_path):
+    """PILLAR-4 (drawdown demotes - on realised money, not on a quote). I-86:
+    Alpaca's `equity` includes open options at their CURRENT MARK, so one wide
+    print on a spread inflated it for a single tick, `update_high_water` kept
+    the max, and the true equity then read as a permanent drawdown against a
+    peak no fill could ever have reached. Measured: a one-tick +5.5% mark
+    inflation demoted SCALE to ESTABLISH indefinitely."""
+    from trdrbot import competence
+    from trdrbot.analytics import Snapshot
+
+    def snapshot(equity: float, unrealised: float) -> Snapshot:
+        return Snapshot(
+            account={"equity": equity}, account_readable=True, broker_readable=True,
+            broker_positions=[{"symbol": "A", "unrealized_pl": unrealised}])
+
+    # A settled book at 100k, then one wide print marks it at 105.5k.
+    settled = snapshot(100_000.0, 0.0)
+    assert competence.update_high_water(tmp_path, settled.realised_equity) == 100_000.0
+
+    wide = snapshot(105_500.0, 5_500.0)
+    hw = competence.update_high_water(tmp_path, wide.realised_equity)
+
+    assert hw == 100_000.0, "a peak that was never realisable is not a peak"
+    assert competence.assess(resolved=20, reliability=0.01, positions=[],
+                             equity=100_000.0, high_water=hw).drawdown == 0.0
+
+
+def test_a_realised_gain_does_advance_the_high_water_mark(tmp_path):
+    """The opposite direction: the ratchet still ratchets. A gain that has
+    actually been booked - cash, no open mark behind it - moves the peak, or
+    the drawdown brake would measure against a floor that never rises."""
+    from trdrbot import competence
+    from trdrbot.analytics import Snapshot
+
+    booked = Snapshot(account={"equity": 112_000.0}, account_readable=True,
+                      broker_readable=True, broker_positions=[])
+
+    assert competence.update_high_water(tmp_path, booked.realised_equity) == 112_000.0
+
+
+# ------------------------------------------------------------------- I-75
+#
+# PILLAR-3 again, one input lower down: the bankroll every cap is a fraction
+# of. Absence-as-a-number (D-038) on the one field sizing, the book caps and
+# the drawdown brake all share.
+
+def _unreadable() -> Snapshot:
+    """A tick whose account read failed - `account={}`, so `equity` is 0.0."""
+    return Snapshot(market_open=True, broker_readable=True)
+
+
+def test_an_unreadable_account_sizes_nothing_and_says_why(tmp_path):
+    """PILLAR-2 (a seam that loses the measure refuses rather than
+    substituting). I-75: `analytics.snapshot` left `account={}` on a failed
+    read and `tick` read `snap.equity or 100000.0`, so an unreadable account
+    became a $100,000 bankroll. Measured: the same structure sized 47
+    contracts against the 12 the true equity permitted."""
+    from trdrbot import local_tools
+    from trdrbot.calibration import CalibrationStore as _Cal
+
+    snap_ = _unreadable()
+    assert snap_.equity == 0.0 and not snap_.account_readable
+
+    shared = local_tools.SharedContext()
+    tool = local_tools.build_size_position(_Cal(tmp_path / "f.jsonl"),
+                                           None, shared=shared)
+    reply = tool.func(stated_confidence=0.62, max_profit=500.0, max_loss=-500.0,
+                      underlying="SPY", structure_name="anything")
+
+    assert reply.startswith("REFUSED")
+    assert "bankroll" in reply
+    assert shared.sizing is None, "a refusal must stash no size"
+
+
+def test_a_readable_account_at_the_same_equity_still_sizes(tmp_path):
+    """The opposite direction (testing rule 4): the refusal is about the READ,
+    not about the number. A real account that reports the same figure the
+    fallback used to invent sizes exactly as it always did."""
+    from trdrbot import local_tools
+    from trdrbot.calibration import CalibrationStore as _Cal
+
+    readable = Snapshot(market_open=True, broker_readable=True, account_readable=True,
+                        account={"equity": 100_000.0})
+    assert readable.equity == 100_000.0
+
+    shared = local_tools.SharedContext()
+    shared.structures = [local_tools.SimStructure(
+        key=(), name="s", qty=1, entry_cost=500.0, max_profit=500.0,
+        max_loss=-500.0, payoff_ratio=1.0, rr=1.0)]
+    tool = local_tools.build_size_position(_Cal(tmp_path / "f.jsonl"),
+                                           readable.equity, shared=shared)
+    reply = tool.func(stated_confidence=0.62, max_profit=500.0, max_loss=-500.0,
+                      underlying="SPY", structure_name="s")
+
+    assert not reply.startswith("REFUSED"), reply
+
+
+def test_an_unreadable_account_holds_the_ladder_where_it_was():
+    """I-75's other half. With a real 11.6% drawdown that should demote to
+    EXPLORE, the $100,000 fallback read 3.9% and the tier held at MATURE - a
+    ladder moving on a number nobody measured. Unknown equity now HOLDS the
+    posture at its last journalled drawdown instead."""
+    from trdrbot import competence
+
+    args = dict(resolved=60, reliability=0.01, positions=[], high_water=113_000.0)
+    measured = competence.assess(equity=100_000.0, **args)
+    held = competence.assess(equity=None, last_drawdown=measured.drawdown, **args)
+
+    assert held.drawdown == measured.drawdown
+    assert held.tier == measured.tier
+    assert "could not be read" in held.reason
+
+    # And it does not silently read as a healthy book either.
+    unaware = competence.assess(equity=None, **args)
+    assert unaware.drawdown == 0.0 and unaware.tier != measured.tier, \
+        "without the last measurement it must not pretend the drawdown is real"
+
+
+def test_an_unreadable_account_leaves_no_deployable_room():
+    """I-75 at the idle ladder: hunting on an invented bankroll generates
+    candidates sizing will refuse - spend with no possible outcome. Oversight
+    of a held position is unaffected, because it needs no bankroll."""
+    from trdrbot import idle
+
+    base = dict(market_open=True, positions=[], underlying_prices={},
+                last_decision_at=None, last_hunt_at=None, open_risk_usd=0.0,
+                risk_cap_fraction=0.20, minutes_to_close_=300.0)
+
+    assert idle.decide(equity=100_000.0, **base).level == "hunt"
+    blind = idle.decide(equity=None, **base)
+    assert blind.level == "sleep"
+    assert "could not be read" in blind.reason

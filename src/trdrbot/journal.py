@@ -48,6 +48,20 @@ class Journal:
             print(f"[journal] skipped {skipped} unparseable line(s) in {self.path.name}")
         yield from rows
 
+    def last(self, *kinds: str) -> dict[str, Any] | None:
+        """The newest row of any of these kinds, or None.
+
+        The journal is append-only, so the LAST matching row is the newest and
+        no timestamp comparison is needed. One reader for "what did this
+        subsystem last say", because three callers were about to grow their
+        own loop over `read()` looking for the same thing.
+        """
+        latest: dict[str, Any] | None = None
+        for row in self.read():
+            if row.get("kind") in kinds:
+                latest = row
+        return latest
+
     def last_decision_at(self) -> datetime | None:
         """When the agent last actually reasoned. None if never.
 

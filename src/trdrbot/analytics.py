@@ -55,6 +55,18 @@ class Snapshot:
     #: watching. `broker_readable` closed this hole for positions (I-55); the
     #: orders read had the same shape and the same bare print.
     orders_readable: bool = False
+    #: Did the account read succeed, with a bankroll number on it?
+    #:
+    #: The same rule as `broker_readable` and `orders_readable`, one field
+    #: over (I-75). `equity` is `_f(account.get("equity"))`, which is 0.0 both
+    #: when the account says zero and when the read failed - and `tick` turned
+    #: that into a $100,000 constant, so an unreadable account sized 47
+    #: contracts where the true equity permitted 12 and the drawdown brake
+    #: read 3.9% against a real 11.6%. False means "there is no bankroll to
+    #: size against this tick", which every consumer refuses on rather than
+    #: substituting a number. A literal zero equity reads the same way, and
+    #: correctly: nothing can be sized against it either.
+    account_readable: bool = False
     #: Previous session's CLOSE per underlying, when the feed carried one.
     #:
     #: The exit engine's corroboration rule needs a RECENT reference point to
@@ -76,6 +88,24 @@ class Snapshot:
     @property
     def total_unrealized(self) -> float:
         return sum(_f(p.get("unrealized_pl")) for p in self.broker_positions)
+
+    @property
+    def realised_equity(self) -> float | None:
+        """Equity with every open position's unrealised mark taken back out -
+        cash plus cost basis. None when it cannot be computed.
+
+        What the equity HIGH-WATER anchors on (I-86). Alpaca's `equity`
+        includes open options at their current mark, so a single wide print on
+        a spread inflates it for one tick, `update_high_water` keeps the max,
+        and from then on the true equity reads as a drawdown against a peak no
+        fill could ever have reached. Measured: a one-tick +5.5% mark
+        inflation demoted SCALE to ESTABLISH indefinitely. A peak you did not
+        realise is not a peak; the drawdown is still measured against the
+        current MARK, so an open loss still brakes.
+        """
+        if not self.account_readable or not self.broker_readable:
+            return None
+        return self.equity - self.total_unrealized
 
     def by_symbol(self) -> dict[str, dict[str, Any]]:
         # A bare `p["symbol"]` here KeyErrored the whole fast path on one
@@ -350,10 +380,23 @@ async def snapshot(tools: dict[str, Any], underlyings: list[str] | None = None,
 
     try:
         acct = await mcp_client.call(tools, "get_account_info")
-        if isinstance(acct, dict):
+        if isinstance(acct, dict) and _f(acct.get("equity")) > 0:
             snap.account = acct
+            snap.account_readable = True
+        else:
+            # NOT just a print (I-75). The positions and orders reads one line
+            # either side already write a `degraded` row for exactly this
+            # shape, and equity is the one input every cap, the Kelly gate and
+            # the drawdown brake share.
+            health.degraded(journal, "analytics.account",
+                            "the account carried no usable equity - nothing may be "
+                            "sized this tick and the ladder holds its last posture",
+                            detail=repr(acct)[:200])
     except Exception as exc:  # noqa: BLE001
-        print(f"[analytics] account unavailable: {exc!r}")
+        health.degraded(journal, "analytics.account",
+                        "could not read the account - no bankroll to size against, so "
+                        "sizing refuses and the ladder holds its last posture",
+                        error=repr(exc)[:200])
 
     try:
         pos = await mcp_client.call(tools, "get_all_positions")

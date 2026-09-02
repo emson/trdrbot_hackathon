@@ -675,6 +675,16 @@ async def _run_tick(
             # rather than a print in an unattended run (I-55).
             journal=journal,
         )
+        # THE ACCOUNT EITHER READ OR IT DID NOT (I-75). `snap.equity or
+        # 100000.0` substituted a constant into the one input every cap, the
+        # Kelly gate and the drawdown brake share - so an unreadable account
+        # sized 47 contracts where the true equity permitted 12 and the ladder
+        # held MATURE through a real 11.6% drawdown. None is the honest answer
+        # and every consumer below refuses on it: sizing declines, the ladder
+        # holds its last measured drawdown, and the idle ladder has no
+        # deployable room.
+        equity_now = snap.equity if snap.account_readable else None
+
         recon = await reconcile.reconcile(store, snap, journal, mem, wiki, calib,
                                           blog_dir=config.paths.blog)
         triggered = await exit_rules.run(
@@ -683,7 +693,8 @@ async def _run_tick(
         )
 
         if verbose:
-            print(f"[tick {n}] market_open={snap.market_open} equity=${snap.equity:,.0f} "
+            equity_text = f"${equity_now:,.0f}" if equity_now is not None else "UNREADABLE"
+            print(f"[tick {n}] market_open={snap.market_open} equity={equity_text} "
                   f"holdings={len(snap.broker_positions)}")
             # Sensors were the ONE fast-path subsystem whose output the tick
             # discarded entirely - `sensed` was assigned and never read, so a
@@ -741,7 +752,7 @@ async def _run_tick(
                 last_decision_at=journal.last_decision_at(),
                 last_hunt_at=journal.last_hunt_at(),
                 open_risk_usd=sum(p.max_loss_usd or 0.0 for p in store.open_positions()),
-                equity=snap.equity or 100000.0,
+                equity=equity_now,
                 risk_cap_fraction=sizing.PORTFOLIO_MAX_AT_RISK,
                 minutes_to_close_=idle.minutes_to_close(et),
             )
@@ -848,8 +859,12 @@ async def _run_tick(
                 by_underlying[op.underlying.upper()] = (
                     by_underlying.get(op.underlying.upper(), 0.0) + (op.max_loss_usd or 0.0)
                 )
-        equity_now = snap.equity or 100000.0
-        hw = competence.update_high_water(config.paths.state, equity_now, journal)
+        # REALISED equity, not the marked figure (I-86): a peak set by one wide
+        # option quote is a peak no fill could ever reach, and the brake then
+        # latches on noise for good. None when it cannot be computed, which
+        # leaves the stored peak where it is.
+        hw = competence.update_high_water(config.paths.state, snap.realised_equity, journal)
+        last_comp = journal.last("competence") or {}
         # Calibration draws on declined-thesis forecasts too (D-052). Computed
         # ONCE and passed everywhere it is needed: the ladder, the sizing tool
         # and the prompt all used to derive their own, and the sizing tool's
@@ -867,6 +882,9 @@ async def _run_tick(
             # The operator's size preference (D-099). The ONE thing on this
             # posture the agent did not earn, and the one it may not set.
             appetite=config.risk_appetite,
+            # Read back rather than recomputed when the account is unreadable
+            # (I-75): the ladder holds the posture it last measured.
+            last_drawdown=float(last_comp.get("drawdown") or 0.0),
         )
         if verbose:
             print(f"[tick {n}] competence: {posture.reason}")
@@ -1039,12 +1057,19 @@ async def _run_tick(
             model=config.model,
             model_served=served,
             tick=n,
-            client_order_id=ids.client_order_id(batch) if orders else None,
             tool_calls=[tc.get("name") for tc in calls],
+            # `client_order_id_enforced` is None for a tool that takes no such
+            # field (I-101). It used to be stamped on every order call from one
+            # cycle-wide id, so the live 2026-08-27 row claims an enforced id
+            # on `close_all_positions` - which was never wrapped and never sent
+            # one. `tool_guard` owns the derivation, so the record and the wire
+            # cannot disagree. The former cycle-wide `client_order_id` field is
+            # gone with it: there is no such thing as one id for a cycle.
             order_calls=[
                 {"name": tc.get("name"),
                  "args_as_model_supplied": tc.get("args"),
-                 "client_order_id_enforced": ids.client_order_id(batch)}
+                 "client_order_id_enforced": tool_guard.enforced_order_id(
+                     batch, str(tc.get("name", "")), tc.get("args") or {})}
                 for tc in orders
             ],
             positions_recorded=len(recorded),

@@ -866,7 +866,7 @@ def _journal_sizing(journal: Any, **fields: Any) -> None:
 
 
 def build_size_position(
-    calibration: CalibrationStore, equity: float,
+    calibration: CalibrationStore, equity: float | None,
     open_risk_usd: float = 0.0,
     open_risk_by_underlying: dict[str, float] | None = None,
     shared: SharedContext | None = None,
@@ -915,6 +915,22 @@ def build_size_position(
         its expected win is entirely eaten by costs, this REFUSES - and that
         refusal is a real answer about the trade, not an error to route around.
         """
+        # NO BANKROLL, NO SIZE (I-75). Every cap in this system - Kelly, the
+        # book cap, the per-name cap, the exploration floor - is a FRACTION of
+        # equity, so an unreadable account leaves nothing to take a fraction
+        # of. The caller used to substitute a $100,000 constant, which sized 47
+        # contracts against the 12 the real equity permitted. This is the sizer
+        # declining to answer a question it has no input for, not a policy gate.
+        if equity is None:
+            _journal_sizing(journal, underlying=underlying.upper(), result="refused",
+                            contracts=0, structure=structure_name,
+                            reason="account unreadable - no bankroll to size against")
+            return (
+                "REFUSED: the account could not be read this tick, so there is no "
+                "bankroll to size against and every cap here is a fraction of one. "
+                "Do not open a position on this cycle; the account is re-read every "
+                "tick and sizing will answer again as soon as it is readable."
+            )
         match = _match_structure(shared, max_profit, max_loss, structure_name)
         if isinstance(match, str):
             _journal_sizing(journal, underlying=underlying.upper(), result="refused",
