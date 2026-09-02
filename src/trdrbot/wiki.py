@@ -302,7 +302,7 @@ class Wiki:
         root = self.root / subdir if subdir else self.root
         out: list[Concept] = []
         for p in sorted(root.rglob("*.md")):
-            if p.name in ("log.md",) or "positions/" in str(p):
+            if p.name in ("log.md",) or p.name.endswith(".history.md") or "positions/" in str(p):
                 continue
             cid = str(p.relative_to(self.root)).removesuffix(".md")
             try:
@@ -349,6 +349,31 @@ class Wiki:
             self.write_concept(c, touch_generated=False)
             marked.append(c.concept_id)
         return {"deprecated": marked, "protected": skipped}
+
+    def archive_prior(self, concept: Concept) -> bool:
+        """Keep the page's CURRENT body before it is overwritten (D-110).
+
+        A page is never deleted - the sweep tombstones in place - but it IS
+        overwritten: research rewrites `context/regime` every morning, handing
+        the model yesterday's text to "update, not rewrite from scratch". The
+        previous assessment then existed only in git, and only when a human
+        committed `data/`, which the loop never does. Between commits each
+        rewrite destroyed the prior one - and the regime page is the one
+        surface from which "how regimes change" could ever be learned.
+
+        Prepended under a dated heading to `<concept_id>.history.md`, newest
+        first, the same shape as `log.md`. Not a Concept: `all_concepts`
+        excludes it, so the muse cannot sample a history as an idea.
+        Returns False when there is nothing to keep (an empty page).
+        """
+        if not concept.body.strip():
+            return False
+        path = self.root / f"{concept.concept_id}.history.md"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        today = ids.utc_now().strftime("%Y-%m-%d")
+        prior = path.read_text(encoding="utf-8") if path.exists() else ""
+        store.write_atomic(path, f"## {today}\n\n{concept.body.rstrip()}\n\n{prior}")
+        return True
 
     def append_log(self, entry: str, *, dir_: Path | None = None) -> None:
         """OKF log.md: newest-first, dated headings (D-022's reserved filename)."""

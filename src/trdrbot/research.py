@@ -269,6 +269,11 @@ async def run(
         c = wiki.read("context/regime") or Concept(
             concept_id="context/regime", frontmatter={"type": "MarketContext"}, body=""
         )
+        # Keep yesterday's assessment before today's replaces it (D-110) -
+        # only when it actually changed, so a quiet week does not archive the
+        # same paragraph five times.
+        if c.body.strip() and c.body.strip() != regime_md.strip():
+            wiki.archive_prior(c)
         c.body = regime_md + "\n"
         # `status` and `stale_after` are stamped by wiki.LIFECYCLE now. They
         # were set here by hand, which is exactly how one file ends up with two

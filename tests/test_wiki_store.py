@@ -154,3 +154,40 @@ def test_the_muse_is_not_fed_tombstoned_pages(tmp_path):
 
     assert "research/GOOD" in picked
     assert "research/DEAD" not in picked
+
+
+
+def test_an_overwritten_page_keeps_its_prior_body_in_a_history_the_muse_cannot_sample(tmp_path):
+    """D-110. Nothing in the wiki is ever deleted - but the regime page is
+    OVERWRITTEN every morning, and its previous assessment survived only in
+    git, only when a human committed data/, which the loop never does. The one
+    surface "how regimes change" could be learned from was destroying its own
+    past daily.
+
+    Three properties: the prior body is kept under a dated heading, newest
+    first; an unchanged rewrite keeps nothing; and the history is NOT a concept
+    - the muse's collision sampler must never draw yesterday's regime as an
+    idea."""
+    from trdrbot.wiki import Concept, Wiki
+
+    w = Wiki(tmp_path)
+    c = Concept(concept_id="context/regime", frontmatter={"type": "MarketContext"},
+                body="# Assessment\nRisk-on.\n")
+    w.write_concept(c, type_="MarketContext")
+
+    assert w.archive_prior(w.read("context/regime"))
+    hist = (tmp_path / "context" / "regime.history.md").read_text()
+    assert hist.startswith("## ") and "Risk-on." in hist
+
+    later = w.read("context/regime")
+    later.body = "# Assessment\nRisk-off.\n"
+    w.write_concept(later, type_="MarketContext")
+    assert w.archive_prior(w.read("context/regime"))
+    hist = (tmp_path / "context" / "regime.history.md").read_text()
+    assert hist.index("Risk-off.") < hist.index("Risk-on."), "newest first, like log.md"
+
+    assert not w.archive_prior(Concept(concept_id="context/empty", body="")), \
+        "an empty page has nothing to keep"
+    ids_ = {x.concept_id for x in w.all_concepts()}
+    assert "context/regime" in ids_
+    assert not any("history" in i for i in ids_), "a history is not a concept"
