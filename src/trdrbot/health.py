@@ -544,6 +544,31 @@ def check(journal_path: Path, positions: list[Any]) -> list[tuple[str, str, str]
                                  f"stuck in 'closing' - {failed} close attempt(s) failed; "
                                  "legs may still be live at the broker"))
             continue
+        # A CLOSED position with no scoreable thesis is permanently stuck
+        # (D-109): `attribution.pending` needs a claim AND a parseable horizon,
+        # so it never becomes pending, the probe's `work` reads 0, and the
+        # subsystem reports "idle, not stalled" - a permanently empty queue and
+        # a permanently stuck item are the same observation. Live:
+        # pos_20260826_SPY_bull_put_spread closed +8.2% with thesis_claim ''
+        # and will never be attributed at any future date. Its outcome is lost
+        # to the learning loop, and only this line says so.
+        if getattr(p, "status", "") == "closed" and not getattr(p, "attribution", ""):
+            claim = getattr(p, "thesis_claim", "")
+            horizon = str(getattr(p, "thesis_horizon", "") or "")
+            try:
+                from datetime import date as _d
+                _d.fromisoformat(horizon)
+                horizon_ok = True
+            except (ValueError, TypeError):
+                horizon_ok = False
+            if not claim or not horizon_ok:
+                findings.append((BAD, f"position:{p.position_id[:28]}",
+                                 "closed with " + ("no thesis" if not claim else
+                                                   f"an unparseable horizon {horizon!r}")
+                                 + " - will NEVER be attributed; its outcome is lost "
+                                   "to the learning loop and the attribution probe "
+                                   "cannot see it"))
+            continue
         if getattr(p, "status", "") not in ("open", "opening"):
             continue
         if getattr(p, "max_loss_usd", None) is None:

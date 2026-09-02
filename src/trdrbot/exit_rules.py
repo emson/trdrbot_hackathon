@@ -343,6 +343,19 @@ def evaluate(pos: Position, snap: Snapshot, deadline: str,
     # and leg divergence. Neither is the agent's to override, and for the same
     # reason - the agent's exit rules all describe a position that, in these
     # two cases, either cannot resolve in time or no longer exists.
+    # ASSIGNED SHARES LEAVE (D-109). Reconcile adopts a non-OCC broker row as
+    # `orphan_equity` so it is watched - and every rule that could watch it is
+    # dead: `deadline` and `time_stop` read `_days_to("")` -> None and hold,
+    # and a single-symbol position that vanishes takes the phantom branch, so
+    # `leg_divergence` can never count. Live shape: the book's short 758P is
+    # assigned early on a drop through 758 -> 1,200 shares bought at 758 =
+    # $909,600 of stock on a ~$100k account, held indefinitely by rules that
+    # cannot fire. Shares are outside a defined-risk options mandate on any
+    # reading; the only correct exit rule for them is "now". Submitted in
+    # session and retried through `closing` like every other close.
+    if pos.strategy == "orphan_equity":
+        return ("orphan_equity", "assigned or stray shares are outside the defined-risk "
+                                 "mandate - flattened, not held", None)
     implicit: list[dict[str, Any]] = [{"type": "deadline"}, {"type": "leg_divergence"}]
     # A gamma-wall time stop is the second, unless the agent wrote a USABLE one
     # of its own. Keyed on whether the rule PARSES rather than on whether one
@@ -416,11 +429,37 @@ async def _close_legs(tools: dict[str, Any], symbols: list[str]) -> bool:
     ok = True
     for symbol in symbols:
         try:
-            await mcp_client.call(tools, "close_position", symbol_or_asset_id=symbol)
+            r = await mcp_client.call(tools, "close_position", symbol_or_asset_id=symbol)
         except Exception as exc:  # noqa: BLE001
             ok = False
             print(f"[exit] failed closing leg {symbol}: {exc!r}")
+            continue
+        # READ THE ANSWER (D-109). Success used to be the absence of an
+        # exception - and `mcp_client.unwrap` hands an Alpaca error envelope
+        # back as ordinary data, never raising. A rejected close therefore
+        # "succeeded", the position was transitioned to `closed` (terminal,
+        # exactly once - INV-17), a fictional outcome was scored into
+        # calibration and memory, and the real spread stayed live at the
+        # broker with nothing watching it. The contract test that would have
+        # caught this was skipped with a note saying exactly that. Same
+        # error shapes discovery already reads off its option-chain call.
+        why = _in_band_error(r)
+        if why:
+            ok = False
+            print(f"[exit] broker refused closing leg {symbol}: {why}")
     return ok
+
+
+def _in_band_error(r: Any) -> str:
+    """The broker's own refusal, if the unwrapped payload carries one."""
+    if isinstance(r, dict):
+        if r.get("error"):
+            return str(r["error"])[:160]
+        if str(r.get("status", "")).lower() in ("rejected", "canceled", "cancelled", "expired"):
+            return f"order {r.get('status')}"
+    elif isinstance(r, str) and "error" in r.lower()[:200]:
+        return r[:160]
+    return ""
 
 
 def _legs_to_close(pos: Position, snap: Snapshot) -> list[str]:

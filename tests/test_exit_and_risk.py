@@ -660,3 +660,58 @@ async def test_an_unreadable_broker_still_attempts_every_leg(paths, make_positio
 
     assert sorted(closed_legs) == sorted(pos.symbols), \
         "a failed read silently skipped legs it could not see"
+
+
+async def test_a_close_the_broker_refused_is_not_a_close(paths, make_position):
+    """D-109. PILLAR-3. Success was the ABSENCE of an exception, and
+    `mcp_client.unwrap` returns an Alpaca error envelope as ordinary data. A
+    refused close therefore transitioned the position to `closed` - terminal,
+    exactly once - scored a fictional outcome, and left the real spread live at
+    the broker with nothing watching it. The contract test for this was
+    skipped with a note saying so."""
+
+    store, journal = PositionStore(paths.wiki), Journal(paths.journal)
+    pos = make_position(exit_rules=[
+        {"type": "stop_loss", "basis": "position_mark", "threshold": "-65.0%"}])
+    store.save(pos)
+    refusing = tools_for(close_position=lambda **kw: {"error": "insufficient buying power"})
+    snap = _underwater(pos.symbols, -0.80)
+    await _run(store, snap, journal, paths, tools=refusing)   # arm the debounce
+    await _run(store, snap, journal, paths, tools=refusing)   # confirm it
+    assert store.load(pos.position_id).status != "closed", \
+        "a refused close was recorded as a close"
+    assert any(r.get("submitted") is False for r in journal_rows(journal, "exit")), \
+        "the refusal must be journalled as a failed submission so it is retried"
+    # And the accepting broker still closes it - the fix is not a blanket hold.
+    accepting = tools_for(close_position=lambda **kw: {"status": "accepted"})
+    await _run(store, snap, journal, paths, tools=accepting)
+    assert store.load(pos.position_id).status == "closed"
+
+
+async def test_assigned_shares_are_flattened_not_held_forever(paths, make_position):
+    """D-109. PILLAR-3. Reconcile adopts a non-OCC broker row as `orphan_equity`
+    so it is WATCHED - and every rule that could watch it is dead: deadline and
+    time_stop read `_days_to("")` and hold, and a lone symbol that vanishes takes
+    the phantom branch so leg_divergence can never count. 1,200 assigned SPY
+    shares is $900k of stock on a $100k account with nothing that can close it.
+    Shares are outside a defined-risk mandate; the only correct rule is now."""
+    store, journal = PositionStore(paths.wiki), Journal(paths.journal)
+    shares = make_position(position_id="pos_orphan", strategy="orphan_equity",
+                           underlying="SPY", expiry="", exit_rules=[],
+                           legs=[{"symbol": "SPY", "side": "long", "qty": 1200}],
+                           thesis_claim="", thesis_horizon="")
+    store.save(shares)
+    broker = tools_for(close_position=lambda **kw: {"status": "accepted"})
+    snap = Snapshot(market_open=True, broker_positions=[
+        {"symbol": "SPY", "qty": 1200, "cost_basis": 909_600.0, "unrealized_pl": 0.0}])
+    closed = await _run(store, snap, journal, paths, tools=broker)
+    assert closed == ["pos_orphan"], "assigned shares were held"
+    assert broker["close_position"].calls[0]["symbol_or_asset_id"] == "SPY"
+    # Off-hours: detected, not submitted - the same gate as every other close.
+    store.save(make_position(position_id="pos_orphan2", strategy="orphan_equity",
+                             expiry="", exit_rules=[], thesis_claim="", thesis_horizon="",
+                             legs=[{"symbol": "SPY", "side": "long", "qty": 100}]))
+    night = Snapshot(market_open=False, broker_positions=[
+        {"symbol": "SPY", "qty": 100, "cost_basis": 75_800.0, "unrealized_pl": 0.0}])
+    assert await _run(store, night, journal, paths, tools=broker) == []
+

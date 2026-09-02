@@ -528,3 +528,30 @@ def test_health_says_so_when_the_live_process_is_older_than_the_code(tmp_path):
     run_json.unlink()
     assert health._stale_process(run_json) == []
 
+
+def test_health_names_a_closed_position_that_can_never_be_attributed(tmp_path, make_position):
+    """D-109. `attribution.pending` needs a claim and a parseable horizon, so a
+    closed position without them never becomes pending, the probe's `work`
+    reads 0, and the subsystem reports "idle, not stalled". A permanently empty
+    queue and a permanently stuck item were the same observation. Live:
+    pos_20260826_SPY_bull_put_spread closed +8.2% with no thesis and will never
+    be attributed at any future date."""
+    from trdrbot import health
+
+    journal = tmp_path / "journal.jsonl"
+    journal.write_text("")
+    stuck = make_position(status="closed", thesis_claim="", thesis_horizon="", attribution="")
+    bad_date = make_position(position_id="pos_h", status="closed", thesis_claim="c",
+                             thesis_horizon="not-a-date", attribution="")
+    fine = make_position(position_id="pos_ok", status="closed", thesis_claim="c",
+                         thesis_horizon="2026-09-10", attribution="")
+    done = make_position(position_id="pos_done", status="closed", thesis_claim="",
+                         thesis_horizon="", attribution="thesis_right_expression_right")
+    found = {f[1]: (f[0], f[2]) for f in health.check(journal, [stuck, bad_date, fine, done])
+             if f[1].startswith("position:")}
+    assert found[f"position:{stuck.position_id[:28]}"][0] == health.BAD
+    assert "NEVER be attributed" in found[f"position:{stuck.position_id[:28]}"][1]
+    assert "unparseable horizon" in found["position:pos_h"][1]
+    assert "position:pos_ok" not in found, "a closed position with a future horizon is fine"
+    assert "position:pos_done" not in found, "an attributed position is done"
+
