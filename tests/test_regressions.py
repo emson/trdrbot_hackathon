@@ -3712,6 +3712,40 @@ def test_forecast_window_leaves_room_to_act():
     assert competence.forecast_window("2027-01-01", today)[2] == "2026-09-07"
 
 
+def test_a_forecast_matures_when_its_session_ends_not_when_its_utc_date_begins():
+    """D-107. PILLAR-4 (learning integrity): the calibration sample must be
+    scored against the close of the horizon day, not the close BEFORE it.
+
+    `Entry.matured` compared the horizon to `ids.today()` - the UTC date.
+    Housekeeping runs while the market is closed, i.e. evening ET, which is
+    already the next UTC day; so a Wednesday forecast matured on Tuesday night
+    and was scored at Tuesday's close. Measured live: 94 of 95 resolved
+    entries, and 71 of 71 in the sample that drives the size ladder, were
+    resolved before 16:00 ET on their own horizon date. `attribution.
+    _horizon_passed` had the same clock and is pinned by the same test."""
+    from datetime import date
+    from types import SimpleNamespace
+
+    from trdrbot import attribution, ids
+    from trdrbot import ledger as L
+
+    e = L.Entry(id="x", kind="muse", created="2026-09-01", underlying="SPY", claim="c",
+                probability=0.4, horizon="2026-09-03", band_low=1.0, band_high=2.0)
+    # Tuesday 20:30 ET is Wednesday 00:30 UTC. The horizon is Wednesday.
+    tue_et, wed_utc = date(2026, 9, 2), date(2026, 9, 3)
+    assert not e.matured(tue_et), "Wednesday's horizon has not passed on Tuesday evening"
+    assert e.matured(wed_utc)
+    # And the default clock is the MARKET one, whatever UTC says.
+    old_today, old_market = ids.today, ids.market_today
+    try:
+        ids.today, ids.market_today = (lambda: wed_utc), (lambda: tue_et)
+        assert not e.matured(), "matured() read the UTC date, not the market date"
+        pos = SimpleNamespace(thesis_horizon="2026-09-03")
+        assert not attribution._horizon_passed(pos), "attribution read the UTC date"
+    finally:
+        ids.today, ids.market_today = old_today, old_market
+
+
 def test_no_deadline_is_a_first_class_state_not_a_disarmed_one(tmp_path):
     """D-101. Running indefinitely must remove the HARD STOP and nothing else.
 

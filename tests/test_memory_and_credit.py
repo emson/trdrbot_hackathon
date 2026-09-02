@@ -399,7 +399,14 @@ async def test_a_memory_failure_does_not_disarm_the_capital_protection_path(
     assert result["phantom"] == ["pos_gone"]
     assert store.load("pos_gone").status == "closed"
     errors = journal_rows(journal, "learn_error")
-    assert [r["stage"] for r in errors] == ["on_resolution"]
+    # CHANGED (D-107): the failure is now the NARROW one. `record_mind_outcome`
+    # is guarded inside on_resolution, so a memory raise is journalled at that
+    # stage and the lesson and reflection are still written - previously the
+    # whole stage aborted (`stage: on_resolution`) and one closed position lost
+    # all three for good. Capital protection is untouched either way; what
+    # changed is that a broken memory no longer costs the record too.
+    assert [r["stage"] for r in errors] == ["record_mind_outcome"]
+    assert journal_rows(journal, "reflection"), "the lesson must survive a memory failure"
     assert journal_rows(journal, "learn_run")[0]["errors"] == 1
 
     # Half two: a breached stop still closes, with memory still broken.

@@ -23,8 +23,12 @@ from .wiki import Wiki
 
 
 def _horizon_passed(pos: Position) -> bool:
+    # `market_today`, not the UTC date (D-107): evening housekeeping is the
+    # next UTC day, so a Wednesday horizon "passed" on Tuesday night and the
+    # position was attributed against Tuesday's close. Same clock as
+    # `ledger.Entry.matured`, so the two halves of resolution agree.
     try:
-        return ids.today() >= date.fromisoformat(pos.thesis_horizon)
+        return ids.market_today() >= date.fromisoformat(pos.thesis_horizon)
     except (ValueError, TypeError):
         return False
 

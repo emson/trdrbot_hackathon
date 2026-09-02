@@ -119,8 +119,19 @@ class Entry:
         return optmath.band_holds(price, self.band_low, self.band_high) is True
 
     def matured(self, today: date | None = None) -> bool:
+        """Has the horizon's SESSION ended - not merely its UTC date begun.
+
+        This compared against `ids.today()`, the UTC date. Housekeeping runs
+        while the market is closed, which in the evening ET is already the next
+        UTC day - so a forecast for Wednesday matured on Tuesday evening and was
+        scored against Tuesday's close. Measured live (D-107): 94 of 95 resolved
+        entries, and 71 of 71 in the calibration sample that drives the ladder,
+        were scored before 16:00 ET on their own horizon date. `market_today`
+        exists for exactly this and is the clock every other date decision in
+        the system uses.
+        """
         try:
-            return date.fromisoformat(self.horizon) <= (today or ids.today())
+            return date.fromisoformat(self.horizon) <= (today or ids.market_today())
         except (ValueError, TypeError):
             return False
 

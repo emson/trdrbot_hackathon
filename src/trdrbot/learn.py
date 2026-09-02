@@ -45,8 +45,13 @@ async def guarded(coro: Any, journal: Journal, *, stage: str, position_id: str) 
     `trdrbot health` and `trdrbot report` (D-038).
     """
     try:
-        await coro
-        return True
+        # The stage's OWN verdict, when it has one (D-107). `on_resolution`
+        # returns False when it guarded a memory failure internally and kept
+        # going, so a degraded run is still COUNTED in `learn_run.errors` -
+        # the number `health` reads. Swallowing the raise and returning a
+        # constant True here would have been D-038's absence-as-success.
+        ok = await coro
+        return ok is not False
     except Exception as exc:  # noqa: BLE001 - the advisory boundary itself
         print(f"[learn] {stage} failed for {position_id}: {exc!r}")
         journal.append("learn_error", stage=stage, position_id=position_id,
@@ -79,7 +84,7 @@ async def on_resolution(
     *,
     pnl_fraction: float | None,
     calibration: CalibrationStore | None = None,
-) -> None:
+) -> bool:
     """F3: a position reached a terminal state, however it got there.
 
     pnl_fraction is None when the resolving detector has no P&L to hand (e.g. an
@@ -128,10 +133,28 @@ async def on_resolution(
     # Deferring costs nothing real: attribution is where the view is actually
     # tested, and a position that closes before its horizon has not yet
     # produced the evidence that would justify moving a memory.
+    degraded = False
     if pnl_fraction is not None:
         hit = pnl_fraction > 0
-        await mem.record_mind_outcome(pos, hit=hit)
-        scored = True
+        # GUARDED (D-107). elfmem raises BlockNotActiveError when the decision
+        # block has been archived as `superseded` by consolidation - which
+        # happens whenever `on_fill` wrote the thesis text twice, so 2 of 4
+        # live decision blocks were archived. Unguarded, one raise here skipped
+        # the lesson, the reflection row and the store save for good: the
+        # position was already terminal, and INV-17 refuses a second terminal
+        # transition, so there is no retry. One closed position lost all three.
+        # A memory that cannot take the outcome is a degraded memory, not a
+        # reason to lose the lesson.
+        try:
+            await mem.record_mind_outcome(pos, hit=hit)
+            scored = True
+        except Exception as exc:  # noqa: BLE001 - memory never blocks the lesson
+            journal.append("learn_error", stage="record_mind_outcome",
+                           position_id=pos.position_id, error=repr(exc)[:200],
+                           consequence="mind outcome not recorded; lesson and "
+                                       "reflection still written")
+            scored = False
+            degraded = True
     else:
         hit = None
 
@@ -152,6 +175,7 @@ async def on_resolution(
         hit=hit,
     )
     store.save(pos)  # persist any state the resolve step touched
+    return not degraded
 
 
 def _write_lesson(wiki: Wiki, pos: Position, *, pnl_fraction: float | None, scored: bool) -> str:
