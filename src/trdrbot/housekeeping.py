@@ -266,7 +266,9 @@ async def run(
     coached: dict[str, Any] = {}
     try:
         from . import coach
-        coach.reconcile(config)
+        # `pulse` reconciles first now (I-92), so this call is gone rather than
+        # duplicated: the repair belonged to the pulse, not to one of its two
+        # callers, and the tick path was the one that had it missing.
         coached = await coach.pulse(config, journal,
                                                                         verbose=verbose)
     except Exception as exc:  # noqa: BLE001 - the Coach is advisory (INV-8)

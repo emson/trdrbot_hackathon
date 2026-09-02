@@ -105,8 +105,14 @@ def validate_prompt(text: str, incumbent: str, placeholders: tuple[str, ...],
         return "too short to be a replacement prompt"
     if len(text) > 2 * len(incumbent):
         return f"{len(text)} chars against an incumbent of {len(incumbent)} - prompt bloat"
-    if fingerprint(text) == fingerprint(incumbent):
-        return "identical to the incumbent - nothing to test"
+    # NORMALISED, not exact (I-98). `mutate()` runs `clean_prompt()` - which
+    # strips - before this, and `MUSE_PROMPT` ends with a newline, so an ECHO of
+    # the incumbent (which a model told to "change exactly ONE thing" sometimes
+    # returns) passed as a novel challenger. Both arms were then token-identical
+    # after formatting: a coin flip that runs to the 40-run cap, roughly two
+    # weeks and 40 challenger calls, and times out.
+    if fingerprint(clean_prompt(text)) == fingerprint(clean_prompt(incumbent)):
+        return "identical to the incumbent once normalised - nothing to test"
     for token in must_contain:
         if token not in text:
             return f"dropped the contract token {token!r}"
@@ -126,25 +132,34 @@ def validate_prompt(text: str, incumbent: str, placeholders: tuple[str, ...],
 
 
 def _rejection_digest(rows: list[dict[str, Any]], kind: str = "", n: int = 30) -> str:
-    """What keeps failing, so a challenger can aim at it.
+    """What keeps failing, BY GATE, so a challenger can aim at it.
 
     `kind` is the lever's declared `evidence_kind` rather than a hardcoded
     "muse": a lever with no evidence stream is a fine steady state and simply
     gets no digest, which is what the generic path must tolerate.
+
+    Keyed through `ledger.gate_of` (I-99). It used to key on
+    `fate.split(" - ")[0][:80]`, which keeps the embedded base rate, date or
+    price - so nine rejections across four gates rendered as nine `x1` lines and
+    the section headed "by gate" aggregated nothing. `gate_of` is D-104's
+    canonical classifier and already reads every historical wording; one
+    definition, not two.
     """
+    from ..ledger import gate_of
+
     if not kind:
         return "(no rejection evidence for this lever)"
-    fates: dict[str, int] = {}
+    gates: dict[str, int] = {}
     for r in [r for r in rows if r.get("kind") == kind][-20:]:
         for f in (r.get("fates") or []):
             fate = str(f.get("fate", ""))
             if fate.startswith("rejected"):
-                key = fate.split(" - ")[0][:80]
-                fates[key] = fates.get(key, 0) + 1
-    if not fates:
+                g = gate_of(fate)
+                gates[g] = gates.get(g, 0) + 1
+    if not gates:
         return "(nothing rejected recently)"
     return "\n".join(f"- {k}  x{v}" for k, v in
-                     sorted(fates.items(), key=lambda kv: -kv[1])[:n])
+                     sorted(gates.items(), key=lambda kv: -kv[1])[:n])
 
 
 def _graveyard_digest(cfg: Any, lever_name: str, n: int = 4) -> str:
@@ -209,7 +224,12 @@ async def mutate(cfg: Any, st: LeverState, rows: list[dict[str, Any]],
                                    attempt=attempt,
                                    rationale=str(parsed.get("rationale", ""))[:300])
                     return Variant(id=vid, text=candidate,
-                                   since=ids.utc_now().isoformat(), origin="mutation")
+                                   since=ids.utc_now().isoformat(), origin="mutation",
+                                   # Carried so the close row can render it and
+                                   # the graveyard stops re-proposing dead ideas
+                                   # (I-95). It used to live only on the
+                                   # journal's `coach_mutation` row.
+                                   rationale=str(parsed.get("rationale", ""))[:300])
             journal.append("coach_mutation_rejected", lever=st.lever, reason=bad,
                            attempt=attempt,
                            rationale=str((parsed or {}).get("rationale", ""))[:200]

@@ -5510,3 +5510,66 @@ P(+5% or more) rendered 1.0% where a 5-session horizon has 3.5%. D-074's convers
 `simulate_experiments` and never reached this caller. The block is now `discovery.bootstrap_block`,
 extracted so the units at that seam are testable without an LLM call, and the prompt's horizon comes
 from the same constant.
+
+## D-120 - The Coach's autonomy is fine; the bookkeeping under it was not
+
+Nine defects from the Coach sweep (I-91 to I-99). **None of them is fixed by adding a human
+checkpoint**, and none is: D-088's rule that the human pre-authorises the SPACE rather than each
+move stands unchanged, and `docs/plan_defect_remediation.md` §12 says so explicitly. What was wrong
+is the record the autonomy runs on. Plan: W5.
+
+**PAIRING INTEGRITY (I-91, I-97, I-98).** The operator-override check compared only the CHALLENGER
+id, so a hand-edited incumbent - which README says is supported and `gauges.py` admits "corrupts the
+pairing" - kept the experiment open: `arms()` paired the rewritten incumbent with the old
+challenger, later trials folded into one tally under `v0` with two different incumbent texts, and
+D-111's documented undo done mid-trial left the log saying v8 vs v0 while `arms()` ran v8 vs v7. It
+was not even detectable after the fact, because `experiment_opened` recorded `challenger_fp` and no
+incumbent fingerprint. Both are recorded now and EITHER arm moving closes the experiment as
+`operator_override`. A NULLED challenger is the third case and was the worst: the check was guarded
+by `st.challenger and`, so an operator cancelling one wedged the lever forever - no trials arrived,
+nothing closed, nothing opened, `experiments_open` read 1 indefinitely, and `paused: true` was the
+only way out. And `validate_prompt` compares NORMALISED text: `mutate()` runs `clean_prompt()`
+(which strips) first and `MUSE_PROMPT` ends with a newline, so a whitespace echo of the incumbent -
+which a model told to "change exactly ONE thing" sometimes returns - passed as a novel challenger
+and ran two token-identical arms to the 40-run cap, about two weeks and 40 challenger calls.
+
+**CRASH REPAIR EVERYWHERE (I-92, I-96).** `housekeeping.run` called `reconcile` then `pulse`;
+`tick.py` called `pulse` alone after every muse run - so on the tick path a crash between
+`_promote`'s log append and its `save_state` left the pulse seeing a closed experiment, passing the
+cooldown, spending a mutation call and opening v2 against v0 while the log said v1 was promoted.
+`reconcile` now runs at the top of `pulse` (it is cheap and idempotent) and the duplicate call at
+one caller is gone: the repair belonged to the pulse, not to whichever caller remembered it. It also
+gained the MIRROR repair - an `experiment_opened` row with no close row that is no longer in state
+is closed as `abandoned`, because `trdrbot report` derives open experiments from the log and listed
+one forever while the `coach.open_experiments` gauge derives from state and said 0.
+
+A corrupt state file is KEPT and its lever is skipped (I-96). `load_state`'s docstring promised the
+unreadable file was kept for a human, and then the cooldown save and `_open`'s save in the same
+pulse replaced it with a fresh seed state - which opened a second experiment beside the one the log
+said was running, reset `next_variant_n` so the new challenger reused the id `reconcile` keys on,
+and ran a prior promotion as the seed until housekeeping. `save_state` now refuses to write over it.
+
+**THE OPERATOR'S CONTROLS MEAN WHAT THEY SAY (I-93, I-94).** `enabled: false` made `arms()` return
+the SEED while `prompts._active_muse_prompt`, `trdrbot report` and `trdrbot coach` all read the state
+incumbent - so every journalled decision fingerprinted a prompt nothing was running, which is
+precisely the outcome `prompts.py` calls worse than no provenance at all. Disabled now means **run
+no experiments, keep the promoted incumbent.** And `pinned` is restored rather than deleted: the
+config comment promised a demo-day freeze, commit 10563c8 deleted the code and left the comment, and
+the live `muse.prompt.json` still carries `"pinned": false`. What must not stand is a documented
+control silently dropped from the state file. The two controls are now distinct and documented as
+such: `paused` closes any open experiment and opens no more; `pinned` freezes what PRODUCTION runs -
+no opening AND no promotion - while an open trial keeps gathering evidence for when the pin lifts.
+
+**THE MUTATOR CAN SEE (I-95, I-99).** `_graveyard_digest` renders `r.get("rationale")` from
+`experiment_closed` rows, and `_close` wrote `challenger_text` and no rationale - it lived only on
+the journal's `coach_mutation` row. So "Variants already tried and beaten (do not re-propose these)"
+always read `- v1 (refuted, P=0.03): ` and the mutator re-litigated dead ideas, which is the one
+thing that section exists to prevent. The rationale is carried on the `Variant` and written to the
+close row. And `_rejection_digest` keys through `ledger.gate_of` - D-104's canonical classifier -
+instead of `fate.split(" - ")[0][:80]`, which keeps the embedded base rate, date or price, so nine
+rejections across four gates rendered as nine `x1` lines under a heading that says "by gate".
+
+**A promotion is reported only if it happened.** `_promote` returns early when the challenger is
+gone and `pulse` set `closed="promoted"` and bumped `promotions_today` regardless - a promotion in
+the heartbeat, zero close rows, the incumbent unchanged. It returns a bool now, and the caller reads
+it.

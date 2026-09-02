@@ -284,9 +284,21 @@ coach:
   # that is a crash between the log row and the save, which it repairs. A
   # variant left in `previous` is an operator's revert, which it keeps.
   #
-  # STEERING, not gating: set `paused: true` or `pinned: true` inside a lever's
-  # own state file to stop experimentation on it (demo day is one pin), and
-  # read `trdrbot report` for the trajectory. Nothing here can touch code, gate
+  # STEERING, not gating. Two controls, inside a lever's own state file, and
+  # they mean different things:
+  #   paused: true   close any open experiment as an operator override, and
+  #                  open no more. The incumbent keeps running.
+  #   pinned: true   freeze what PRODUCTION runs - no new experiments and no
+  #                  promotion - while an open trial keeps gathering evidence
+  #                  for when the pin lifts. Demo day is one pin.
+  # `pinned` was a documented no-op until D-120: commit 10563c8 deleted the
+  # code and left this comment.
+  #
+  # `enabled: false` means RUN NO EXPERIMENTS, not "revert to the seed prompt".
+  # The promoted incumbent keeps serving, which is what provenance, `trdrbot
+  # report` and `trdrbot coach` have always said it does.
+  #
+  # Read `trdrbot report` for the trajectory. Nothing here can touch code, gate
   # thresholds, sizing, or elfmem's constitution - those are outside the lever
   # space by construction, not by policy.
   enabled: true

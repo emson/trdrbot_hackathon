@@ -100,6 +100,7 @@ from .coach_pkg.state import (  # noqa: E402,F401 - re-exported for callers
     lever,
     load_state,
     metrics_path,
+    opened_event,
     save_state,
     seeds,
 )
@@ -128,9 +129,16 @@ def arms(cfg: Any, lever_name: str, *, seed_text: str) -> Arms:
     on its hot path.
     """
     try:
-        if not enabled(cfg):
-            return Arms(incumbent=Variant(SEED_VARIANT_ID, seed_text))
         st = load_state(cfg, lever_name, seed_text)
+        # DISABLED MEANS "RUN NO EXPERIMENTS", NOT "DISCARD THE PROMOTION"
+        # (I-93). This returned the SEED while `prompts._active_muse_prompt`,
+        # `trdrbot report` and `trdrbot coach` all read the state incumbent - so
+        # every journalled decision fingerprinted a prompt nothing was running,
+        # which is the outcome `prompts.py` calls worse than no provenance at
+        # all. `paused` freezes the incumbent and closes any open trial; this
+        # simply stops new ones.
+        if not enabled(cfg):
+            return Arms(incumbent=st.incumbent)
         if st.challenger and st.exp_id and not is_closed(cfg, st.exp_id):
             return Arms(incumbent=st.incumbent, challenger=st.challenger, exp_id=st.exp_id)
         return Arms(incumbent=st.incumbent)
@@ -214,6 +222,15 @@ async def pulse(cfg: Any, journal: Any, *, seed_override: dict[str, str] | None 
     # which is a code change in four places the moment a second lever exists.
     # The override stays for tests that need a lever with a controlled seed.
     lever_seeds = seed_override if seed_override is not None else seeds()
+    # REPAIR BEFORE ANYTHING READS STATE (I-92). `housekeeping.run` called
+    # `reconcile` then `pulse`; `tick.py` called `pulse` alone after every muse
+    # run - so on the tick path a crash between `_promote`'s log append and its
+    # `save_state` left the pulse seeing a closed experiment, passing the
+    # cooldown, spending a mutation call and opening v2 against v0 while the log
+    # said v1 was promoted. That night `reconcile` re-applied v1 and cleared the
+    # new experiment's id: an `experiment_opened` row with no close row, ever.
+    # It is cheap and idempotent, so it belongs here rather than at one caller.
+    reconcile(cfg, seed_override)
     state = {"experiments_open": 0, "trials_scored": 0, "trials_scored_today": 0,
              "promotions_today": 0, "sentinels_active": [], "snapshotted": False,
              "opened": None, "closed": None, "muse_runs_since_pulse": 0}
@@ -292,6 +309,15 @@ async def pulse(cfg: Any, journal: Any, *, seed_override: dict[str, str] | None 
         seed = lever_seeds.get(lv.name, "")
         try:
             st = load_state(cfg, lv.name, seed)
+            if st.unreadable:
+                # KEPT, not overwritten, and not acted on (I-96). Every write
+                # below would replace the only evidence of what broke, and
+                # `save_state` refuses anyway - so a pulse that pretended to
+                # manage this lever would open a SECOND experiment beside the
+                # one the log says is running and reuse the variant id
+                # `reconcile` keys on.
+                print(f"[coach] skipping {lv.name}: {st.blocked}")
+                continue
             open_exp = st.exp_id and not is_closed(cfg, st.exp_id)
 
             # 2b. apply sentinels to this lever
@@ -310,25 +336,29 @@ async def pulse(cfg: Any, journal: Any, *, seed_override: dict[str, str] | None 
 
             # 2c. a human edited state out from under an open experiment
             if open_exp:
-                t = tally(cfg, st.exp_id or "")
-                if t and st.challenger and t.challenger != st.challenger.id:
-                    _close(cfg, st, "operator_override",
-                           "lever state no longer matches the open experiment", journal)
-                    open_exp = False
-                elif st.paused:
-                    _close(cfg, st, "operator_override", st.blocked, journal)
+                override = _operator_override(cfg, st)
+                if override:
+                    _close(cfg, st, "operator_override", override, journal)
                     open_exp = False
 
-            # 3. promote / refute / timeout
-            if open_exp:
+            # 3. promote / refute / timeout. A PIN blocks promotion as well as
+            #    opening (I-94): freezing what production runs and then
+            #    promoting into it during the freeze is not a freeze. The trial
+            #    keeps gathering evidence and settles when the pin lifts.
+            if open_exp and not st.pinned:
                 t = tally(cfg, st.exp_id or "")
                 if t:
                     outcome, reason = verdict(t, floors(cfg))
                     if outcome == "promoted":
-                        _promote(cfg, st, t, reason, journal)
-                        state["closed"] = "promoted"
-                        state["promotions_today"] += 1
-                        open_exp = False
+                        # ...and only if it ACTUALLY promoted (I-97). `_promote`
+                        # returns early when the challenger is gone, and the
+                        # pulse reported `closed="promoted"` and bumped
+                        # `promotions_today` regardless: a promotion in the
+                        # heartbeat, zero close rows, the incumbent unchanged.
+                        if _promote(cfg, st, t, reason, journal):
+                            state["closed"] = "promoted"
+                            state["promotions_today"] += 1
+                            open_exp = False
                     elif outcome:
                         _close(cfg, st, outcome, reason, journal, t=t)
                         state["closed"] = outcome
@@ -375,6 +405,43 @@ async def pulse(cfg: Any, journal: Any, *, seed_override: dict[str, str] | None 
     return state
 
 
+def _operator_override(cfg: Any, st: LeverState) -> str:
+    """Why this open experiment is no longer the one that was opened, or "".
+
+    **Either arm moving ends the pairing** (I-91). The check compared only the
+    challenger id, so a hand-edited INCUMBENT - which README says is supported
+    and `gauges.py` admits "corrupts the pairing" - kept the experiment open:
+    `arms()` paired the rewritten incumbent with the old challenger, later
+    trials folded into one tally under `v0` with two different incumbent texts,
+    and D-111's documented undo (swap `incumbent`/`previous`) done mid-trial
+    left the log saying v8 vs v0 while `arms()` ran v8 vs v7. `experiment_opened`
+    recorded `challenger_fp` and no incumbent fingerprint, so it was not even
+    detectable after the fact; it records both now.
+
+    A NULLED challenger is the third case (I-97). The old check was guarded by
+    `st.challenger and`, so an operator cancelling one left the lever wedged
+    forever: `arms()` unpaired so no trials arrived, nothing closed, nothing
+    opened, and `experiments_open` read 1 indefinitely.
+    """
+    if st.paused:
+        return st.blocked
+    if not st.challenger:
+        return "the challenger was removed from lever state - nothing is being tested"
+    t = tally(cfg, st.exp_id or "")
+    if t and t.challenger != st.challenger.id:
+        return "lever state no longer matches the open experiment"
+    opened = opened_event(cfg, st.exp_id or "")
+    if not opened:
+        return ""
+    for arm, fp, variant in (("challenger", opened.get("challenger_fp"), st.challenger),
+                             ("incumbent", opened.get("incumbent_fp"), st.incumbent)):
+        if fp and fp != variant.fingerprint:
+            return (f"the {arm} was edited while the experiment was open "
+                    f"({fp[:12]} -> {variant.fingerprint[:12]}) - the pairing no "
+                    f"longer describes what ran")
+    return ""
+
+
 def _open(cfg: Any, st: LeverState, challenger: Variant, journal: Any) -> None:
     """Open an experiment. EVENT FIRST, then the state swap.
 
@@ -395,6 +462,10 @@ def _open(cfg: Any, st: LeverState, challenger: Variant, journal: Any) -> None:
         "kind": "experiment_opened", "exp_id": exp_id, "lever": st.lever,
         "incumbent": st.incumbent.id, "challenger": challenger.id,
         "challenger_origin": challenger.origin, "challenger_fp": challenger.fingerprint,
+        # BOTH arms' fingerprints (I-91). Only the challenger's was recorded, so
+        # a hand-edited incumbent mid-trial was undetectable even after the
+        # fact - and it is the arm the operator is most likely to edit.
+        "incumbent_fp": st.incumbent.fingerprint,
         "floors": floors(cfg)})
     st.challenger = challenger
     st.exp_id = exp_id
@@ -419,7 +490,13 @@ def _close(cfg: Any, st: LeverState, outcome: str, reason: str, journal: Any,
         "runs": t.runs if t else None,
         "final_posterior": round(t.posterior, 4) if t else None,
         "challenger": ch.id if ch else None,
-        "challenger_text": ch.text if ch else None})
+        "challenger_text": ch.text if ch else None,
+        # WHAT IT WAS TRYING TO DO (I-95). `_graveyard_digest` renders
+        # `r.get("rationale")` from this row, which never carried one - so
+        # "Variants already tried and beaten (do not re-propose these)" read
+        # `- v1 (refuted, P=0.03): ` and the mutator re-litigated dead ideas,
+        # which is the one thing that section exists to prevent.
+        "rationale": ch.rationale if ch else ""})
     st.challenger, st.exp_id = None, None
     save_state(cfg, st)
     journal.append("coach_experiment_closed", lever=st.lever, exp_id=exp_id,
@@ -427,7 +504,7 @@ def _close(cfg: Any, st: LeverState, outcome: str, reason: str, journal: Any,
     marker(cfg, "experiment_closed", lever=st.lever, detail=f"{outcome}: {reason[:80]}")
 
 
-def _promote(cfg: Any, st: LeverState, t: Tally, reason: str, journal: Any) -> None:
+def _promote(cfg: Any, st: LeverState, t: Tally, reason: str, journal: Any) -> bool:
     """Swap in the challenger.
 
     Ordering is crash-safe on purpose: the CLOSE is appended first, then the
@@ -438,16 +515,17 @@ def _promote(cfg: Any, st: LeverState, t: Tally, reason: str, journal: Any) -> N
     """
     ch = st.challenger
     if ch is None:
-        return
+        return False  # the caller must not report a promotion that did not happen
     _append(events_path(cfg), {
         "kind": "experiment_closed", "exp_id": st.exp_id, "lever": st.lever,
         "outcome": "promoted", "reason": reason, "runs": t.runs,
         "final_posterior": round(t.posterior, 4),
         "challenger": ch.id, "challenger_text": ch.text,
+        "rationale": ch.rationale,
         "promoted_from": st.incumbent.id})
     st.previous = st.incumbent
     st.incumbent = Variant(id=ch.id, text=ch.text, since=ids.utc_now().isoformat(),
-                           origin=ch.origin)
+                           origin=ch.origin, rationale=ch.rationale)
     st.challenger, st.exp_id = None, None
     save_state(cfg, st)
     journal.append("coach_promotion", lever=st.lever, promoted=ch.id,
@@ -455,6 +533,7 @@ def _promote(cfg: Any, st: LeverState, t: Tally, reason: str, journal: Any) -> N
     marker(cfg, "promotion", lever=st.lever,
            detail=f"{st.previous.id} -> {ch.id}")
     print(f"[coach] PROMOTED {st.lever}: {st.previous.id} -> {ch.id} ({reason})")
+    return True
 
 
 def reconcile(cfg: Any, seed_override: dict[str, str] | None = None) -> list[str]:
@@ -477,15 +556,42 @@ def reconcile(cfg: Any, seed_override: dict[str, str] | None = None) -> list[str
     for lv in LEVERS:
         st = load_state(cfg, lv.name, lever_seeds.get(lv.name, ""))
 
-        if st.exp_id and not any(r.get("kind") == "experiment_opened"
-                                 and r.get("exp_id") == st.exp_id
-                                 for r in events(cfg)):
+        if st.unreadable:
+            continue  # kept for inspection; nothing here may write over it (I-96)
+
+        if st.exp_id and not opened_event(cfg, st.exp_id):
             orphan = st.exp_id
             st.challenger, st.exp_id = None, None
             save_state(cfg, st)
             applied.append(f"{lv.name}: cleared orphaned experiment {orphan}")
             print(f"[coach] {lv.name}: experiment {orphan} has no opened event - "
                   f"cleared so the lever is not stuck mid-trial")
+
+        # ...and the MIRROR of that (I-92): an `experiment_opened` row whose
+        # experiment is no longer in state and was never closed. `trdrbot
+        # report` derives open experiments from the log and listed it forever
+        # while the `coach.open_experiments` gauge derives from state and said
+        # 0 - one question, two readers, two answers. Closing it makes the log
+        # self-consistent, which is the whole basis for the state file being a
+        # cache of it.
+        rows = events(cfg)
+        closed_ids = {r.get("exp_id") for r in rows if r.get("kind") == "experiment_closed"}
+        for r in rows:
+            if (r.get("kind") != "experiment_opened" or r.get("lever") != lv.name
+                    or r.get("exp_id") in closed_ids or r.get("exp_id") == st.exp_id):
+                continue
+            _append(events_path(cfg), {
+                "kind": "experiment_closed", "exp_id": r.get("exp_id"), "lever": lv.name,
+                "outcome": "abandoned",
+                "reason": "no longer in lever state and never closed - a crash between "
+                          "the open and a later write, repaired by reconcile",
+                "runs": None, "final_posterior": None,
+                "challenger": r.get("challenger"), "challenger_text": None,
+                "rationale": ""})
+            closed_ids.add(r.get("exp_id"))
+            applied.append(f"{lv.name}: closed dangling experiment {r.get('exp_id')}")
+            print(f"[coach] {lv.name}: experiment {r.get('exp_id')} was opened and never "
+                  f"closed and is no longer in state - closed as abandoned")
 
         closes = [r for r in events(cfg)
                   if r.get("kind") == "experiment_closed" and r.get("lever") == lv.name

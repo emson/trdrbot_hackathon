@@ -928,8 +928,11 @@ def test_a_lever_with_no_evidence_stream_still_mutates():
     """An evidence kind is optional - a new lever has no rejection history and
     must not be blocked from ever generating a challenger by its absence."""
     assert "no rejection evidence" in coach._rejection_digest([], "")
+    # An unclassified wording reports as `other` rather than vanishing (I-99):
+    # a gate that starts rejecting under a phrasing nobody classified must show
+    # up as a growing `other`, which is `gate_of`'s own documented contract.
     assert coach._rejection_digest([{"kind": "widget", "fates": [
-        {"fate": "rejected: too wide"}]}], "widget").startswith("- rejected: too wide")
+        {"fate": "rejected: too wide"}]}], "widget").startswith("- other")
 
 
 # ==================================================================== PILLAR-4
@@ -1116,3 +1119,238 @@ def test_a_daily_source_that_ran_today_still_reports_its_yield(tmp_path):
 
     assert g["research.opportunities_per_run"] == 4.0
     assert g["research.days_since_run"] < 1.0
+
+
+# ======================================================= D-120 - the bookkeeping
+#
+# I-91 .. I-99. The Coach's AUTONOMY is not the problem and is not gated here;
+# the bookkeeping under it is.
+
+def _seeded(tmp_path: Path, seed: str = "seed prompt text " * 20):
+    """A cfg and a lever state file, as an operator would find them."""
+    cfg = _cfg(tmp_path)
+    st = coach.load_state(cfg, "muse.prompt", seed)
+    coach.save_state(cfg, st)
+    return cfg, st
+
+
+async def test_editing_the_incumbent_mid_trial_closes_the_experiment(tmp_path):
+    """I-91. The override check compared only the CHALLENGER id, so a
+    hand-edited incumbent - which README says is supported and `gauges.py`
+    admits "corrupts the pairing" - kept the experiment open: `arms()` paired
+    the rewritten incumbent with the old challenger, later trials folded into
+    one tally under `v0` with two different incumbent texts, and D-111's
+    documented undo done mid-trial left the log saying v8 vs v0 while `arms()`
+    ran v8 vs v7. `experiment_opened` recorded no incumbent fingerprint at all,
+    so it was not even detectable after the fact."""
+    cfg, st = _seeded(tmp_path)
+    coach._open(cfg, st, coach.Variant("v1", "challenger text " * 20),
+                Journal(cfg.paths.journal))
+    opened = coach.opened_event(cfg, st.exp_id)
+    assert opened["incumbent_fp"] == st.incumbent.fingerprint
+
+    # The operator rewrites the INCUMBENT while the trial is running.
+    st.incumbent = coach.Variant("v0", "a hand-edited incumbent " * 20)
+    coach.save_state(cfg, st)
+
+    await coach.pulse(cfg, Journal(cfg.paths.journal))
+
+    closes = [r for r in coach.events(cfg) if r.get("kind") == "experiment_closed"]
+    assert closes and closes[-1]["outcome"] == "operator_override"
+    assert "incumbent was edited" in closes[-1]["reason"]
+
+
+async def test_a_nulled_challenger_does_not_wedge_the_lever(tmp_path):
+    """I-97. With `exp_id` set and no challenger block - an operator cancelling
+    one - the override check was guarded by `st.challenger and`, so it never
+    fired: `arms()` was unpaired so no trials arrived, nothing closed, nothing
+    opened, and `experiments_open` read 1 indefinitely."""
+    cfg, st = _seeded(tmp_path)
+    coach._open(cfg, st, coach.Variant("v1", "challenger text " * 20),
+                Journal(cfg.paths.journal))
+    st.challenger = None
+    coach.save_state(cfg, st)
+
+    await coach.pulse(cfg, Journal(cfg.paths.journal))
+
+    closes = [r for r in coach.events(cfg) if r.get("kind") == "experiment_closed"]
+    assert closes and closes[-1]["outcome"] == "operator_override"
+    assert coach.load_state(cfg, "muse.prompt", "x" * 300).exp_id is None
+
+
+def test_a_promotion_the_coach_refused_is_not_reported_as_one(tmp_path):
+    """I-97's second half. `_promote` returns early when the challenger is
+    gone, and `pulse` set `closed="promoted"` and bumped `promotions_today`
+    anyway - a promotion in the heartbeat, zero close rows, the incumbent
+    unchanged."""
+    cfg, st = _seeded(tmp_path)
+    st.challenger, st.exp_id = None, "exp_gone"
+
+    promoted = coach._promote(cfg, st, coach.Tally(exp_id="exp_gone", lever="muse.prompt",
+                                                   incumbent="v0", challenger="v1"),
+                              "reason", Journal(cfg.paths.journal))
+
+    assert promoted is False
+    assert not [r for r in coach.events(cfg) if r.get("kind") == "experiment_closed"]
+
+
+def test_a_whitespace_echo_is_not_a_challenger():
+    """I-98. `validate_prompt` compared exact fingerprints while `mutate()`
+    runs `clean_prompt()` (which strips) first, and `MUSE_PROMPT` ends with a
+    newline - so an echo of the incumbent, which a model told to "change
+    exactly ONE thing" sometimes returns, was accepted as novel. Both arms were
+    then token-identical after formatting: a coin flip that runs to the 40-run
+    cap, ~two weeks and 40 challenger calls, and times out."""
+    incumbent = _MUSE_LEVER and muse.MUSE_PROMPT
+
+    assert coach.validate_prompt("\n  " + incumbent + "  \n\n", incumbent,
+                                 _MUSE_LEVER.placeholders,
+                                 must_contain=_MUSE_LEVER.must_contain), \
+        "a whitespace echo passed as a novel challenger"
+    assert coach.validate_prompt(incumbent, incumbent, _MUSE_LEVER.placeholders)
+
+
+def test_a_corrupt_lever_state_file_is_kept_and_the_lever_is_skipped(tmp_path):
+    """I-96. `load_state`'s docstring promised the unreadable file was kept for
+    a human - and the cooldown save and `_open`'s save in the same pulse
+    replaced it with a fresh seed state. With an experiment open per the log, a
+    SECOND was opened beside it (report 2 open, gauge 1), `next_variant_n` reset
+    so the new challenger reused `v1` - the id `reconcile` keys on - and a prior
+    promotion ran as the seed until housekeeping."""
+    cfg = _cfg(tmp_path)
+    path = coach._state_path(cfg, "muse.prompt")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("{ this is not json", encoding="utf-8")
+
+    st = coach.load_state(cfg, "muse.prompt", "seed " * 60)
+    assert st.unreadable and st.blocked
+
+    coach.save_state(cfg, st)
+    assert path.read_text(encoding="utf-8") == "{ this is not json", \
+        "the only evidence of what broke was overwritten"
+
+
+async def test_a_disabled_coach_keeps_the_promoted_incumbent(tmp_path):
+    """I-93. `arms()` returned the SEED when disabled while
+    `prompts._active_muse_prompt`, `trdrbot report` and `trdrbot coach` all read
+    the state incumbent - so every journalled decision fingerprinted a prompt
+    nothing was running, which is exactly what `prompts.py` calls worse than no
+    provenance at all. Disabled means "no experiments", not "discard the
+    promotion"."""
+    cfg = _cfg(tmp_path)
+    promoted = "a promoted variant " * 25
+    st = coach.load_state(cfg, "muse.prompt", "seed " * 60)
+    st.incumbent = coach.Variant("v3", promoted)
+    coach.save_state(cfg, st)
+
+    cfg.coach = {"enabled": False}
+    arms = coach.arms(cfg, "muse.prompt", seed_text="seed " * 60)
+
+    assert arms.incumbent.text == promoted and arms.incumbent.id == "v3"
+    assert not arms.paired, "disabled still means no experiment runs"
+    assert (await coach.pulse(cfg, Journal(cfg.paths.journal)))["opened"] is None
+
+
+async def test_a_pinned_lever_neither_opens_nor_promotes(tmp_path):
+    """I-94. The operator config has always promised a demo-day freeze; commit
+    10563c8 deleted the code and left the comment, `load_state` stopped reading
+    the key and `save_state` dropped it - so the live `muse.prompt.json` still
+    carries `"pinned": false` and a pinned lever opened an experiment on the
+    next pulse and could promote mid-demo."""
+    cfg, st = _seeded(tmp_path)
+    st.pinned = True
+    coach.save_state(cfg, st)
+
+    reloaded = coach.load_state(cfg, "muse.prompt", "seed " * 60)
+    assert reloaded.pinned, "the flag was dropped on the next write"
+    assert "pinned" in reloaded.blocked
+
+    out = await coach.pulse(cfg, Journal(cfg.paths.journal))
+    assert out["opened"] is None and out["closed"] is None
+    # ...and unlike `paused`, it does not close an open trial: the evidence
+    # keeps accruing for when the pin lifts.
+    assert not [r for r in coach.events(cfg) if r.get("kind") == "experiment_closed"]
+
+
+def test_the_graveyard_shows_why_a_dead_variant_was_proposed(tmp_path):
+    """I-95. `mutate.py` renders `r.get("rationale")` from `experiment_closed`
+    rows and `_close` wrote `challenger_text` and no rationale - it lived only
+    on the journal's `coach_mutation` row. So "Variants already tried and beaten
+    (do not re-propose these)" always read `- v1 (refuted, P=0.03): ` and the
+    mutator re-litigated dead ideas, which is what the section exists to
+    prevent."""
+    cfg, st = _seeded(tmp_path)
+    ch = coach.Variant("v1", "challenger text " * 20,
+                       rationale="ask for tighter bands on low-IV names")
+    coach._open(cfg, st, ch, Journal(cfg.paths.journal))
+    st.challenger = ch
+    coach._close(cfg, st, "refuted", "posterior below futility",
+                 Journal(cfg.paths.journal))
+
+    digest = coach._graveyard_digest(cfg, "muse.prompt")
+
+    assert "tighter bands on low-IV names" in digest
+
+
+def test_the_rejection_digest_aggregates_by_gate():
+    """I-99, cosmetic but corrosive. The digest keyed on
+    `fate.split(" - ")[0][:80]`, which keeps the embedded base rate, date or
+    price - so nine rejections across four gates rendered as nine `x1` lines
+    under a heading that says "by gate". `ledger.gate_of` is D-104's canonical
+    classifier: one definition, not two."""
+    rows = [{"kind": "muse", "fates": [
+        {"fate": "rejected: base probability 0% - lottery ticket"},
+        {"fate": "rejected: base probability 3% - lottery ticket"},
+        {"fate": "rejected: band is not a plausible price (spot 762.35)"},
+        {"fate": "rejected: band is not a plausible price (spot 224.15)"},
+        {"fate": "rejected: horizon 2026-09-30 outside 1-10 days"},
+    ]}]
+
+    digest = coach._rejection_digest(rows, "muse")
+
+    assert "- lottery  x2" in digest
+    assert "- implausible_band  x2" in digest
+    assert "- horizon_window  x1" in digest
+    assert len(digest.splitlines()) == 3, f"nine lines wearing three gates' clothing: {digest}"
+
+
+async def test_the_tick_path_pulse_repairs_a_crashed_promotion(tmp_path):
+    """I-92. `housekeeping.run` called `reconcile` then `pulse`; `tick.py`
+    called `pulse` ALONE after every muse run. After a crash between
+    `_promote`'s log append and `save_state`, the next tick pulse saw the
+    experiment closed, passed the cooldown, spent a mutation call and opened v2
+    against v0 while the log said v1 was promoted."""
+    cfg, st = _seeded(tmp_path)
+    coach._open(cfg, st, coach.Variant("v1", "the promoted text " * 20),
+                Journal(cfg.paths.journal))
+    # The crash: the close row lands, the state swap never does.
+    coach._append(coach.events_path(cfg), {
+        "kind": "experiment_closed", "exp_id": st.exp_id, "lever": "muse.prompt",
+        "outcome": "promoted", "reason": "won", "runs": 9, "final_posterior": 0.97,
+        "challenger": "v1", "challenger_text": "the promoted text " * 20,
+        "promoted_from": "v0"})
+
+    await coach.pulse(cfg, Journal(cfg.paths.journal))
+
+    after = coach.load_state(cfg, "muse.prompt", "seed " * 60)
+    assert after.incumbent.id == "v1", "the pulse ran without repairing the crash first"
+
+
+def test_reconcile_closes_an_experiment_the_log_left_open(tmp_path):
+    """I-92's other half: `trdrbot report` derives open experiments from the LOG
+    and listed a cleared one forever, while the `coach.open_experiments` gauge
+    derives from STATE and said 0. One question, two readers, two answers."""
+    cfg, st = _seeded(tmp_path)
+    coach._open(cfg, st, coach.Variant("v1", "challenger text " * 20),
+                Journal(cfg.paths.journal))
+    st.challenger, st.exp_id = None, None       # state cleared, no close row
+    coach.save_state(cfg, st)
+
+    coach.reconcile(cfg)
+
+    closes = [r for r in coach.events(cfg) if r.get("kind") == "experiment_closed"]
+    assert closes and closes[-1]["outcome"] == "abandoned"
+    # Idempotent: a second pass must not write a second close row.
+    coach.reconcile(cfg)
+    assert len([r for r in coach.events(cfg)
+                if r.get("kind") == "experiment_closed"]) == 1

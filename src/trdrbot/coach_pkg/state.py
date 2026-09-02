@@ -173,6 +173,14 @@ class Variant:
     fingerprint: str = ""
     since: str = ""
     origin: str = "seed"  # seed | mutation | human
+    #: WHY this variant was proposed, in the mutator's own words. Carried onto
+    #: the `experiment_closed` row so the graveyard can render it (I-95): the
+    #: digest read `r.get("rationale")` from a row that only ever carried
+    #: `challenger_text`, so "Variants already tried and beaten (do not
+    #: re-propose these)" always read `- v1 (refuted, P=0.03): ` and the
+    #: mutator re-litigated dead ideas, which is what the section exists to
+    #: prevent.
+    rationale: str = ""
 
     def __post_init__(self) -> None:
         # Recompute rather than trust: a human editing the state file by hand
@@ -197,15 +205,38 @@ class LeverState:
     challenger: Variant | None = None
     exp_id: str | None = None
     paused: bool = False
+    #: The demo-day freeze the operator config has always promised (I-94).
+    #: Commit 10563c8 deleted the code and left the comment, `load_state` stopped
+    #: reading the key and `save_state` dropped it on the next write - so the
+    #: live `muse.prompt.json` still carries `"pinned": false` and a pinned
+    #: lever opened an experiment on the next pulse and could promote mid-demo.
+    #:
+    #: DIFFERENT FROM `paused`, and that difference is the point: `paused`
+    #: closes any open experiment as an operator override, while `pinned`
+    #: freezes what PRODUCTION runs - no new experiments and no promotion - and
+    #: leaves an open trial gathering evidence for when the pin lifts.
+    pinned: bool = False
     sentinel_block: dict[str, Any] | None = None
     next_variant_n: int = 1
     last_mutation_at: str = ""
+    #: The state file existed and could not be parsed. Set by `load_state`, and
+    #: `save_state` REFUSES to write over it (I-96): the docstring promised the
+    #: unreadable file was kept for a human, and then the cooldown save and
+    #: `_open`'s save in the same pulse replaced it with a fresh seed state -
+    #: which spawned a second experiment beside the one the log said was open,
+    #: reset `next_variant_n` so the new challenger reused the id `reconcile`
+    #: keys on, and ran a prior promotion as the seed until housekeeping.
+    unreadable: bool = False
 
     @property
     def blocked(self) -> str:
         """Why no new experiment may open. Empty string when clear."""
+        if self.unreadable:
+            return "the lever's state file is unreadable and is being kept for inspection"
         if self.paused:
             return "paused by operator"
+        if self.pinned:
+            return "pinned by operator (production frozen; no promotion)"
         if self.sentinel_block:
             return f"sentinel: {self.sentinel_block.get('name')}"
         return ""
@@ -223,7 +254,8 @@ def _variant(raw: Any) -> Variant | None:
     if not isinstance(raw, dict) or not raw.get("text"):
         return None
     return Variant(id=str(raw.get("id") or SEED_VARIANT_ID), text=str(raw["text"]),
-                   since=str(raw.get("since") or ""), origin=str(raw.get("origin") or "seed"))
+                   since=str(raw.get("since") or ""), origin=str(raw.get("origin") or "seed"),
+                   rationale=str(raw.get("rationale") or ""))
 
 
 def load_state(cfg: Any, lever_name: str, seed_text: str) -> LeverState:
@@ -248,24 +280,35 @@ def load_state(cfg: Any, lever_name: str, seed_text: str) -> LeverState:
             challenger=_variant(raw.get("challenger")),
             exp_id=raw.get("exp_id") or None,
             paused=bool(raw.get("paused")),
+            pinned=bool(raw.get("pinned")),
             sentinel_block=raw.get("sentinel_block") or None,
             next_variant_n=int(raw.get("next_variant_n") or 1),
             last_mutation_at=str(raw.get("last_mutation_at") or ""),
         )
     except (json.JSONDecodeError, OSError, TypeError, ValueError) as exc:
         print(f"[coach] lever state unreadable ({lever_name}): {exc!r} - "
-              f"running incumbent-only from the in-code seed")
-        return LeverState(lever=lever_name, incumbent=seed)
+              f"running incumbent-only from the in-code seed, and KEEPING the file")
+        return LeverState(lever=lever_name, incumbent=seed, unreadable=True)
 
 
 def save_state(cfg: Any, st: LeverState) -> None:
     """Atomic: write-temp then os.replace, so a crash mid-write cannot leave a
-    half-file that the next load would read as corrupt."""
+    half-file that the next load would read as corrupt.
+
+    **Refuses to write over an unreadable file** (I-96). `load_state`'s
+    docstring promised the corrupt file was kept for a human to read, and then
+    the very next save in the same pulse overwrote it with a fresh seed state.
+    """
+    if st.unreadable:
+        print(f"[coach] not overwriting the unreadable state file for {st.lever} - "
+              f"it is the only evidence of what broke")
+        return
     path = _state_path(cfg, st.lever)
     path.parent.mkdir(parents=True, exist_ok=True)
     body = {
         "lever": st.lever,
         "paused": st.paused,
+        "pinned": st.pinned,
         "incumbent": asdict(st.incumbent),
         "previous": asdict(st.previous) if st.previous else None,
         "challenger": asdict(st.challenger) if st.challenger else None,
@@ -301,6 +344,20 @@ def _read(path: Path) -> list[dict[str, Any]]:
 
 def events(cfg: Any) -> list[dict[str, Any]]:
     return _read(events_path(cfg))
+
+
+def opened_event(cfg: Any, exp_id: str) -> dict[str, Any] | None:
+    """The `experiment_opened` row for this experiment, or None.
+
+    The log is the truth and the state file is a cache of it, so "what were the
+    two arms when this experiment opened" is a question only the log can answer
+    (I-91). Both fingerprints are on that row now, which is what makes an
+    edit to EITHER arm mid-trial detectable at all.
+    """
+    if not exp_id:
+        return None
+    return next((r for r in events(cfg)
+                 if r.get("kind") == "experiment_opened" and r.get("exp_id") == exp_id), None)
 
 
 # --- config accessors ------------------------------------------------------
