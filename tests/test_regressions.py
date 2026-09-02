@@ -1506,6 +1506,61 @@ def test_the_hunt_cooldown_stays_longer_than_the_oversight_interval():
         f"every {idle.MAX_SILENCE_MIN}min")
 
 
+def test_gate_regret_is_computed_from_outcomes_the_gate_cannot_reach():
+    """I-73 / D-104. The one self-improvement signal that does not violate the
+    measured/measurer rule (specs/notes/015), recorded since D-081 and never
+    computed until now.
+
+    Three things pinned, and the first is the whole safety argument: a rejected
+    thesis NEVER enters the calibration sample, so a gate scored by its regret
+    is scored by outcomes it cannot influence. Then that the prose in
+    `rejected_by` classifies to a stable gate on every wording the muse writes,
+    and that the arithmetic and the reading are right."""
+    from trdrbot import ledger as L
+
+    def entry(rej="", stated=True, outcome=None):
+        return L.Entry(id="x", kind="muse", created="2026-09-01", underlying="SPY",
+                       claim="c", probability=0.4, horizon="2026-09-05",
+                       band_low=1.0, band_high=2.0, probability_stated=stated,
+                       rejected_by=rej, outcome=outcome, resolved_at="2026-09-05")
+
+    # 1. A rejection is registered, resolves, and is INVISIBLE to calibration.
+    rejected = entry("rejected: base probability 7% - a lottery ticket",
+                     stated=False, outcome=True)
+    assert L.as_forecasts([rejected]) == [], "a refused thesis leaked into calibration"
+
+    # 2. Every wording the muse writes classifies; the unknown is kept, not dropped.
+    for fate, gate in (("rejected: no usable price history", "price_history"),
+                       ("rejected: unfalsifiable (no band)", "unfalsifiable"),
+                       ("rejected: band is not a plausible price (spot 700.00)",
+                        "implausible_band"),
+                       ("rejected: horizon 2026-10-01 outside 1-10 days", "horizon_window"),
+                       ("rejected: horizon 2026-09-30 resolves too late to be worth acting on",
+                        "horizon_window"),
+                       ("rejected: base probability 7% - a lottery ticket", "lottery"),
+                       ("rejected: base 92% and the model agrees - vacuous", "vacuous"),
+                       ("rejected: no options chain inside the deadline", "no_chain"),
+                       ("error: KeyError", "error"),
+                       ("rejected: some new gate nobody classified", "other")):
+        assert L.gate_of(fate) == gate, fate
+
+    # 3. The arithmetic, and the baseline it is read against.
+    rows = ([entry("rejected: no options chain inside the deadline", False, True)] * 3
+            + [entry("rejected: no options chain inside the deadline", False, False)] * 2
+            + [entry("rejected: no options chain inside the deadline", False, None)]
+            + [entry("rejected: base probability 5% - a lottery ticket", False, False)] * 2
+            + [entry("", True, True)] * 2 + [entry("", True, False)] * 8)
+    regret, baseline = L.gate_regret(rows)
+    assert baseline == pytest.approx(0.2), "baseline is the ADMITTED hold rate"
+    nc = regret["no_chain"]
+    assert (nc.rejected, nc.resolved, nc.held) == (6, 5, 3)
+    assert nc.regret == pytest.approx(0.6) and nc.measured
+    assert "REFUSING BETTER THAN IT ADMITS" in nc.read(baseline)
+    lot = regret["lottery"]
+    assert lot.regret == 0.0 and not lot.measured, "2 resolved cannot discriminate"
+    assert "unmeasured" in lot.read(baseline)
+
+
 def test_no_function_shadows_a_callable_it_imports():
     """D-102. An imported function rebound to a local value in the same body is
     a NameError that only fires when that line RUNS - so it passes import,

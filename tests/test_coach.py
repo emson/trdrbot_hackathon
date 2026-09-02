@@ -13,6 +13,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from conftest import days_out
 
 from trdrbot import coach, muse
 from trdrbot.journal import Journal
@@ -32,7 +33,7 @@ def _cfg(tmp_path: Path, **coach_opts) -> SimpleNamespace:
                               journal=tmp_path / "journal.jsonl"),
         coach={"enabled": True, **coach_opts},
         pricing={},
-        deadline="2026-09-04",
+        deadline=days_out(3),
     )
 
 
@@ -154,7 +155,7 @@ def test_the_shadow_ledger_is_shaped_like_the_real_one():
         assert hasattr(muse.ShadowLedger(), name)
     sl = muse.ShadowLedger()
     e = sl.register(kind="muse", underlying="SPY", claim="c", probability=0.4,
-                    probability_stated=False, horizon="2026-09-02",
+                    probability_stated=False, horizon=days_out(1),
                     band_low=1.0, band_high=2.0, variant="v1", notes="n")
     assert e is not None and sl.mark_stated(e.id) and sl.mark_rejected(e.id, "why")
 
@@ -173,7 +174,7 @@ async def test_the_shadow_arm_writes_nothing_at_all(tmp_path, monkeypatch):
 
     cand = {"underlying": "SPY", "claim": "c", "chain": ["a"], "direction": "bullish",
             "probability": 0.4, "band_low_pct": -3.0, "band_high_pct": 3.0,
-            "horizon": "2026-09-02", "suggested_structures": []}
+            "horizon": days_out(1), "suggested_structures": []}
 
     paths = SimpleNamespace(state=tmp_path / "state", data=tmp_path,
                             journal=tmp_path / "journal.jsonl",
@@ -185,7 +186,7 @@ async def test_the_shadow_arm_writes_nothing_at_all(tmp_path, monkeypatch):
               paths.inbox_failed):
         Path(p).mkdir(parents=True, exist_ok=True)
     cfg = SimpleNamespace(paths=paths, coach={"enabled": True}, pricing={},
-                          deadline="2026-09-04", polymarket_queries=[],
+                          deadline=days_out(3), polymarket_queries=[],
                           max_retries=3)
 
     closes = [100.0 + (i % 7) * 0.5 for i in range(120)]

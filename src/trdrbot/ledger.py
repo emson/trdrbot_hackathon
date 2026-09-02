@@ -334,3 +334,108 @@ def as_forecasts(entries: list[Entry]) -> list[Any]:
         # 0.67" (D-062).
         for e in entries if e.outcome is not None and e.probability_stated
     ]
+
+
+# ------------------------------------------------------------ gate regret
+
+#: `rejected_by` is prose, written by whichever gate refused the candidate, on
+#: an append-only ledger - so the GATE is recovered from the text rather than
+#: stored beside it, and every historical row classifies the same way a new one
+#: does. Order matters only where two needles could both match; none do today.
+#: A string no needle matches is "other", which is reported, never dropped: a
+#: gate that starts rejecting under a wording nobody classified must show up as
+#: a growing "other", not vanish.
+GATES: tuple[tuple[str, str], ...] = (
+    ("no usable price history", "price_history"),
+    ("unfalsifiable", "unfalsifiable"),
+    ("not a plausible price", "implausible_band"),
+    ("outside 1-10 days", "horizon_window"),
+    ("resolves too late", "horizon_window"),
+    ("lottery ticket", "lottery"),
+    ("model agrees", "vacuous"),
+    ("no options chain", "no_chain"),
+    ("error:", "error"),
+)
+
+#: Below this many RESOLVED rejections a gate's regret is not a measurement -
+#: the same floor the ladder uses for attribution (`competence.
+#: MIN_ATTR_VERDICTS`), for the same reason: a rate over three outcomes cannot
+#: discriminate, and reporting it as if it could is how a threshold gets
+#: "tuned" on noise.
+MIN_GATE_RESOLVED = 5
+
+
+def gate_of(rejected_by: str) -> str:
+    """Which gate a `rejected_by` string came from. 'other' if none match."""
+    for needle, key in GATES:
+        if needle in rejected_by:
+            return key
+    return "other"
+
+
+@dataclass
+class GateRegret:
+    """What one gate refused, and how much of it would have held (I-73, D-104).
+
+    A rejected candidate is registered with `probability_stated=False`, so it
+    never enters calibration - and it still carries a band and a horizon, so
+    it still RESOLVES. "We refused it and it would have held" is therefore a
+    score for the gate's threshold computed from outcomes the gate cannot
+    influence: the only self-improvement signal in this system that does not
+    violate the measured/measurer rule (specs/notes/015). Recorded since D-081.
+    Computed here for the first time.
+    """
+
+    gate: str
+    rejected: int
+    resolved: int
+    held: int
+
+    @property
+    def regret(self) -> float | None:
+        """Share of this gate's resolved refusals that would have held."""
+        return self.held / self.resolved if self.resolved else None
+
+    @property
+    def measured(self) -> bool:
+        return self.resolved >= MIN_GATE_RESOLVED
+
+    def read(self, baseline: float | None) -> str:
+        """One honest line. A gate whose refusals hold as often as the claims
+        it admits is throttling, not filtering; one whose refusals hold MORE
+        often is refusing better theses than it accepts."""
+        if self.regret is None:
+            return f"{self.rejected} refused, none resolved yet"
+        head = f"{self.resolved} resolved, {self.regret:.0%} would have held"
+        if not self.measured:
+            return head + f" - unmeasured below {MIN_GATE_RESOLVED}"
+        if baseline is None:
+            return head
+        if self.regret > baseline + 0.10:
+            return head + f" vs {baseline:.0%} admitted - REFUSING BETTER THAN IT ADMITS"
+        if self.regret >= baseline - 0.10:
+            return head + f" vs {baseline:.0%} admitted - not discriminating"
+        return head + f" vs {baseline:.0%} admitted - earning its keep"
+
+
+def gate_regret(entries: list[Entry]) -> tuple[dict[str, GateRegret], float | None]:
+    """Per-gate regret, plus the baseline it must be read against.
+
+    The baseline is the hold rate of resolved claims that PASSED every gate
+    (`probability_stated`), because that is what "the gate let this through"
+    would have meant. A rejection that holds no more often than an admission
+    was refused for nothing.
+    """
+    by: dict[str, GateRegret] = {}
+    for e in entries:
+        if not e.rejected_by:
+            continue
+        g = by.setdefault(gate_of(e.rejected_by), GateRegret(gate_of(e.rejected_by), 0, 0, 0))
+        g.rejected += 1
+        if e.outcome is not None:
+            g.resolved += 1
+            g.held += int(bool(e.outcome))
+    admitted = [e for e in entries if e.probability_stated and e.outcome is not None]
+    baseline = (sum(1 for e in admitted if e.outcome) / len(admitted)) if admitted else None
+    return by, baseline
+

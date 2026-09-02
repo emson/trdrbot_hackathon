@@ -18,7 +18,10 @@ from typing import Any
 
 import pytest
 
+from datetime import timedelta
+
 from trdrbot import config as config_mod
+from trdrbot import ids
 from trdrbot.elfmem_adapter import ContextResult
 from trdrbot.positions import Position
 
@@ -29,6 +32,30 @@ def paths(tmp_path: Path) -> config_mod.Paths:
     p = config_mod.Paths.build(tmp_path)
     p.ensure()
     return p
+
+
+def days_out(n: int) -> str:
+    """An ISO date `n` days from the code's own today. D-032's rule for tests.
+
+    Eight tests hardcoded "2026-09-02" as a horizon and "2026-09-03" as an
+    expiry, which were tomorrow and the day after when written - and became
+    TODAY and ONE DAY OUT when the calendar rolled, crossing the zero-day
+    horizon branch and the 1-day implicit time stop. The suite failed on a
+    clean tree the morning after, on every test that said "nothing should
+    close". A fixture date is derived from today or it is a countdown.
+    """
+    return (ids.today() + timedelta(days=n)).isoformat()
+
+
+def occ(underlying: str, expiry_iso: str, right: str, strike: float) -> str:
+    """An OCC option symbol whose date AGREES with the fixture's expiry."""
+    d = expiry_iso.replace("-", "")[2:]
+    return f"{underlying}{d}{right}{int(round(strike * 1000)):08d}"
+
+
+#: Far enough out that no implicit time stop fires; near enough to be a
+#: realistic weekly. Derived, so it is the same distance out on every day.
+FIXTURE_EXPIRY_DAYS = 7
 
 
 @pytest.fixture
@@ -49,10 +76,12 @@ def make_position():
             "strategy": "bear_put_spread",
             "underlying": "SPY",
             "opened": "2026-08-28T17:34:00.843832+00:00",
-            "expiry": "2026-09-03",
+            "expiry": days_out(FIXTURE_EXPIRY_DAYS),
             "legs": [
-                {"symbol": "SPY260903P00766000", "side": "buy", "qty": 13},
-                {"symbol": "SPY260903P00758000", "side": "sell", "qty": 13},
+                {"symbol": occ("SPY", days_out(FIXTURE_EXPIRY_DAYS), "P", 766),
+                 "side": "buy", "qty": 13},
+                {"symbol": occ("SPY", days_out(FIXTURE_EXPIRY_DAYS), "P", 758),
+                 "side": "sell", "qty": 13},
             ],
             "exit_rules": [
                 {"type": "stop_loss", "basis": "position_mark", "threshold": "-65.0%"},

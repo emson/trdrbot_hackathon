@@ -384,6 +384,14 @@ def _ledger() -> int:
           f"resolved {s['resolved']} | pending {s['pending']}")
     if s["hit_rate"] is not None:
         print(f"  hit rate on resolved: {s['hit_rate']:.0%}")
+    # Gate regret (D-104): what each gate refused, and how much of it held.
+    # Read against the admitted hold rate, because that is the counterfactual.
+    regret, baseline = ledger_mod.gate_regret(book.all())
+    if regret:
+        print(f"\n  gate regret (admitted claims held "
+              f"{baseline:.0%})" if baseline is not None else "\n  gate regret")
+        for g in sorted(regret.values(), key=lambda x: -x.rejected):
+            print(f"    {g.gate:<18} {g.read(baseline)}")
     print()
     for e in book.all()[-15:]:
         state = ("HELD" if e.outcome else "MISSED") if e.outcome is not None else "pending"

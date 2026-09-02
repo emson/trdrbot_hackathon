@@ -319,6 +319,15 @@ def snapshot_gauges(cfg: Any, rows: list[dict[str, Any]]) -> dict[str, Any]:
             cal = _cal.score(_led.as_forecasts(resolved))
             put("calibration.brier", round(cal.brier, 4) if cal.brier is not None else None)
             put("calibration.n_eff", round(cal.n_eff, 2) if cal.n_eff else None)
+        # Gate regret (D-104): the one self-improvement signal a gate lever
+        # could be scored by without measuring itself. Measured gates only -
+        # an unmeasured one is omitted, never zeroed, like every other gauge.
+        regret, baseline = _led.gate_regret(book.all())
+        put("gates.admitted_hold_rate", round(baseline, 4) if baseline is not None else None)
+        for g in regret.values():
+            if g.measured:
+                put(f"gates.{g.gate}.regret", round(g.regret, 4))
+                put(f"gates.{g.gate}.resolved", g.resolved)
 
     guarded("calibration", _calibration_gauges)
     # PRICED spend only, deliberately: a gauge that silently folded unpriced

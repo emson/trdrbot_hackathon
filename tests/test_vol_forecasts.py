@@ -19,6 +19,7 @@ import random
 from types import SimpleNamespace
 
 import pytest
+from conftest import days_out
 
 from trdrbot import ledger as ledger_mod
 from trdrbot import market_stats
@@ -95,7 +96,7 @@ def test_a_vol_band_round_trips_through_the_ledger(tmp_path):
 
     e = book.register(kind=ledger_mod.STANDALONE, underlying="spy",
                       claim="realized stays subdued", probability=0.62,
-                      horizon="2026-09-02", band_low=7.0, band_high=9.5,
+                      horizon=days_out(1), band_low=7.0, band_high=9.5,
                       metric=REALIZED_VOL_PCT)
 
     assert e is not None and e.metric == REALIZED_VOL_PCT
@@ -127,7 +128,7 @@ def test_a_vol_claim_and_a_price_claim_are_not_the_same_forecast(tmp_path):
     happen to coincide."""
     book = Ledger(tmp_path / "ledger.jsonl")
     common = dict(kind=ledger_mod.STANDALONE, underlying="SPY", claim="c",
-                  probability=0.6, horizon="2026-09-02",
+                  probability=0.6, horizon=days_out(1),
                   band_low=7.0, band_high=9.5)
 
     price = book.register(**common)
@@ -178,7 +179,7 @@ async def test_a_vol_forecast_with_no_series_is_skipped_not_guessed(tmp_path):
     state = _hk_cfg(tmp_path).state
     book = Ledger(tmp_path / "ledger.jsonl")
     e = book.register(kind=ledger_mod.STANDALONE, underlying="NOSUCH", claim="c",
-                      probability=0.7, horizon="2026-09-02", band_low=1.0,
+                      probability=0.7, horizon=days_out(1), band_low=1.0,
                       band_high=99.0, metric=REALIZED_VOL_PCT)
 
     assert await _resolved_value(e, object(), state) is None
@@ -227,7 +228,7 @@ def test_the_tool_records_a_vol_claim_and_says_so_in_percent(tmp_path):
 
     out = _forecast_tool(tmp_path, book)(
         underlying="SPY", claim="realized stays subdued", probability=0.62,
-        horizon="2026-09-02", band_low=7.0, band_high=9.5, metric="realized_vol")
+        horizon=days_out(1), band_low=7.0, band_high=9.5, metric="realized_vol")
 
     assert "realized vol" in out and "[7.0%, 9.5%]" in out
     assert book.all()[0].metric == REALIZED_VOL_PCT
@@ -237,7 +238,7 @@ def test_an_unknown_metric_is_refused_by_name_rather_than_stored_as_a_price(tmp_
     book = Ledger(tmp_path / "ledger.jsonl")
 
     out = _forecast_tool(tmp_path, book)(
-        underlying="SPY", claim="c", probability=0.6, horizon="2026-09-02",
+        underlying="SPY", claim="c", probability=0.6, horizon=days_out(1),
         band_low=7.0, band_high=9.5, metric="variance_swap")
 
     assert out.startswith("REFUSED") and "realized_vol" in out
@@ -255,10 +256,10 @@ def test_a_vol_claim_skips_the_price_anchored_vacuity_check(tmp_path):
 
     # Agreeing with a base rate of ~100% is what the guard refuses.
     priced = _forecast_tool(tmp_path, book)(
-        underlying="SPY", claim="c", probability=0.97, horizon="2026-09-02",
+        underlying="SPY", claim="c", probability=0.97, horizon=days_out(1),
         band_low=1.0, band_high=100000.0)
     vol = _forecast_tool(tmp_path, book)(
-        underlying="SPY", claim="c", probability=0.97, horizon="2026-09-02",
+        underlying="SPY", claim="c", probability=0.97, horizon=days_out(1),
         band_low=7.0, band_high=9.5, metric="realized_vol")
 
     assert priced.startswith("REFUSED"), "the price guard must still bite"
