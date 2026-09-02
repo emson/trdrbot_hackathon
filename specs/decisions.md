@@ -4947,3 +4947,70 @@ the new process did not carry them either.
 is alive. A live process on an older sha is a `PROBLEM` naming how many commits it is behind,
 every one of which is a fix that is not running. A dead pid or no file is silence, because
 `run.sh` drives one process per tick and never writes it. Three cases, pinned.
+
+## D-109 - Three holes the audits found in capital protection and the learning loop
+
+**A close was "successful" because the call did not raise.** `_close_legs` treated the absence of
+an exception as success, and `mcp_client.unwrap` hands an Alpaca error envelope back as ordinary
+data - it never raises on an in-band error. So a refused close transitioned the position to
+`closed` (terminal, exactly once - INV-17), scored a fictional outcome into calibration and
+memory, published it to the blog, and left the real spread live at the broker with nothing
+watching it. The contract test that would have caught this was skipped with a note saying exactly
+that. The unwrapped payload is now read the way discovery already reads its option-chain errors:
+an `error` key or a rejected/canceled/expired status is a failed submission, journalled as one and
+retried through `closing`.
+
+**Assigned shares were adopted and held forever.** Reconcile adopts a non-OCC broker row as
+`orphan_equity` so it is *watched* - and every rule that could watch it was dead: `deadline` and
+`time_stop` read `_days_to("")` and hold, and a lone symbol that vanishes takes the phantom branch
+so `leg_divergence` never counts. The live book's short 758P assigned early on a drop through 758
+is 1,200 shares - **$909,600 of stock on a ~$100k account** - with nothing able to close it.
+Shares are outside a defined-risk mandate on any reading; `evaluate()` now returns an immediate
+close for `orphan_equity`, submitted in session and retried like every other close.
+
+**A closed position with no thesis can never be attributed, and health called that healthy.**
+`attribution.pending` needs a claim and a parseable horizon, so the position never becomes
+pending, the probe's `work` reads 0, and the subsystem reports "idle, not stalled" - a permanently
+empty queue and a permanently stuck item were the same observation. Live:
+`pos_20260826_SPY_bull_put_spread` closed +8.2% with `thesis_claim: ''` and will never be
+attributed at any date. Health now names it as BAD: its outcome is lost to the learning loop.
+
+**Not changed, and worth stating as policy (I-60):** the sized quantity is *reported*, not
+*enforced* - `sizing_mismatch` is journalled and health escalates on repeat, but nothing stops the
+agent placing 460 contracts when sizing said 46. That is D-009 (report, never gate) applied to the
+one number that most directly bounds loss, and at 1.75x appetite it deserves a deliberate
+decision rather than an inherited one.
+
+## D-110 - The regime page keeps its past
+
+Nothing in the wiki is deleted - the sweep tombstones in place, and the whole-system scaffold
+proves it. But `context/regime` is *overwritten* every morning: research hands the model
+yesterday's text to "update, not rewrite from scratch", and the previous assessment then survived
+only in git, only when a human committed `data/`, which the loop never does. Between commits each
+rewrite destroyed the prior one - on the one surface from which "how regimes change" could ever be
+learned.
+
+`Wiki.archive_prior` prepends the page's current body under a dated heading to
+`<concept_id>.history.md`, newest first - `log.md`'s own shape, applied per page. Research calls it
+before the overwrite, and only when the body actually changed, so a quiet week does not archive the
+same paragraph five times. `all_concepts` excludes `.history.md` the way it excludes `log.md`, so
+the muse can never sample yesterday's regime as an idea. Any page can use it; the regime is the
+one that needed it today.
+
+## D-111 - The Coach respects a revert, and shared legs are named
+
+`coach.reconcile` re-applied the last promotion whenever the incumbent was not the promoted
+variant. The documented operator undo - "reverts by editing one file" - was therefore re-promoted
+on the next pulse, every pulse, forever. Unapplied now means the variant appears in **neither**
+slot: a crash between the `experiment_closed` row and `save_state` leaves it nowhere and is
+repaired; an operator who reverted by swapping `incumbent` and `previous` leaves it as `previous`
+and is kept. `config.yaml` now says exactly how to revert.
+
+`record_position` accepted a leg already held by another open position. The broker aggregates
+holdings by symbol, and `analytics.by_symbol` keys on symbol, so two pages sharing an OCC leg both
+read ONE aggregated broker row: each mark-based stop divides by a net cost that includes the
+other's contracts, and when the aggregate's short credit nears the long debit the base is refused
+as unreadable and **both stops go permanently unobservable**. Reachable now at six concurrent
+positions. Reported in the tool's reply and journalled as `leg_overlap` - never refused, because the
+fill has already happened and an unrecorded fill is an orphan - and health names both pages as BAD.
+`_render_positions` already lists every held leg in the prompt, so the agent can avoid it.
