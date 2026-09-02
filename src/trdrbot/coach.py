@@ -494,7 +494,16 @@ def reconcile(cfg: Any, seed_override: dict[str, str] | None = None) -> list[str
             continue
         last = closes[-1]
         want = str(last.get("challenger") or "")
-        if want and st.incumbent.id != want and last.get("challenger_text"):
+        # UNAPPLIED means the lever has never held `want` at all (D-111). This
+        # used to re-apply whenever the incumbent was not `want` - so the
+        # operator's documented undo (edit the lever's state file back) was
+        # re-promoted on the next pulse, every pulse, forever. A crash between
+        # the `experiment_closed` row and `save_state` leaves `want` nowhere in
+        # the state: repair that. An operator who reverted by swapping
+        # incumbent and previous leaves `want` as `previous`: respect that.
+        held_before = st.previous is not None and st.previous.id == want
+        if (want and st.incumbent.id != want and not held_before
+                and last.get("challenger_text")):
             st.previous = st.incumbent
             st.incumbent = Variant(id=want, text=str(last["challenger_text"]),
                                    since=str(last.get("ts", "")), origin="mutation")

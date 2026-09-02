@@ -527,6 +527,32 @@ def build_record_position(
         if underlying_stop_above is not None:
             rules.append({"type": "underlying_stop", "direction": "above", "level": underlying_stop_above})
 
+        # SHARED LEGS (D-111). The broker aggregates holdings BY SYMBOL, and
+        # `analytics.by_symbol` keys on symbol, so two position pages sharing an
+        # OCC leg both read ONE aggregated broker row: the mark-based stop on
+        # each divides by a net cost that includes the other's contracts, and
+        # when the aggregate's short credit approaches the long debit the base
+        # is refused as unreadable and BOTH stops go permanently unobservable.
+        # Reachable now at six concurrent positions. Reported, never refused:
+        # the order has already filled, and an unrecorded fill is an orphan.
+        # `_render_positions` lists every held leg in the prompt, so the agent
+        # can avoid this; `trdrbot health` names both pages when it does not.
+        _held = {sym: p.position_id for p in store.open_positions() for sym in p.symbols}
+        _shared = sorted({l.get("symbol", "") for l in legs} & set(_held))
+        if _shared:
+            journal_note = (f"WARNING: leg(s) {', '.join(_shared)} are already held by "
+                            f"{', '.join(sorted({_held[x] for x in _shared}))}. The broker "
+                            f"aggregates by symbol, so the mark-based stops on BOTH "
+                            f"positions now read a shared, fabricated cost base. Prefer "
+                            f"different strikes or expiries on a name you already hold.")
+            if journal is not None:
+                try:
+                    journal.append("leg_overlap", legs=_shared,
+                                   with_positions=sorted({_held[x] for x in _shared}))
+                except Exception as exc:  # noqa: BLE001 - observability never breaks a trade
+                    print(f"[record_position] journal append failed: {exc!r}")
+        else:
+            journal_note = ""
         pos = Position(
             position_id=ids.position_id(underlying, strategy),
             # `opening`, not `open`: the order is submitted, not confirmed
@@ -734,7 +760,8 @@ def build_record_position(
             risk += (f"; entry greeks delta ${ge['delta_dollars']:+,.0f}, "
                      f"theta ${ge['theta_dollars']:+,.0f}/day, vega ${ge['vega_dollars']:+,.0f}/IVpt")
         return (
-            f"Recorded {pos.position_id} with {len(rules)} exit rule(s) at {path.name}, "
+            (journal_note + "\n" if journal_note else "")
+            + f"Recorded {pos.position_id} with {len(rules)} exit rule(s) at {path.name}, "
             f"confidence {confidence:.0%} (scored for calibration at close),{risk}. "
             f"Watching: {', '.join(watching) or 'no signals'}. "
             f"Exit rules are evaluated automatically every tick.{note}"

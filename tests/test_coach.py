@@ -1048,3 +1048,30 @@ def test_the_funnel_overlap_gauge_measures_before_anything_gates(tmp_path):
 
     assert _funnel_overlap_rate(cfg, rows) == 0.6667
     assert _funnel_overlap_rate(cfg, []) is None, "omitted, never zeroed (D-038)"
+
+
+def test_reconcile_repairs_a_crashed_promotion_and_respects_an_operator_revert(tmp_path):
+    """D-111. `reconcile` re-applied the last promotion whenever the incumbent
+    was not the promoted variant - so the documented undo (edit the lever's
+    state file back) was re-promoted on the next pulse, every pulse, forever.
+    Unapplied now means the variant appears in NEITHER slot."""
+    cfg = _cfg(tmp_path)
+    seed = coach.seeds()["muse.prompt"]
+    coach._append(coach.events_path(cfg), {
+        "kind": "experiment_closed", "lever": "muse.prompt", "outcome": "promoted",
+        "incumbent": "v0", "challenger": "v1", "challenger_text": seed + " CHALLENGER",
+        "ts": "2026-09-01T00:00:00+00:00"})
+
+    # 1. crashed between the log row and the save: v1 is nowhere -> repaired.
+    st = coach.load_state(cfg, "muse.prompt", seed)
+    assert st.incumbent.id == "v0" and st.previous is None
+    assert coach.reconcile(cfg) == ["muse.prompt: v0 -> v1"]
+    st = coach.load_state(cfg, "muse.prompt", seed)
+    assert st.incumbent.id == "v1" and st.previous.id == "v0"
+
+    # 2. the operator reverts by swapping the slots: v1 is `previous` -> kept.
+    st.incumbent, st.previous = st.previous, st.incumbent
+    coach.save_state(cfg, st)
+    assert coach.reconcile(cfg) == [], "the operator's revert was overturned"
+    assert coach.load_state(cfg, "muse.prompt", seed).incumbent.id == "v0"
+

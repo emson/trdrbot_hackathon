@@ -497,6 +497,21 @@ def check(journal_path: Path, positions: list[Any]) -> list[tuple[str, str, str]
                          "the caps were sized against a trade that was not made"))
 
     # --- 4. absence that quietly loosens a constraint --------------------
+    # Two open pages sharing an OCC leg (D-111): the broker aggregates by
+    # symbol, so both mark-based stops read one fabricated cost base, and can
+    # go permanently unobservable together. Both pages are named.
+    owners: dict[str, list[str]] = {}
+    for p in positions:
+        if getattr(p, "status", "") in ("open", "opening", "closing"):
+            for sym in getattr(p, "symbols", []) or []:
+                owners.setdefault(sym, []).append(p.position_id)
+    for sym, ids_ in sorted(owners.items()):
+        if len(ids_) > 1:
+            findings.append((BAD, f"leg_overlap:{sym[:24]}",
+                             f"held by {len(ids_)} open positions ({', '.join(i[:28] for i in ids_)}) - "
+                             f"the broker aggregates by symbol, so every mark-based stop on "
+                             f"them reads a shared, fabricated cost base"))
+
     # The whole repository is the absence, when the process that trades is
     # older than the code (D-108). `trdrbot run` writes run.json at startup;
     # if that pid is alive and its sha is not HEAD, every commit since is a

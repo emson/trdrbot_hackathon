@@ -278,7 +278,11 @@ coach:
   # with the subsystem's own deterministic gates, and promotes a winner without
   # asking. That is the intended trade for a paper-trading hackathon: human
   # approval gates block the feedback loop, and every change it makes is data
-  # under data/state/levers/ that reverts by editing one file.
+  # under data/state/levers/ that reverts by editing one file: SWAP `incumbent`
+  # and `previous` in the lever's state file (D-111). Reconcile treats a
+  # promotion as unapplied only when its variant appears in NEITHER slot -
+  # that is a crash between the log row and the save, which it repairs. A
+  # variant left in `previous` is an operator's revert, which it keeps.
   #
   # STEERING, not gating: set `paused: true` or `pinned: true` inside a lever's
   # own state file to stop experimentation on it (demo day is one pin), and

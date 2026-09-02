@@ -555,3 +555,21 @@ def test_health_names_a_closed_position_that_can_never_be_attributed(tmp_path, m
     assert "position:pos_ok" not in found, "a closed position with a future horizon is fine"
     assert "position:pos_done" not in found, "an attributed position is done"
 
+
+def test_health_names_two_open_positions_that_share_a_leg(tmp_path, make_position):
+    """D-111. The broker aggregates by symbol, so two pages sharing an OCC leg
+    both read one fabricated cost base and their mark-based stops can go
+    permanently unobservable together. Reachable at six concurrent positions."""
+    from trdrbot import health
+
+    journal = tmp_path / "journal.jsonl"
+    journal.write_text("")
+    a = make_position(position_id="pos_a")
+    b = make_position(position_id="pos_b")           # identical legs by default
+    c = make_position(position_id="pos_c", legs=[{"symbol": "NVDA260909P00100000",
+                                                   "side": "buy", "qty": 1}])
+    found = [f for f in health.check(journal, [a, b, c]) if f[1].startswith("leg_overlap")]
+    assert len(found) == 2, f"both shared legs must be named: {found}"
+    assert all(f[0] == health.BAD and "pos_a" in f[2] and "pos_b" in f[2] for f in found)
+    assert not [f for f in health.check(journal, [a, c]) if f[1].startswith("leg_overlap")]
+
