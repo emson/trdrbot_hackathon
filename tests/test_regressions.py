@@ -1506,6 +1506,44 @@ def test_the_hunt_cooldown_stays_longer_than_the_oversight_interval():
         f"every {idle.MAX_SILENCE_MIN}min")
 
 
+def test_a_traded_thesis_enters_calibration_at_the_confidence_it_was_traded_at():
+    """D-105. PILLAR-4 (learning integrity). The theses the agent puts MONEY on
+    were the only theses excluded from the record that gates how much money it
+    may put on the next one.
+
+    `simulate_experiments` pre-registers a thesis at a 0.5 placeholder with
+    `probability_stated=False` (D-052: the trial must count for N even if never
+    stated). `record_position` then took the agent's `confidence` - the same
+    number `size_position` sized against, and documented to the agent as
+    "scored ... Brier/Murphy calibration" - and only linked the position.
+    Measured live: 13 `thesis` entries, 2 traded, 0 stated; one had already
+    resolved TRUE and did not count, while 105 muse candidates the agent never
+    touched did. Trading is the strongest statement of a probability there is.
+    """
+    from trdrbot import ledger as L
+
+    book = L.Ledger(Path(tempfile.mkdtemp()) / "ledger.jsonl")
+    e = book.register(kind="thesis", underlying="SPY", claim="c", probability=0.5,
+                      horizon="2026-09-05", band_low=None, band_high=636.0,
+                      probability_stated=False)
+    assert L.as_forecasts([e]) == [], "a placeholder must not score"
+
+    assert book.mark_traded("SPY", "2026-09-05", "pos_x", probability=0.42)
+    traded = next(x for x in book.all() if x.traded)
+    assert traded.probability_stated and traded.probability == pytest.approx(0.42)
+
+    book.resolve(traded.id, 630.0, "2026-09-05T21:00:00+00:00")
+    fc = L.as_forecasts(book.resolved())
+    assert len(fc) == 1 and fc[0].probability == pytest.approx(0.42), \
+        "the traded thesis must reach calibration at the confidence it was traded at"
+    # The one caller with no number keeps the old behaviour: linked, not stated.
+    e2 = book.register(kind="thesis", underlying="NVDA", claim="c", probability=0.5,
+                       horizon="2026-09-05", band_low=None, band_high=100.0,
+                       probability_stated=False)
+    assert book.mark_traded("NVDA", "2026-09-05", "pos_y")
+    assert not next(x for x in book.all() if x.underlying == "NVDA").probability_stated
+
+
 def test_gate_regret_is_computed_from_outcomes_the_gate_cannot_reach():
     """I-73 / D-104. The one self-improvement signal that does not violate the
     measured/measurer rule (specs/notes/015), recorded since D-081 and never

@@ -13,12 +13,11 @@ Two rules this file exists to enforce, both from the testing principles:
 
 from __future__ import annotations
 
+from datetime import timedelta
 from pathlib import Path
 from typing import Any
 
 import pytest
-
-from datetime import timedelta
 
 from trdrbot import config as config_mod
 from trdrbot import ids

@@ -256,12 +256,30 @@ class Ledger:
                 return True
         return False
 
-    def mark_traded(self, underlying: str, horizon: str, position_id: str) -> bool:
-        """Link a registered thesis to the position it became."""
+    def mark_traded(self, underlying: str, horizon: str, position_id: str,
+                    probability: float | None = None) -> bool:
+        """Link a registered thesis to the position it became - and STATE it.
+
+        Trading a thesis is the strongest statement of a probability the agent
+        can make: it is the number `size_position` was handed as
+        `stated_confidence`, and money went behind it. Yet this used to leave
+        the entry at its 0.5 pre-registration placeholder with
+        `probability_stated=False`, so the theses the agent actually bet on
+        were the ONLY theses excluded from the calibration record that gates
+        how much it may bet next. Measured live (D-105): 13 `thesis` entries,
+        2 traded, 0 stated - one already resolved TRUE and did not count,
+        while 105 muse candidates it never touched did.
+
+        `probability` is the agent's own `confidence` from `record_position`.
+        None keeps the old behaviour for the one caller that has no number.
+        """
         for e in reversed(self._items):
             if (e.underlying == underlying.upper() and e.horizon == horizon
                     and not e.traded):
                 e.traded, e.position_id = True, position_id
+                if probability is not None:
+                    e.probability = float(probability)
+                    e.probability_stated = True
                 self._rewrite()
                 return True
         return False

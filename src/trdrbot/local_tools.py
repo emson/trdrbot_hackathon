@@ -643,11 +643,14 @@ def build_record_position(
             pos.thesis_band_high = th.band_high
             pos.thesis_drift = th.drift
             pos.thesis_vol_view = th.vol_view
-        # Close the loop: mark the pre-registered thesis as traded, so the
-        # ledger distinguishes ideas acted on from ideas declined.
+        # Close the loop: mark the pre-registered thesis as traded, AND state
+        # its probability - the agent's `confidence` is the same number
+        # `size_position` sized against, and a thesis with money behind it is
+        # the last one that should sit outside the calibration record (D-105).
         if ledger is not None and pos.thesis_horizon:
             try:
-                ledger.mark_traded(pos.underlying, pos.thesis_horizon, pos.position_id)
+                ledger.mark_traded(pos.underlying, pos.thesis_horizon, pos.position_id,
+                                   probability=confidence)
             except Exception as exc:  # noqa: BLE001
                 print(f"[ledger] mark_traded failed: {exc!r}")
         path = store.save(pos)
