@@ -409,8 +409,9 @@ async def _evaluate(
                 continue
 
             # Base rate from the CALIBRATED bootstrap (D-089). The raw one was
-            # measured overconfident by 15-23pp exactly where these gates bite
-            # (I-29): it called bands "vacuous" using an optimistic number and
+            # measured overconfident exactly where these gates bite (I-29; the
+            # magnitude is under re-measurement since D-119): it called bands
+            # "vacuous" using an optimistic number and
             # understated the tails where breakout claims live. The inflation is
             # fitted offline against history with a holdout veto, read from an
             # artifact, and 1.0 whenever no fit exists - see band_inflation().

@@ -140,11 +140,13 @@ LESSONS: tuple[Lesson, ...] = (
         "leaves my exit rules unfired, my attribution empty, and my size ladder "
         "stuck, so the learning loop stops for want of anything to learn from. "
         "'No trade' is the right answer often; it is not free, and a run of "
-        "them is evidence about ME, not about the market. Measured sequel: part "
-        "of that abstention was manufactured by my own instrument - the base "
-        "rate feeding my gates was later audited at 15-23 points overconfident "
-        "(since corrected, audit pending) - so a refusal streak is evidence "
-        "about me OR about my ruler, and the ruler is the cheaper one to check.",
+        "them is evidence about ME, not about the market. Measured sequel, twice "
+        "over: part of that abstention was manufactured by my own instrument - "
+        "the base rate feeding my gates audited as overconfident - and then the "
+        "AUDIT itself turned out to be measured with a mismatched harness, which "
+        "cut the fitted correction from 1.30 to 1.10. A refusal streak is "
+        "evidence about me, about my ruler, or about the ruler I measured the "
+        "ruler with, and each is cheaper to check than the one before it.",
         cue="when about to decline, or when several cycles in a row have produced no position",
         tags=("discipline", "expectancy", "calibration"),
     ),
@@ -157,11 +159,14 @@ LESSONS: tuple[Lesson, ...] = (
         "mutations both targeted 'avoid certain probabilities'), which an A/B "
         "trial rightly refused to promote, because the defect was in the "
         "measuring instrument: the bootstrap was audited against 21,280 "
-        "historical band-forecasts and found overconfident by 15-23 points "
-        "exactly where those gates bite. When the ruler was corrected, the "
-        "same class of band went from 5.6% (auto-rejected as a lottery "
-        "ticket) to 10.2% (judged on its merits) - with the gates themselves "
-        "untouched. Teaching myself to please a broken instrument is not "
+        "historical band-forecasts and found overconfident exactly where those "
+        "gates bite. When the ruler was corrected, the same class of band went "
+        "from 5.6% (auto-rejected as a lottery ticket) to 10.2% (judged on its "
+        "merits) - with the gates themselves untouched. The sequel is the same "
+        "lesson one level up: the correction was 1.30, and re-fitting it after "
+        "a units defect in the FITTING harness was found gave 1.10 - so most of "
+        "what I had 'corrected' was my own arithmetic. Teaching myself to please "
+        "a broken instrument is not "
         "improvement; before tuning my behaviour to a gate, I ask what "
         "evidence stream has ever scored the number the gate reads.",
         cue="when many candidates die at the same numeric gate, or a change "

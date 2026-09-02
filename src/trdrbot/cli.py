@@ -788,8 +788,9 @@ def _modelcal(action: str) -> int:
 
     if not path.exists():
         print("no model calibration artifact - run `trdrbot modelcal fit`")
-        print("(the bootstrap runs UNINFLATED until one exists; I-29 measured "
-              "that as 15-23pp overconfident where credit spreads live)")
+        print("(the bootstrap runs UNINFLATED until one exists; I-29 measured it\n"
+              "  overconfident where credit spreads live - the magnitude is under\n"
+              "  re-measurement since D-119 corrected the harness's units)")
         return 0
 
     art = _json.loads(path.read_text(encoding="utf-8"))

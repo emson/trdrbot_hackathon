@@ -295,8 +295,9 @@ def build_simulate_experiments(shared: SharedContext, state_dir: Path | None = N
             closes = market_stats.load_closes(state_dir, underlying)
             if closes:
                 # The CALIBRATED bootstrap, the same one the muse's gates read
-                # (D-089). The raw one was measured overconfident by 15-23pp
-                # exactly where credit spreads live (I-29), and this call feeds
+                # (D-089). The raw one was measured overconfident where credit
+                # spreads live (I-29 - the MAGNITUDE is under re-measurement
+                # since D-119 corrected the fitting harness's units), and this call feeds
                 # the EV, POP and payoff_ratio columns the agent chooses a
                 # structure from - and then sizing's Kelly gate. An optimistic
                 # tail here is an optimistic bet size downstream. The inflation

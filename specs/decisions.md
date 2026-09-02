@@ -5459,3 +5459,54 @@ markdown heading into `lessons.md`, and `recent_lessons` split on any `\n## `, s
 one of the five prompt slots and pushed out a genuinely resolved position. Both halves: every line is
 quoted, and the reader splits on the `## pos_` marker the writer actually emits, which also handles
 the phantoms already on disk.
+
+## D-119 - The bootstrap correction was mostly our own ruler, and the holdout says so
+
+`fit_band_inflation` drew `round(h * 252/365)` returns - treating `h` as CALENDAR days - and scored
+the result against `closes[i + h]`, which on a daily-bar cache is h SESSIONS ahead. The mismatch
+alone predicts a "needed" inflation of `sqrt(h/draws)` = 1.22/1.29/1.20, and the live artifact said
+**1.30/1.30/1.25** (I-100). On perfectly iid lognormal data, where the true k is 1.0 by
+construction, the old function chose 1.15/1.30/1.30; a copy with `draws = h` chose 1.0/1.0/1.1.
+
+**Why it was not merely a wrong constant.** The holdout that validated the artifact (Brier 0.216 raw
+-> 0.202 fitted) runs through the SAME function, so it validated the fit against the harness's own
+mismatch rather than against the tape. And live, `muse.py` and `simulate_experiments` applied that k
+to `bootstrap_factors`, whose `days` really ARE calendar days: a correctly drawn distribution,
+widened by a correction fitted for a shortfall that was not there. Measured: a 7-calendar-day +/-3%
+band on 1%-vol data has truth 0.820, raw bootstrap 0.815, inflated **0.688** - so the muse's base
+rates ran ~13pp low (more lottery-ticket rejections, `claimed_edge` inflated) and simulate's POP/EV
+columns and the Kelly size behind them were pessimistic by the same amount.
+
+**Sequenced so no state file was ever hand-edited.** `data/state/**` is append-only and sacred, so
+the artifact carries a `harness` version and `band_inflation` returns 1.0 for anything older - the
+documented degraded path the code has always had when no fit exists, not a new one. Then the units:
+`h` is SESSIONS throughout the fit, `sessions_in`/`calendar_days_for` are the named conversions, and
+the lookup converts the caller's CALENDAR days before choosing the nearest key (comparing 7 calendar
+days against the keys directly picked the 10-session row). The unit is recorded on the artifact.
+
+**Re-fitted, and the holdout had the veto.** 99 tickers, corrected units:
+
+| horizon (sessions) | k | holdout Brier raw -> fit |
+|---|---|---|
+| 3 | 1.10 | 0.2023 -> 0.2016 |
+| 5 | 1.05 | 0.2142 -> 0.2137 |
+| 10 | **1.00** | 0.2141 -> 0.2141 (withdrawn) |
+
+A small real correction survives at short horizons; the long-horizon correction is withdrawn. Most
+of what had been "corrected" was our own arithmetic.
+
+**I-29 is re-opened, not closed.** Its 21,280-forecast measurement (notes/017) describes the same
+3/5/10 horizon scoring and was made with the same harness, so **the 15-18pp figure is not currently
+supported**. Every in-code citation of it now says the magnitude is under re-measurement -
+`lessons.py`, `muse.py`, `local_tools.py`, `market_stats.py`, `cli.py` - because a number this
+system quotes to itself in five places is a number it will act on. The two lessons that cite it are
+strengthened rather than retracted: "audit the ruler" now has a second instance, one level up, where
+the ruler used to audit the ruler was the thing that was wrong.
+
+**Discovery's five days were sessions all along (I-107).** It passed 5 to `bootstrap_factors`, which
+reads calendar days and drew 3 - while the synth prompt says "over the next 5 trading days" and
+tells the model not to contradict the block. Measured on 1.2%-vol data: quantiles ~23% too narrow,
+P(+5% or more) rendered 1.0% where a 5-session horizon has 3.5%. D-074's conversion fixed
+`simulate_experiments` and never reached this caller. The block is now `discovery.bootstrap_block`,
+extracted so the units at that seam are testable without an LLM call, and the prompt's horizon comes
+from the same constant.

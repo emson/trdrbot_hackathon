@@ -43,6 +43,42 @@ from .opportunity import Opportunity, admit, options_gate
 from .research import dossier
 from .wiki import Concept, Wiki
 
+#: The horizon of the bootstrap block discovery shows the model, in TRADING
+#: SESSIONS - which is the unit the prompt states and the unit `market_stats`
+#: draws in. `bootstrap_factors` takes CALENDAR days, so the conversion is
+#: explicit at the call site rather than implied by a bare `5` (I-107).
+DISCOVERY_HORIZON_SESSIONS = 5
+
+def bootstrap_block(closes: list[float], *, seed: str) -> str:
+    """The drift-free bootstrap line the synth prompt reads. "" when unusable.
+
+    Extracted so the UNITS at this seam are testable without an LLM call
+    (I-107): `bootstrap_factors` takes CALENDAR days, and this passed
+    `DISCOVERY_HORIZON_SESSIONS` raw - so 5 meaning "5 trading days" became 3
+    draws. Measured on 1.2%-vol data: quantiles ~23% too narrow, and
+    P(+5% or more) rendered 1.0% where a 5-session horizon has 3.5% - while the
+    prompt says "over the next {n} trading days" and tells the model not to
+    contradict the block. D-074's conversion fixed `simulate_experiments` and
+    never reached this caller.
+    """
+    fac = market_stats.bootstrap_factors(
+        closes, market_stats.calendar_days_for(DISCOVERY_HORIZON_SESSIONS), seed=seed)
+    if not fac:
+        return ""
+    fac.sort()
+
+    def q(pct: float) -> float:
+        return fac[int(pct * (len(fac) - 1))]
+
+    up5 = sum(1 for f in fac if f >= 1.05) / len(fac)
+    dn5 = sum(1 for f in fac if f <= 0.95) / len(fac)
+    return (
+        f"Bootstrap {DISCOVERY_HORIZON_SESSIONS}-session forecast (own history, no view): "
+        f"5%ile {q(0.05):+.1%}, median {q(0.5):+.1%}, 95%ile {q(0.95):+.1%} "
+        f"(as moves); P(+5% or more) {up5:.0%}, P(-5% or worse) {dn5:.0%}"
+    ).replace("+1", "+").replace("1.0%", "0%")
+
+
 NOMINATE_PROMPT = """You are scouting for an options trading agent (paper account; {horizon}). \
 Below is broad market news and prediction-market odds.
 
@@ -75,7 +111,7 @@ options-chain check. Do not contradict computed numbers.
 
 {candidates_block}
 
-Task: forecast each candidate's potential over the next 5 trading days, then propose 0-3 \
+Task: forecast each candidate's potential over the next {sessions} trading days, then propose 0-3 \
 OPPORTUNITIES total (across all candidates - only where evidence, technicals and the forecast \
 line up; an empty array is a valid answer). {horizon} \
 **Every horizon must fall between {earliest} and {latest} inclusive; outside that is rejected.** \
@@ -208,22 +244,9 @@ async def run(
             market_stats.save_closes(config.paths.state, t, closes, dates=dates)
             stats = market_stats.compute_stats(t, closes)
             lines.append(f"Computed technicals: {stats.render()}")
-            # Drift-free bootstrap from the stock's OWN returns: what a
-            # 5-day move looks like when the story is ignored entirely.
-            fac = market_stats.bootstrap_factors(closes, 5, seed=t)
-            if fac:
-                fac.sort()
-                def q(pct: float, _f: list[float] = fac) -> float:
-                    return _f[int(pct * (len(_f) - 1))]
-
-                up5 = sum(1 for f in fac if f >= 1.05) / len(fac)
-                dn5 = sum(1 for f in fac if f <= 0.95) / len(fac)
-                lines.append(
-                    "Bootstrap 5-day forecast (own history, no view): "
-                    f"5%ile {q(0.05):+.1%}, median {q(0.5):+.1%}, 95%ile {q(0.95):+.1%} "
-                    f"(as moves); P(+5% or more) {up5:.0%}, P(-5% or worse) {dn5:.0%}"
-                    .replace("+1", "+").replace("1.0%", "0%")
-                )
+            line = bootstrap_block(closes, seed=t)
+            if line:
+                lines.append(line)
         elif closes:
             lines.append(f"Price history: too short ({len(closes)} bars)")
 
@@ -242,6 +265,7 @@ async def run(
     # three thesis sources cannot drift apart on what "in time" means.
     reply2 = await model.ainvoke(SYNTH_PROMPT.format(
         candidates_block="\n\n".join(blocks), horizon=horizon,
+        sessions=DISCOVERY_HORIZON_SESSIONS,
         earliest=_earliest, preferred=_preferred, latest=_latest))
     note_truncation(reply2, "discovery.synthesise", journal)
     text2 = text_of(reply2)

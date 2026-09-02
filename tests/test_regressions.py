@@ -4910,6 +4910,18 @@ def test_the_fit_wants_inflation_on_autocorrelated_data_and_not_on_iid():
         f"IID data is calibrated by construction, fit chose {fit_iid['per_horizon']}")
 
 
+def _artifact(per_horizon: dict, harness: int | None = None) -> str:
+    """A model-calibration artifact as `fit_band_inflation` writes one."""
+    import json as _j
+
+    from trdrbot import market_stats
+    body = {"per_horizon": per_horizon, "horizon_unit": "sessions",
+            "harness": market_stats.HARNESS_VERSION if harness is None else harness}
+    if harness == 0:
+        body.pop("harness")
+    return _j.dumps(body)
+
+
 def test_band_inflation_loader_fails_safe_and_clamps(tmp_path):
     """No artifact, a corrupt one, or an insane value must all degrade to the
     uninflated bootstrap - the behaviour the system had before the fit
@@ -4923,13 +4935,66 @@ def test_band_inflation_loader_fails_safe_and_clamps(tmp_path):
     p.write_text("{ not json")
     assert market_stats.band_inflation(tmp_path, 5) == 1.0  # corrupt
 
-    p.write_text('{"per_horizon": {"5": 3.0, "10": 0.4}}')
+    # The artifact's keys are SESSIONS; the caller holds CALENDAR days (I-100).
+    p.write_text(_artifact({"3": 3.0, "7": 0.4}))
     assert market_stats.band_inflation(tmp_path, 5) == market_stats.INFLATE_MAX
     assert market_stats.band_inflation(tmp_path, 10) == 1.0  # below the floor
 
-    p.write_text('{"per_horizon": {"3": 1.1, "10": 1.3}}')
-    assert market_stats.band_inflation(tmp_path, 4) == 1.1   # nearest horizon
-    assert market_stats.band_inflation(tmp_path, 9) == 1.3
+    p.write_text(_artifact({"3": 1.1, "10": 1.3}))
+    assert market_stats.band_inflation(tmp_path, 4) == 1.1   # 4 calendar = 3 sessions
+    assert market_stats.band_inflation(tmp_path, 14) == 1.3  # 14 calendar = 10 sessions
+    # A CALENDAR week is 5 sessions, so the 3-session key is the nearer one -
+    # comparing 7 against the keys directly would have picked 10 (I-100).
+    assert market_stats.band_inflation(tmp_path, 7) == 1.1
+
+
+def test_an_artifact_from_an_older_harness_neutralises_itself(tmp_path):
+    """PILLAR-4 (fitted numbers are holdout-vetoed). I-100: the live k of
+    1.30/1.30/1.25 was mostly a HARNESS ARTIFACT - the fit drew
+    `round(h * 252/365)` returns while scoring against the close h SESSIONS
+    ahead, and the mismatch alone predicts 1.22/1.29/1.20. `data/state/**` is
+    append-only and sacred, so the artifact is not hand-edited: it carries a
+    harness version, and one written by an older harness reads as 1.0 - the
+    documented degraded path, not a new one - until `trdrbot modelcal fit`
+    rewrites it."""
+    from trdrbot import market_stats
+
+    p = market_stats.model_cal_path(tmp_path)
+    p.write_text(_artifact({"3": 1.30, "5": 1.30, "10": 1.25}, harness=0))
+    assert market_stats.band_inflation(tmp_path, 5) == 1.0, \
+        "a pre-fix artifact must not keep over-widening every bootstrap"
+
+    p.write_text(_artifact({"3": 1.30}))
+    assert market_stats.band_inflation(tmp_path, 4) == 1.30, \
+        "...and a current one is still read"
+
+
+def test_the_fit_returns_one_when_the_true_inflation_is_one():
+    """PILLAR-4, and the measurement I-100 turns on. On perfectly iid data the
+    bootstrap is already the right distribution, so the honest answer is k=1.0.
+    The pre-fix harness chose 1.15/1.30/1.30 on exactly this data because it
+    drew `round(h * 252/365)` returns and scored against the close h SESSIONS
+    ahead - a shortfall of `sqrt(h/draws)` that has nothing to do with tails."""
+    import random as _r
+
+    from trdrbot import market_stats
+
+    rng = _r.Random("iid")
+    series = {}
+    for s in range(12):
+        px, closes = 100.0, []
+        for _ in range(400):
+            px *= math.exp(rng.gauss(0.0, 0.012))
+            closes.append(px)
+        series[f"T{s}"] = closes
+
+    art = market_stats.fit_band_inflation(series, horizons=(3, 5, 10),
+                                          n_paths=200, step=17)
+
+    assert art["harness"] == market_stats.HARNESS_VERSION
+    assert art["horizon_unit"] == "sessions"
+    for h, k in art["per_horizon"].items():
+        assert k <= 1.05, f"h={h}: fitted k={k} on data whose true k is 1.0"
 
 
 def test_simulate_experiments_prices_against_the_calibrated_bootstrap(tmp_path):
@@ -4952,7 +5017,8 @@ def test_simulate_experiments_prices_against_the_calibrated_bootstrap(tmp_path):
         (d / "closes").mkdir(parents=True, exist_ok=True)
         market_stats.save_closes(d, "SPY", closes, dates=dates)
         market_stats.model_cal_path(d).write_text(
-            json.dumps({"per_horizon": {"5": k}}), encoding="utf-8")
+            json.dumps({"per_horizon": {"3": k}, "horizon_unit": "sessions",
+                        "harness": market_stats.HARNESS_VERSION}), encoding="utf-8")
         sim = local_tools.build_simulate_experiments(local_tools.SharedContext(), d, None)
         out = sim.func(
             thesis_claim="SPY drifts lower", underlying="SPY", horizon="2026-09-05",
@@ -6117,3 +6183,40 @@ def test_a_phantom_heading_already_on_disk_does_not_count_as_a_lesson(tmp_path):
     assert shown.count("## pos_") == learn.LESSONS_IN_PROMPT, \
         "a heading already on disk evicted a real lesson"
     assert all(f"pos_{i}" in shown for i in range(learn.LESSONS_IN_PROMPT))
+
+
+def test_discoverys_five_days_reach_the_bootstrap_as_five_sessions():
+    """I-107. `discovery.py` passed 5 meaning "5 trading days" to
+    `bootstrap_factors`, which reads CALENDAR days and converted it to 3 draws -
+    while the synth prompt says "over the next 5 trading days" and tells the
+    model not to contradict the block. Measured on 1.2%-vol data: quantiles
+    ~23% too narrow, and P(+5% or more) rendered 1.0% where a 5-session horizon
+    has 3.5%. D-074's conversion fixed `simulate_experiments` and never reached
+    this caller.
+
+    A units assertion at the seam, driven through the real producer: the block
+    the prompt reads must describe the horizon the prompt names."""
+    import random as _r
+
+    from trdrbot import discovery, market_stats
+
+    rng = _r.Random("units")
+    px, closes = 100.0, []
+    for _ in range(300):
+        px *= math.exp(rng.gauss(0.0, 0.012))
+        closes.append(px)
+
+    line = discovery.bootstrap_block(closes, seed="T")
+
+    # The block the model is shown must be the 5-SESSION distribution the
+    # prompt promises, not the 3-draw one 5 calendar days would produce.
+    five = market_stats.bootstrap_factors(
+        closes, market_stats.calendar_days_for(discovery.DISCOVERY_HORIZON_SESSIONS), seed="T")
+    three = market_stats.bootstrap_factors(
+        closes, discovery.DISCOVERY_HORIZON_SESSIONS, seed="T")
+    up = lambda f: sum(1 for x in f if x >= 1.05) / len(f)  # noqa: E731
+
+    assert f"{up(five):.0%}" in line
+    assert up(five) > up(three) * 1.5, "the fixture must actually separate the two"
+    assert f"P(+5% or more) {up(three):.0%}," not in line
+    assert f"{discovery.DISCOVERY_HORIZON_SESSIONS}-session" in line

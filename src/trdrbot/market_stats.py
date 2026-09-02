@@ -28,6 +28,22 @@ from . import ids, store
 TRADING_DAYS = 252
 
 
+def sessions_in(calendar_days: int) -> int:
+    """Trading sessions inside a calendar-day span. At least one.
+
+    The bootstrap resamples per-SESSION returns, so a horizon measured in
+    calendar days has to be converted before it can say how many to draw -
+    drawing one per calendar day prices in weekends that never traded.
+    """
+    return max(1, round(calendar_days * TRADING_DAYS / 365.0))
+
+
+def calendar_days_for(sessions: int) -> int:
+    """The calendar span containing `sessions` trading days - `sessions_in`'s
+    inverse, for a caller that thinks in sessions and must speak calendar."""
+    return max(1, round(sessions * 365.0 / TRADING_DAYS))
+
+
 @dataclass
 class Stats:
     symbol: str
@@ -222,7 +238,7 @@ def bootstrap_factors(
     # `tail_gap`, which warns above 5pp - so a fifth of every "the tails
     # disagree, this edge is assumption-dependent" flag was manufactured by the
     # units, not by tail shape. Round to at least one draw.
-    draws = max(1, round(days * TRADING_DAYS / 365.0))
+    draws = sessions_in(days)
     mean = sum(rets) / len(rets)
     var = sum((r - mean) ** 2 for r in rets) / (len(rets) - 1)
     # Center so E[exp(r')] ~= 1 per session (martingale), same correction as
@@ -232,7 +248,9 @@ def bootstrap_factors(
     # MEASURED empirical correction, not a modelling choice. Scored offline
     # over 21,280 historical band-forecasts with the history sliced before
     # every estimate (I-29 / notes/017): the raw bootstrap overstates
-    # P(stays inside a band) by 15-23pp exactly where credit spreads live,
+    # P(stays inside a band) where credit spreads live - though the MAGNITUDE
+    # that measurement reported was inflated by the same units defect D-119
+    # fixed in the harness, and is being re-measured,
     # and UNDERstates both tails - the signature of a too-narrow
     # distribution, which is why the fix is variance inflation rather than a
     # p->p map (a map cannot tell band shapes apart; widening corrects both
@@ -274,7 +292,28 @@ def bootstrap_factors(
 #: Sanity bounds on a fitted inflation. A fit wanting more than the ceiling
 #: is evidence of something structural, not a bigger knob - refuse it.
 INFLATE_MIN, INFLATE_MAX = 1.0, 1.5
+
+#: **SESSIONS, not calendar days** (I-100). `fit_band_inflation` used to draw
+#: `round(h * 252/365)` returns - treating `h` as calendar days - and score the
+#: result against `closes[i + h]`, which on a daily-bar cache is h SESSIONS
+#: ahead. The mismatch alone predicts a "needed" inflation of `sqrt(h/draws)` =
+#: 1.22/1.29/1.20, and on perfectly iid lognormal data where the true k is 1.0
+#: the old function chose 1.15/1.30/1.30 while a byte-faithful copy with
+#: `draws = h` chose 1.0/1.0/1.1. The live k of 1.30/1.30/1.25 was therefore
+#: mostly a harness artifact - and the holdout that validated it (Brier 0.216
+#: raw -> 0.202 fitted) runs through the SAME function, so it validated the fit
+#: against the harness's own mismatch rather than against the tape.
 FIT_HORIZONS = (3, 5, 10)
+
+#: Bumped whenever the fitting harness changes in a way that makes an OLDER
+#: artifact's numbers mean something different. `band_inflation` returns 1.0 -
+#: the documented degraded path the code has always had when no fit exists -
+#: for any artifact that does not carry the current version, so a stale
+#: artifact neutralises itself instead of silently over-widening every
+#: bootstrap. `data/state/**` is append-only and sacred, so the live artifact
+#: is neutralised by this stamp and then REWRITTEN by `trdrbot modelcal fit`,
+#: never hand-edited.
+HARNESS_VERSION = 2
 _FIT_BANDS = ((-0.03, 0.03), (-0.05, 0.05), (None, -0.02), (0.02, None))
 
 
@@ -285,16 +324,25 @@ def model_cal_path(state_dir: Path) -> Path:
 def band_inflation(state_dir: Path, days: int) -> float:
     """The fitted inflation for this horizon, clamped, 1.0 when absent.
 
-    Fail-safe by construction: no artifact, an unreadable one, or an insane
-    value all degrade to the uninflated bootstrap - the behaviour the system
-    had for its whole life before the fit existed. Never raises.
+    `days` is CALENDAR days - what `muse` and `simulate_experiments` both hold -
+    and the artifact's keys are SESSIONS, so the conversion happens here, once,
+    at the one seam that reads both (I-100). Choosing the nearest key without
+    converting compared a 7-calendar-day horizon against a 5-SESSION key.
+
+    Fail-safe by construction: no artifact, an unreadable one, an insane value,
+    or one fitted by a harness whose numbers no longer mean the same thing all
+    degrade to the uninflated bootstrap - the behaviour the system had for its
+    whole life before the fit existed. Never raises.
     """
     try:
         d = json.loads(model_cal_path(state_dir).read_text(encoding="utf-8"))
+        if int(d.get("harness", 0)) != HARNESS_VERSION:
+            return 1.0
         per_h = d.get("per_horizon") or {}
         if not per_h:
             return 1.0
-        nearest = min(per_h, key=lambda h: abs(int(h) - days))
+        sessions = sessions_in(days)
+        nearest = min(per_h, key=lambda h: abs(int(h) - sessions))
         k = float(per_h[nearest])
         return max(INFLATE_MIN, min(INFLATE_MAX, k))
     except (OSError, ValueError, TypeError, KeyError, json.JSONDecodeError):
@@ -321,7 +369,12 @@ def fit_band_inflation(
     per_h: dict[str, float] = {}
     diag: dict[str, Any] = {}
     for h in horizons:
-        draws = max(1, round(h * TRADING_DAYS / 365.0))
+        # `h` is SESSIONS throughout (I-100). The row is scored against
+        # `closes[i + h]`, which on a daily-bar cache is h sessions ahead, so
+        # the simulation must draw h session returns. It drew
+        # `round(h * 252/365)` instead, and the shortfall alone - not the tail
+        # shape it was meant to measure - accounted for most of the fitted k.
+        draws = h
         train: list[tuple[list[float], float, float, float]] = []
         test: list[tuple[list[float], float, float, float]] = []
         for sym, closes in sorted(series.items()):
@@ -379,14 +432,22 @@ def fit_band_inflation(
 
     return {
         "kind": "bootstrap_band_inflation",
+        "harness": HARNESS_VERSION,
         "fitted": ids.utc_now().isoformat(),
+        # SESSIONS. Stated on the artifact because the reader holds calendar
+        # days and has to convert - the mismatch that produced the previous
+        # artifact was exactly this unit going unrecorded (I-100).
+        "horizon_unit": "sessions",
         "per_horizon": per_h,
         "bounds": [INFLATE_MIN, INFLATE_MAX],
         "sample": {"tickers": len(series), "horizons": list(horizons),
                    "n_paths": n_paths, "step": step},
         "holdout": diag,
-        "provenance": "notes/017 + D-089; time-split holdout has the veto; "
-                      "root cause of the raw defect NOT established (I-29)",
+        "provenance": "notes/017 + D-089 + D-119; horizons are SESSIONS and the "
+                      "simulation draws that many session returns; time-split "
+                      "holdout has the veto. I-29's 15-23pp measurement was made "
+                      "with the pre-D-119 harness and must be re-measured before "
+                      "it is cited again.",
     }
 
 
