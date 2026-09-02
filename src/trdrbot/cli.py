@@ -19,6 +19,7 @@ from typing import Any
 from . import config as config_mod
 from . import failures, ids, mcp_client
 from . import llm as llm_mod
+from . import store as store_mod
 from .inbox import Inbox
 from .journal import Journal
 from .lock import tick_lock
@@ -282,6 +283,24 @@ async def _run_loop(interval: int, closed_interval: int, *,
     # reason it exists. `--max-ticks` remains the way to bound a smoke test.
     deadline = date.fromisoformat(cfg.deadline) if cfg.deadline else None
     n = 0
+    # WHO IS RUNNING, AND ON WHAT CODE (D-108). A long-lived process holds the
+    # config and every module in memory from the moment it started. On
+    # 2026-09-02 the live loop turned out to have been started 40 hours and
+    # SEVEN decisions earlier: the discovery corpse, the deadlocked Coach, the
+    # single-name watchlist and a deadline two days from force-closing the
+    # whole book were all still executing, while the repo said they were
+    # fixed. Nothing detected it. This file is what `trdrbot health` compares
+    # against HEAD, so "the live process predates N commits" is a finding.
+    _git_head = ""
+    try:
+        import subprocess
+        _git_head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=cfg.paths.root,
+                                   capture_output=True, text=True, timeout=5).stdout.strip()
+    except Exception:  # noqa: BLE001 - provenance is best-effort, never blocking
+        pass
+    store_mod.write_atomic(cfg.paths.state / "run.json", json.dumps({
+        "pid": os.getpid(), "started": ids.utc_now().isoformat(),
+        "git_sha": _git_head, "argv": sys.argv[1:]}))
     print(f"[run] pid {os.getpid()} looping "
           + (f"until {deadline}" if deadline else "indefinitely (no deadline)")
           + f"; open={interval}s closed={closed_interval}s watchdog={outer_timeout}s"

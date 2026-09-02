@@ -4887,3 +4887,63 @@ written; the calendar rolled overnight and they crossed the zero-day-horizon and
 branches on a clean tree. D-032's rule now applies to fixtures: `conftest.days_out(n)`.
 
 **Verified:** 557 tests (+3), lint clean, the scaffold at 0 failing checks, mutation-verified.
+
+## D-106 - Two thesis sources were failing their own horizon gate
+
+Found by the sources audit while the whole-system scaffold was green - the scaffold stubs the
+LLM, and both defects live in what the LLM is *told*.
+
+**Research never stated the window.** `RESEARCH_PROMPT` said "within the next 10 days" and never
+gave the model today's date or `earliest`/`preferred`/`latest`; muse and discovery interpolate all
+three. Live: **14 of 14 research rejections were `horizon_too_late`**, nine LLM calls for zero
+opportunities over five days, on the path the agent reads every morning. Now interpolated, and
+`test_every_thesis_source_asks_the_same_question` covers research.
+
+**The muse passed `config.deadline` to its options gate.** D-101 made the deadline `None` and moved
+discovery's gate onto the window's own `latest`, and missed this call. Alpaca's
+`expiration_date_lte` is an optional string, so after a restart the gate would either have
+silently vanished (any name with options passes, horizon unchecked) or, if the generated schema
+refused `None`, rejected every candidate for good. Now passes `latest`. Landed before the restart.
+
+## D-107 - Forecasts were scored a trading day early
+
+`Entry.matured()` and `attribution._horizon_passed` compared the horizon to `ids.today()` - the
+**UTC** date. Housekeeping runs while the market is closed, which in the evening ET is already the
+next UTC day. So a Wednesday forecast matured on Tuesday night and was scored against Tuesday's
+close. Measured live: **94 of 95** resolved ledger entries, and **71 of 71** in the calibration
+sample that drives the size ladder, were resolved before 16:00 ET on their own horizon date.
+
+Both now read `market_today()`, the clock every other date decision already uses. The rows
+already resolved stay as they are - the ledger is append-only and re-scoring would be a rewrite of
+the record; the sample recovers as new resolutions land on the right day.
+
+Also: `learn.on_resolution` called `mem.record_mind_outcome` unguarded, and elfmem raises when the
+decision block has been archived as `superseded` - which consolidation does whenever `on_fill`
+wrote the thesis text twice, so 2 of the 4 live decision blocks were archived. One raise skipped
+the lesson, the reflection and the store save, and INV-17 refuses a second terminal transition, so
+there was no retry: one closed position lost all three permanently. Guarded, journalled, and the
+degraded run is still COUNTED in `learn_run.errors` - swallowing the raise and returning a constant
+`True` would have been D-038's absence-as-success one layer down.
+
+## D-108 - The live process was 40 hours and seven decisions old, and nothing noticed
+
+The sources audit's first finding subsumed its brief: `trdrbot run` (PID 4808) had been started on
+2026-08-31 at 15:53 - **before D-100 through D-105 were written**. Python does not reload modules
+and the loop loads config once, exactly as its own comment warns. Proof from the journal, not
+inference: the 2026-09-02 research row carried the old five-name universe with no
+`research_universe_widened`; six consecutive `hunt` rows carried the D-102 `TypeError`, the last
+*after* the fix commit; the last trial row carried an integer `run_nonce`.
+
+The in-memory config still held `deadline: 2026-09-04`. From that morning the stale
+`forecast_window` would have been permanently in the past, every candidate from all three sources
+would have failed the horizon gate, `can_open` would have blocked new positions, and **the old
+force-close sweep would have flattened the whole book** - two days out.
+
+Restarted (PID 49141, `looping indefinitely (no deadline)`), after D-106 and D-107 had landed so
+the new process did not carry them either.
+
+**The detector, so this class ends here.** `_run_loop` now writes `data/state/run.json` at startup
+- pid, start time, git sha, argv - and `trdrbot health` compares that sha to `HEAD` when the pid
+is alive. A live process on an older sha is a `PROBLEM` naming how many commits it is behind,
+every one of which is a fix that is not running. A dead pid or no file is silence, because
+`run.sh` drives one process per tick and never writes it. Three cases, pinned.

@@ -327,6 +327,45 @@ def _runs_since_last_output(ran: list[dict[str, Any]], probe: Probe) -> int:
     return idle_tail
 
 
+def _stale_process(run_json: Path) -> list[tuple[str, str, str]]:
+    """Is the live `trdrbot run` older than the code on disk?
+
+    Reads the pid and git sha the loop wrote at startup. A dead pid is not a
+    finding (the loop was stopped, or `run.sh` is driving one process per
+    tick and never writes this file). A live pid on a sha that is not HEAD is
+    the finding, and the number of commits in between is how far behind it is.
+    """
+    import json as _json
+    import os as _os
+    import subprocess as _sp
+
+    if not run_json.exists():
+        return []
+    try:
+        info = _json.loads(run_json.read_text(encoding="utf-8"))
+        pid, sha = int(info.get("pid", 0)), str(info.get("git_sha") or "")
+        _os.kill(pid, 0)                      # raises if the pid is gone
+    except (ValueError, TypeError, OSError, _json.JSONDecodeError):
+        return []
+    if not sha:
+        return [(WARN, "live_process", f"pid {pid} is running but recorded no git sha - "
+                                        "cannot tell whether it is current")]
+    try:
+        root = run_json.parents[2]
+        head = _sp.run(["git", "rev-parse", "HEAD"], cwd=root, capture_output=True,
+                       text=True, timeout=5).stdout.strip()
+        if not head or head == sha:
+            return []
+        behind = _sp.run(["git", "rev-list", "--count", f"{sha}..{head}"], cwd=root,
+                         capture_output=True, text=True, timeout=5).stdout.strip() or "?"
+    except Exception:  # noqa: BLE001 - git is optional evidence, not a dependency
+        return []
+    return [(BAD, "live_process",
+             f"pid {pid} started on {sha[:7]} (since {str(info.get('started', ''))[:16]}); "
+             f"HEAD is {head[:7]}, {behind} commit(s) later. Every one of them is a fix that "
+             f"is NOT running. Restart `trdrbot run` to apply them")]
+
+
 def check(journal_path: Path, positions: list[Any]) -> list[tuple[str, str, str]]:
     """Return (level, subject, detail). Pure - takes data, returns findings."""
     rows = store.read_jsonl(journal_path)[0]
@@ -458,6 +497,12 @@ def check(journal_path: Path, positions: list[Any]) -> list[tuple[str, str, str]
                          "the caps were sized against a trade that was not made"))
 
     # --- 4. absence that quietly loosens a constraint --------------------
+    # The whole repository is the absence, when the process that trades is
+    # older than the code (D-108). `trdrbot run` writes run.json at startup;
+    # if that pid is alive and its sha is not HEAD, every commit since is a
+    # fix that is NOT running. Silence here cost 40 hours and seven decisions.
+    findings.extend(_stale_process(journal_path.parent / "state" / "run.json"))
+
     # ...and its mirror image: a knob that is SET and quietly does nothing.
     # Above 1.75x at SCALE and 1.40x at MATURE the book cap is pinned at the
     # ruin bound, so the operator's number is partly absorbed and every surface

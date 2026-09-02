@@ -478,3 +478,53 @@ def test_a_dead_book_risk_feed_is_flagged_only_while_positions_are_open(tmp_path
 
     assert "book_risk.stale" not in flat
     assert "book_risk.stale" in held
+
+
+def test_health_says_so_when_the_live_process_is_older_than_the_code(tmp_path):
+    """D-108. A long-lived `trdrbot run` holds every module and the config in
+    memory from the moment it started. On 2026-09-02 the live loop turned out
+    to be 40 hours and SEVEN decisions old - the discovery corpse, the deadlocked
+    Coach, the single-name watchlist and a deadline two days from force-closing
+    the whole book were all still executing while the repo said they were fixed.
+    Nothing noticed. Now the loop writes its pid and sha at startup and health
+    compares that sha to HEAD.
+
+    Three cases, because a wrong probe here would cry wolf on every run.sh
+    deployment (one process per tick, never writes the file)."""
+    import json
+    import os
+    import subprocess
+
+    from trdrbot import health
+
+    root = tmp_path / "repo"
+    (root / "data" / "state").mkdir(parents=True)
+    subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+    subprocess.run(["git", "-c", "user.email=t@t", "-c", "user.name=t",
+                    "commit", "-q", "--allow-empty", "-m", "one"], cwd=root, check=True)
+    old_sha = subprocess.run(["git", "rev-parse", "HEAD"], cwd=root,
+                             capture_output=True, text=True).stdout.strip()
+    subprocess.run(["git", "-c", "user.email=t@t", "-c", "user.name=t",
+                    "commit", "-q", "--allow-empty", "-m", "two"], cwd=root, check=True)
+    run_json = root / "data" / "state" / "run.json"
+
+    # 1. alive pid (this test's own), on the OLD sha -> the finding, counting commits
+    run_json.write_text(json.dumps({"pid": os.getpid(), "git_sha": old_sha,
+                                    "started": "2026-08-31T15:53:35"}))
+    found = health._stale_process(run_json)
+    assert len(found) == 1 and found[0][0] == health.BAD
+    assert "1 commit(s) later" in found[0][2] and "Restart" in found[0][2]
+
+    # 2. alive pid on HEAD -> silence
+    head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=root,
+                          capture_output=True, text=True).stdout.strip()
+    run_json.write_text(json.dumps({"pid": os.getpid(), "git_sha": head}))
+    assert health._stale_process(run_json) == []
+
+    # 3. dead pid -> silence: the loop was stopped, or run.sh is driving it
+    run_json.write_text(json.dumps({"pid": 999_999_999, "git_sha": old_sha}))
+    assert health._stale_process(run_json) == []
+    # and no file at all (run.sh mode) -> silence
+    run_json.unlink()
+    assert health._stale_process(run_json) == []
+
