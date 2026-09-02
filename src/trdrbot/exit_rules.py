@@ -357,7 +357,16 @@ def evaluate(pos: Position, snap: Snapshot, deadline: str,
     if pos.strategy == "orphan_equity":
         return ("orphan_equity", "assigned or stray shares are outside the defined-risk "
                                  "mandate - flattened, not held", None)
-    implicit: list[dict[str, Any]] = [{"type": "deadline"}, {"type": "leg_divergence"}]
+    #
+    # The deadline rule is only implicit when there IS one. D-102 removed the
+    # hard stop, and an implicit rule reading `_days_to("")` -> None every tick
+    # is not a rule holding, it is a rule that cannot exist - which the blind
+    # counter above would have reported as a permanently unreadable stop on
+    # every position in the book, five ticks after it was written (D-113). A
+    # detector's first duty is not to cry wolf.
+    implicit: list[dict[str, Any]] = [{"type": "leg_divergence"}]
+    if str(deadline or "").strip():
+        implicit.insert(0, {"type": "deadline"})
     # A gamma-wall time stop is the second, unless the agent wrote a USABLE one
     # of its own. Keyed on whether the rule PARSES rather than on whether one
     # is present: a time_stop the evaluator cannot read is a typo, not a

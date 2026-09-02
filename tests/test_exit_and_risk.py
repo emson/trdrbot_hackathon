@@ -931,3 +931,27 @@ def test_a_nanosecond_timestamp_parses_rather_than_reading_as_unknown():
 
     assert parsed is not None
     assert parsed.year == 2026 and parsed.minute == 30
+
+
+def test_no_deadline_means_no_deadline_rule_rather_than_a_blind_one():
+    """D-102 removed the hard stop; D-113 made an unreadable signal visible.
+    Together those would have reported an unreadable `days_to_deadline` on
+    every position in the book, every tick, forever - a detector crying wolf on
+    the one case that is deliberate."""
+    pos, stats = _spread(), {}
+
+    exit_rules.evaluate(pos, _mark(0.0, 100.0), "", stats=stats)
+
+    assert "blind:days_to_deadline" not in stats
+    assert not any(k.startswith("blind:") for k in stats), stats
+
+
+def test_a_deadline_that_exists_is_still_watched_on_every_position():
+    """INV-26 is unchanged: with a hard stop configured, the sweep is implicit
+    on every position whether or not the agent wrote a rule for it."""
+    pos = _spread(exit_rules=[])
+
+    reason, why, _ = exit_rules.evaluate(pos, _mark(0.0, 100.0),
+                                         (ids.market_today()).isoformat())
+
+    assert reason == "deadline", why
