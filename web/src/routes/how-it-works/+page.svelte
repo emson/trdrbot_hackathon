@@ -1,20 +1,20 @@
 <script>
 	import Icon from '$lib/components/Icon.svelte';
 	import Term from '$lib/components/Term.svelte';
+	import PageHeader from '$lib/components/PageHeader.svelte';
 </script>
 
 <svelte:head><title>How it works — trdrbot</title></svelte:head>
 
 <section class="block ledger">
 	<div class="wrap">
-		<span class="kicker">The machine</span>
-		<h1 style="margin:.5rem 0 .8rem">Five stages, looped so the system can learn from itself.</h1>
-		<p class="standfirst">
+		<PageHeader kicker="The machine">
+			{#snippet heading()}Five stages, looped so the system can learn from itself.{/snippet}
 			A scheduler wakes the agent every 60 seconds. Cheap deterministic work runs every tick;
 			the one LLM decision cycle runs roughly every 15 minutes. What Learn finds feeds forward into
 			Think through calibration and attribution: how much size the <em>next</em> trade gets depends
 			on how honestly the last ones were explained.
-		</p>
+		</PageHeader>
 	</div>
 </section>
 

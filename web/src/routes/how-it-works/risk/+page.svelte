@@ -1,20 +1,19 @@
 <script>
 	import Term from '$lib/components/Term.svelte';
 	import Callout from '$lib/components/Callout.svelte';
+	import PageHeader from '$lib/components/PageHeader.svelte';
 </script>
 
 <svelte:head><title>Risk & sizing — trdrbot</title></svelte:head>
 
 <section class="block ledger">
 	<div class="wrap">
-		<a href="/how-it-works" class="fine" style="text-decoration:none">&larr; how it works</a>
-		<span class="kicker" style="display:block; margin-top:1rem">Risk</span>
-		<h1 style="margin:.5rem 0 .8rem">There is no approval gate. The math is the guardrail.</h1>
-		<p class="standfirst">
+		<PageHeader kicker="Risk" back={{ href: '/how-it-works', label: 'how it works' }}>
+			{#snippet heading()}There is no approval gate. The math is the guardrail.{/snippet}
 			No separate step vetoes an LLM decision after the fact. What replaces it is stricter:
 			<strong>the agent cannot execute a mistake the sizing math itself refuses to compute.</strong>
 			A "no trade" verdict from any gate is a correct answer, not a fallback.
-		</p>
+		</PageHeader>
 	</div>
 </section>
 

@@ -5,6 +5,7 @@
 	import EquityCurve from '$lib/components/EquityCurve.svelte';
 	import Callout from '$lib/components/Callout.svelte';
 	import Term from '$lib/components/Term.svelte';
+	import PageHeader from '$lib/components/PageHeader.svelte';
 
 	let { data } = $props();
 	let acct = $derived(data.account);
@@ -16,15 +17,14 @@
 
 <section class="block ledger">
 	<div class="wrap">
-		<span class="kicker">The scorecard</span>
-		<h1 style="margin:.5rem 0 .8rem">Results, stated plainly.</h1>
-		<p class="standfirst">
+		<PageHeader kicker="The scorecard">
+			{#snippet heading()}Results, stated plainly.{/snippet}
 			P&amp;L Performance is a real judging category, and the number is reported here in full.
 			But even a genuine 60%-edge agent only beats a coin flip 69% of the time over 20 trades —
 			measured, not assumed — so a one-week P&amp;L sits closer to noise than proof. Calibration
 			and attribution, below, are the honest instruments for the harder question: did the agent
 			actually know what it was doing?
-		</p>
+		</PageHeader>
 	</div>
 </section>
 

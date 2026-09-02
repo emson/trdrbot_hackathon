@@ -1,17 +1,17 @@
 <script>
 	import { glossary } from '$lib/glossary.js';
+	import PageHeader from '$lib/components/PageHeader.svelte';
 </script>
 
 <svelte:head><title>Glossary — trdrbot</title></svelte:head>
 
 <section class="block ledger">
 	<div class="wrap narrow">
-		<span class="kicker">Plain English</span>
-		<h1 style="margin:.5rem 0 .8rem">Glossary.</h1>
-		<p class="standfirst">
+		<PageHeader kicker="Plain English">
+			{#snippet heading()}Glossary.{/snippet}
 			Every dotted-underlined term on this site shows its plain-English definition on hover —
 			this page just collects them all in one place. No prior options-trading knowledge assumed.
-		</p>
+		</PageHeader>
 
 		<dl style="margin:1.6rem 0 0; display:flex; flex-direction:column; gap:1.1rem">
 			{#each glossary as g}

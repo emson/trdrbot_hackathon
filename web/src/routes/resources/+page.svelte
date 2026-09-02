@@ -2,6 +2,7 @@
 	import { resources } from '$lib/resources.js';
 	import Icon from '$lib/components/Icon.svelte';
 	import EmptyState from '$lib/components/EmptyState.svelte';
+	import PageHeader from '$lib/components/PageHeader.svelte';
 
 	const KIND_LABEL = { interactive: 'Interactive', reading: 'Read' };
 </script>
@@ -10,12 +11,11 @@
 
 <section class="block ledger">
 	<div class="wrap">
-		<span class="kicker">Tools &amp; documents</span>
-		<h1 style="margin:.5rem 0 .8rem">Resources.</h1>
-		<p class="standfirst">
+		<PageHeader kicker="Tools & documents">
+			{#snippet heading()}Resources.{/snippet}
 			Interactive tools and standalone write-ups that go deeper than the main pages — starting
 			with the risk model, itself. More gets added here over time.
-		</p>
+		</PageHeader>
 
 		{#if resources.length === 0}
 			<div style="margin-top:2rem">

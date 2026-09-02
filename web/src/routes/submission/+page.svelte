@@ -3,6 +3,7 @@
 	import { pct, usd } from '$lib/format.js';
 	import MarkdownBody from '$lib/components/MarkdownBody.svelte';
 	import Icon from '$lib/components/Icon.svelte';
+	import PageHeader from '$lib/components/PageHeader.svelte';
 
 	let { data } = $props();
 
@@ -37,17 +38,16 @@
 
 <svelte:head><title>For judges — trdrbot</title></svelte:head>
 
-<section class="block brand">
+<section class="block ledger">
 	<div class="wrap">
-		<span class="kicker">Alpaca AI Trading Agents Hackathon</span>
-		<h1 style="margin:.5rem 0 .8rem">For judges — everything in one place.</h1>
-		<p class="lead">
+		<PageHeader kicker="Alpaca AI Trading Agents Hackathon">
+			{#snippet heading()}For judges — everything in one place.{/snippet}
 			trdrbot senses markets and news, forms a falsifiable thesis, and simulates several option
 			structures for expressing it. It sizes the winner by Kelly, gated on its own earned track
 			record, then executes and manages the trade through Alpaca. Afterward, it scores itself
 			honestly: was the <strong>view</strong> right, was the <strong>structure</strong> right, or
 			did it just get lucky? Only the first two ever move its confidence. Paper trading only.
-		</p>
+		</PageHeader>
 		<div style="display:flex; gap:.7rem; flex-wrap:wrap; margin-top:1rem">
 			<a class="btn ghost" href={siteConfig.deckPath} target="_blank" rel="noopener noreferrer">Slide deck <Icon name="external" size={14} /></a>
 			{#if siteConfig.videoUrl}

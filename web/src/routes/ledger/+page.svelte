@@ -1,6 +1,7 @@
 <script>
 	import { dateTime, titleCase } from '$lib/format.js';
 	import EmptyState from '$lib/components/EmptyState.svelte';
+	import PageHeader from '$lib/components/PageHeader.svelte';
 
 	let { data } = $props();
 
@@ -31,13 +32,12 @@
 
 <section class="block ledger">
 	<div class="wrap">
-		<span class="kicker">The central record</span>
-		<h1 style="margin:.5rem 0 .6rem">Every decision, newest first.</h1>
-		<p class="standfirst">
+		<PageHeader kicker="The central record">
+			{#snippet heading()}Every decision, newest first.{/snippet}
 			Trades, declines, untraded theses, gate rejections and resolved forecasts — merged into
 			one stream. A decline is a logged answer here, not a gap in the record: {counts.declined}
 			of them carry the agent's own reasoning, verbatim.
-		</p>
+		</PageHeader>
 
 		<div class="chip-row" style="margin:1.6rem 0">
 			{#each FILTERS as f}

@@ -2,6 +2,7 @@
 	import { dateTime } from '$lib/format.js';
 	import SourceLink from '$lib/components/SourceLink.svelte';
 	import Icon from '$lib/components/Icon.svelte';
+	import PageHeader from '$lib/components/PageHeader.svelte';
 
 	let { data } = $props();
 
@@ -24,13 +25,12 @@
 
 <section class="block ledger">
 	<div class="wrap">
-		<span class="kicker">Provenance</span>
-		<h1 style="margin:.5rem 0 .8rem">Every number on this site, checkable.</h1>
-		<p class="standfirst">
+		<PageHeader kicker="Provenance">
+			{#snippet heading()}Every number on this site, checkable.{/snippet}
 			This site is generated directly from the files below by <code>trdrbot site export</code> —
 			nothing here is hand-written or summarized from memory. What's shown as "not recorded"
 			genuinely wasn't recorded, rather than being filled in with a plausible guess.
-		</p>
+		</PageHeader>
 
 		<div class="cols c3" style="margin-top:1.4rem">
 			<div class="card"><span class="stat-tile"><span class="label">Redaction scan</span>

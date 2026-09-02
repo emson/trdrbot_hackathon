@@ -1,4 +1,6 @@
 <script>
+	import PageHeader from '$lib/components/PageHeader.svelte';
+
 	let { data } = $props();
 </script>
 
@@ -6,12 +8,11 @@
 
 <section class="block ledger">
 	<div class="wrap narrow">
-		<span class="kicker">Built in public</span>
-		<h1 style="margin:.5rem 0 .8rem">The dev journal.</h1>
-		<p class="standfirst">
+		<PageHeader kicker="Built in public">
+			{#snippet heading()}The dev journal.{/snippet}
 			What actually happened, written the same day — including the defects found and why a fix
 			was chosen over its alternatives. {data.journals.length} entries.
-		</p>
+		</PageHeader>
 
 		<div style="margin-top:1.6rem">
 			{#each data.journals as j}

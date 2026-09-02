@@ -1,4 +1,6 @@
 <script>
+	import PageHeader from '$lib/components/PageHeader.svelte';
+
 	let { data } = $props();
 
 	const GROUPS = [
@@ -17,12 +19,11 @@
 
 <section class="block ledger">
 	<div class="wrap">
-		<span class="kicker">The agent's own wiki</span>
-		<h1 style="margin:.5rem 0 .8rem">Notes.</h1>
-		<p class="standfirst">
+		<PageHeader kicker="The agent's own wiki">
+			{#snippet heading()}Notes.{/snippet}
 			Every page here was written by the agent itself, not by the team — its working knowledge,
 			kept current on its own schedule. {data.notes.length} pages.
-		</p>
+		</PageHeader>
 	</div>
 </section>
 

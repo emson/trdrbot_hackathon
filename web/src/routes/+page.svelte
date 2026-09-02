@@ -3,6 +3,7 @@
 	import Attribution2x2 from '$lib/components/Attribution2x2.svelte';
 	import TickIndicator from '$lib/components/TickIndicator.svelte';
 	import Icon from '$lib/components/Icon.svelte';
+	import PageHeader from '$lib/components/PageHeader.svelte';
 
 	let { data } = $props();
 	let acct = $derived(data.account);
@@ -14,20 +15,19 @@
 </svelte:head>
 
 <!-- ── hero ─────────────────────────────────────────────────────────── -->
-<section class="block brand">
+<section class="block ledger">
 	<div class="wrap">
 		<div class="cols side">
 			<div class="stack" style="gap:1.3rem">
-				<span class="kicker">Alpaca AI Trading Agents Hackathon · paper trading</span>
-				<h1>Theo is a self-improving options-trading agent.</h1>
-				<p class="lead">
+				<PageHeader kicker="Alpaca AI Trading Agents Hackathon · paper trading">
+					{#snippet heading()}Theo is a self-improving options-trading agent.{/snippet}
 					Every cycle it gathers research, forms a falsifiable thesis, simulates the ways to
 					trade it, and sizes the one it trusts most by a track record it has to <em>earn</em>.
 					Then it scores itself honestly — whether the <strong>view</strong> was right, whether
 					the <strong>structure</strong> was right, or whether it just got lucky — and only the
 					first two ever move its confidence. That's the self-improving part: not a bigger model,
 					a more honest one.
-				</p>
+				</PageHeader>
 				<div style="display:flex; gap:.7rem; flex-wrap:wrap">
 					<a class="btn primary" href="/ledger">
 						See the ledger <Icon name="arrowRight" size={16} />
