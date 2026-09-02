@@ -21,7 +21,7 @@ from __future__ import annotations
 import hashlib
 import uuid
 from collections.abc import Sequence
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, time
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -52,6 +52,11 @@ def today() -> date:
     return utc_now().date()
 
 
+def market_now() -> datetime:
+    """The current moment in US-market (ET) time."""
+    return datetime.now(ZoneInfo("America/New_York"))
+
+
 def market_today() -> date:
     """The US-market (ET) date - for anything that means "the trading day".
 
@@ -62,7 +67,42 @@ def market_today() -> date:
     Saturday research gate had the mirror error: keyed on the UTC weekday, it
     suppressed research from Friday 20:00 ET.
     """
-    return datetime.now(ZoneInfo("America/New_York")).date()
+    return market_now().date()
+
+
+#: When the US equity session ends. One definition: `idle.minutes_to_close`
+#: had its own copy, and a clock this project keeps two copies of is a clock it
+#: eventually disagrees with itself about.
+MARKET_CLOSE_ET = time(16, 0)
+
+
+def session_closed_on(day: Any, now: datetime | None = None) -> bool:
+    """Has the trading session ON `day` ENDED? False if it cannot be judged.
+
+    **A DATE IS NOT A SESSION** (I-79), and this is D-107's other half. Maturity
+    was `horizon <= market_today()`, which is true from 00:00 ET - so the first
+    overnight housekeeping tick after midnight resolved every forecast for that
+    day against `_spot`, i.e. the PREVIOUS session's last print or an
+    after-hours IEX trade, sixteen hours before the session it named had closed.
+    `Entry.matured`'s own docstring already promised "the horizon's SESSION has
+    ended - not merely its UTC date begun", and the code delivered the ET
+    version of exactly the bug D-107 fixed, four hours later. The journal shows
+    the morning side of it: CRWD and XOM for 09-01, both resolved at 05:25 ET on
+    09-01.
+
+    One helper, two callers - `ledger.Entry.matured` and
+    `attribution._horizon_passed` - so the two halves of resolution cannot drift
+    apart again. An unparseable day is "cannot judge", which leaves the row
+    PENDING rather than resolving it against nothing.
+    """
+    try:
+        d = day if isinstance(day, date) else date.fromisoformat(str(day))
+    except (ValueError, TypeError):
+        return False
+    et = now or market_now()
+    if d < et.date():
+        return True
+    return d == et.date() and et.time() >= MARKET_CLOSE_ET
 
 
 def position_id(underlying: str, strategy: str, dt: datetime | None = None) -> str:

@@ -19,8 +19,27 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from pathlib import Path
 from typing import Any
+
+#: A frontmatter fence is a LINE that is exactly `---`, never a substring.
+#: `positions._parse` and `wiki._parse` both did `text.split("---", 2)`, and
+#: `thesis_claim` is model-authored prose where a dash-separated invalidation
+#: clause is ordinary writing (I-84, I-123). Two live shapes:
+#:
+#:   inline ` --- `   the page loads and every frontmatter key AFTER the claim
+#:                    is silently lost - horizon, bands, drift, vol view,
+#:                    divergence count, attribution, provenance - so the
+#:                    position is unscoreable and `attribution.run` marks the
+#:                    truncated page `unscoreable` and SAVES IT BACK, taking
+#:                    the claim, horizon and bands with it. This is the one
+#:                    defect in the audit that destroys data on disk.
+#:   a leading `---`  yaml emits a quoted multi-line scalar, the page fails to
+#:                    parse at all, `all()` skips it, the position VANISHES
+#:                    from the store, and reconcile adopts its live legs as an
+#:                    orphan with no stops.
+_FENCE = re.compile(r"^---[ \t]*$", re.MULTILINE)
 
 #: Schema version stamped on every appended row. Nothing rewrites old rows and
 #: nothing branches on this yet - the point is that the NEXT schema change is
@@ -30,6 +49,25 @@ from typing import Any
 #: consumer absorbing the drift with `.get()`, and no way to tell which
 #: population a historical aggregate is mixing.
 SCHEMA_VERSION = 1
+
+
+def split_frontmatter(text: str) -> tuple[str, str]:
+    """(frontmatter, body) for a page opening with a `---` fence line.
+
+    ("", text) when the page has no frontmatter at all. Raises ValueError when
+    it opens a fence and never closes one - which is a truncated write, and the
+    caller decides what to do about it (positions skips the page loudly, the
+    wiki reads the whole file as body).
+    """
+    if not text.startswith("---"):
+        return "", text
+    eol = text.find("\n")
+    if eol == -1 or text[:eol].strip() != "---":
+        return "", text
+    m = _FENCE.search(text, eol + 1)
+    if m is None:
+        raise ValueError("unterminated frontmatter: no closing `---` line")
+    return text[eol + 1:m.start()], text[m.end():]
 
 
 def write_atomic(path: Path, text: str) -> None:

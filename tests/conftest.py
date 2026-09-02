@@ -128,6 +128,8 @@ class FakeMem:
         self.mind_outcomes: list[tuple[str, bool]] = []
         self.remembered: list[str] = []
         self.dreamed = 0
+        #: Did the thesis block survive consolidation? False reproduces I-115.
+        self.thesis_block_active = True
 
     def _guard(self) -> None:
         if self.fail_with is not None:
@@ -146,11 +148,14 @@ class FakeMem:
         self._guard()
         return ContextResult(text="", blocks={})
 
-    async def remember_thesis(self, pos: Position) -> str:
+    async def remember_thesis(self, pos: Position) -> tuple[str, bool]:
+        # `(block_id, active)` - the real adapter verifies that consolidation
+        # did not archive the block it just wrote (I-115), and a fake that
+        # returns a bare id would let a caller forget the second half exists.
         self._guard()
         block_id = f"blk_{pos.position_id}"
         self.remembered.append(block_id)
-        return block_id
+        return block_id, self.thesis_block_active
 
     async def predict(self, pos: Position) -> str:
         self._guard()

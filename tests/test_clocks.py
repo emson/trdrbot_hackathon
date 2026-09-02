@@ -29,15 +29,25 @@ def test_maturity_is_judged_against_the_clock_the_horizon_was_written_with():
     attribution simply never ran for it that day."""
     from trdrbot.ledger import Entry
 
-    due_today = Entry(id="e", kind="muse", created="", underlying="SPY", claim="c",
-                      probability=0.5, horizon=ids.today().isoformat(),
+    yesterday = Entry(id="e", kind="muse", created="", underlying="SPY", claim="c",
+                      probability=0.5,
+                      horizon=(ids.market_today() - timedelta(days=1)).isoformat(),
                       band_low=1.0, band_high=2.0)
 
-    assert due_today.matured() is True
+    assert yesterday.matured() is True
+
+    # TODAY is not matured until today's SESSION has closed (I-79). The old
+    # assertion here was `horizon == today -> True`, which is true from 00:00
+    # ET - so the first overnight housekeeping tick scored the day's forecasts
+    # against the previous session's last print, sixteen hours early.
+    due_today = Entry(id="e1", kind="muse", created="", underlying="SPY", claim="c",
+                      probability=0.5, horizon=ids.market_today().isoformat(),
+                      band_low=1.0, band_high=2.0)
+    assert due_today.matured() is ids.session_closed_on(ids.market_today())
 
     tomorrow = Entry(id="e2", kind="muse", created="", underlying="SPY", claim="c",
                      probability=0.5,
-                     horizon=(ids.today() + timedelta(days=1)).isoformat(),
+                     horizon=(ids.market_today() + timedelta(days=1)).isoformat(),
                      band_low=1.0, band_high=2.0)
     assert tomorrow.matured() is False
 

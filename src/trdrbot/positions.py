@@ -203,7 +203,18 @@ class Position:
     #: - and since principles carry PERMANENT decay they would never recover.
     #: Principles are scored by incident review with human ratification
     #: (D-033/D-041), never automatically by P&L.
-    CREDITED_FRAMES = ("task", "attention")
+    #:
+    #: And it excludes "task" (I-118). `elfmem_adapter.assemble_context` already
+    #: says SELF and TASK "are framed with query=None ... correct, since neither
+    #: frame is credited" - and this tuple said otherwise, so the docstring and
+    #: the constant disagreed about the same thing. TASK similarities are
+    #: elfmem's 0.0 sentinel ("vector search never scored this"), which
+    #: `credit_weight` reads as "matched least" and floors at 0.25 - so a block
+    #: nothing scored took a quarter-weight credit from every verdict. Live: the
+    #: NVDA thesis block 7b36fdbb sits in TASK on both SPY pages and drew credit
+    #: from every SPY verdict, which is the cross-underlying credit D-072 exists
+    #: to prevent, arriving through the other frame.
+    CREDITED_FRAMES = ("attention",)
 
     @property
     def all_elfmem_block_ids(self) -> list[str]:
@@ -370,7 +381,10 @@ class PositionStore:
 
     def _parse(self, path: Path) -> Position:
         text = path.read_text(encoding="utf-8")
-        _, fm, body = text.split("---", 2)
+        # ON THE FENCE, never the substring (I-84). `text.split("---", 2)` cut
+        # the page at the first `---` ANYWHERE, and `thesis_claim` is
+        # model-authored prose.
+        fm, body = store.split_frontmatter(text)
         d = yaml.safe_load(fm) or {}
         thesis = body.split("## Thesis", 1)[-1].strip() if "## Thesis" in body else ""
         generated = d.get("generated") or {}

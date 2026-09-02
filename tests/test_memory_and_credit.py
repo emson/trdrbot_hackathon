@@ -530,7 +530,7 @@ async def test_attribution_without_a_price_says_so_rather_than_guessing(
     out = await attribution.run(store, no_price, mem, wiki, journal, verbose=False)
 
     assert out == {"attributed": 0, "pending": 1, "skipped_no_price": 1,
-                   "unscoreable": 0}
+                   "unscoreable": 0, "credit_failed": 0}
     assert journal_rows(journal, "attribution_run")[0]["skipped_no_price"] == 1
     assert mem.credited == []
 
@@ -703,7 +703,7 @@ async def test_the_answer_is_written_once_and_the_queue_then_empties(
 
     assert first["unscoreable"] == 1
     assert second == {"attributed": 0, "pending": 0, "skipped_no_price": 0,
-                      "unscoreable": 0}
+                      "unscoreable": 0, "credit_failed": 0}
     assert len(journal_rows(journal, "attribution")) == 1
 
 
@@ -809,3 +809,106 @@ async def test_adoption_waits_when_the_order_book_could_not_be_read(paths, mem: 
 
     assert result["orphan"] == [] and store.all() == []
     assert any(r.get("finding") == "orphans_deferred" for r in journal.read())
+
+
+# -------------------------------------------------------- I-117, I-119, I-115
+
+async def test_a_memory_failure_during_credit_leaves_the_position_attributable(
+    paths, make_position
+):
+    """PILLAR-4. I-117: `store.save(pos)` with the verdict came BEFORE
+    `mem.credit_blocks`, so a raise from memory during credit - "database is
+    locked", the failure `learn.guarded`'s docstring names - left the position
+    permanently attributed with ZERO credit applied. `pending()` excludes it
+    forever, no `attribution` row and no `attribution_run` heartbeat were
+    written, and the exception aborted the rest of housekeeping."""
+    from trdrbot import attribution
+
+    store, journal, wiki, _ = _stores(paths)
+    pos = make_position(status="closed", last_pnl_pct=0.4,
+                        thesis_horizon="2020-01-01", thesis_claim="SPY fades",
+                        thesis_band_high=10_000.0,
+                        elfmem_blocks={"attention": {"blk_a": 0.9}})
+    store.save(pos)
+    locked = FakeMem(fail_with=RuntimeError("database is locked"))
+    priced = tools_for(get_stock_snapshot=lambda **kw: {"latestTrade": {"p": 100.0}},
+                       get_stock_latest_trade=lambda **kw: {"trade": {"p": 100.0}})
+
+    out = await attribution.run(store, priced, locked, wiki, journal, verbose=False)
+
+    assert out["credit_failed"] == 1 and out["attributed"] == 0
+    assert not store.load(pos.position_id).attribution, \
+        "a verdict was saved for credit that never landed"
+    assert attribution.pending(store), "the position must be attributable again"
+    assert journal_rows(journal, "attribution_run"), "the heartbeat must still be written"
+
+
+async def test_housekeeping_finishes_when_attribution_raises(paths, make_position):
+    """I-117's blast radius. `housekeeping.run` awaited `attribution.run` bare,
+    so one locked write took forecast resolution, the wiki sweep, the Coach
+    pulse and dream down with it - silently, on the path that runs unattended
+    all night."""
+    from trdrbot import attribution, housekeeping
+    from trdrbot import config as config_mod
+
+    store, journal, wiki, _ = _stores(paths)
+    cfg = config_mod.load()
+    mem = FakeMem()
+
+    async def _explode(*a, **k):
+        raise RuntimeError("database is locked")
+
+    original = attribution.run
+    attribution.run = _explode
+    try:
+        out = await housekeeping.run(store, Snapshot(), mem, wiki, journal, cfg,
+                                     tools=None, verbose=False)
+    finally:
+        attribution.run = original
+
+    assert out["attributed"] == 0
+    assert journal_rows(journal, "interim_run"), "the stages around it must still run"
+
+
+async def test_on_fill_persists_the_thesis_block_before_the_prediction(paths,
+                                                                       make_position):
+    """I-119. `remember_thesis -> add_recalled_block -> predict -> save`: if
+    `predict` raised - `BlockNotActiveError`, which I-115's consolidation causes
+    - the page was never saved at all. The thesis block existed in elfmem with
+    no position referencing it, `mind_decision_block_id` stayed None, and a fill
+    is confirmed exactly once, so there was no retry."""
+    store, journal, _, _ = _stores(paths)
+    pos = make_position(status="open")
+    store.save(pos)
+
+    class BrokenPredict(FakeMem):
+        async def predict(self, p):
+            raise RuntimeError("BlockNotActiveError: the mind id is archived")
+
+    ok = await learn.guarded(learn.on_fill(pos, store, BrokenPredict(), journal),
+                             journal, stage="on_fill", position_id=pos.position_id)
+
+    assert ok is False
+    saved = store.load(pos.position_id)
+    assert f"blk_{pos.position_id}" in saved.all_elfmem_block_ids, \
+        "the thesis block was written to memory and lost from the page"
+    assert not saved.verified, "the page must not claim a step that never completed"
+
+
+async def test_an_archived_thesis_block_is_reported_not_swallowed(paths, make_position):
+    """I-115. elfmem archives a near-duplicate at cosine >= 0.95 with no audit
+    row of its own, and the id is still stored on the page and credited at
+    resolution - so the credit reaches nothing, invisibly. Live on 3 of 3
+    resolved positions."""
+    store, journal, _, _ = _stores(paths)
+    pos = make_position(status="open")
+    store.save(pos)
+    mem = FakeMem()
+    mem.thesis_block_active = False
+
+    await learn.on_fill(pos, store, mem, journal)
+
+    rows = [r for r in journal_rows(journal, "degraded")
+            if r.get("subsystem") == "elfmem.remember_thesis"]
+    assert rows and rows[0]["position_id"] == pos.position_id
+    assert journal_rows(journal, "fill")[0]["thesis_block_active"] is False

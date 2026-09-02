@@ -18,9 +18,6 @@ and ::test_the_overnight_mark_does_not_pre_satisfy_the_debounce_window), X3
 (I-75, ::test_an_unreadable_account_sizes_nothing_and_says_why and its three
 siblings), X17 (I-86, ::test_the_high_water_mark_ignores_an_unrealisable_option_print).
 
-  X5   an order that never filled is attributed at its horizon and credits memory
-  X7   a forecast matures at 00:00 ET on its horizon date, 16h before that session closes
-  X8   '---' inside a thesis claim truncates or destroys the position page
   X12  (control) shared-leg close by quantity leaves the sibling intact
 """
 from __future__ import annotations
@@ -43,7 +40,6 @@ from conftest import FakeMem, FakeTool, days_out, occ  # noqa: E402
 
 from trdrbot import (  # noqa: E402
     analytics,
-    attribution,
     competence,
     exit_rules,
     ids,
@@ -335,92 +331,6 @@ def clock_at(et_str: str):
     finally:
         ids.utc_now, ids.market_today, ids.today = saved
 
-
-# ============================================================== X5
-h("X5  an order that NEVER FILLED is attributed at its horizon and credits memory")
-w = World("x5")
-try:
-    expiry, horizon = days_out(7), days_out(-1)   # horizon already passed by the time we look
-    spot = w.broker.prices["SPY"]
-    with clock_at(f"{days_out(-3)}T14:00"):       # recorded three days ago
-        run(w.decide_open(underlying="SPY", spot=spot, expiry=expiry, long_k=round(spot - 4),
-                          short_k=round(spot - 12), stated=0.42, horizon=horizon, place=False,
-                          confirm=False))
-    pid = w.store.open_positions()[0].position_id
-    snap, recon, _ = run(w.fast_path())           # no fill, no working order -> abandoned
-    p = w.store.load(pid)
-    check(p.status == "abandoned" and p.close_reason == "never_filled", "reconcile marks it abandoned",
-          f"{p.status}/{p.close_reason}")
-    pend = attribution.pending(w.store)
-    check(any(x.position_id == pid for x in pend), "attribution.pending() lists the ABANDONED position")
-    r = run(attribution.run(w.store, w.tools, w.mem, w.wiki, w.journal, verbose=False))
-    p = w.store.load(pid)
-    check(p.attribution not in ("", "unscoreable"),
-          "it receives a real verdict - as if a trade had happened", f"verdict={p.attribution}")
-    check(len(w.mem.credited) > 0, "and its recalled memory blocks are CREDITED on that verdict",
-          f"credits={[(b, s, wt) for b, s, wt, _ in w.mem.credited]}")
-    rate, n = competence.attributable_rate(w.store.all())
-    check(n == 1, "and it counts toward the attributable rate that gates the size ladder",
-          f"rate={rate} over {n} verdict(s)")
-    NOTES.append("X5: attribution.pending() admits every non-active status including `abandoned`; "
-                 "profited falls back to close_reason, so a never-filled order becomes a scored loss.")
-finally:
-    w.cleanup()
-
-# ============================================================== X7
-h("X7  D-107's other half: a forecast MATURES at 00:00 ET on its horizon date, 16 hours before that session closes")
-w = World("x7")
-try:
-    hz = "2026-09-10"
-    e = w.ledger.register(kind="standalone", underlying="SPY", claim="c", probability=0.6,
-                          horizon=hz, band_low=600.0, band_high=700.0)
-    with clock_at("2026-09-09T20:05"):
-        check(not e.matured(), "20:05 ET the evening before: NOT matured (D-107 fixed this)")
-    with clock_at("2026-09-10T00:15"):
-        check(e.matured(), "00:15 ET on the horizon date: MATURED - resolved by the first overnight housekeeping tick",
-              f"matured={e.matured()} against ids.market_today()={ids.market_today()}")
-        due = w.ledger.matured_unresolved()
-        check(e in due, "matured_unresolved() hands it to the resolver, whose `_spot` is the previous close")
-        pos = SimpleNamespace(thesis_horizon=hz)
-        check(attribution._horizon_passed(pos), "attribution._horizon_passed agrees: the position is attributed at 00:15 too")
-    NOTES.append("X7: Entry.matured() and attribution._horizon_passed compare the horizon to the ET DATE, "
-                 "which is true from midnight; the docstring promises 'the horizon's SESSION has ended'.")
-finally:
-    w.cleanup()
-
-# ============================================================== X8
-h("X8  '---' inside the thesis claim: the position page is cut at the wrong place")
-for tag, claim, mode in (("x8a", "SPY fades --- payrolls Friday --- into 628", "truncated"),
-                         ("x8b", "SPY fades into payrolls\n--- invalidation: a close above 645", "unreadable")):
-    w = World(tag)
-    try:
-        expiry, horizon = days_out(7), days_out(3)
-        spot = w.broker.prices["SPY"]
-        run(w.decide_open(underlying="SPY", spot=spot, expiry=expiry, long_k=round(spot - 4),
-                          short_k=round(spot - 12), stated=0.42, horizon=horizon,
-                          thesis_claim=claim, confirm=False))
-        pages = list(w.store.dir.glob("*.md"))
-        on_disk = pages[0].read_text()
-        buf = io.StringIO()
-        with contextlib.redirect_stdout(buf):
-            loaded = w.store.all()
-        lp = loaded[0] if loaded else None
-        if mode == "truncated":
-            check(lp is not None and "thesis_horizon:" in on_disk and not lp.thesis_horizon and lp.thesis_band_high is None,
-                  f"[{tag}] inline ' --- ': page loads, but thesis_horizon/bands/attribution AFTER the claim are silently lost",
-                  f"loaded horizon={lp.thesis_horizon!r} band_high={lp.thesis_band_high!r} claim={lp.thesis_claim!r}" if lp else "no position loaded")
-            r = run(attribution.run(w.store, w.tools, w.mem, w.wiki, w.journal, verbose=False))
-        else:
-            check(lp is None, f"[{tag}] a claim line starting '---': the page is UNREADABLE and the position VANISHES",
-                  buf.getvalue().strip()[:110])
-            snap, recon, _ = run(w.fast_path())
-            orphans = [p for p in w.store.all() if p.provenance == "unknown"]
-            check(len(orphans) == 1, f"[{tag}] reconcile adopts the live legs as an ORPHAN: thesis, stops and sizing gone",
-                  f"recon={reconcile.summarise(recon)}")
-    finally:
-        w.cleanup()
-NOTES.append("X8: PositionStore._parse splits the whole file on '---' (maxsplit=2) regardless of line position; "
-             "yaml.safe_dump emits a claim containing ' --- ' as a plain scalar.")
 
 # ============================================================== X12
 h("X12 (control) shared-leg close by quantity: closing A must not leg B out (D-112)")

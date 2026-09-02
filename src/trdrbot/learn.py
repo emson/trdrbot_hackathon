@@ -8,6 +8,7 @@ duplicated or skipped depending on which path happened to notice first.
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from . import ids
@@ -59,20 +60,40 @@ async def guarded(coro: Any, journal: Journal, *, stage: str, position_id: str) 
         return False
 
 
-async def on_fill(pos: Position, store: PositionStore, mem: ElfmemAdapter, journal: Journal) -> None:
+async def on_fill(pos: Position, store: PositionStore, mem: ElfmemAdapter,
+                  journal: Journal) -> None:
     """F2: a position's order is confirmed filled. Remember the thesis, make
     it a falsifiable prediction, and mark the page machine-confirmed (D-022) -
     reconciliation independently verified this, which is a real trust
-    upgrade over the original unverified write."""
-    block_id = await mem.remember_thesis(pos)
+    upgrade over the original unverified write.
+
+    **SAVED AFTER EACH STEP** (I-119). The page used to be written once, at the
+    end, so a raise from `predict` - `BlockNotActiveError`, which I-115's
+    consolidation causes - lost everything before it too: the thesis block
+    existed in elfmem with no position referencing it, `mind_decision_block_id`
+    stayed None, and because a fill is confirmed exactly once there was no
+    retry. Each step now persists what it earned.
+    """
+    block_id, active = await mem.remember_thesis(pos)
     # The thesis block IS the decision's subject matter, so it carries full
     # credit weight regardless of what retrieval scored (D-073).
     pos.add_recalled_block("attention", block_id, similarity=1.0)
+    store.save(pos)
+    if not active:
+        # elfmem archived it as a near-duplicate on the way in, with no audit
+        # row of its own (I-115). The id is kept - it is the honest record of
+        # what was written - but credit at resolution will reach nothing, and
+        # that must not be invisible.
+        journal.append("degraded", subsystem="elfmem.remember_thesis",
+                       reason="the thesis block was archived as a near-duplicate on "
+                              "write, so credit at resolution will reach nothing",
+                       position_id=pos.position_id, elfmem_block=block_id)
     pos.mind_decision_block_id = await mem.predict(pos)
     pos.mark_verified(by="trdrbot/reconcile")
     store.save(pos)
     journal.append("fill", position_id=pos.position_id, elfmem_block=block_id,
-                    mind_decision_block=pos.mind_decision_block_id)
+                   thesis_block_active=active,
+                   mind_decision_block=pos.mind_decision_block_id)
 
 
 async def on_resolution(
@@ -199,11 +220,19 @@ def _write_lesson(wiki: Wiki, pos: Position, *, pnl_fraction: float | None, scor
         "nothing scored - no measured P&L, so both the prediction and the credit "
         "would be a guess"
     )
+    # QUOTE EVERY LINE (I-122). Only the first got a `> `, so a thesis whose
+    # later lines start with `## ` - which model prose does - wrote a real
+    # markdown heading into lessons.md. `recent_lessons` split on `\n## `, so
+    # that phantom consumed one of the LESSONS_IN_PROMPT slots and pushed a
+    # genuine resolved position out of the decide prompt.
+    quoted = "\n".join(
+        f"> {line}" for line in
+        (pos.thesis[:300] if pos.thesis else "(no thesis recorded)").splitlines() or [""])
     entry = (
         f"\n\n{heading}\n"
         f"{pos.underlying} {pos.strategy}, closed `{pos.close_reason}`, P&L {pnl_text}. "
         f"Credit assignment: {credit_text}.\n\n"
-        f"> {pos.thesis[:300] if pos.thesis else '(no thesis recorded)'}\n"
+        f"{quoted}\n"
     )
     existing.body = existing.body.rstrip("\n") + entry + "\n"
     existing.add_source(f"positions/{pos.position_id}.md", author="trdrbot/learn")
@@ -238,13 +267,17 @@ def recent_lessons(wiki: Wiki, k: int = LESSONS_IN_PROMPT) -> str:
     concept = wiki.read("lessons")
     if concept is None or not concept.body.strip():
         return ""
-    # Sections, not lines: one lesson is a heading plus its prose plus the
-    # quoted thesis, and splitting on anything finer would hand the agent half
-    # an entry. `[1:]` drops the "# Lessons" preamble, which is a title.
-    sections = [s.strip() for s in concept.body.split("\n## ")[1:] if s.strip()]
+    # Split on the marker the WRITER actually emits - `## pos_` - not on any
+    # `## ` (I-122). A level-2 heading inside a thesis used to create a section
+    # that consumed one of the k slots and evicted a real lesson; quoting the
+    # whole thesis above stops new ones appearing, and this stops the ones
+    # already on disk from counting. `[1:]`-style trimming is unnecessary now:
+    # the "# Lessons" preamble simply does not match.
+    sections = [s.strip() for s in re.split(r"\n(?=## pos_)", concept.body)
+                if s.strip().startswith("## pos_")]
     if not sections:
         return ""
-    return "\n\n".join(f"## {s}" for s in sections[-k:])
+    return "\n\n".join(sections[-k:])
 
 
 def _new_lessons_concept():

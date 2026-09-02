@@ -161,7 +161,26 @@ class ElfmemAdapter:
 
     # -- fill-event learning (F2) --
 
-    async def remember_thesis(self, pos: Position) -> str:
+    async def block_is_active(self, block_id: str, *, tag: str = "",
+                              category: str = "knowledge") -> bool:
+        """Is this block still ACTIVE, or did consolidation archive it?
+
+        elfmem's `consolidate()` archives any inbox block at cosine >= 0.95
+        against an active one as `superseded`, with no audit row - so a block
+        id we hold can silently stop existing (I-115). `ls()` is elfmem's
+        deterministic unscored view of ACTIVE blocks, which is exactly the
+        question. Unknown counts as ACTIVE: a read failure must not be reported
+        as a lost block, which would be absence-as-evidence in the direction
+        that cries wolf.
+        """
+        try:
+            rows = await self.mem.ls(tag=tag or None, category=category, limit=200)
+        except Exception as exc:  # noqa: BLE001 - a verification never blocks a fill
+            print(f"[elfmem] could not verify block {block_id}: {exc!r}")
+            return True
+        return any(getattr(b, "id", None) == block_id for b in rows)
+
+    async def remember_thesis(self, pos: Position) -> tuple[str, bool]:
         """Cue is hand-written, not derived - a missing cue means the block is
         findable only by its own wording later (verified against elfmem's own
         retrieval design: the cue forms the BM25 half of hybrid retrieval).
@@ -176,6 +195,12 @@ class ElfmemAdapter:
         dated trade rationale. Position theses are `[routing]`'s "evolving
         pattern" case, never identity - so every future one is pinned at
         write time instead of retrofitted after the fact.
+
+        Returns `(block_id, active)`. **`active` is False when consolidation
+        archived the block we just wrote** (I-115) - it is stored on the page
+        and credited at resolution, so an archived id means credit that reaches
+        nothing, and elfmem writes no audit row for the archiving. A re-entry
+        on a >= 0.95-similar thesis is the ordinary way to reach it.
         """
         text = pos.thesis or f"{pos.strategy} on {pos.underlying}"
         tags = [pos.underlying.lower(), pos.strategy]
@@ -189,7 +214,7 @@ class ElfmemAdapter:
             await self.mem.consolidate(host_analyses={
                 r.block_id: {"alignment_score": 0.6, "tags": tags, "summary": text},
             })
-        return r.block_id
+        return r.block_id, await self.block_is_active(r.block_id, tag=tags[0])
 
     async def _mind_for(self, underlying: str) -> str:
         """One mind per underlying (resolves notes/006 gap #12's open mapping
@@ -224,15 +249,66 @@ class ElfmemAdapter:
             store.write_atomic(self._minds_path, json.dumps(minds, indent=2))
         return r.block_id
 
+    def _prediction_text(self, pos: Position) -> str:
+        """The mind's prediction, in ITS OWN WORDS - never a copy of the thesis.
+
+        `remember_thesis` stores `pos.thesis` as a knowledge block and this
+        stored `pos.thesis` again inside `mind_predict`, so elfmem held the same
+        text twice - and `consolidate()` archives any inbox block at cosine
+        >= 0.95 against an active one as `superseded`, with no audit row.
+        Whichever half consolidated second died, on EVERY position: live, 3 of
+        3 resolved positions had lost one (I-115).
+
+        A prediction is a different statement from a rationale, so it says a
+        different thing: the falsifiable CLAIM, the date it is judged, and the
+        position it belongs to. That is also more useful to a human reading the
+        mind than a paragraph of reasoning pasted in twice.
+        """
+        claim = (pos.thesis_claim or pos.thesis or
+                 f"{pos.strategy} on {pos.underlying} resolves favourably")
+        horizon = pos.thesis_horizon or pos.expiry or "its horizon"
+        return (f"Prediction for {pos.position_id} ({pos.underlying} "
+                f"{pos.strategy}), judged at {horizon}: {claim}")
+
     async def predict(self, pos: Position) -> str:
         """Returns the decision_block_id to store on the position - the bridge
-        to mind_outcome() at resolution."""
+        to mind_outcome() at resolution.
+
+        A dead mind id is DROPPED and re-minted, once (I-119). `minds.json` is
+        our own map of underlying -> mind block, and a block in it can be
+        archived by consolidation - after which every future fill on that name
+        raises `BlockNotActiveError` identically, forever, and `on_fill` never
+        completes. Retrying the same dead id is the one thing that cannot work.
+        """
+        from elfmem import BlockNotActiveError
+
         mind_id = await self._mind_for(pos.underlying)
-        r = await self.mem.mind_predict(
-            mind_id, pos.thesis or f"{pos.strategy} resolves favourably",
-            verify_at=pos.expiry or pos.opened,
-        )
+        try:
+            r = await self.mem.mind_predict(
+                mind_id, self._prediction_text(pos),
+                verify_at=pos.expiry or pos.opened,
+            )
+        except BlockNotActiveError:
+            print(f"[elfmem] mind {mind_id} for {pos.underlying} is no longer active - "
+                  f"dropping it from minds.json and minting a fresh one")
+            self._forget_mind(pos.underlying)
+            mind_id = await self._mind_for(pos.underlying)
+            r = await self.mem.mind_predict(
+                mind_id, self._prediction_text(pos),
+                verify_at=pos.expiry or pos.opened,
+            )
         return r.decision_block_id
+
+    def _forget_mind(self, underlying: str) -> None:
+        """Drop one underlying's mind id from the local map."""
+        if not self._minds_path or not self._minds_path.exists():
+            return
+        try:
+            minds = json.loads(self._minds_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return
+        if minds.pop(underlying, None) is not None:
+            store.write_atomic(self._minds_path, json.dumps(minds, indent=2))
 
     # -- resolution learning (F3) - the actual credit-assignment step --
 
@@ -291,8 +367,17 @@ class ElfmemAdapter:
         """
         if not block_ids:
             return (0, 0)
+        # `blocks_updated` ALONE (I-116). elfmem computes `blocks_penalized`
+        # FROM the updated ids, so every penalised block is also an updated one
+        # and adding them double-counted it. With a negative verdict (signal
+        # 0.1, under the penalise threshold) and one of two blocks archived,
+        # this returned (2, 2): no consolidate-and-retry, no
+        # `attribution_credit_short` row, and `blocks_applied=2` journalled for
+        # credit that reached one block. Exactly the negative-verdict path -
+        # the one where blocks are actually lost - silently lost them, and
+        # I-115 guarantees an archived block on every position.
         out = await self.mem.outcome(block_ids, signal, weight=weight, source=source)
-        applied = out.blocks_updated + out.blocks_penalized
+        applied = out.blocks_updated
         if applied < len(block_ids):
             # outcome() on a block still in elfmem's inbox returns
             # updated=0 SILENTLY - the credit vanishes. This is not an
@@ -308,7 +393,7 @@ class ElfmemAdapter:
                   f"consolidating inbox and retrying")
             await self.mem.consolidate()
             retry = await self.mem.outcome(block_ids, signal, weight=weight, source=source)
-            applied = retry.blocks_updated + retry.blocks_penalized
+            applied = retry.blocks_updated
         return (len(block_ids), applied)
 
     # -- housekeeping only (INV-10/23: dream() lives here and nowhere else) --

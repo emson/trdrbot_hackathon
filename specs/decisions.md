@@ -5371,3 +5371,91 @@ notice that the clock is fake.
 silently red since D-115 landed, on two scenarios that asserted a mark stop firing on an underlying
 that had not moved. Those are now the corroborated move a real stop is, and the gate is pytest +
 ruff + all seven scaffolds + `suite_at 30`, each on its own captured exit code.
+
+## D-118 - The record: a date is not a session, a fence is not a substring, one text is stored once
+
+Ten defects in what the ladder actually reads. Plan: `docs/plan_defect_remediation.md` W3. Closes
+I-79, I-80, I-84, I-105, I-115, I-116, I-117, I-118, I-119, I-122, I-123.
+
+**A DATE IS NOT A SESSION (I-79), and this is D-107's other half.** D-107 moved maturity off the UTC
+date and onto the market date, which fixed the evening and left the morning: `horizon <=
+market_today()` is true from **00:00 ET**, so the first overnight housekeeping tick resolved every
+forecast for that day against `_spot` - the previous session's last print, or an after-hours IEX
+trade - sixteen hours before the session it named had closed. `Entry.matured`'s own docstring
+already promised "the horizon's SESSION has ended". The journal shows the morning side: CRWD and XOM
+for 09-01, both resolved at 05:25 ET on 09-01. `ids.session_closed_on` is now the whole rule and both
+halves of resolution call it, so they cannot drift apart again. Already-resolved rows stay as they
+are: the ledger is append-only and re-scoring would rewrite the record, the same call D-107 made.
+
+**A FRONTMATTER FENCE IS A LINE (I-84, I-123).** `positions._parse` and `wiki._parse` both did
+`text.split("---", 2)` with no regard for line position, and `thesis_claim` is model-authored prose
+where a dash-separated invalidation clause is ordinary writing. Two shapes, both reproduced: an
+inline ` --- ` loads the page and silently drops every frontmatter key after the claim - horizon,
+bands, drift, vol view, divergence count, attribution, provenance - and a claim line starting `---`
+makes the page unparseable, so the position VANISHES from the store and reconcile adopts its live
+legs as an orphan with no stops. **This is the one defect in the audit that destroys data on disk**:
+a truncated page is unscoreable, so `attribution.run` marks it `unscoreable` and SAVES IT BACK,
+taking the claim, horizon and bands with it. One helper, `store.split_frontmatter`, in both parsers.
+
+*Repair:* a read-only scan of all 9 position pages and all 58 wiki concepts found **nothing lost** -
+the old parser would have truncated none of them. The defect was live and reproducible; the model had
+simply not yet written a claim containing `---`. Recorded rather than assumed.
+
+**TERMINAL IS NOT TRADED (I-80).** `attribution.pending()` admitted every status outside the active
+five, which includes `abandoned` - an order that never filled. `unscoreable_reason` saw a thesis and
+a horizon; `profited` fell back to `close_reason in ("target_hit", "thesis_resolved")`, which
+`never_filled` is not. So a limit order that expired unfilled was scored
+`thesis_wrong_expression_faithful` (signal 0.1 applied to every recalled block) or
+`thesis_right_expression_wrong` (0.65), and counted in the `attributable_rate` that gates SCALE and
+MATURE. `positions.SCOREABLE_TERMINAL` is the predicate: there was no expression to judge.
+
+**CREDIT FIRST, SAVE THE VERDICT ON SUCCESS (I-117).** The save came first and the call was awaited
+bare, so a raise from memory during credit - "database is locked", the failure `learn.guarded`'s own
+docstring names - left the position permanently attributed with zero credit: `pending()` excludes it
+forever, no `attribution` row and no heartbeat were written, and the exception took the REST of
+housekeeping with it (forecast resolution, the sweep, the Coach pulse, dream). Now isolated per
+position, with an outer advisory boundary matching every sibling stage in housekeeping, and a
+`credit_failed` count on the heartbeat.
+
+**ONE TEXT, STORED ONCE (I-115, I-116, I-119).** `remember_thesis` stored `pos.thesis` and `predict`
+stored `pos.thesis` AGAIN, so elfmem held the same text twice - and `consolidate()` archives any
+inbox block at cosine >= 0.95 against an active one as `superseded`, with no audit row. Whichever
+half consolidated second died, on every position: **live, 3 of 3 resolved positions had lost one.**
+The prediction now says what a prediction says - the falsifiable claim, the date it is judged, the
+position it belongs to - which is also more useful to a human reading the mind. `remember_thesis`
+verifies the block it returns is still active and reports a `degraded` row when it is not, because
+an archived id is credit that reaches nothing. `credit_blocks` counts `blocks_updated` alone
+(elfmem computes `blocks_penalized` FROM the updated ids, so a penalised block was counted twice and
+the negative-verdict path - the one where blocks are actually lost - never triggered D-057's
+consolidate-and-retry). `on_fill` saves after each step and a dead mind id is dropped from
+`minds.json` and re-minted rather than retried forever.
+
+*Not repairable:* the blocks already archived cannot be un-archived - elfmem has no such call. The
+I-2 precedent: watched, no action possible.
+
+**THE TASK FRAME IS NOT CREDITED (I-118).** `elfmem_adapter` said SELF and TASK "are framed with
+query=None ... correct, since neither frame is credited" while `CREDITED_FRAMES` said otherwise: one
+fact, two answers. Both frames are queried with None, so elfmem returns its 0.0 "never scored"
+sentinel, which `credit_weight` reads as "matched least" and floors at 0.25 - a block nothing scored
+drawing a quarter-weight credit from every verdict. Live: the NVDA thesis block 7b36fdbb sits in TASK
+on both SPY pages and drew credit from every SPY verdict, which is the cross-underlying credit D-072
+exists to prevent, arriving through the other frame. Provenance is unaffected - every recalled block
+is still on the page and still auditable; only CREDIT narrows to the frame whose similarity means
+something.
+
+**A JUDGED TRIAL IS A CLOSED RECORD (I-105).** `register`'s dedup returned the prior row without
+updating its probability. Identical bands across runs are documented as common (three byte-identical
+pairs from three muse runs on the same cached closes) while the LLM's probability is not stable: run
+1 registered at 0.80 and a gate rejected it; run 2 drew the same bands at 0.30, dedup returned row A,
+and `mark_stated(A)` stated it at **0.80** - a number nobody stated that run - while it still carried
+`rejected_by`, so `gate_regret` counted it as a refusal and an admission at once. Run 3 no longer
+matched and appended a third row: two stated rows and two calibration forecasts for one claim. A row
+carrying `rejected_by` is never returned; an unjudged match still dedups and takes the latest number,
+which is what one decide cycle's repeated `simulate_experiments` calls mean.
+
+**A PHANTOM HEADING CANNOT EVICT A LESSON (I-122).** `_write_lesson` quoted only the FIRST line of
+the thesis, so a thesis whose later lines start with `## ` - which model prose does - wrote a real
+markdown heading into `lessons.md`, and `recent_lessons` split on any `\n## `, so the phantom took
+one of the five prompt slots and pushed out a genuinely resolved position. Both halves: every line is
+quoted, and the reader splits on the `## pos_` marker the writer actually emits, which also handles
+the phantoms already on disk.

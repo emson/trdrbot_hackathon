@@ -14,7 +14,7 @@ from __future__ import annotations
 import math
 import random
 import tempfile
-from datetime import UTC, date, timedelta
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -676,13 +676,28 @@ def test_latest_trade_response_is_parsed_from_its_real_shape():
     assert _f((node or {}).get("p"), 0.0) == 767.46
 
 
-def test_credit_assignment_excludes_the_constitution():
+def test_credit_reaches_only_the_frame_that_was_scored_against_the_query():
     """A losing trade must not degrade identity. Principles carry PERMANENT
     decay, so P&L-driven damage to them would never recover, and D-033 puts
-    them under human-ratified incident review instead."""
+    them under human-ratified incident review instead.
+
+    **TASK left `CREDITED_FRAMES` too** (I-118). `elfmem_adapter` already said
+    SELF and TASK "are framed with query=None ... correct, since neither frame
+    is credited" while the constant said otherwise - one fact, two answers.
+    Both are framed with no query, so elfmem returns its 0.0 "never scored"
+    sentinel for every block, which `credit_weight` reads as "matched least"
+    and floors at 0.25: a block nothing scored took a quarter-weight credit
+    from every verdict. Live, the NVDA thesis block sat in TASK on both SPY
+    pages and drew credit from every SPY verdict - the cross-underlying credit
+    D-072 exists to prevent, through the other frame.
+
+    Provenance is unaffected: every recalled block is still on the page and
+    still auditable. Only CREDIT narrows, to the one frame whose similarity
+    means anything.
+    """
     p = Position(position_id="x", elfmem_blocks={
         "self": ["c1", "c2"], "task": ["t1"], "attention": ["a1", "a2"]})
-    assert set(p.all_elfmem_block_ids) == {"t1", "a1", "a2"}
+    assert set(p.all_elfmem_block_ids) == {"a1", "a2"}
     assert set(p.recalled_block_ids()) == {"c1", "c2", "t1", "a1", "a2"}
 
 
@@ -3863,7 +3878,7 @@ def test_forecast_window_leaves_room_to_act():
     assert competence.forecast_window("2027-01-01", today)[2] == "2026-09-07"
 
 
-def test_a_forecast_matures_when_its_session_ends_not_when_its_utc_date_begins():
+def test_a_forecast_matures_when_its_session_ends_not_when_its_date_begins():
     """D-107. PILLAR-4 (learning integrity): the calibration sample must be
     scored against the close of the horizon day, not the close BEFORE it.
 
@@ -3875,25 +3890,41 @@ def test_a_forecast_matures_when_its_session_ends_not_when_its_utc_date_begins()
     resolved before 16:00 ET on their own horizon date. `attribution.
     _horizon_passed` had the same clock and is pinned by the same test."""
     from types import SimpleNamespace
+    from zoneinfo import ZoneInfo
 
     from trdrbot import attribution, ids
     from trdrbot import ledger as L
+    ET = ZoneInfo("America/New_York")
 
     e = L.Entry(id="x", kind="muse", created="2026-09-01", underlying="SPY", claim="c",
                 probability=0.4, horizon="2026-09-03", band_low=1.0, band_high=2.0)
+
+    def et(stamp: str):
+        return datetime.fromisoformat(stamp).replace(tzinfo=ET)
+
     # Tuesday 20:30 ET is Wednesday 00:30 UTC. The horizon is Wednesday.
-    tue_et, wed_utc = date(2026, 9, 2), date(2026, 9, 3)
-    assert not e.matured(tue_et), "Wednesday's horizon has not passed on Tuesday evening"
-    assert e.matured(wed_utc)
+    assert not e.matured(et("2026-09-02T20:30")), \
+        "Wednesday's horizon has not passed on Tuesday evening"
+    # ...and D-107's other half (I-79): nor has it at 00:15 ET on Wednesday
+    # itself, which is where every overnight housekeeping tick lives. Resolving
+    # there scores the horizon against the PREVIOUS session's last print.
+    assert not e.matured(et("2026-09-03T00:15")), \
+        "a date is not a session - 00:15 ET is sixteen hours before the bell"
+    assert not e.matured(et("2026-09-03T15:59"))
+    assert e.matured(et("2026-09-03T16:00")), "the session has now closed"
+    assert e.matured(et("2026-09-04T09:00"))
+
     # And the default clock is the MARKET one, whatever UTC says.
-    old_today, old_market = ids.today, ids.market_today
+    old_now, old_today, old_market = ids.market_now, ids.today, ids.market_today
     try:
-        ids.today, ids.market_today = (lambda: wed_utc), (lambda: tue_et)
-        assert not e.matured(), "matured() read the UTC date, not the market date"
+        ids.market_now = lambda: et("2026-09-03T00:15")
+        ids.today, ids.market_today = (lambda: date(2026, 9, 3)), (lambda: date(2026, 9, 3))
+        assert not e.matured(), "matured() resolved before the session it named had closed"
         pos = SimpleNamespace(thesis_horizon="2026-09-03")
-        assert not attribution._horizon_passed(pos), "attribution read the UTC date"
+        assert not attribution._horizon_passed(pos), \
+            "attribution and the ledger must agree - they are two halves of one rule"
     finally:
-        ids.today, ids.market_today = old_today, old_market
+        ids.market_now, ids.today, ids.market_today = old_now, old_today, old_market
 
 
 def test_no_deadline_is_a_first_class_state_not_a_disarmed_one(tmp_path):
@@ -5863,3 +5894,226 @@ def test_the_matching_structure_still_supplies_the_risk(tmp_path):
         thesis="t", confidence=0.4, max_loss_usd=900.0)
 
     assert store.all()[0].max_loss_usd == 2700.0
+
+
+# ==================================================== D-118 - the record
+#
+# I-79, I-80, I-84, I-105, I-115, I-116, I-118, I-119, I-122, I-123: what the
+# ladder reads is wrong, or double, or destroyed on disk.
+
+def test_a_frontmatter_fence_is_a_line_never_a_substring(tmp_path):
+    """I-84 (scaffold X8), the one defect in the audit that destroys data on
+    disk. `PositionStore._parse` did `text.split("---", 2)` with no regard for
+    line position, and `thesis_claim` is model-authored prose where a
+    dash-separated invalidation clause is ordinary writing. Inline, every
+    frontmatter field AFTER the claim was silently lost - horizon, bands, drift,
+    vol view, divergence count, attribution, provenance - and `attribution.run`
+    then marked the truncated page `unscoreable` and SAVED IT BACK."""
+    store = PositionStore(tmp_path)
+    for i, claim in enumerate([
+        "SPY fades --- invalidated above 640",
+        "---\nSPY fades below 630",
+        "SPY fades\n---\ninvalidated above 640",
+    ]):
+        p = Position(position_id=f"pos_{i}", status="open", underlying="SPY",
+                     thesis_claim=claim, thesis_horizon="2026-09-09",
+                     thesis_band_low=620.0, thesis_band_high=636.0,
+                     attribution="", provenance="agent")
+        store.save(p)
+        back = store.load(f"pos_{i}")
+        assert back is not None, f"the page VANISHED from the store: {claim!r}"
+        assert back.thesis_claim == claim
+        assert back.thesis_horizon == "2026-09-09", "every key after the claim was lost"
+        assert back.thesis_band_high == 636.0 and back.provenance == "agent"
+    assert len(store.all()) == 3
+
+
+def test_a_wiki_page_survives_a_dash_run_in_its_frontmatter(tmp_path):
+    """I-123, the wiki half of the same bug and the one that makes it
+    destructive: `wiki.py` split on the same substring, so a `sources[].resource`
+    or a title containing ` --- ` lost every later key."""
+    from trdrbot.wiki import Concept, Wiki
+
+    w = Wiki(tmp_path)
+    c = Concept(concept_id="research/SPY", frontmatter={"tags": ["a"]},
+                body="# What it is\nx\n")
+    c.add_source("a note --- with a dash run", author="trdrbot/test")
+    w.write_concept(c, type_="CompanyDossier")
+
+    back = w.read("research/SPY")
+    assert back is not None
+    assert back.frontmatter.get("type") == "CompanyDossier", "keys after the source were lost"
+    assert back.frontmatter.get("tags") == ["a"]
+    assert back.frontmatter["sources"][0]["resource"] == "a note --- with a dash run"
+
+
+def test_an_order_that_never_filled_is_never_attributed(tmp_path):
+    """PILLAR-4. I-80 (scaffold X5): `pending()` admitted every status outside
+    the active five, which includes `abandoned` - so a limit order that expired
+    unfilled was scored `thesis_wrong_expression_faithful` (signal 0.1 applied
+    to every recalled block) or `thesis_right_expression_wrong` (0.65). A
+    verdict on a trade that never existed, counted in the `attributable_rate`
+    that gates SCALE and MATURE. There was no expression to judge."""
+    from trdrbot import attribution
+
+    store = PositionStore(tmp_path)
+    common = dict(underlying="SPY", thesis_claim="SPY fades",
+                  thesis_horizon=days_out(-2), thesis_band_high=636.0)
+    store.save(Position(position_id="pos_never", status="abandoned",
+                        close_reason="never_filled", **common))
+    store.save(Position(position_id="pos_traded", status="closed",
+                        close_reason="stop_triggered", last_pnl_pct=-0.4, **common))
+
+    queued = [p.position_id for p in attribution.pending(store)]
+
+    assert queued == ["pos_traded"], "an order that never filled has no verdict to reach"
+
+
+def test_a_judged_trial_is_never_restated_by_a_later_run(tmp_path):
+    """I-105. `register`'s dedup returned the prior row without updating its
+    probability, and identical bands across runs are documented as common while
+    the LLM's probability is not stable. Run 1 registers at 0.80 and a gate
+    rejects it; run 2 draws the same bands at 0.30 and `mark_stated` then states
+    the row at **0.80** - a number nobody stated on that run - while it still
+    carries `rejected_by`, so `gate_regret` counts it as a refusal and an
+    admission at once."""
+    from trdrbot import ledger as L
+
+    book = L.Ledger(tmp_path / "ledger.jsonl")
+    bands = dict(underlying="SPY", horizon=days_out(3), band_low=620.0, band_high=640.0)
+
+    run1 = book.register(kind="muse", claim="c", probability=0.80,
+                         probability_stated=False, **bands)
+    book.mark_rejected(run1.id, "rejected: lottery ticket")
+
+    run2 = book.register(kind="muse", claim="c", probability=0.30,
+                         probability_stated=False, **bands)
+
+    assert run2.id != run1.id, "a judged trial is a closed record, not a slot to reuse"
+    assert run2.probability == pytest.approx(0.30)
+    book.mark_stated(run2.id)
+    rows = {e.id: e for e in book.all()}
+    assert rows[run2.id].probability == pytest.approx(0.30) and not rows[run2.id].rejected_by
+    assert rows[run1.id].probability == pytest.approx(0.80) and not rows[run1.id].probability_stated
+    assert sum(1 for e in book.all() if e.probability_stated) == 1, \
+        "one claim, one stated row"
+
+
+def test_an_unjudged_duplicate_within_one_cycle_takes_the_latest_number(tmp_path):
+    """The opposite direction: the dedup still exists, and still does its job.
+    One decide cycle's repeated `simulate_experiments` calls are ONE trial, and
+    within a cycle the latest number is the one meant."""
+    from trdrbot import ledger as L
+
+    book = L.Ledger(tmp_path / "ledger.jsonl")
+    bands = dict(underlying="SPY", horizon=days_out(3), band_low=620.0, band_high=640.0)
+
+    first = book.register(kind="thesis", claim="c", probability=0.5,
+                          probability_stated=False, **bands)
+    again = book.register(kind="thesis", claim="c", probability=0.62,
+                          probability_stated=False, **bands)
+
+    assert again.id == first.id, "two simulate calls in one cycle are one trial"
+    assert again.probability == pytest.approx(0.62)
+    assert book.trials() == 1
+
+
+def test_a_penalised_block_is_counted_once(tmp_path):
+    """I-116. `credit_blocks` set `applied = blocks_updated + blocks_penalized`,
+    but elfmem computes `blocks_penalized` FROM the updated ids - so every
+    penalised block was counted twice. With a negative verdict and one of two
+    blocks archived it returned (2, 2): no consolidate-and-retry, no
+    `attribution_credit_short` row, and full credit journalled for credit that
+    reached one block. Exactly the negative-verdict path silently lost blocks,
+    and the archived block is guaranteed by I-115."""
+    import asyncio
+    from types import SimpleNamespace
+
+    from trdrbot.elfmem_adapter import ElfmemAdapter
+
+    calls = []
+
+    class FakeElfmem:
+        async def outcome(self, ids_, signal, *, weight, source):
+            calls.append(ids_)
+            # One of the two blocks is archived, so only one updates - and
+            # elfmem reports it as penalised too, from the same id.
+            return SimpleNamespace(blocks_updated=1, blocks_penalized=1)
+
+        async def consolidate(self, host_analyses=None):
+            return None
+
+    got = asyncio.run(ElfmemAdapter(FakeElfmem()).credit_blocks(
+        ["a", "b"], 0.1, source="attribution:pos_x"))
+
+    assert got == (2, 1), "a penalised block is an updated block, not a second one"
+    assert len(calls) == 2, "the D-057 consolidate-and-retry must actually fire"
+
+
+def test_the_mind_prediction_is_not_a_second_copy_of_the_thesis():
+    """I-115, live on 3 of 3 resolved positions. `remember_thesis` stored
+    `pos.thesis` and `predict` stored `pos.thesis` AGAIN, so elfmem held the
+    same text twice - and `consolidate()` archives any inbox block at cosine
+    >= 0.95 against an active one as `superseded`, with no audit row. Whichever
+    half consolidated second died, on every position."""
+    from trdrbot.elfmem_adapter import ElfmemAdapter
+
+    pos = Position(position_id="pos_x", underlying="NVDA", strategy="bull_call_spread",
+                   thesis="NVDA holds its post-earnings gap because the PT raise was broad.",
+                   thesis_claim="NVDA closes above 218 by the horizon",
+                   thesis_horizon="2026-09-09")
+
+    text = ElfmemAdapter(None)._prediction_text(pos)
+
+    assert pos.thesis not in text, "the prediction is a copy of the thesis again"
+    assert "pos_x" in text and "2026-09-09" in text and pos.thesis_claim in text
+
+
+def test_a_heading_inside_a_thesis_cannot_evict_a_real_lesson(tmp_path):
+    """I-122. `_write_lesson` quoted only the FIRST line of the thesis, so a
+    thesis whose later lines start with `## ` - which model prose does - wrote a
+    real markdown heading into lessons.md; `recent_lessons` split on `\\n## `,
+    that phantom took one of the LESSONS_IN_PROMPT slots, and a genuinely
+    resolved position was pushed out of the decide prompt."""
+    from trdrbot import learn
+    from trdrbot.wiki import Wiki
+
+    w = Wiki(tmp_path)
+    for i in range(learn.LESSONS_IN_PROMPT):
+        learn._write_lesson(w, Position(
+            position_id=f"pos_{i}", underlying="SPY", strategy="bear_put_spread",
+            close_reason="stop_triggered",
+            thesis=f"lesson {i}\n## Why this failed\nthe underlying rallied"),
+            pnl_fraction=-0.3, scored=True)
+
+    shown = learn.recent_lessons(w)
+
+    assert shown.count("## pos_") == learn.LESSONS_IN_PROMPT, \
+        "a phantom heading evicted a real lesson"
+    assert "## Why this failed" not in shown.replace("> ## Why this failed", ""), \
+        "a heading inside a thesis must be quoted, not emitted"
+    assert all(f"pos_{i}" in shown for i in range(learn.LESSONS_IN_PROMPT))
+
+
+def test_a_phantom_heading_already_on_disk_does_not_count_as_a_lesson(tmp_path):
+    """I-122's other half, and the reason the READER changed too. Quoting the
+    whole thesis stops new phantoms; `lessons.md` already carries the ones
+    written before that, and `recent_lessons` split on any `\\n## `. Splitting on
+    the `## pos_` marker the writer actually emits is what stops those from
+    evicting real lessons out of the decide prompt."""
+    from trdrbot import learn
+    from trdrbot.wiki import Concept, Wiki
+
+    w = Wiki(tmp_path)
+    body = "# Lessons\n"
+    for i in range(learn.LESSONS_IN_PROMPT):
+        body += (f"\n\n## pos_{i}\nSPY bear_put_spread, closed `stop_triggered`.\n\n"
+                 f"> lesson {i}\n## Why this failed\nthe underlying rallied\n")
+    w.write_concept(Concept(concept_id="lessons", frontmatter={}, body=body),
+                    type_="Lesson")
+
+    shown = learn.recent_lessons(w)
+
+    assert shown.count("## pos_") == learn.LESSONS_IN_PROMPT, \
+        "a heading already on disk evicted a real lesson"
+    assert all(f"pos_{i}" in shown for i in range(learn.LESSONS_IN_PROMPT))

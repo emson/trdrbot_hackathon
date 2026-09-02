@@ -197,10 +197,23 @@ async def run(
                            skipped_no_data=len(due) - forecasts_resolved)
 
     # Attribute any thesis whose horizon has now arrived (view vs structure).
+    # ADVISORY, like every stage around it (I-117). It was awaited bare, so a
+    # raise from memory during credit took the rest of housekeeping down with
+    # it - forecast resolution, the sweep, the Coach pulse and dream all
+    # skipped, silently, for a locked SQLite file. `attribution.run` isolates
+    # per position internally; this is the outer boundary the sibling stages
+    # already have.
     attributed = 0
     if tools:
-        attributed = (await attribution.run(store, tools, mem, wiki, journal,
-                                            verbose=verbose))["attributed"]
+        try:
+            attributed = (await attribution.run(store, tools, mem, wiki, journal,
+                                                verbose=verbose))["attributed"]
+        except Exception as exc:  # noqa: BLE001 - attribution is advisory (INV-8)
+            print(f"[housekeeping] attribution failed, continuing: {exc!r}")
+            health.degraded(journal, "attribution",
+                            "the attribution pass raised - positions stay attributable "
+                            "and the rest of housekeeping continues",
+                            error=repr(exc)[:200])
 
     # Wiki lifecycle sweep. Tombstones expired dossiers in place - never
     # deletes, never moves - and never touches a ticker we are actually holding,

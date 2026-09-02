@@ -18,19 +18,17 @@ from typing import Any
 from . import analytics, experiments, health, ids
 from .elfmem_adapter import ElfmemAdapter
 from .journal import Journal
-from .positions import Position, PositionStore
+from .positions import SCOREABLE_TERMINAL, Position, PositionStore
 from .wiki import Wiki
 
 
 def _horizon_passed(pos: Position) -> bool:
-    # `market_today`, not the UTC date (D-107): evening housekeeping is the
-    # next UTC day, so a Wednesday horizon "passed" on Tuesday night and the
-    # position was attributed against Tuesday's close. Same clock as
-    # `ledger.Entry.matured`, so the two halves of resolution agree.
-    try:
-        return ids.market_today() >= date.fromisoformat(pos.thesis_horizon)
-    except (ValueError, TypeError):
-        return False
+    # A DATE IS NOT A SESSION (I-79). D-107 moved this off the UTC date; the
+    # morning half survived, because `market_today() >= horizon` is true from
+    # 00:00 ET and the position was attributed against the previous session's
+    # last print. One rule, shared with `ledger.Entry.matured`, so the two
+    # halves of resolution cannot drift apart again.
+    return ids.session_closed_on(pos.thesis_horizon)
 
 
 def unscoreable_reason(pos: Position) -> str:
@@ -63,12 +61,22 @@ def pending(store: PositionStore) -> list[Position]:
     A closed position is now in exactly one of three states rather than four:
     scoreable and due (attribute it), scoreable and not yet due (wait), or
     unscoreable (record WHY, once, and stop). There is no fourth.
+
+    **`abandoned` is not one of them** (I-80). It is terminal, but the order
+    never filled: there was no expression to judge, so there is no verdict to
+    reach. The old predicate admitted every non-active status, and
+    `unscoreable_reason` saw a thesis and a horizon, and `profited` fell back to
+    `close_reason in ("target_hit", "thesis_resolved")` - which `never_filled`
+    is not. So a limit order that expired unfilled was scored
+    `thesis_wrong_expression_faithful` (signal 0.1, applied to every recalled
+    block) or `thesis_right_expression_wrong` (0.65): a verdict on a trade that
+    never existed, counted in the `attributable_rate` that gates SCALE and
+    MATURE.
     """
     return [
         p
         for p in store.all()
-        if not p.attribution
-        and p.status not in ("proposed", "opening", "open", "adjusting", "closing")
+        if not p.attribution and p.status in SCOREABLE_TERMINAL
         and (unscoreable_reason(p) or _horizon_passed(p))
     ]
 
@@ -108,6 +116,7 @@ async def run(
     waiting = list(pending(store))
     no_price = 0
     unjudgeable = 0
+    failed = 0
     for pos in waiting:
         # A thesis that can never be judged still gets an ANSWER, once. The
         # verdict already exists and already means exactly this - UNSCOREABLE
@@ -160,41 +169,57 @@ async def run(
         verdict, lesson = experiments.attribute(held, profited)
         signal = experiments.ATTRIBUTION_SIGNAL[verdict]
 
+        # CREDIT FIRST, SAVE THE VERDICT ON SUCCESS (I-117). The save used to
+        # come first, so a raise from memory during credit - "database is
+        # locked", the failure `learn.guarded`'s docstring names - left the
+        # position permanently attributed with ZERO credit applied: `pending()`
+        # excludes it forever, no `attribution` row and no heartbeat were
+        # written, and the exception took the rest of housekeeping down with it
+        # (forecast resolution, the sweep, the Coach pulse, dream). Isolated per
+        # position, so one locked write costs one position rather than the run,
+        # and that position is attributable again next time.
+        requested = applied = 0
+        try:
+            if signal is not None:
+                # Weight by how well each block matched the query that produced
+                # this decision (D-073). Grouped by rounded weight so a 3-block
+                # position costs one or two calls, not three - and so the
+                # grouping is deterministic, which matters for a path we want to
+                # be able to replay from the journal.
+                groups: dict[float, list[str]] = {}
+                for bid, w in pos.credit_weights().items():
+                    groups.setdefault(round(w, 2), []).append(bid)
+                for weight, bids in sorted(groups.items()):
+                    req, app = await mem.credit_blocks(
+                        bids, signal, weight=weight,
+                        source=f"attribution:{pos.position_id}",
+                    )
+                    requested += req
+                    applied += app
+        except Exception as exc:  # noqa: BLE001 - the advisory boundary itself
+            failed += 1
+            journal.append("learn_error", stage="attribution_credit",
+                           position_id=pos.position_id, error=repr(exc)[:300],
+                           consequence="no verdict saved; this position is attributable "
+                                       "again on the next run")
+            print(f"[attribution] {pos.position_id}: credit failed, verdict NOT saved "
+                  f"(it will be retried): {exc!r}")
+            continue
+
         pos.attribution = verdict
         store.save(pos)
 
-        # The signal follows the attribution, NOT the P&L - so a lucky win on a
-        # wrong view teaches nothing and a right view that lost keeps its credit.
-        # `signal is None` means exactly that: apply NOTHING, rather than the
-        # 0.5 that used to drag every block toward the midpoint (D-072).
-        requested = applied = 0
-        if signal is not None:
-            # Weight by how well each block matched the query that produced
-            # this decision (D-073). Grouped by rounded weight so a 3-block
-            # position costs one or two calls, not three - and so the grouping
-            # is deterministic, which matters for a path we want to be able to
-            # replay from the journal.
-            groups: dict[float, list[str]] = {}
-            for bid, w in pos.credit_weights().items():
-                groups.setdefault(round(w, 2), []).append(bid)
-            for weight, bids in sorted(groups.items()):
-                req, app = await mem.credit_blocks(
-                    bids, signal, weight=weight,
-                    source=f"attribution:{pos.position_id}",
-                )
-                requested += req
-                applied += app
-            if requested and applied < requested:
-                # Credit that reaches zero blocks is indistinguishable from
-                # credit that was never attempted, unless it says so. The SPY
-                # position's only creditable block is archived, and elfmem
-                # skips non-active blocks - so this path really does fire.
-                journal.append("attribution_credit_short",
-                               position_id=pos.position_id,
-                               requested=requested, applied=applied)
-                if verbose:
-                    print(f"[attribution] {pos.position_id}: credit applied to "
-                          f"{applied}/{requested} blocks")
+        if requested and applied < requested:
+            # Credit that reaches zero blocks is indistinguishable from credit
+            # that was never attempted, unless it says so. The SPY position's
+            # only creditable block is archived, and elfmem skips non-active
+            # blocks - so this path really does fire.
+            journal.append("attribution_credit_short",
+                           position_id=pos.position_id,
+                           requested=requested, applied=applied)
+            if verbose:
+                print(f"[attribution] {pos.position_id}: credit applied to "
+                      f"{applied}/{requested} blocks")
 
         journal.append(
             "attribution",
@@ -228,6 +253,11 @@ async def run(
         # nothing from it. A rising share here is the entry path failing to
         # record theses, which is where the fix belongs.
         unscoreable=unjudgeable,
+        # Positions whose credit RAISED, so no verdict was saved and they are
+        # still attributable next run (I-117). Distinct from `skipped_no_price`,
+        # which is the tape being quiet rather than memory being broken.
+        credit_failed=failed,
     )
     return {"attributed": done, "pending": len(waiting),
-            "skipped_no_price": no_price, "unscoreable": unjudgeable}
+            "skipped_no_price": no_price, "unscoreable": unjudgeable,
+            "credit_failed": failed}

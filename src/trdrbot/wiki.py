@@ -217,15 +217,19 @@ class Wiki:
         text = path.read_text(encoding="utf-8")
         fm: dict[str, Any] = {}
         body = text
-        if text.startswith("---"):
-            try:
-                _, fm_text, body = text.split("---", 2)
-                loaded = yaml.safe_load(fm_text)
-                fm = loaded if isinstance(loaded, dict) else {}
-            except (ValueError, yaml.YAMLError) as exc:
-                print(f"[wiki] {concept_id}: unreadable frontmatter ({exc!r}) - "
-                      f"reading the whole file as body")
-                fm, body = {}, text
+        try:
+            # THE FENCE, not the substring - the same helper `positions._parse`
+            # uses, because this had the identical bug (I-123): a
+            # `sources[].resource` or a title containing ` --- ` lost every
+            # later frontmatter key, and for a POSITION page `attribution.run`
+            # then marked the truncated result unscoreable and saved it back.
+            fm_text, body = store.split_frontmatter(text)
+            loaded = yaml.safe_load(fm_text) if fm_text else None
+            fm = loaded if isinstance(loaded, dict) else {}
+        except (ValueError, yaml.YAMLError) as exc:
+            print(f"[wiki] {concept_id}: unreadable frontmatter ({exc!r}) - "
+                  f"reading the whole file as body")
+            fm, body = {}, text
         return Concept(concept_id=concept_id, frontmatter=fm, body=body.strip() + "\n", path=path)
 
     def write_concept(self, concept: Concept, *, type_: str | None = None,

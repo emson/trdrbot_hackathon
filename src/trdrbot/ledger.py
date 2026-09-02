@@ -38,7 +38,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import asdict, dataclass
-from datetime import date
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -118,22 +118,18 @@ class Entry:
         FALSE rather than vacuously true - it made no checkable claim."""
         return optmath.band_holds(price, self.band_low, self.band_high) is True
 
-    def matured(self, today: date | None = None) -> bool:
-        """Has the horizon's SESSION ended - not merely its UTC date begun.
+    def matured(self, now: datetime | None = None) -> bool:
+        """Has the horizon's SESSION ended - not merely its date begun.
 
-        This compared against `ids.today()`, the UTC date. Housekeeping runs
-        while the market is closed, which in the evening ET is already the next
-        UTC day - so a forecast for Wednesday matured on Tuesday evening and was
-        scored against Tuesday's close. Measured live (D-107): 94 of 95 resolved
-        entries, and 71 of 71 in the calibration sample that drives the ladder,
-        were scored before 16:00 ET on their own horizon date. `market_today`
-        exists for exactly this and is the clock every other date decision in
-        the system uses.
+        D-107 moved this off the UTC date and onto the market date, which fixed
+        the evening half and left the morning half: `horizon <= market_today()`
+        is true from 00:00 ET, so the first overnight housekeeping tick resolved
+        the day's forecasts sixteen hours before that session closed, against
+        the PREVIOUS session's last print. `ids.session_closed_on` is the whole
+        rule, shared with `attribution._horizon_passed` so the two halves of
+        resolution cannot drift apart again (I-79).
         """
-        try:
-            return date.fromisoformat(self.horizon) <= (today or ids.market_today())
-        except (ValueError, TypeError):
-            return False
+        return ids.session_closed_on(self.horizon, now)
 
 
 class Ledger:
@@ -219,12 +215,32 @@ class Ledger:
         # shows 50% instead of 67%, the intent is 0.67") surviving in the one
         # place D-062 did not look. It has not bitten live only because the
         # agent has always drawn its standalone bands differently.
+        #
+        # A row that has already been JUDGED is never returned (I-105).
+        # Identical bands across runs are documented as common - three
+        # byte-identical pairs from three muse runs on the same cached closes -
+        # while the LLM's probability is not stable. So: run 1 registers A at
+        # p=0.80, a gate rejects it, `rejected_by` is stamped; run 2 draws the
+        # same bands at p=0.30, dedup hands back A, and `mark_stated(A)` states
+        # it at 0.80 - a number nobody stated on this run - while it still
+        # carries `rejected_by`, so `gate_regret` counts it as a refusal and an
+        # admission at once. Run 3 no longer matches (stated=True) and appends
+        # a third row: two stated rows and two calibration forecasts for one
+        # claim. A judged trial is a closed record; the next run gets its own.
+        #
+        # An unjudged match DOES take the new probability. The dedup exists so
+        # one decide cycle's repeated `simulate_experiments` calls are one
+        # trial, and within a cycle the latest number is the one meant.
         for prior in self._items:
-            if (prior.outcome is None and prior.underlying == e.underlying
+            if (prior.outcome is None and not prior.rejected_by
+                    and prior.underlying == e.underlying
                     and prior.horizon == e.horizon
                     and prior.probability_stated == e.probability_stated
                     and prior.metric == e.metric
                     and prior.band_low == e.band_low and prior.band_high == e.band_high):
+                if prior.probability != e.probability:
+                    prior.probability = e.probability
+                    self._rewrite()
                 return prior
         self._items.append(e)
         self._append(e)
@@ -309,9 +325,9 @@ class Ledger:
             return True
         return False
 
-    def matured_unresolved(self, today: date | None = None) -> list[Entry]:
+    def matured_unresolved(self, now: datetime | None = None) -> list[Entry]:
         return [e for e in self._items
-                if e.outcome is None and e.scoreable() and e.matured(today)]
+                if e.outcome is None and e.scoreable() and e.matured(now)]
 
     def resolve(self, entry_id: str, value: float, at: str) -> Entry | None:
         """Score one entry against the resolved value of its metric - a price
