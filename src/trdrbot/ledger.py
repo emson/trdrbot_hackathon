@@ -267,32 +267,46 @@ class Ledger:
                 return True
         return False
 
-    def mark_traded(self, underlying: str, horizon: str, position_id: str,
+    def mark_traded(self, entry_id: str, position_id: str,
                     probability: float | None = None) -> bool:
-        """Link a registered thesis to the position it became - and STATE it.
+        """Link a registered thesis to the position it became, BY ID.
 
-        Trading a thesis is the strongest statement of a probability the agent
-        can make: it is the number `size_position` was handed as
-        `stated_confidence`, and money went behind it. Yet this used to leave
-        the entry at its 0.5 pre-registration placeholder with
-        `probability_stated=False`, so the theses the agent actually bet on
-        were the ONLY theses excluded from the calibration record that gates
-        how much it may bet next. Measured live (D-105): 13 `thesis` entries,
-        2 traded, 0 stated - one already resolved TRUE and did not count,
-        while 105 muse candidates it never touched did.
+        **By id, because (underlying, horizon) is not an identity** (I-88).
+        This used to walk backwards for the last untraded row matching the
+        underlying and the horizon, ignoring kind and band - so a standalone
+        forecast the agent recorded for the same name and day between
+        `simulate_experiments` and `record_position` was marked traded instead,
+        and its own 80% view was overwritten with the trade's 42%, while the
+        thesis actually traded stayed unstated at its 0.5 placeholder. That is
+        D-105's exact symptom, one row over. `simulate_experiments` already
+        knows which entry it registered; it passes the id through
+        `SharedContext`.
 
-        `probability` is the agent's own `confidence` from `record_position`.
-        None keeps the old behaviour for the one caller that has no number.
+        **`probability_stated` is NOT set here, and that is D-105 amended**
+        (I-78, see D-116). The traded row keeps everything else it does - the
+        trial count N, gate regret, and the band attribution scores at the
+        horizon - but the CALIBRATION claim belongs to the position row alone.
+        `confidence` is documented to the model as "your honest probability
+        that this position closes profitable"; scoring the same number a second
+        time as "P(the band holds at the horizon)" made one stated number into
+        n=2 from one trade, on two different events that can resolve in
+        opposite directions. The number is still written down, because it is
+        the agent's own and belongs on the record - it is simply not scored
+        twice.
+
+        Idempotent: re-recording the same fill (a retried tool call, a resumed
+        cycle) updates the probability rather than refusing.
         """
-        for e in reversed(self._items):
-            if (e.underlying == underlying.upper() and e.horizon == horizon
-                    and not e.traded):
-                e.traded, e.position_id = True, position_id
-                if probability is not None:
-                    e.probability = float(probability)
-                    e.probability_stated = True
-                self._rewrite()
-                return True
+        for e in self._items:
+            if e.id != entry_id:
+                continue
+            if e.traded and e.position_id not in (None, position_id):
+                return False
+            e.traded, e.position_id = True, position_id
+            if probability is not None:
+                e.probability = float(probability)
+            self._rewrite()
+            return True
         return False
 
     def matured_unresolved(self, today: date | None = None) -> list[Entry]:

@@ -22,7 +22,7 @@ from . import experiments, ids, market_stats, optmath, sizing
 from .analytics import MIN_NET_COST_SHARE
 from .calibration import CalibrationStore
 from .ledger import PRICE_BAND, REALIZED_VOL_PCT, STANDALONE
-from .positions import Position, PositionStore
+from .positions import Position, PositionStore, leg_key, normalise_symbol
 
 
 @dataclass(frozen=True)
@@ -69,6 +69,14 @@ class SizingStash:
     underlying: str
     contracts: int
     max_loss_usd: float
+    #: The `_legs_key` of the structure this size was computed FOR. Matching on
+    #: the underlying and the contract COUNT alone carried a wide spread's
+    #: $2,700 risk onto a narrow $900 structure recorded at the same quantity,
+    #: and into every cap for the rest of the cycle (I-90). `_reprice_max_loss`
+    #: repairs it at fill confirmation, so the window is bounded - but until
+    #: the fill the caps are denominated in the wrong structure's risk, and
+    #: nothing said so.
+    key: tuple = ()
 
 
 @dataclass
@@ -84,6 +92,12 @@ class SharedContext:
     """
 
     thesis: experiments.Thesis | None = None
+    #: The ledger row `simulate_experiments` registered for `thesis`, so
+    #: `record_position` can mark THAT row traded rather than walking the
+    #: ledger backwards for one matching (underlying, horizon) - which found a
+    #: standalone forecast recorded in the same cycle instead (I-88). None when
+    #: the thesis carried no band and could not be registered at all.
+    thesis_entry_id: str | None = None
     market: MarketParams | None = None
     ranked: list[tuple[str, dict[str, Any]]] = field(default_factory=list)
     structures: list[SimStructure] = field(default_factory=list)
@@ -307,9 +321,10 @@ def build_simulate_experiments(shared: SharedContext, state_dir: Path | None = N
         # skip it under pressure, and pays no extra prompt burden. An LLM
         # generates far more theses than it trades, and the discarded ones are
         # exactly what a multiple-testing correction needs to count.
+        shared.thesis_entry_id = None
         if ledger is not None:
             try:
-                ledger.register(
+                registered = ledger.register(
                     kind="thesis", underlying=underlying, claim=thesis_claim,
                     # Placeholder: this records the TRIAL, not a forecast.
                     # probability_stated=False keeps it out of calibration.
@@ -317,6 +332,9 @@ def build_simulate_experiments(shared: SharedContext, state_dir: Path | None = N
                     band_low=band_low, band_high=band_high,
                     notes=f"{len(built)} structures simulated",
                 )
+                # The id, not the (underlying, horizon) pair, is what links this
+                # thesis to the position it becomes (I-88).
+                shared.thesis_entry_id = registered.id if registered else None
             except Exception as exc:  # noqa: BLE001 - never block a decision
                 print(f"[ledger] register failed: {exc!r}")
         shared.thesis = thesis
@@ -442,6 +460,65 @@ def _horizon_outlives_expiry(horizon: str, expiry: str) -> str | None:
             f"the horizon or buy the expiry that outlives it")
 
 
+#: A `stop_loss_pct` or `profit_target_pct` under this magnitude is read as a
+#: FRACTION written where a PERCENT was asked for (I-87). `record_position`
+#: formats the argument as `f"{x}%"`, so -0.65 arms a stop at -0.65% - and the
+#: neighbouring `confidence` argument in the SAME call IS a 0-1 fraction, which
+#: makes the mixed-units call the most natural mistake a model can make and
+#: this project's own most familiar bug class. Measured: a -2% mark, ordinary
+#: bid/ask noise on a fresh spread, closed the position on the second tick.
+#:
+#: 1% of the net entry cost is not a stop anyone writes deliberately, so the
+#: rule is REFUSED rather than reinterpreted - never guess which unit was
+#: meant. The position is still recorded (an unrecorded fill is an orphan) and
+#: the reply names the exact fix, which `record_position` can then apply by
+#: being called again: the same legs resolve to the same page (I-83).
+MIN_PCT_MAGNITUDE = 1.0
+
+
+def _suspect_pct_units(name: str, value: float | None) -> str | None:
+    """The refusal for a percent argument that looks like a fraction, or None."""
+    if value is None or abs(value) >= MIN_PCT_MAGNITUDE or value == 0:
+        return None
+    return (
+        f"{name}={value:g} was DROPPED: this argument is a PERCENT of the net debit "
+        f"paid or credit received, so {value:g} means {value:g}% - a stop inside the "
+        f"bid/ask spread that fires on noise. If you meant {value * 100:g}%, call "
+        f"record_position again with {name}={value * 100:g}; the same legs update the "
+        f"same page. No rule was recorded for it."
+    )
+
+
+def _resolve_expiry(stated: str, legs: list[dict[str, Any]]) -> tuple[str, str]:
+    """(expiry, note). Derived from the OCC legs when absent, checked when not.
+
+    `expiry` defaulted to `""` and `days_to_expiry` reads `pos.expiry`, so a
+    missing field left the implicit gamma-wall time stop holding blind on every
+    tick with nothing but the `exit_run` heartbeat's `blind_signals` to say so -
+    `invalid_rules` read 0, because the rule parses perfectly (I-89). The legs
+    carry the date already, through the same `parse_occ` the greeks use.
+    """
+    found = sorted({p["expiry"] for leg in legs
+                    if (p := optmath.parse_occ(str(leg.get("symbol", ""))))})
+    stated = str(stated or "").strip()
+    if not stated:
+        if len(found) == 1:
+            return found[0], (f" NOTE: no expiry given - derived {found[0]} from the "
+                              f"OCC legs, which is what the time stop and the "
+                              f"gamma-wall default will read.")
+        if found:
+            return "", (f" WARNING - no expiry given and the legs span {found}, so it "
+                        f"cannot be derived. Every calendar rule on this position is "
+                        f"blind until you record one.")
+        return "", (" WARNING - no expiry given and the legs are not OCC symbols, so "
+                    "the time stop and the gamma-wall default can never fire.")
+    if found and stated not in found:
+        return stated, (f" WARNING - the stated expiry {stated} disagrees with the legs "
+                        f"({', '.join(found)}). The stated one is recorded and is what "
+                        f"every calendar rule will read.")
+    return stated, ""
+
+
 def build_record_position(
     store: PositionStore,
     decision_ref: str,
@@ -515,7 +592,23 @@ def build_record_position(
                 (contracts x per-contract max loss, from simulate/size).
                 Feeds the portfolio risk cap.
         """
+        # NORMALISE AT THE BOUNDARY (I-85). This is the one place model-authored
+        # leg symbols enter the system, and every matcher downstream compares
+        # them by exact string against the broker's uppercase OCC.
+        legs = [{**l, "symbol": normalise_symbol(l.get("symbol"))}
+                for l in legs if isinstance(l, dict)]
+
+        note = ""
         rules: list[dict[str, Any]] = []
+        for arg, value in (("stop_loss_pct", stop_loss_pct),
+                           ("profit_target_pct", profit_target_pct)):
+            bad = _suspect_pct_units(arg, value)
+            if bad:
+                note += f" WARNING - {bad}"
+                if arg == "stop_loss_pct":
+                    stop_loss_pct = None
+                else:
+                    profit_target_pct = None
         if stop_loss_pct is not None:
             rules.append({"type": "stop_loss", "basis": "position_mark", "threshold": f"{stop_loss_pct}%"})
         if profit_target_pct is not None:
@@ -527,18 +620,90 @@ def build_record_position(
         if underlying_stop_above is not None:
             rules.append({"type": "underlying_stop", "direction": "above", "level": underlying_stop_above})
 
-        # SHARED LEGS (D-111). The broker aggregates holdings BY SYMBOL, and
-        # `analytics.by_symbol` keys on symbol, so two position pages sharing an
-        # OCC leg both read ONE aggregated broker row: the mark-based stop on
-        # each divides by a net cost that includes the other's contracts, and
-        # when the aggregate's short credit approaches the long debit the base
-        # is refused as unreadable and BOTH stops go permanently unobservable.
-        # Reachable now at six concurrent positions. Reported, never refused:
-        # the order has already filled, and an unrecorded fill is an orphan.
-        # `_render_positions` lists every held leg in the prompt, so the agent
-        # can avoid this; `trdrbot health` names both pages when it does not.
-        _held = {sym: p.position_id for p in store.open_positions() for sym in p.symbols}
-        _shared = sorted({l.get("symbol", "") for l in legs} & set(_held))
+        expiry, expiry_note = _resolve_expiry(expiry, legs)
+        note += expiry_note
+
+        # ONE FILL, ONE PAGE (I-81, I-82, I-83). The sorted leg set is the
+        # identity of a fill, and an ACTIVE page already claiming it is THIS
+        # fill's page - a retried tool call, a decide cycle resumed after a
+        # crash, and the orphan stub reconcile wrote while we were gone all
+        # arrive here with the same legs. Creating a sibling gave one fill two
+        # `open` pages: the book caps counted its risk twice, `learn.on_fill`
+        # wrote two thesis blocks and two mind predictions, two calibration
+        # forecasts pended, and when the real page's stop fired it closed its
+        # own quantity and left the other to go phantom and be scored a second
+        # time as an `external` close.
+        #
+        # ADOPT IT, do not narrate it: the `leg_overlap` warning below already
+        # identified the page and then recorded a duplicate anyway.
+        key = leg_key(l.get("symbol") for l in legs)
+        existing = store.find_active_by_legs(key)
+        pos = existing or Position(
+            position_id=ids.position_id(underlying, strategy),
+            # `opening`, not `open`: the order is submitted, not confirmed
+            # filled. Reconciliation promotes it once the broker shows the
+            # legs. Claiming `open` here would make an unfilled limit order
+            # look like real exposure, and exit rules would evaluate against a
+            # position that does not exist.
+            status="opening",
+            opened=ids.utc_now().isoformat(),
+        )
+        pos.strategy = strategy
+        pos.underlying = underlying.upper()
+        pos.expiry = expiry
+        pos.legs = legs
+        pos.exit_rules = rules
+        pos.thesis = thesis
+        pos.decision_ref = decision_ref
+        pos.generated_by = generated_by
+        if existing is not None:
+            # An orphan stub was adopted BECAUSE it was unexplained; it is
+            # explained now. Everything the stub earned in the meantime is
+            # kept: its status (never demote a confirmed `open` back to
+            # `opening`), its debounce state, its verifications, and the
+            # attention block `learn.on_fill` may already have written.
+            pos.provenance = "agent"
+            for frame, blocks in (elfmem_blocks or {}).items():
+                target = pos.elfmem_blocks.setdefault(frame, {} if isinstance(blocks, dict) else [])
+                if isinstance(target, dict) and isinstance(blocks, dict):
+                    target.update(blocks)
+                elif isinstance(target, list):
+                    target.extend(b for b in blocks if b not in target)
+            known = {(s.get("resource"), s.get("author")) for s in pos.sources}
+            pos.sources += [s for s in (sources or [])
+                            if (s.get("resource"), s.get("author")) not in known]
+            note += (f" NOTE: {pos.position_id} already held exactly these legs "
+                     f"(status {pos.status}) - it was UPDATED in place rather than a "
+                     f"second page being written for one fill. Its thesis, exit rules "
+                     f"and sizing are now the ones given here.")
+            if journal is not None:
+                try:
+                    journal.append("position_adopted", position_id=pos.position_id,
+                                   legs=list(key), prior_status=pos.status,
+                                   decision_ref=decision_ref)
+                except Exception as exc:  # noqa: BLE001 - observability never breaks a trade
+                    print(f"[record_position] journal append failed: {exc!r}")
+        else:
+            # elfmem blocks recalled for THIS decision (INV-22, per-frame) -
+            # the credit-assignment targets at resolution (D-011).
+            pos.elfmem_blocks = dict(elfmem_blocks or {})
+            # OKF sources (D-022): what the agent actually read this cycle,
+            # so a resolved position can credit or discredit its inputs.
+            pos.sources = list(sources or [])
+
+        # SHARED LEGS (D-111), which is a different thing from the same fill.
+        # The broker aggregates holdings BY SYMBOL, and `analytics.by_symbol`
+        # keys on symbol, so two position pages sharing SOME of their legs both
+        # read ONE aggregated broker row: the mark-based stop on each divides by
+        # a net cost that includes the other's contracts, and when the
+        # aggregate's short credit approaches the long debit the base is refused
+        # as unreadable and BOTH stops go permanently unobservable. Reported,
+        # never refused: the order has already filled, and an unrecorded fill is
+        # an orphan. An EXACT leg-set match is not this case - it is one fill,
+        # handled above.
+        _held = {sym: p.position_id for p in store.open_positions()
+                 for sym in p.leg_key if p.position_id != pos.position_id}
+        _shared = sorted(set(key) & set(_held))
         if _shared:
             journal_note = (f"WARNING: leg(s) {', '.join(_shared)} are already held by "
                             f"{', '.join(sorted({_held[x] for x in _shared}))}. The broker "
@@ -553,36 +718,37 @@ def build_record_position(
                     print(f"[record_position] journal append failed: {exc!r}")
         else:
             journal_note = ""
-        pos = Position(
-            position_id=ids.position_id(underlying, strategy),
-            # `opening`, not `open`: the order is submitted, not confirmed
-            # filled. Reconciliation promotes it once the broker shows the
-            # legs. Claiming `open` here would make an unfilled limit order
-            # look like real exposure, and exit rules would evaluate against a
-            # position that does not exist.
-            status="opening",
-            strategy=strategy,
-            underlying=underlying.upper(),
-            opened=ids.utc_now().isoformat(),
-            expiry=expiry,
-            legs=legs,
-            exit_rules=rules,
-            thesis=thesis,
-            decision_ref=decision_ref,
-            # elfmem blocks recalled for THIS decision (INV-22, per-frame) -
-            # the credit-assignment targets at resolution (D-011).
-            elfmem_blocks=dict(elfmem_blocks or {}),
-            generated_by=generated_by,
-            # OKF sources (D-022): what the agent actually read this cycle,
-            # so a resolved position can credit or discredit its inputs.
-            sources=list(sources or []),
-        )
-        note = ""
+
+        # WHICH simulated structure was actually traded, matched on legs so
+        # nothing is re-declared (D-037). Computed here, ahead of sizing,
+        # because three things need it: the stash's structure check just below,
+        # the per-leg IVs, and the exit-rule reachability warnings further down.
+        traded = [optmath.Leg.from_position_leg(leg) for leg in legs]
+        traded_key = (_legs_key([(t.right, t.strike, t.side) for t in traded if t])
+                      if legs and all(traded) else ())
+        matched = next((st for st in (shared.structures if shared else [])
+                        if st.key == traded_key and st.qty), None)
+
         # Risk is DERIVED, not declared: prefer what size_position actually
         # computed this cycle, falling back to the model's own figure only if
         # sizing was skipped. Keeps the book caps honest without depending on
         # the model remembering a field.
         sized = shared.sizing if shared else None
+        if sized is not None and sized.key and traded_key and sized.key != traded_key:
+            # A DIFFERENT STRUCTURE (I-90). The stash lives for the whole cycle
+            # and matched on underlying and contract COUNT only, so sizing a
+            # wide spread at N contracts and then recording a narrow one at N
+            # carried $2,700 of risk onto a $900 structure - and into every cap
+            # until `_reprice_max_loss` repaired it at the fill.
+            if journal is not None:
+                journal.append("sizing_mismatch", seam="structure",
+                               position_id=pos.position_id, underlying=sized.underlying,
+                               sized_contracts=sized.contracts)
+            note += (" NOTE: size_position was last called for a DIFFERENT structure this "
+                     "cycle, so its risk figure is not used here. Re-run size_position for "
+                     "the structure you actually traded - until you do, the book caps "
+                     "carry your own max_loss_usd and are repriced at the fill.")
+            sized = None
         if sized is not None and sized.underlying in ("", underlying.upper()):
             pos.max_loss_usd = float(sized.max_loss_usd)
             # ...and say so when the two disagree. `max_loss_usd` above is
@@ -609,16 +775,6 @@ def build_record_position(
                 )
         elif max_loss_usd is not None:
             pos.max_loss_usd = float(max_loss_usd)
-
-        # WHICH simulated structure was actually traded, matched on legs so
-        # nothing is re-declared (D-037). Computed once, here, because two
-        # separate things need it: the per-leg IVs below, and the exit-rule
-        # reachability warnings further down.
-        traded = [optmath.Leg.from_position_leg(leg) for leg in legs]
-        traded_key = (_legs_key([(t.right, t.strike, t.side) for t in traded if t])
-                      if legs and all(traded) else ())
-        matched = next((st for st in (shared.structures if shared else [])
-                        if st.key == traded_key and st.qty), None)
 
         # The skew the agent OBSERVED, carried onto the recorded legs. Without
         # it every greek computed after entry - these, and the book-greeks line
@@ -669,14 +825,14 @@ def build_record_position(
             pos.thesis_band_high = th.band_high
             pos.thesis_drift = th.drift
             pos.thesis_vol_view = th.vol_view
-        # Close the loop: mark the pre-registered thesis as traded, AND state
-        # its probability - the agent's `confidence` is the same number
-        # `size_position` sized against, and a thesis with money behind it is
-        # the last one that should sit outside the calibration record (D-105).
-        if ledger is not None and pos.thesis_horizon:
+        # Close the loop: link the pre-registered thesis to the position it
+        # became, BY THE ID simulate_experiments recorded (I-88). The row keeps
+        # the trial count, gate regret and the band attribution scores; the
+        # calibration claim is the position row's alone (I-78, D-116).
+        entry_id = shared.thesis_entry_id if shared else None
+        if ledger is not None and entry_id:
             try:
-                ledger.mark_traded(pos.underlying, pos.thesis_horizon, pos.position_id,
-                                   probability=confidence)
+                ledger.mark_traded(entry_id, pos.position_id, probability=confidence)
             except Exception as exc:  # noqa: BLE001
                 print(f"[ledger] mark_traded failed: {exc!r}")
         path = store.save(pos)
@@ -761,7 +917,8 @@ def build_record_position(
                      f"theta ${ge['theta_dollars']:+,.0f}/day, vega ${ge['vega_dollars']:+,.0f}/IVpt")
         return (
             (journal_note + "\n" if journal_note else "")
-            + f"Recorded {pos.position_id} with {len(rules)} exit rule(s) at {path.name}, "
+            + f"{'Updated' if existing is not None else 'Recorded'} {pos.position_id} "
+            f"with {len(rules)} exit rule(s) at {path.name}, "
             f"confidence {confidence:.0%} (scored for calibration at close),{risk}. "
             f"Watching: {', '.join(watching) or 'no signals'}. "
             f"Exit rules are evaluated automatically every tick.{note}"
@@ -970,6 +1127,7 @@ def build_size_position(
             shared.sizing = SizingStash(
                 underlying=underlying.upper(), contracts=d.contracts,
                 max_loss_usd=abs(max_loss) * d.contracts,
+                key=match.key,
             )
         _journal_sizing(journal, underlying=underlying.upper(),
                         result="sized" if d.contracts > 0 else "no_position",

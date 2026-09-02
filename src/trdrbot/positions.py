@@ -30,6 +30,47 @@ from . import ids, store
 TERMINAL = {"closed", "expired", "assigned", "abandoned"}
 ACTIVE = {"proposed", "opening", "open", "adjusting", "closing"}
 
+#: Terminal states in which a trade actually existed and can therefore be
+#: judged. `abandoned` is terminal but never became exposure - the order died
+#: unfilled, so there was no expression to score and no verdict to reach
+#: (I-80). Scoring one credited memory at signal 0.1 or 0.65 on a trade that
+#: never happened, and counted it toward the `attributable_rate` that gates
+#: SCALE and MATURE.
+SCOREABLE_TERMINAL = TERMINAL - {"abandoned"}
+
+
+def normalise_symbol(symbol: Any) -> str:
+    """A leg symbol as the BROKER spells it: stripped, uppercase.
+
+    The one place model-authored symbols enter the system (I-85). `parse_occ`
+    already upper-cases; the matchers in `reconcile` and `exit_rules` compare
+    `pos.symbols` by exact string against the broker's uppercase OCC and do
+    not - so a filled position whose page said `spy260909p00636000` was
+    `abandoned/never_filled` on the next tick and its real legs were adopted as
+    an orphan, taking the thesis, the stops and the sizing with them.
+    """
+    return str(symbol or "").strip().upper()
+
+
+def leg_key(symbols: Any) -> tuple[str, ...]:
+    """THE IDENTITY OF A FILL: its sorted, normalised leg set (I-81/82/83).
+
+    Nothing said what made two observations "the same position". `reconcile`
+    claimed legs from ACTIVE pages only, `record_position` created a page
+    unconditionally, and neither consulted working orders - so a slow close, a
+    crash between the order and the record, and a retried tool call all ended
+    with two pages for one fill: double-counted book risk, two thesis blocks,
+    two mind predictions and two scored resolutions.
+
+    The leg set, not the position id, because the id is minted per call and
+    the broker has no multi-leg position concept at all - the legs are the only
+    thing two independent observers of one fill can both see. Genuine leg
+    SHARING between two different structures (D-111's case) is unaffected:
+    different leg sets, different keys, different pages.
+    """
+    return tuple(sorted({s for s in map(normalise_symbol, symbols) if s}))
+
+
 #: Floor on credit weight. Two independent reasons, both measured (D-073):
 #:
 #: 1. elfmem REJECTS `weight <= 0.0` outright (`_validate_weight` raises
@@ -73,6 +114,14 @@ class Position:
     exit_rules: list[dict[str, Any]] = field(default_factory=list)
     exit_state: dict[str, list[bool]] = field(default_factory=dict)
     close_reason: str | None = None
+    #: When this position entered a terminal state, ISO-stamped by
+    #: `transition`. Empty on anything still active and on pages written before
+    #: the field existed. Orphan adoption reads it (I-81): a close is accepted
+    #: by the broker one tick and fills the next, and in between the terminal
+    #: page has stopped claiming its legs while the broker still shows them -
+    #: so without a "closed just now" grace the adopter re-adopted the position
+    #: it had itself just closed, and scored the phantom a second time.
+    closed_at: str = ""
     thesis: str = ""
     decision_ref: str = ""
     provenance: str = "agent"
@@ -142,6 +191,11 @@ class Position:
     @property
     def symbols(self) -> list[str]:
         return [leg["symbol"] for leg in self.legs if leg.get("symbol")]
+
+    @property
+    def leg_key(self) -> tuple[str, ...]:
+        """This page's identity as a fill (see the module-level `leg_key`)."""
+        return leg_key(self.symbols)
 
     #: Frames whose blocks are CREDITED at resolution. Deliberately excludes
     #: "self": constitutional principles are identity, not a bet on this trade.
@@ -228,6 +282,7 @@ class Position:
             "exit_rules": self.exit_rules,
             "exit_state": self.exit_state,
             "close_reason": self.close_reason,
+            "closed_at": self.closed_at,
             "decision_ref": self.decision_ref,
             "sources": self.sources,
             "generated": {"by": self.generated_by, "at": ids.utc_now().isoformat()},
@@ -282,6 +337,37 @@ class PositionStore:
     def open_positions(self) -> list[Position]:
         return [p for p in self.all() if p.status in ACTIVE]
 
+    def find_active_by_legs(self, key: tuple[str, ...]) -> Position | None:
+        """The ACTIVE page already claiming this exact leg set, if there is one.
+
+        The reader half of `leg_key` (I-81/82/83). `record_position` calls it
+        before creating a page, so a retried tool call, a resumed cycle after a
+        crash, and an orphan stub the adopter wrote all resolve to the ONE page
+        that fill already has.
+        """
+        if not key:
+            return None
+        return next((p for p in self.open_positions() if p.leg_key == key), None)
+
+    def recently_closed_legs(self, within_minutes: float) -> set[str]:
+        """Legs claimed by a page that went terminal within the last N minutes.
+
+        A close is ACCEPTED by the broker on one tick and fills on a later one
+        (`exit_rules.run` transitions on acceptance, not on the fill), so in
+        between the terminal page has stopped claiming its legs while the
+        broker still shows them. Without this grace the orphan adopter took
+        them, the stub went phantom when the close landed, and one trade was
+        scored twice (I-81).
+        """
+        out: set[str] = set()
+        for p in self.all():
+            if p.status not in TERMINAL or not p.closed_at:
+                continue
+            age = ids.age_days(p.closed_at)
+            if age is not None and age * 24 * 60 <= within_minutes:
+                out.update(p.leg_key)
+        return out
+
     def _parse(self, path: Path) -> Position:
         text = path.read_text(encoding="utf-8")
         _, fm, body = text.split("---", 2)
@@ -305,6 +391,7 @@ class PositionStore:
             exit_rules=d.get("exit_rules") or [],
             exit_state=d.get("exit_state") or {},
             close_reason=d.get("close_reason"),
+            closed_at=d.get("closed_at", ""),
             thesis=thesis,
             decision_ref=d.get("decision_ref", ""),
             sources=d.get("sources") or [],
@@ -337,5 +424,7 @@ class PositionStore:
         pos.status = new_status
         if close_reason:
             pos.close_reason = close_reason
+        if new_status in TERMINAL:
+            pos.closed_at = ids.utc_now().isoformat()
         self.save(pos)
         return True

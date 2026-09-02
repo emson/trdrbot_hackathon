@@ -6,10 +6,9 @@ normal. The existing suite fed them clean candidates and well-shaped chains.
 
 from __future__ import annotations
 
-from datetime import date, timedelta
 from typing import Any
 
-from conftest import tools_for
+from conftest import days_out, tools_for
 
 from trdrbot import muse, opportunity
 
@@ -18,7 +17,7 @@ def _soon(days: int = 3) -> str:
     """A horizon inside the muse's own 1-10 day window, derived from today -
     a literal date would drift out of the window as the calendar moves and
     the test would start failing for a reason that is not the code's."""
-    return (date.today() + timedelta(days=days)).isoformat()
+    return days_out(days)
 
 
 # --------------------------------------------------------- the options gate

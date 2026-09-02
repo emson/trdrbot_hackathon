@@ -19,12 +19,21 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from conftest import synthetic_dates
+from conftest import days_out, synthetic_dates
 
-from trdrbot import discovery, experiments, local_tools, market_stats, optmath, sizing
+from trdrbot import (
+    discovery,
+    experiments,
+    ids,
+    local_tools,
+    market_stats,
+    optmath,
+    sizing,
+)
 from trdrbot.analytics import Snapshot
 from trdrbot.exit_rules import evaluate, watched_signals
 from trdrbot.housekeeping import _materiality_band
+from trdrbot.journal import Journal
 from trdrbot.optmath import Leg
 from trdrbot.positions import Position, PositionStore
 from trdrbot.sizing import Calibration
@@ -175,7 +184,7 @@ def test_stop_beats_profit_target_when_both_breach():
 def test_deadline_outranks_everything():
     p = pos(exit_rules=[{"type": "profit_target", "threshold": "50%"}])
     s = snap(mark_pnl=+80)
-    today = date.today().isoformat()
+    today = days_out(0)
     evaluate(p, s, today)
     assert evaluate(p, s, today)[0] == "deadline"
 
@@ -225,7 +234,7 @@ def test_stale_pre_registry_debounce_state_self_heals():
 
 
 def test_time_stop_fires_immediately_time_is_not_noisy():
-    p = pos(expiry=(date.today() + timedelta(days=1)).isoformat(),
+    p = pos(expiry=days_out(1),
             exit_rules=[{"type": "time_stop", "days_before_expiry": 1}])
     assert evaluate(p, snap(), "2099-01-01")[0] == "time_stop"
 
@@ -714,7 +723,7 @@ def test_material_move_wakes_the_agent_through_the_idle_ladder():
 # -------------------------------------------- D-043 the idle ladder
 
 def _idle(**kw):
-    from datetime import datetime, timedelta
+    from datetime import datetime
 
     from trdrbot import idle
     now = datetime.now(UTC)
@@ -744,7 +753,7 @@ def test_idle_reviews_on_a_material_move_under_a_held_position():
 
 
 def test_idle_reviews_after_too_long_without_looking():
-    from datetime import datetime, timedelta
+    from datetime import datetime
     a = _idle(positions=[_held()], underlying_prices={"SPY": 766.9},
               open_risk_usd=14_500,
               last_decision_at=datetime.now(UTC) - timedelta(minutes=125))
@@ -754,7 +763,7 @@ def test_idle_reviews_after_too_long_without_looking():
 def test_idle_hunts_when_capital_is_idle():
     """Idle capital is a position too - 100% cash at 0% expected return. With
     a deadline that is a decision, not a default."""
-    from datetime import datetime, timedelta
+    from datetime import datetime
     a = _idle(last_hunt_at=datetime.now(UTC) - timedelta(minutes=200))
     assert a.level == "hunt"
 
@@ -762,7 +771,7 @@ def test_idle_hunts_when_capital_is_idle():
 def test_idle_does_not_hunt_when_the_risk_cap_is_full():
     """Do not hunt when you cannot shoot: candidates sizing will refuse are
     spend with no possible outcome."""
-    from datetime import datetime, timedelta
+    from datetime import datetime
     a = _idle(positions=[_held()], underlying_prices={"SPY": 766.9},
               open_risk_usd=15_000,
               last_hunt_at=datetime.now(UTC) - timedelta(minutes=200))
@@ -770,7 +779,7 @@ def test_idle_does_not_hunt_when_the_risk_cap_is_full():
 
 
 def test_idle_does_not_open_new_risk_into_the_close():
-    from datetime import datetime, timedelta
+    from datetime import datetime
     a = _idle(last_hunt_at=datetime.now(UTC) - timedelta(minutes=300),
               minutes_to_close_=15.0)
     assert a.level == "sleep" and "close" in a.reason
@@ -1474,7 +1483,7 @@ def test_a_ready_hunt_is_not_starved_by_a_latched_material_move():
 
     Both directions (admission rule 4): the hunt wins when it is genuinely
     ready, and loses to the oversight guarantee and to a full book."""
-    from datetime import UTC, datetime, timedelta
+    from datetime import UTC, datetime
     from types import SimpleNamespace
 
     from trdrbot import idle
@@ -1515,42 +1524,79 @@ def test_the_hunt_cooldown_stays_longer_than_the_oversight_interval():
         f"every {idle.MAX_SILENCE_MIN}min")
 
 
-def test_a_traded_thesis_enters_calibration_at_the_confidence_it_was_traded_at():
-    """D-105. PILLAR-4 (learning integrity). The theses the agent puts MONEY on
-    were the only theses excluded from the record that gates how much money it
-    may put on the next one.
+def test_one_trade_contributes_exactly_one_forecast_to_calibration():
+    """PILLAR-4 (learning integrity). **This revises D-105** (I-78, D-116).
 
-    `simulate_experiments` pre-registers a thesis at a 0.5 placeholder with
-    `probability_stated=False` (D-052: the trial must count for N even if never
-    stated). `record_position` then took the agent's `confidence` - the same
-    number `size_position` sized against, and documented to the agent as
-    "scored ... Brier/Murphy calibration" - and only linked the position.
-    Measured live: 13 `thesis` entries, 2 traded, 0 stated; one had already
-    resolved TRUE and did not count, while 105 muse candidates the agent never
-    touched did. Trading is the strongest statement of a probability there is.
+    D-105's symptom was that a traded thesis never reached calibration; its
+    premise was incomplete, because the same `confidence` was ALREADY reaching
+    calibration through the position row. `record_position` wrote it to both,
+    and `CalibrationStore.score` concatenates the two lists with no dedup on
+    `position_id` - so one stated 42% counted as n=2, on two DIFFERENT events
+    (P(closes profitable) at the close, P(the band holds) at the horizon) that
+    can resolve in opposite directions. Measured: a stop-out at a loss whose
+    band then held yields [0.42 -> False, 0.42 -> True], base rate 0.5, n=2 from
+    one trade - and the ladder's min_n gates (5/15/40) and `shrink_probability`'s
+    n/30 trust ramp both read that n, so three trades bought ESTABLISH.
+
+    The POSITION ROW owns calibration, because `confidence` is documented to the
+    model as "your honest probability that this position closes profitable" and
+    the tool docstring is the claim it made. The ledger's traded row keeps
+    everything else: the trial count N, gate regret, and the band attribution
+    scores at the horizon.
     """
     from trdrbot import ledger as L
+    from trdrbot.calibration import CalibrationStore
 
-    book = L.Ledger(Path(tempfile.mkdtemp()) / "ledger.jsonl")
+    d = Path(tempfile.mkdtemp())
+    book, calib = L.Ledger(d / "ledger.jsonl"), CalibrationStore(d / "forecasts.jsonl")
     e = book.register(kind="thesis", underlying="SPY", claim="c", probability=0.5,
                       horizon="2026-09-05", band_low=None, band_high=636.0,
                       probability_stated=False)
     assert L.as_forecasts([e]) == [], "a placeholder must not score"
 
-    assert book.mark_traded("SPY", "2026-09-05", "pos_x", probability=0.42)
-    traded = next(x for x in book.all() if x.traded)
-    assert traded.probability_stated and traded.probability == pytest.approx(0.42)
+    # What record_position does for one fill.
+    calib.record("pos_x", 0.42, "SPY")
+    assert book.mark_traded(e.id, "pos_x", probability=0.42)
 
+    traded = next(x for x in book.all() if x.traded)
+    assert traded.probability == pytest.approx(0.42), "the number is still on the record"
+    assert not traded.probability_stated, "...but it is not a second scoreable claim"
+
+    # The trade stops out at a loss; the band then holds at the horizon.
+    calib.resolve("pos_x", outcome=False, at="2026-09-04T20:00:00+00:00")
     book.resolve(traded.id, 630.0, "2026-09-05T21:00:00+00:00")
-    fc = L.as_forecasts(book.resolved())
-    assert len(fc) == 1 and fc[0].probability == pytest.approx(0.42), \
-        "the traded thesis must reach calibration at the confidence it was traded at"
-    # The one caller with no number keeps the old behaviour: linked, not stated.
-    book.register(kind="thesis", underlying="NVDA", claim="c", probability=0.5,
-                       horizon="2026-09-05", band_low=None, band_high=100.0,
-                       probability_stated=False)
-    assert book.mark_traded("NVDA", "2026-09-05", "pos_y")
-    assert not next(x for x in book.all() if x.underlying == "NVDA").probability_stated
+
+    scored = calib.score(L.as_forecasts(book.resolved()))
+    assert scored.n == 1, "one trade, one forecast - the two cannot disagree at n=2"
+    assert calib.resolved()[0].probability == pytest.approx(0.42)
+
+
+def test_marking_a_thesis_traded_leaves_a_standalone_forecast_alone():
+    """I-88. `mark_traded` walked the ledger BACKWARDS for the last untraded row
+    matching (underlying, horizon), ignoring kind and band - so a standalone
+    forecast the agent recorded for the same name and day between
+    `simulate_experiments` and `record_position` was marked traded instead, its
+    own 80% view overwritten with the trade's 42%, while the thesis actually
+    traded stayed unstated at its 0.5 placeholder. D-105's exact symptom, one
+    row over. The id is the link."""
+    from trdrbot import ledger as L
+
+    book = L.Ledger(Path(tempfile.mkdtemp()) / "ledger.jsonl")
+    thesis = book.register(kind=L.THESIS, underlying="SPY", claim="the trade",
+                           probability=0.5, probability_stated=False,
+                           horizon="2026-09-05", band_low=None, band_high=636.0)
+    standalone = book.register(kind=L.STANDALONE, underlying="SPY", claim="a view",
+                               probability=0.80, horizon="2026-09-05",
+                               band_low=600.0, band_high=None)
+
+    assert book.mark_traded(thesis.id, "pos_x", probability=0.42)
+
+    rows = {e.id: e for e in book.all()}
+    assert rows[thesis.id].traded and rows[thesis.id].position_id == "pos_x"
+    assert not rows[standalone.id].traded, "the standalone view was not the trade"
+    assert rows[standalone.id].probability == pytest.approx(0.80), \
+        "and its own stated number is intact"
+    assert rows[standalone.id].probability_stated
 
 
 def test_an_over_corrected_reliability_is_unmeasured_not_perfect():
@@ -1813,16 +1859,14 @@ def test_the_ladder_has_no_calendar_in_it():
 
 
 def test_hard_stop_is_a_position_check_not_a_sizing_regime():
-    import datetime
-    from datetime import date
 
     from trdrbot import competence
-    soon = (date.today() + datetime.timedelta(days=1)).isoformat()
-    far = (date.today() + datetime.timedelta(days=30)).isoformat()
+    soon = days_out(1)
+    far = days_out(30)
     assert competence.can_open(soon, None)[0] is False
     assert competence.can_open(far, None)[0] is True
     assert competence.can_open(None, None)[0] is True, "no deadline: always open"
-    past = (date.today() + datetime.timedelta(days=45)).isoformat()
+    past = days_out(45)
     assert competence.can_open(far, past)[0] is False
 
 
@@ -2058,7 +2102,6 @@ def test_declined_theses_still_score_calibration():
     """The whole point: at 1-5 concurrent positions, trade-level observations
     never reach the ~50 needed for calibration to mean anything. Forecasts on
     setups we DECLINE cost nothing and score the same judgement."""
-    import datetime
     import tempfile
     from pathlib import Path
 
@@ -2066,7 +2109,7 @@ def test_declined_theses_still_score_calibration():
     from trdrbot.ledger import STANDALONE, as_forecasts
 
     b = _book()
-    past = (datetime.date.today() - datetime.timedelta(days=1)).isoformat()
+    past = days_out(-1)
     for i, (lo, hi, px) in enumerate([(200.0, 238.0, 249.0), (100.0, 150.0, 120.0)]):
         e = b.register(kind=STANDALONE, underlying=f"X{i}", claim="declined",
                        probability=0.45, horizon=past, band_low=lo, band_high=hi)
@@ -2078,11 +2121,10 @@ def test_declined_theses_still_score_calibration():
 
 
 def test_resolution_checks_the_band_against_the_tape():
-    import datetime
 
     from trdrbot.ledger import THESIS
     b = _book()
-    past = (datetime.date.today() - datetime.timedelta(days=1)).isoformat()
+    past = days_out(-1)
     e = b.register(kind=THESIS, underlying="NVDA", claim="holds", probability=0.38,
                    horizon=past, band_low=220.0, band_high=245.0)
     assert b.resolve(e.id, 231.0, "now").outcome is True
@@ -2092,11 +2134,10 @@ def test_resolution_checks_the_band_against_the_tape():
 
 
 def test_a_forecast_is_not_resolved_before_its_horizon():
-    import datetime
 
     from trdrbot.ledger import STANDALONE
     b = _book()
-    future = (datetime.date.today() + datetime.timedelta(days=5)).isoformat()
+    future = days_out(5)
     b.register(kind=STANDALONE, underlying="SMCI", claim="later", probability=0.3,
                horizon=future, band_low=38.0, band_high=48.0)
     assert b.matured_unresolved() == []
@@ -2116,11 +2157,11 @@ def test_the_same_thesis_is_not_double_registered():
 def test_traded_and_declined_are_distinguishable():
     from trdrbot.ledger import STANDALONE, THESIS
     b = _book()
-    b.register(kind=THESIS, underlying="NVDA", claim="a", probability=0.4,
-               horizon="2099-01-01", band_low=220.0, band_high=245.0)
+    e = b.register(kind=THESIS, underlying="NVDA", claim="a", probability=0.4,
+                   horizon="2099-01-01", band_low=220.0, band_high=245.0)
     b.register(kind=STANDALONE, underlying="SPY", claim="b", probability=0.6,
                horizon="2099-01-02", band_low=750.0, band_high=None)
-    b.mark_traded("NVDA", "2099-01-01", "pos_1")
+    b.mark_traded(e.id, "pos_1")
     s = b.summary()
     assert s["traded"] == 1 and s["declined"] == 1 and s["trials"] == 2
 
@@ -2912,7 +2953,6 @@ def test_record_forecast_refuses_a_band_history_almost_always_holds(tmp_path):
     walks the agent up the ladder on evidence of nothing. The ladder's only
     n-gate is a COUNT, so inflating the count is the cheapest way to earn
     size dishonestly and nothing else would have noticed."""
-    from datetime import date, timedelta
 
     from trdrbot import market_stats
     from trdrbot.local_tools import _vacuity_check
@@ -2920,7 +2960,7 @@ def test_record_forecast_refuses_a_band_history_almost_always_holds(tmp_path):
     closes = [100.0 * (1.0005 ** i) for i in range(120)]  # calm, no big moves
     market_stats.save_closes(tmp_path, "TEST", closes)
     spot = closes[-1]
-    horizon = (date.today() + timedelta(days=3)).isoformat()
+    horizon = days_out(3)
 
     gamed = _vacuity_check(tmp_path, "TEST", 0.97, horizon, 1.0, 100000.0)
     assert gamed and "uninformative" in gamed
@@ -2933,7 +2973,6 @@ def test_vacuity_guard_keeps_a_contrarian_call_against_an_extreme_base(tmp_path)
     """The muse learned this the hard way: a naive ceiling rejected a stated
     27% against a 99% base - the single most interesting call it produced.
     Disagreeing with history IS the claim, so only AGREEMENT is vacuous."""
-    from datetime import date, timedelta
 
     from trdrbot import market_stats
     from trdrbot.local_tools import _vacuity_check
@@ -2941,7 +2980,7 @@ def test_vacuity_guard_keeps_a_contrarian_call_against_an_extreme_base(tmp_path)
     closes = [100.0 * (1.0005 ** i) for i in range(120)]
     market_stats.save_closes(tmp_path, "TEST", closes)
     spot = closes[-1]
-    horizon = (date.today() + timedelta(days=3)).isoformat()
+    horizon = days_out(3)
 
     assert _vacuity_check(tmp_path, "TEST", 0.27, horizon, spot * 0.8, spot * 1.2) is None
 
@@ -2949,11 +2988,10 @@ def test_vacuity_guard_keeps_a_contrarian_call_against_an_extreme_base(tmp_path)
 def test_vacuity_guard_fails_open_without_price_history(tmp_path):
     """No anchor means no judgement. An invented one is worse than none -
     the same rule _plausible_band follows when it has no spot."""
-    from datetime import date, timedelta
 
     from trdrbot.local_tools import _vacuity_check
 
-    horizon = (date.today() + timedelta(days=3)).isoformat()
+    horizon = days_out(3)
     assert _vacuity_check(tmp_path, "NOHIST", 0.99, horizon, 1.0, 99999.0) is None
     assert _vacuity_check(None, "TEST", 0.99, horizon, 1.0, 99999.0) is None
 
@@ -3836,7 +3874,6 @@ def test_a_forecast_matures_when_its_session_ends_not_when_its_utc_date_begins()
     entries, and 71 of 71 in the sample that drives the size ladder, were
     resolved before 16:00 ET on their own horizon date. `attribution.
     _horizon_passed` had the same clock and is pinned by the same test."""
-    from datetime import date
     from types import SimpleNamespace
 
     from trdrbot import attribution, ids
@@ -4060,7 +4097,7 @@ def test_the_durable_half_survives_expiry(tmp_path):
     assert "228.17" not in durable, "the perishable half must not ride along"
 
     # Long past expiry, the concept is still exactly as usable.
-    later = datetime.datetime.now(datetime.UTC) + datetime.timedelta(days=30)
+    later = ids.utc_now() + datetime.timedelta(days=30)
     assert c.is_stale(later)
     assert c.durable_text() == durable, "staleness must not change the durable text"
 
@@ -4093,7 +4130,7 @@ def test_sweep_tombstones_in_place_and_never_deletes(tmp_path):
     path = w.write_concept(c, type_="CompanyDossier")
     generated_before = c.frontmatter["generated"]["at"]
 
-    later = datetime.datetime.now(datetime.UTC) + datetime.timedelta(days=2)
+    later = ids.utc_now() + datetime.timedelta(days=2)
     out = w.sweep(now=later)
     assert out["deprecated"] == ["research/WEN"]
 
@@ -4119,7 +4156,7 @@ def test_sweep_never_retires_a_ticker_we_are_holding(tmp_path):
     for t in ("HELD", "NOTHELD"):
         w.write_concept(Concept(concept_id=f"research/{t}", frontmatter={}, body=DOSSIER),
                         type_="CompanyDossier")
-    later = datetime.datetime.now(datetime.UTC) + datetime.timedelta(days=2)
+    later = ids.utc_now() + datetime.timedelta(days=2)
     out = w.sweep(protected={"research/HELD"}, now=later)
     assert out["deprecated"] == ["research/NOTHELD"]
     assert out["protected"] == ["research/HELD"]
@@ -4135,7 +4172,7 @@ def test_re_researching_a_tombstoned_dossier_revives_it(tmp_path):
     w = _wiki(tmp_path)
     w.write_concept(Concept(concept_id="research/BURL", frontmatter={}, body=DOSSIER),
                     type_="CompanyDossier")
-    later = datetime.datetime.now(datetime.UTC) + datetime.timedelta(days=2)
+    later = ids.utc_now() + datetime.timedelta(days=2)
     w.sweep(now=later)
     assert w.read("research/BURL").frontmatter["status"] == "deprecated"
 
@@ -5633,3 +5670,196 @@ def test_an_order_stating_no_intent_at_all_is_treated_as_opening():
             "args": {"qty": "2", "legs": [{"symbol": "SPY260903P00763000"}]}}
 
     assert tick._opens_a_position(bare) is True
+
+
+# ==================================================== D-116 - one fill, one page
+#
+# I-81, I-82, I-83, I-85, I-89, I-90. Nothing said what made two observations of
+# a broker fill "the same position", so a slow close, a crash between the order
+# and the record, and a retried tool call each ended with two pages for one
+# fill. The sorted leg set is that identity. Derived from the adversarial
+# scaffold's X4, X15, X16, X9, X13 and X14, with D-111's control beside them.
+
+def _record_tool(store, **kw):
+    """A `record_position` bound to a real store, as `tick` binds it."""
+    from trdrbot import local_tools
+    return local_tools.build_record_position(store, "dec_1", **kw)
+
+
+def _occ_legs(*symbols: str, qty: int = 3) -> list[dict[str, Any]]:
+    return [{"symbol": s, "side": "buy" if i == 0 else "sell", "qty": qty}
+            for i, s in enumerate(symbols)]
+
+
+def test_recording_one_fill_twice_yields_one_page(tmp_path):
+    """I-83 (scaffold X15). A retried tool call with identical legs was WARNED
+    (`leg_overlap`) and then recorded anyway: both pages confirmed `open`
+    against the one broker fill, `max_loss_usd` was summed twice into every cap,
+    `learn.on_fill` wrote two thesis blocks and two mind predictions, and two
+    calibration forecasts pended for one trade."""
+    from trdrbot.calibration import CalibrationStore
+    from trdrbot.positions import PositionStore
+
+    store = PositionStore(tmp_path)
+    calib = CalibrationStore(tmp_path / "forecasts.jsonl")
+    tool = _record_tool(store, calibration=calib, journal=Journal(tmp_path / "j.jsonl"))
+    legs = _occ_legs("SPY260909P00636000", "SPY260909P00628000")
+
+    first = tool.func(underlying="SPY", strategy="bear_put_spread", legs=legs,
+                      thesis="t", confidence=0.42, max_loss_usd=900.0)
+    second = tool.func(underlying="SPY", strategy="bear_put_spread", legs=legs,
+                       thesis="t, restated", confidence=0.51, max_loss_usd=900.0)
+
+    pages = store.all()
+    assert len(pages) == 1, f"one fill, two pages: {[p.position_id for p in pages]}"
+    assert pages[0].position_id in first and pages[0].position_id in second
+    assert "Updated" in second
+    assert pages[0].thesis == "t, restated", "the page carries the latest statement"
+    assert sum(p.max_loss_usd or 0.0 for p in store.open_positions()) == 900.0, \
+        "the book caps counted one fill's risk twice"
+    assert len(calib.pending()) == 1, "one trade, one forecast"
+    assert calib.pending()[0].probability == pytest.approx(0.51)
+
+
+def test_the_resumed_cycle_adopts_the_orphan_stub_it_raced(tmp_path):
+    """I-82 (scaffold X16), the residual of FM-1 made concrete. After a crash
+    between the order and `record_position`, the next tick adopts the fill as an
+    orphan stub; the resumed decide cycle then re-submits (the broker rejects the
+    duplicate id, as designed) and records - and two `open` pages claimed one
+    fill. The real page's stop then closed its own quantity and left the stub to
+    go phantom and be scored `external`."""
+    from trdrbot import ids
+    from trdrbot.positions import Position, PositionStore
+
+    store = PositionStore(tmp_path)
+    legs = _occ_legs("SPY260909P00636000", "SPY260909P00628000")
+    store.save(Position(  # what reconcile._adopt_orphans wrote while we were gone
+        position_id=ids.position_id("SPY", "orphan"), status="open",
+        strategy="orphan_option", underlying="SPY", legs=list(legs),
+        thesis="Adopted orphan.", provenance="unknown"))
+
+    reply = _record_tool(store).func(
+        underlying="SPY", strategy="bear_put_spread", legs=legs,
+        thesis="the thesis the crash lost", confidence=0.42,
+        stop_loss_pct=-50.0, max_loss_usd=900.0)
+
+    pages = store.all()
+    assert len(pages) == 1, "the stub and the record are one fill"
+    p = pages[0]
+    assert p.status == "open", "a confirmed fill must not be demoted to `opening`"
+    assert p.provenance == "agent", "it is explained now"
+    assert p.thesis == "the thesis the crash lost" and p.exit_rules
+    assert "UPDATED in place" in reply
+
+
+def test_two_structures_sharing_one_leg_stay_two_positions(tmp_path):
+    """The D-111 CONTROL, and the reason the identity is the whole leg SET.
+    Genuine leg sharing between two different structures is not one fill: the
+    pages stay separate and the existing overlap warning still fires."""
+    from trdrbot.positions import PositionStore
+
+    store = PositionStore(tmp_path)
+    tool = _record_tool(store, journal=Journal(tmp_path / "j.jsonl"))
+    tool.func(underlying="SPY", strategy="bear_put_spread",
+              legs=_occ_legs("SPY260909P00636000", "SPY260909P00628000"),
+              thesis="a", confidence=0.4, max_loss_usd=900.0)
+    reply = tool.func(underlying="SPY", strategy="bull_put_spread",
+                      legs=_occ_legs("SPY260909P00628000", "SPY260909P00620000"),
+                      thesis="b", confidence=0.4, max_loss_usd=800.0)
+
+    assert len(store.all()) == 2, "different structures are different positions"
+    assert "already held by" in reply, "the D-111 overlap warning still fires"
+
+
+def test_a_lowercase_leg_symbol_is_stored_as_the_broker_spells_it(tmp_path):
+    """I-85 (scaffold X9). `record_position` stored legs verbatim while
+    `reconcile` and `exit_rules` match `pos.symbols` by exact string against the
+    broker's uppercase OCC - so a FILLED position whose page said
+    `spy260909p00636000` was `abandoned/never_filled` on the next tick and its
+    real legs were adopted as an orphan with no thesis and no stops."""
+    from trdrbot.positions import PositionStore
+
+    store = PositionStore(tmp_path)
+    _record_tool(store).func(
+        underlying="spy", strategy="bear_put_spread",
+        legs=_occ_legs(" spy260909p00636000 ", "spy260909p00628000"),
+        thesis="t", confidence=0.4, max_loss_usd=900.0)
+
+    p = store.all()[0]
+    assert p.symbols == ["SPY260909P00636000", "SPY260909P00628000"]
+    assert p.underlying == "SPY"
+
+
+def test_a_missing_expiry_is_derived_from_the_legs(tmp_path):
+    """I-89 (scaffold X14). `expiry` defaulted to `""` and `days_to_expiry`
+    reads `pos.expiry`, so a missing field left the implicit gamma-wall time
+    stop holding blind on every tick - and nothing said so: the reply mentioned
+    nothing and `invalid_rules` read 0, because the rule parses perfectly."""
+    from trdrbot.positions import PositionStore
+
+    store = PositionStore(tmp_path)
+    tool = _record_tool(store)
+    reply = tool.func(underlying="SPY", strategy="bear_put_spread",
+                      legs=_occ_legs("SPY260909P00636000", "SPY260909P00628000"),
+                      thesis="t", confidence=0.4, max_loss_usd=900.0)
+
+    assert store.all()[0].expiry == "2026-09-09"
+    assert "derived 2026-09-09" in reply
+
+    # ...and a stated expiry that disagrees with the legs is named, not silently
+    # overwritten: the stated one is what every calendar rule reads.
+    store2 = PositionStore(tmp_path / "other")
+    reply2 = _record_tool(store2).func(
+        underlying="SPY", strategy="bear_put_spread", expiry="2026-10-16",
+        legs=_occ_legs("SPY260909P00636000", "SPY260909P00628000"),
+        thesis="t", confidence=0.4, max_loss_usd=900.0)
+    assert "disagrees with the legs" in reply2
+    assert store2.all()[0].expiry == "2026-10-16"
+
+
+def test_the_sizing_stash_is_matched_on_the_structure_not_just_the_count(tmp_path):
+    """I-90 (scaffold X13). `SharedContext.sizing` lives for the whole cycle and
+    matched on the underlying and the contract COUNT only - so sizing a WIDE
+    spread at N contracts and then recording a NARROW one at N carried $2,700 of
+    risk onto a $900 structure, and into every cap until `_reprice_max_loss`
+    repaired it at the fill."""
+    from trdrbot import local_tools
+    from trdrbot.positions import PositionStore
+
+    store = PositionStore(tmp_path)
+    shared = local_tools.SharedContext()
+    shared.sizing = local_tools.SizingStash(
+        underlying="SPY", contracts=3, max_loss_usd=2700.0,
+        key=local_tools._legs_key([("P", 636.0, "long"), ("P", 620.0, "short")]))
+
+    reply = _record_tool(store, shared=shared,
+                         journal=Journal(tmp_path / "j.jsonl")).func(
+        underlying="SPY", strategy="bear_put_spread",
+        legs=_occ_legs("SPY260909P00636000", "SPY260909P00628000"),  # the NARROW one
+        thesis="t", confidence=0.4, max_loss_usd=900.0)
+
+    assert store.all()[0].max_loss_usd == 900.0, \
+        "the wide spread's risk was carried onto a different structure"
+    assert "DIFFERENT structure" in reply
+    assert any(r.get("kind") == "sizing_mismatch" and r.get("seam") == "structure"
+               for r in Journal(tmp_path / "j.jsonl").read())
+
+
+def test_the_matching_structure_still_supplies_the_risk(tmp_path):
+    """The opposite direction: the stash is used when it IS the structure that
+    was traded. Derive-don't-declare (D-037) must survive the check."""
+    from trdrbot import local_tools
+    from trdrbot.positions import PositionStore
+
+    store = PositionStore(tmp_path)
+    shared = local_tools.SharedContext()
+    shared.sizing = local_tools.SizingStash(
+        underlying="SPY", contracts=3, max_loss_usd=2700.0,
+        key=local_tools._legs_key([("P", 636.0, "long"), ("P", 628.0, "short")]))
+
+    _record_tool(store, shared=shared).func(
+        underlying="SPY", strategy="bear_put_spread",
+        legs=_occ_legs("SPY260909P00636000", "SPY260909P00628000"),
+        thesis="t", confidence=0.4, max_loss_usd=900.0)
+
+    assert store.all()[0].max_loss_usd == 2700.0

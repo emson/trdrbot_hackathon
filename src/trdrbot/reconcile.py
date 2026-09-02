@@ -28,6 +28,21 @@ from .wiki import Wiki
 #: `max_loss_recomputed` rows themselves once there are enough to look at.
 REPRICE_REPORT_USD, REPRICE_REPORT_SHARE = 50.0, 0.05
 
+#: How long a position's legs stay off-limits to orphan adoption after it goes
+#: terminal (I-81). `exit_rules.run` transitions on the broker ACCEPTING the
+#: close, not on the fill - so for at least one tick the terminal page has
+#: stopped claiming its legs while the broker still shows them, and the adopter
+#: took them, watched the stub go phantom when the close landed, and scored one
+#: trade twice: two `reflection` rows, two lessons.md entries, and a resolution
+#: for a position that never existed.
+#:
+#: A working order covers most of that window on its own; this covers the gap
+#: between the transition and the order appearing in `get_orders`. Fifteen
+#: minutes is three ticks on the open cadence - long enough for a close to
+#: land, short enough that a genuinely stranded leg is adopted and watched
+#: while the session is still running.
+RECENT_CLOSE_GRACE_MIN = 15.0
+
 
 def _reprice_max_loss(pos: Position, snap: Snapshot, journal: Journal) -> None:
     """Recompute `max_loss_usd` from the fill, at the moment it is confirmed.
@@ -227,8 +242,26 @@ async def reconcile(
                      resolutions=len(result["phantom"]),
                      errors=learn_errors)
 
-    if snap.broker_readable:
+    # A CLOSE IN FLIGHT IS NOT AN ORPHAN (I-81). `claimed` is built from ACTIVE
+    # pages only, so a position the exit engine closed a moment ago stops
+    # claiming its legs the instant it goes terminal - while the broker still
+    # shows them until the close actually fills. Two more claims close that
+    # window: a symbol with a working order at the broker, and a symbol a page
+    # released within the last few minutes.
+    #
+    # An UNREADABLE order book cannot support "there is no working order", which
+    # is the conclusion adoption rests on - so adoption waits a tick, exactly as
+    # every other absence-based branch above does (I-55/D-112). Nothing is lost:
+    # a genuine orphan is still there next tick, and it is the read that failed,
+    # not the position that vanished.
+    if snap.broker_readable and snap.orders_readable:
+        claimed |= working
+        claimed |= store.recently_closed_legs(RECENT_CLOSE_GRACE_MIN)
         _adopt_orphans(store, snap, journal, claimed, result)
+    elif snap.broker_readable:
+        journal.append("reconciliation", finding="orphans_deferred",
+                       detail="the order book could not be read, so a working close "
+                              "cannot be told from an unrecorded fill - adoption waits")
 
     return result
 

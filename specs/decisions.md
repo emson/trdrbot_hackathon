@@ -5261,3 +5261,113 @@ requirement. It is now `test_a_persistent_wide_print_on_an_unmoved_underlying_ne
 with `test_an_unjudgeable_breach_still_debounces_to_a_close` so the debounce stays load-bearing and
 "closes too eagerly" cannot be fixed into "never closes". Two fixtures that built snapshots without
 `market_open` now state it: they always meant a live tick.
+
+## D-116 - One fill, one page: the leg set is the identity of a position
+
+**Nothing in this system said what made two observations of a broker fill "the same position."**
+`reconcile` claimed legs from ACTIVE pages only, `record_position` created a page unconditionally,
+and neither consulted working orders - so three unrelated-looking defects turned out to be one
+missing rule wearing four hats. Plan: `docs/plan_defect_remediation.md` W2. Closes I-81, I-82, I-83,
+I-85, I-87, I-88, I-89, I-90 and (through `mark_traded`) I-78.
+
+**The sorted leg set is the identity** (`positions.leg_key`). Alpaca has no multi-leg position
+concept, so the legs are the only thing two independent observers of one fill can both see - the
+position id is minted per call and proves nothing. Three consequences:
+
+- **A close in flight is not an orphan (I-81).** `exit_rules.run` transitions to `closed` on the
+  broker ACCEPTING the close, not on the fill, so for at least one tick the terminal page has
+  stopped claiming its legs while the broker still shows them. Adoption now also claims symbols with
+  a working order and symbols released within `RECENT_CLOSE_GRACE_MIN`, and it DEFERS entirely when
+  the order book could not be read - an unreadable order book cannot support "there is no working
+  close", which is the conclusion adoption rests on (the D-112 rule, one branch over). Before this,
+  the stub went phantom when the close landed and one trade was scored twice: two `reflection` rows,
+  two lessons.md entries, and a resolution for a position that never existed.
+- **`record_position` adopts, it does not narrate (I-82, I-83).** An ACTIVE page holding exactly
+  these legs IS this fill's page, so it is updated in place - thesis, exit rules, sizing, provenance
+  promoted from `unknown` to `agent` - keeping its status (never demote a confirmed `open` back to
+  `opening`), its debounce state, its verifications and any block `learn.on_fill` already wrote. The
+  `leg_overlap` warning had already identified the page and then recorded a duplicate beside it.
+- **Genuine leg SHARING is untouched (D-111).** Different leg sets are different pages and the
+  overlap warning still fires. The adversarial scaffold's X12 control was a byte-identical copy of
+  its own position at another quantity - one leg set, i.e. one fill - so it was rebuilt as the two
+  genuinely different structures it always meant.
+
+**A leg symbol is uppercase OCC or it is nothing (I-85).** `parse_occ` upper-cases; the matchers in
+`reconcile` and `exit_rules` compare `pos.symbols` by exact string against the broker's OCC and did
+not. A filled position whose page said `spy260909p00636000` was `abandoned/never_filled` on the next
+tick and its real legs were adopted as an orphan - thesis, stops and sizing gone, and the page
+carrying them terminal. Normalised at the one place model-authored symbols enter the system.
+
+**Absent facts are derived where they exist, not defaulted (I-89, I-90).** A missing `expiry` is
+derived from the OCC legs and said so in the reply, and a stated one that disagrees with the legs is
+named - it used to default to `""`, leaving the implicit gamma-wall time stop blind on every tick
+while `invalid_rules` read 0, because the rule parses perfectly. `SharedContext.sizing` now records
+the structure key it was computed FOR: matching on underlying and contract COUNT alone carried a
+wide spread's $2,700 risk onto a $900 structure recorded at the same quantity, and into every cap
+until the fill repriced it.
+
+**A percent argument that looks like a fraction is refused, not reinterpreted (I-87).**
+`stop_loss_pct=-0.65` became `threshold: "-0.65%"` - a stop inside the bid/ask spread, and measured:
+a -2% mark closed the position on the second tick. The neighbouring `confidence` argument in the
+same call IS a 0-1 fraction, which makes it the most natural mistake a model can make. The RULE is
+dropped and named, never the call: an unrecorded fill is an orphan, and the reply tells the agent
+exactly how to fix it - by calling `record_position` again, which now reaches the same page.
+
+**Who owns a traded thesis's calibration row (I-78) - this revises D-105.** `record_position` wrote
+the agent's `confidence` into BOTH the calibration store (resolved at close on P&L) and the ledger's
+traded row (resolved at horizon on the band), and `CalibrationStore.score` concatenates the two
+lists with no dedup on `position_id`. One stated 42% counted as **n=2 from one trade**, on two
+different events that can resolve in opposite directions - measured, a stop-out at a loss whose band
+then held yields base rate 0.5 at n=2. The ladder's `min_n` gates (5/15/40) and
+`shrink_probability`'s n/30 trust ramp both read that n, so three trades bought ESTABLISH.
+
+**The POSITION ROW owns calibration.** `confidence` is documented to the model as "your honest
+probability that this position closes profitable", and the tool docstring is what the model reads,
+so that is the claim it made. D-105's symptom was real but its premise was incomplete: the same
+number was already reaching calibration through the position row. The fix stands, the mechanism
+changes - `mark_traded` keeps the trial count N, gate regret and the band attribution scores, and
+reverts to `probability_stated=False`. The number is still written to the row, because it is the
+agent's own and belongs on the record; it is simply not scored twice. `scaffold_whole_system.py` S1
+asserted `matured[0].probability_stated` and is updated as an explicit step.
+
+**And it links BY ID (I-88).** `mark_traded` walked the ledger backwards for the last untraded row
+matching (underlying, horizon), ignoring kind and band - so a standalone forecast recorded in the
+same cycle was marked traded instead, its own 80% view overwritten with the trade's 42%, while the
+thesis actually traded stayed unstated at its 0.5 placeholder. `simulate_experiments` already knows
+which row it registered and passes the id through `SharedContext`. `CalibrationStore.record` is
+idempotent per position for the same reason: one fill reaches one page, so it must reach one
+forecast.
+
+**Existing calibration pairs are NOT rewritten.** Three live pairs are pending resolution. The store
+is append-only; `score()` counts one per trade from here, and the record of what happened stays -
+the same call D-107 made for its early resolutions.
+
+## D-117 - Every fixture date comes from the code's own clock, and so does the tool that checks it
+
+I-74 measured eighteen tests that would start failing within thirty days on hardcoded dates. Ten of
+those eighteen were never real: **`scripts/suite_at.py` double-shifted `ids.today`.** It wrapped a
+function *defined in terms of* `ids.utc_now`, which it had already replaced - so `today()` advanced
+N days through the wrapper and N more through the clock underneath it, and every fixture built with
+`conftest.days_out` sat N days beyond the market clock the code compares it against. The one tool
+whose entire job is to find date fragility was manufacturing it.
+
+The remaining eight were the real thing, in two shapes, and both fired live: two of them went red at
+local midnight on 2026-09-03, mid-session, on a clean tree.
+
+- **`date.today()` in a fixture.** That is the MACHINE's local date. West of UTC it is a day behind
+  `ids.today()` for part of every day; east of it, a day ahead of `ids.market_today()` for another
+  part - which is exactly when the two tests broke, at 00:01 BST against 19:01 ET. Replaced with
+  `conftest.days_out(n)`, which is what D-032's rule already said.
+- **`datetime.now(UTC)` compared against a stored `stale_after`.** The wiki-lifecycle tests computed
+  "later" from the machine while the page's expiry came from the code. Same rule one level up: the
+  moment is `ids.utc_now()`.
+
+`uv run python scripts/suite_at.py N` is now green at +1, +7, +30, +90 and +400 days, which is
+I-74's own stated goal state. `test_clocks` stays deselected there because its whole job is to
+notice that the clock is fake.
+
+**The commit gate runs every scaffold.** `tests/scaffold_*.py` are deliberately not pytest-collected
+(D-079), so a green `uv run pytest` says nothing about them - and `scaffold_whole_system.py` had been
+silently red since D-115 landed, on two scenarios that asserted a mark stop firing on an underlying
+that had not moved. Those are now the corroborated move a real stop is, and the gate is pytest +
+ruff + all seven scaffolds + `suite_at 30`, each on its own captured exit code.

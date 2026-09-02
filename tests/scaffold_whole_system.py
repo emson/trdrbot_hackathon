@@ -334,14 +334,23 @@ try:
     for e in matured:
         w.ledger.resolve(e.id, spot - 8.0, ids.utc_now().isoformat())
     cal1 = w.calib.score(ledger_mod.as_forecasts(w.ledger.resolved()))
-    # D-105: this check FOUND the bug on its first run. The traded thesis sat
-    # at its 0.5 placeholder with probability_stated=False, so the loop was
-    # open exactly where money had crossed it. Now it must close.
-    check(bool(matured) and cal1.n == n0 + 1
-          and matured[0].probability_stated and matured[0].probability == 0.42,
-          "a resolved TRADED thesis reaches calibration AT THE CONFIDENCE IT WAS TRADED AT",
-          f"n {n0} -> {cal1.n}, stated={matured[0].probability_stated if matured else '-'}, "
+    # D-105 FOUND a real gap here on its first run - the traded thesis sat at
+    # its 0.5 placeholder and the loop was open exactly where money had crossed
+    # it. **D-116 revises the MECHANISM** (I-78): the confidence was already
+    # reaching calibration through the POSITION row, so stating the ledger row
+    # too made one number n=2 on two events that can disagree. The property
+    # this scenario cares about is unchanged and is now stated directly: one
+    # trade, one forecast, at the confidence it was traded at.
+    check(bool(matured) and cal1.n == n0 and not matured[0].probability_stated
+          and matured[0].probability == 0.42 and matured[0].position_id,
+          "a traded thesis is LINKED and scored once - by the position row, not twice",
+          f"ledger n {n0} -> {cal1.n}, stated={matured[0].probability_stated if matured else '-'}, "
           f"p={matured[0].probability if matured else '-'}")
+    pend = [f for f in w.calib.pending() + w.calib.resolved()
+            if f.position_id == (matured[0].position_id if matured else "")]
+    check(len(pend) == 1 and pend[0].probability == 0.42,
+          "and the position row is the ONE calibration forecast for that trade",
+          f"{[(f.position_id, f.probability) for f in pend]}")
 finally:
     w.cleanup()
 
@@ -353,7 +362,14 @@ try:
     spot = w.broker.prices["SPY"]
     run(w.decide_open(underlying="SPY", spot=spot, expiry=expiry, long_k=round(spot - 4),
                       short_k=round(spot - 12), stated=0.42, horizon=horizon))
-    w.broker.mark("SPY", -0.80)                 # 80% of the debit gone
+    # 80% of the debit gone, AND the underlying moved to cause it. Since D-115
+    # a mark breach closes only when the underlying corroborates it (I-77): a
+    # wide quote on an unmoved underlying is the artifact the debounce exists
+    # for, and it persists for hours on an illiquid strike. This is a bearish
+    # spread, so the loss is SPY rallying through it - which is what an -80%
+    # print on a real move looks like.
+    w.broker.mark("SPY", -0.80)
+    w.broker.prices["SPY"] = spot + 6.0
     w.broker.market_open = False
     snap, _, closed = run(w.fast_path())
     check(closed == [], "OFF-HOURS: the breach is detected but no close is submitted",
@@ -420,9 +436,15 @@ try:
         open_risk_usd=sum(by.values()), open_risk_by_underlying=by, payoff_ratio=1.5)
     check(d.contracts > 0, "a third position on SPY still fits under SPY's name cap",
           f"{d.contracts} contracts, binding: {d.binding or 'refused'}")
+    # The underlying moves with the mark (D-115/I-77): corroboration now applies
+    # to every mark breach, not only the decisive one, so a loss the underlying
+    # does not show is held as the artifact it probably is.
     w.broker.mark("NVDA", -0.80)
-    run(w.fast_path())                     # first breach ARMS the debounce (I-42)
-    snap, _, closed = run(w.fast_path())   # second confirms it
+    w.broker.prices["NVDA"] = w.broker.prices["NVDA"] * 1.02
+    # ...and a CORROBORATED breach closes on the FIRST print, which is the
+    # whole point of asking the underlying: the debounce is what a breach it
+    # cannot judge falls back to, not a delay applied to every one.
+    snap, _, closed = run(w.fast_path())
     nv = [p for p in w.store.all() if p.underlying == "NVDA"]
     xr = [r for r in w.journal.read() if r.get("kind") == "exit_run"][-1:]
     print(f"  NVDA status={[p.status for p in nv]} max_loss={[p.max_loss_usd for p in nv]} "

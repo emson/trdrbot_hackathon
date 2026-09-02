@@ -127,7 +127,7 @@ def _filled(pos, debit_per_share: float, credit_per_share: float) -> Snapshot:
     long_sym, short_sym = pos.symbols
     qty = pos.legs[0]["qty"]
     mult = 100
-    return Snapshot(broker_readable=True, broker_positions=[
+    return Snapshot(broker_readable=True, orders_readable=True, broker_positions=[
         {"symbol": long_sym, "qty": qty, "cost_basis": debit_per_share * qty * mult,
          "unrealized_pl": 0.0},
         {"symbol": short_sym, "qty": -qty, "cost_basis": -credit_per_share * qty * mult,
@@ -186,7 +186,7 @@ async def test_an_incomplete_fill_leaves_the_stated_risk_alone(
     store, journal, wiki, calib = _stores(paths)
     pos = make_position(status="opening", max_loss_usd=2171.0)
     store.save(pos)
-    partial = Snapshot(broker_readable=True, broker_positions=[
+    partial = Snapshot(broker_readable=True, orders_readable=True, broker_positions=[
         {"symbol": pos.symbols[0], "qty": 13, "cost_basis": 5330.0, "unrealized_pl": 0.0},
     ])
 
@@ -226,7 +226,7 @@ def test_filled_legs_refuses_a_leg_it_cannot_price(make_position):
     from trdrbot.analytics import filled_legs
 
     pos = make_position()
-    snap = Snapshot(broker_readable=True, broker_positions=[
+    snap = Snapshot(broker_readable=True, orders_readable=True, broker_positions=[
         {"symbol": s, "qty": 13, "cost_basis": 0.0} for s in pos.symbols
     ])
 
@@ -245,7 +245,7 @@ async def test_two_orphan_legs_of_one_spread_are_adopted_as_a_single_position(
     them separately would let the exit path close one and leave the other, which
     is the naked short INV-19 exists to prevent."""
     store, journal, wiki, calib = _stores(paths)
-    snap = Snapshot(broker_readable=True, broker_positions=[
+    snap = Snapshot(broker_readable=True, orders_readable=True, broker_positions=[
         {"symbol": "SPY260903P00766000", "qty": 13, "cost_basis": 5330.0},
         {"symbol": "SPY260903P00758000", "qty": -13, "cost_basis": -2119.0},
     ])
@@ -270,7 +270,7 @@ async def test_an_adopted_orphan_reports_itself_as_needing_a_human(paths, mem: F
     from trdrbot import health
 
     store, journal, wiki, calib = _stores(paths)
-    snap = Snapshot(broker_readable=True, broker_positions=[
+    snap = Snapshot(broker_readable=True, orders_readable=True, broker_positions=[
         {"symbol": "SPY260903P00766000", "qty": 13, "cost_basis": 5330.0},
     ])
 
@@ -286,7 +286,7 @@ async def test_an_adopted_orphan_is_not_re_adopted_on_the_next_pass(paths, mem: 
     """Idempotence, proven rather than reasoned about: `claimed` is rebuilt from
     the open pages every call, so the stub's own legs must claim themselves."""
     store, journal, wiki, calib = _stores(paths)
-    snap = Snapshot(broker_readable=True, broker_positions=[
+    snap = Snapshot(broker_readable=True, orders_readable=True, broker_positions=[
         {"symbol": "SPY260903P00766000", "qty": 13, "cost_basis": 5330.0},
     ])
 
@@ -319,10 +319,11 @@ async def test_an_adopted_orphan_is_force_closed_at_the_deadline(paths, mem: Fak
 
     from trdrbot import exit_rules
     store, journal, wiki, calib = _stores(paths)
-    snap = Snapshot(market_open=True, broker_readable=True, broker_positions=[
-        {"symbol": "SPY260903P00766000", "qty": 13, "cost_basis": 5330.0,
-         "unrealized_pl": 0.0},
-    ])
+    snap = Snapshot(market_open=True, broker_readable=True, orders_readable=True,
+                    broker_positions=[
+                        {"symbol": "SPY260903P00766000", "qty": 13,
+                         "cost_basis": 5330.0, "unrealized_pl": 0.0},
+                    ])
     closer = tools_for(close_position=lambda **kw: {"status": "ok"})
 
     await reconcile.reconcile(store, snap, journal, mem, wiki, calib)
@@ -724,3 +725,87 @@ async def test_an_unscoreable_outcome_counts_against_what_the_loop_learned(
 
     assert (before, n_before) == (None, 0), "nothing attributed yet is not a rate of zero"
     assert after == 0.0 and n_after == 1
+
+
+# ------------------------------------------------------------------- I-81
+#
+# A close is ACCEPTED on one tick and FILLS on a later one. In between the
+# terminal page has stopped claiming its legs while the broker still shows
+# them - and the adopter took them.
+
+async def test_a_close_in_flight_is_not_adopted_as_an_orphan(paths, make_position,
+                                                             mem: FakeMem):
+    """I-81 (scaffold X4). `exit_rules.run` transitions to `closed` on the
+    broker ACCEPTING the close, not on the fill; `_adopt_orphans` built
+    `claimed` from ACTIVE pages only and ignored `snap.open_orders`. So legs
+    still at the broker with a working close order were adopted as an
+    `orphan_option` stub with `status=open` - and when the close filled the stub
+    went phantom, `learn.on_resolution` wrote a SECOND `reflection` row and a
+    second lessons.md entry, and attribution later marked it unscoreable. Two
+    resolutions for one trade, one of them for a position that never existed."""
+    store, journal, wiki, calib = _stores(paths)
+    pos = make_position(status="closing")
+    store.transition(pos, "closed", close_reason="stop_triggered")
+
+    working = [{"symbol": s} for s in pos.symbols]
+    snap = Snapshot(market_open=True, broker_readable=True, orders_readable=True,
+                    open_orders=working,
+                    broker_positions=[{"symbol": s, "qty": 3, "cost_basis": 100.0}
+                                      for s in pos.symbols])
+
+    result = await reconcile.reconcile(store, snap, journal, mem, wiki, calib)
+
+    assert result["orphan"] == [], "the close we just submitted is not an orphan"
+    assert len(store.all()) == 1
+
+
+async def test_a_position_closed_moments_ago_keeps_its_legs(paths, make_position,
+                                                            mem: FakeMem):
+    """I-81's other half: the gap between the transition and the close order
+    appearing in `get_orders`. A page that went terminal within the grace still
+    speaks for its legs, so the adopter cannot take them back."""
+    store, journal, wiki, calib = _stores(paths)
+    pos = make_position(status="open")
+    store.transition(pos, "closed", close_reason="stop_triggered")
+    assert store.load(pos.position_id).closed_at, "the transition must stamp the time"
+
+    snap = Snapshot(market_open=True, broker_readable=True, orders_readable=True,
+                    broker_positions=[{"symbol": s, "qty": 3, "cost_basis": 100.0}
+                                      for s in pos.symbols])
+
+    result = await reconcile.reconcile(store, snap, journal, mem, wiki, calib)
+
+    assert result["orphan"] == []
+    assert len(store.all()) == 1
+
+
+async def test_a_genuinely_stranded_leg_is_still_adopted(paths, mem: FakeMem):
+    """The opposite direction, and the whole point of adoption (I-61): a leg the
+    broker holds that NO page of ours has ever claimed still gets a page, and
+    therefore stops and a deadline sweep. Deferring on a working order must not
+    become deferring on everything."""
+    store, journal, wiki, calib = _stores(paths)
+    snap = Snapshot(market_open=True, broker_readable=True, orders_readable=True,
+                    broker_positions=[{"symbol": "SPY260903P00766000", "qty": 13,
+                                       "cost_basis": 5330.0}])
+
+    result = await reconcile.reconcile(store, snap, journal, mem, wiki, calib)
+
+    assert result["orphan"] == ["SPY260903P00766000"]
+    assert store.all()[0].strategy == "orphan_option"
+
+
+async def test_adoption_waits_when_the_order_book_could_not_be_read(paths, mem: FakeMem):
+    """An unreadable order book cannot support "there is no working close",
+    which is the conclusion adoption rests on - the same rule D-112 applied to
+    the `opening` branch one level up. Waiting a tick costs nothing: a real
+    orphan is still there next tick."""
+    store, journal, wiki, calib = _stores(paths)
+    snap = Snapshot(market_open=True, broker_readable=True, orders_readable=False,
+                    broker_positions=[{"symbol": "SPY260903P00766000", "qty": 13,
+                                       "cost_basis": 5330.0}])
+
+    result = await reconcile.reconcile(store, snap, journal, mem, wiki, calib)
+
+    assert result["orphan"] == [] and store.all() == []
+    assert any(r.get("finding") == "orphans_deferred" for r in journal.read())

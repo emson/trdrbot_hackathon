@@ -170,7 +170,21 @@ class CalibrationStore:
         )
 
     def record(self, position_id: str, probability: float, subject: str = "") -> None:
+        """Record - or RESTATE - this position's forecast. One per position.
+
+        A position has one confidence, so an unresolved forecast already
+        carrying this id is updated rather than appended to. `record_position`
+        is now idempotent for one fill (I-83): a retried tool call or a resumed
+        cycle reaches the same page, and it must reach the same forecast too,
+        or one trade would contribute two rows to `score()` - the very thing
+        I-78 was about.
+        """
         probability = max(0.0, min(1.0, probability))
+        for f in self._items:
+            if f.position_id == position_id and f.outcome is None:
+                f.probability, f.subject = probability, subject.upper() or f.subject
+                self._flush()
+                return
         self._items.append(Forecast(position_id=position_id, probability=probability,
                                     subject=subject.upper()))
         self._flush()
