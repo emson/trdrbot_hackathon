@@ -10,8 +10,8 @@
 			<div class="stack" style="gap:.6rem">
 				<a href="/" class="plain" style="font-family:var(--round); font-weight:600; font-size:1.05rem">trdrbot</a>
 				<p class="muted" style="max-width:34ch">
-					An options-trading agent that scores whether it was right, not just whether it made
-					money. Built for the Alpaca AI Trading Agents Hackathon. Paper trading only.
+					A self-improving options-trading agent that scores itself honestly, not just by P&amp;L.
+					Built for the Alpaca AI Trading Agents Hackathon. Paper trading only.
 				</p>
 			</div>
 			<div class="footer-links">

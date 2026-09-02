@@ -7,10 +7,10 @@
 </script>
 
 <svelte:head>
-	<title>trdrbot — Theo learns why it was right</title>
+	<title>trdrbot — Theo, a self-improving options-trading agent</title>
 	<meta
 		name="description"
-		content="An autonomous options-trading agent that scores whether its view was right, whether its structure was right, or whether it just got lucky. Built for the Alpaca AI Trading Agents Hackathon."
+		content="Theo gathers research, forms a falsifiable thesis, simulates the ways to trade it, and sizes the one it trusts most by a track record it has to earn — then scores itself honestly on whether it was right or just lucky. Built for the Alpaca AI Trading Agents Hackathon."
 	/>
 </svelte:head>
 

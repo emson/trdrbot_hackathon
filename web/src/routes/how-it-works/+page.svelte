@@ -1,5 +1,6 @@
 <script>
 	import Icon from '$lib/components/Icon.svelte';
+	import Term from '$lib/components/Term.svelte';
 </script>
 
 <svelte:head><title>How it works — trdrbot</title></svelte:head>
@@ -10,9 +11,9 @@
 		<h1 style="margin:.5rem 0 .8rem">Five stages, looped so the system can learn from itself.</h1>
 		<p class="standfirst">
 			A scheduler wakes the agent every 60 seconds. Cheap deterministic work runs every tick;
-			the one LLM decision cycle runs roughly every 15 minutes. What comes back from Learn feeds
-			forward into Think through calibration and attribution — the size the <em>next</em> trade
-			is allowed depends on how honestly the last ones were explained.
+			the one LLM decision cycle runs roughly every 15 minutes. What Learn finds feeds forward into
+			Think through calibration and attribution: how much size the <em>next</em> trade gets depends
+			on how honestly the last ones were explained.
 		</p>
 	</div>
 </section>
@@ -87,8 +88,9 @@
 				<li><strong>Risk is repriced from the fill</strong>, not the model's word. Every book cap
 					sums <code>max_loss_usd</code>; if that came from a model and never met a fill, every
 					later cap is denominated in fiction.</li>
-				<li><strong>A whole-book close is refused</strong> above one open position, and an orphan
-					found at the broker is adopted into the managed set rather than just logged.</li>
+				<li><strong>The system refuses a whole-book close</strong> above one open position, and
+					adopts any orphan it finds at the broker into the managed set rather than just logging
+					it.</li>
 			</ul>
 			<div class="card">
 				<span class="tag code">a real order</span>
@@ -115,9 +117,9 @@
 					Thesis-level stops watch the <strong>underlying</strong>, not the noisy option mark.</p></div>
 			<div class="card"><span class="tag code">the scoring — at the thesis horizon</span>
 				<p class="muted">Attribution asks the two questions once the horizon named in the thesis
-					passes. A profit on a wrong view is recorded as <strong>luck</strong> and teaches
-					nothing. Calibration then scores every stated probability with a Brier score and its
-					Murphy decomposition.</p></div>
+					passes. A profit on a wrong view counts as <strong>luck</strong> and teaches nothing.
+					Calibration then scores every stated probability with a <Term name="Brier score" /> and
+					its <Term name="Murphy decomposition" />.</p></div>
 		</div>
 		<div class="quote" style="margin-top:1rem">
 			<p>Attribution is deliberately expensive to earn: promotion past the second rung requires
@@ -141,9 +143,9 @@
 			<div class="card stage"><h3>ledger</h3><p class="muted">Every falsifiable claim ever
 				made, traded or not — the trial count a multiple-testing correction needs.</p></div>
 		</div>
-		<p class="lead" style="margin-top:1rem">The ledger is the quiet one that matters most.
-			<strong>Forecasts on setups declined are scored too</strong>, at zero capital risk — the
-			only realistic route to a calibration sample that means anything inside a week.</p>
+		<p class="lead" style="margin-top:1rem">The ledger is the quiet one that matters most: it
+			<strong>scores forecasts on declined setups too</strong>, at zero capital risk — the only
+			realistic route to a calibration sample that means anything inside a week.</p>
 	</div>
 </section>
 

@@ -9,8 +9,8 @@
 		<span class="kicker">Plain English</span>
 		<h1 style="margin:.5rem 0 .8rem">Glossary.</h1>
 		<p class="standfirst">
-			Every underlined term on this site links back here. No prior options-trading knowledge
-			assumed.
+			Every dotted-underlined term on this site shows its plain-English definition on hover —
+			this page just collects them all in one place. No prior options-trading knowledge assumed.
 		</p>
 
 		<dl style="margin:1.6rem 0 0; display:flex; flex-direction:column; gap:1.1rem">

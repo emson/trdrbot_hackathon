@@ -10,7 +10,7 @@
 </script>
 
 <svelte:head>
-	<title>trdrbot — Theo learns why it was right</title>
+	<title>trdrbot — Theo, a self-improving options-trading agent</title>
 </svelte:head>
 
 <!-- ── hero ─────────────────────────────────────────────────────────── -->
@@ -19,12 +19,14 @@
 		<div class="cols side">
 			<div class="stack" style="gap:1.3rem">
 				<span class="kicker">Alpaca AI Trading Agents Hackathon · paper trading</span>
-				<h1>Theo knows the difference between being right and being lucky.</h1>
+				<h1>Theo is a self-improving options-trading agent.</h1>
 				<p class="lead">
-					An autonomous options-trading agent that forms a falsifiable view, prices several ways
-					to express it, sizes by a track record it has to <em>earn</em>, and afterwards scores
-					whether its <strong>view</strong> was right, its <strong>structure</strong> was right —
-					or it simply got lucky. Only the first two ever move its confidence.
+					Every cycle it gathers research, forms a falsifiable thesis, simulates the ways to
+					trade it, and sizes the one it trusts most by a track record it has to <em>earn</em>.
+					Then it scores itself honestly — whether the <strong>view</strong> was right, whether
+					the <strong>structure</strong> was right, or whether it just got lucky — and only the
+					first two ever move its confidence. That's the self-improving part: not a bigger model,
+					a more honest one.
 				</p>
 				<div style="display:flex; gap:.7rem; flex-wrap:wrap">
 					<a class="btn primary" href="/ledger">
@@ -83,8 +85,8 @@
 					Most trading agents score themselves on profit and loss — which, over a one-week
 					window, is close to statistical noise. Theo asks two separate questions instead:
 					<strong>was the view right</strong>, and <strong>was the way it was expressed
-					right</strong>. A profit on a wrong view is excluded from what lets it size up — by
-					construction, not by policy.
+					right</strong>. A profit on a wrong view never counts toward sizing up — the mechanism
+					excludes it, not a policy.
 				</p>
 				<a class="btn ghost sm" href="/scoreboard">See the full scoreboard <Icon name="arrowRight" size={14} /></a>
 			</div>

@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Theo · trdrbot</title>
-<meta name="description" content="An options-trading agent that knows the difference between being right and being lucky.">
+<meta name="description" content="Theo is a self-improving options-trading agent that scores itself honestly on whether it was right or just lucky.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,440;9..144,560;9..144,650&family=Fredoka:wght@500;600;700&family=Public+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
@@ -257,11 +257,13 @@ svg.chart{display:block; width:100%; height:auto; overflow:visible}
     <div class="cols side">
       <div class="inner" style="gap:1.1rem">
         <span class="kicker">Alpaca AI Trading Agents Hackathon · paper trading</span>
-        <h1>Theo knows the difference between being right and being lucky.</h1>
-        <p class="lead">An autonomous options-trading agent that forms a falsifiable view, prices
-        several ways to express it, sizes by a track record it has to <em>earn</em>, and afterwards
-        scores whether its <strong>view</strong> was right, its <strong>structure</strong> was
-        right — or it simply got lucky. Only the first two ever move its confidence.</p>
+        <h1>Theo is a self-improving options-trading agent.</h1>
+        <p class="lead">Every cycle it gathers research, forms a falsifiable thesis, simulates the
+        ways to trade it, and sizes the one it trusts most by a track record it has to <em>earn</em>.
+        Then it scores itself honestly — whether the <strong>view</strong> was right, whether the
+        <strong>structure</strong> was right, or whether it just got lucky — and only the first two
+        ever move its confidence. That's the self-improving part: not a bigger model, a more honest
+        one.</p>
         <p class="fine">trdrbot · built on Alpaca's MCP server · $100,000 paper account</p>
       </div>
       <div class="plate"><img src="assets/elf-coding.jpg"
@@ -323,7 +325,7 @@ svg.chart{display:block; width:100%; height:auto; overflow:visible}
         genuinely earned. The two amber cells are still useful: a loss is informative whichever
         way it points, so both feed learning. The red cell is the trap: <strong>a profit on a
         failed thesis</strong>. P&amp;L-based scoring treats that as strong confirmation. Here it
-        teaches nothing, and it is excluded from what lets Theo size up.</p>
+        teaches nothing, and it never counts toward sizing Theo up.</p>
       </div>
     </div>
   </div>
@@ -479,8 +481,9 @@ svg.chart{display:block; width:100%; height:auto; overflow:visible}
           <li><strong>Risk is repriced from the fill</strong>, not from the model's word. Every
           book cap sums <code>max_loss_usd</code>; if that number came from a model and never met a
           fill, every later cap is denominated in fiction.</li>
-          <li><strong>A whole-book close is refused</strong> above one open position, and an
-          orphan found at the broker is adopted into the managed set rather than just logged.</li>
+          <li><strong>The system refuses a whole-book close</strong> above one open position, and
+          adopts any orphan it finds at the broker into the managed set rather than just logging
+          it.</li>
         </ul>
       </div>
       <div class="card">
@@ -513,7 +516,7 @@ svg.chart{display:block; width:100%; height:auto; overflow:visible}
         base, three of the four mark-based rules this book has ever carried could not fire at all.</p></div>
       <div class="card"><span class="tag code">the scoring — at the thesis horizon</span>
         <p class="muted">Attribution waits for the horizon the claim named, then asks the two
-        questions from slide 3. A profit on a wrong view is recorded as <strong>luck</strong> and
+        questions from slide 3. A profit on a wrong view counts as <strong>luck</strong> and
         teaches nothing.</p>
         <p class="muted">Calibration then scores every stated probability with a Brier score and
         its Murphy decomposition — reliability (am I overconfident?) separated from resolution
