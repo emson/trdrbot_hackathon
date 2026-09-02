@@ -5061,3 +5061,80 @@ failed to be learned from.
 
 **Verified:** 572 tests (+7), lint clean, the whole-system scaffold at 0 failing checks, the live
 loop restarted onto this commit with the stale-process probe silent.
+
+## D-113 - The loop reads what it wrote, and the price feed says how old it is
+
+The four auditors' remaining seven findings. None of them moves capital wrongly, which is why they
+came after D-112; most of them mean the system cannot SEE that something is wrong, which is the
+same shape as every serious defect this project has ever had.
+
+**The loop's other half.** `learn._write_lesson` has appended one entry per resolved position to
+`lessons.md` since D-022, and nothing has ever read it back into a decision. The system learned,
+then decided without consulting what it learned: its own trading history sat on disk, in prose,
+while the prompt carried an aggregate calibration number that cannot say WHICH trades produced it.
+The decide prompt now shows the last five resolutions immediately above that number - the base
+rate, then the trades it is made of. Reader and writer live in the same module deliberately, so
+the `## <position_id>` section format stays an internal detail of two adjacent functions rather
+than becoming a wire format nobody declared.
+
+**Corroboration was measuring drift and calling it a quote check.** `_mark_corroborated` asked
+whether the underlying had moved adversely SINCE ENTRY, against its expected move over however
+long the position had been open. A bad print is instantaneous; cumulative drift is neither
+instantaneous nor recent. So a position that rose for a week and then genuinely gapped down still
+showed a net FAVOURABLE move from entry and was refused corroboration on the one day it mattered,
+while a position that fell hard a fortnight ago had every wild quote since confirmed by history it
+could not un-happen. Both horizons are now the session: the move since the previous close, against
+one day's expected move. A wide quote on an unmoved underlying prints a session move of nearly
+zero; a gap prints most of a day's range.
+
+**An unreadable signal is not a rule holding.** `if x is None: continue` sat before the history
+append with no stat, no row and no print, while `invalid_rules` counts only rules that fail to
+PARSE. A stop whose signal has never once been observable therefore reported identically to one
+that evaluates every tick and correctly holds - and the live book's only loss guard on three names
+is an `underlying_stop` reading a price map that drops a symbol on any feed hiccup. Counted per
+signal on the `exit_run` heartbeat, WARN on the latest run, BAD when the same signal is unreadable
+on five consecutive ones. **It found a false positive of its own within one tick:** D-102 removed
+the hard stop, so the implicit deadline rule read `_days_to("")` on every position forever. That
+is not a rule holding, it is a rule that cannot exist, and it is now added only when a deadline is
+configured.
+
+**A stale print is a real number that stopped describing the market.** `get_stock_latest_trade`
+was read with no timestamp validation. IEX carries a small share of consolidated volume, so on
+XLE/XLP/XLV the last IEX trade can be hours old while the tape moves - and an underlying stop
+reading it does not merely miss, it decides on fiction. The price is dropped with a `degraded` row,
+and only while the market is open, because after the close every last trade is old by definition.
+This came with one reader for the feed: `analytics` asked one endpoint, `attribution` asked another
+with its own fallback and its own shape-guessing, and the two had already drifted - only one knew
+about `dailyBar`, only the other knew the `{"trades": {...}}` envelope.
+
+**I-60 was checking the wrong seam.** It compared sizing's contract count against the legs the
+agent WROTE DOWN. Those two agreeing says nothing about what went to the broker: size 3, send 10,
+record 3, and `max_loss_usd` - what every book cap sums - is denominated in a size that was never
+traded. Checked at the placed seam too, `qty` x each `ratio_qty` so a ratio spread cannot read as
+half its real size. Reported, never refused (D-009). Reading the order args also exposed a second
+one: `position_intent` lives on the LEGS, and the opening-order test read it off the top level
+where it is never present, so the test was `"close" not in ""` - permanently true, and the
+no-exit-rules warning cried wolf on every close the agent submitted.
+
+**Research finally has the third gate.** `options_gate` now lives in `opportunity.py` beside the
+`admit()` parameter it answers. It sat inside `discovery` while the muse reached across for it and
+research could not, because `discovery` already imports `research` and the import would not go the
+other way. A shared gate living inside one of its callers is how the table at the top of
+`opportunity.py` got a "no" in it.
+
+**A count-based window is not a recent window for a daily source.**
+`research.opportunities_per_run` averaged the last 10 research rows regardless of age - ten days of
+history. A cycle that died on Thursday kept the same rows being re-averaged, and the gauge reported
+a healthy number all week, computed entirely from a period that had ended. Bounded by age now, with
+`days_since_run` beside it so a gauge that goes missing can be told from one that was never there.
+
+**A truncated reply is the one failure that looks like a smaller success.** The array salvage
+recovers the complete elements of an unterminated array - which is right, four good candidates
+should not be lost to a half-written fifth - and then hands back a list the caller cannot
+distinguish from the model having offered exactly that many. The muse asks for five candidates and
+gpt-5's reasoning tokens come out of the same budget as its output, so "proposed three" and
+"proposed five, we saw three" are both routine and nothing said which. Every JSON-array call site
+now reads the provider's own stop reason.
+
+**Verified:** 599 tests (+27), lint clean, the whole-system scaffold at 0 failing checks,
+tomorrow's suite green, the live loop restarted onto this commit.
