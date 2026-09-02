@@ -540,13 +540,16 @@ def test_health_says_so_when_the_live_process_is_older_than_the_code(tmp_path):
     assert health._stale_process(run_json) == []
 
 
-def test_health_names_a_closed_position_that_can_never_be_attributed(tmp_path, make_position):
-    """D-109. `attribution.pending` needs a claim and a parseable horizon, so a
-    closed position without them never becomes pending, the probe's `work`
-    reads 0, and the subsystem reports "idle, not stalled". A permanently empty
-    queue and a permanently stuck item were the same observation. Live:
-    pos_20260826_SPY_bull_put_spread closed +8.2% with no thesis and will never
-    be attributed at any future date."""
+def test_health_names_a_closed_position_the_sweep_has_not_answered(tmp_path, make_position):
+    """D-109, narrowed by D-114. A closed position without a scoreable thesis
+    used to be permanently stuck - never pending, never attributed, and the
+    probe's `work` read 0, so a permanently empty queue and a permanently stuck
+    item were the same observation.
+
+    The queue drains now: attribution records UNSCOREABLE with the reason,
+    once. So this finding is SELF-CLEARING, and a self-clearing finding that
+    does not clear means the sweep is not running - which is worth the same
+    alarm for a reason that can be acted on."""
     from trdrbot import health
 
     journal = tmp_path / "journal.jsonl"
@@ -557,12 +560,12 @@ def test_health_names_a_closed_position_that_can_never_be_attributed(tmp_path, m
     fine = make_position(position_id="pos_ok", status="closed", thesis_claim="c",
                          thesis_horizon="2026-09-10", attribution="")
     done = make_position(position_id="pos_done", status="closed", thesis_claim="",
-                         thesis_horizon="", attribution="thesis_right_expression_right")
+                         thesis_horizon="", attribution="unscoreable")
     found = {f[1]: (f[0], f[2]) for f in health.check(journal, [stuck, bad_date, fine, done])
              if f[1].startswith("position:")}
     assert found[f"position:{stuck.position_id[:28]}"][0] == health.BAD
-    assert "NEVER be attributed" in found[f"position:{stuck.position_id[:28]}"][1]
-    assert "unparseable horizon" in found["position:pos_h"][1]
+    assert "no thesis was recorded" in found[f"position:{stuck.position_id[:28]}"][1]
+    assert "not a date" in found["position:pos_h"][1]
     assert "position:pos_ok" not in found, "a closed position with a future horizon is fine"
     assert "position:pos_done" not in found, "an attributed position is done"
 
@@ -617,3 +620,104 @@ def test_an_engine_that_can_read_everything_says_nothing(tmp_path):
              "blind_signals": {}}] * (health.BLIND_RUN_WINDOW + 2)
 
     assert not [f for f in _check(tmp_path, rows) if f[1] == "exit_blind"]
+
+
+# ----------------------- D-114 findings are about the system that is running
+
+
+def _era_journal(tmp_path, rows, *, started_days_ago: float | None):
+    """A journal plus, optionally, a live `run.json` claiming this process."""
+    import json
+    import os
+    from datetime import timedelta
+
+    from trdrbot import ids
+
+    path = tmp_path / "journal.jsonl"
+    path.write_text("".join(json.dumps(r) + "\n" for r in rows), encoding="utf-8")
+    if started_days_ago is not None:
+        state = tmp_path / "state"
+        state.mkdir(exist_ok=True)
+        started = (ids.utc_now() - timedelta(days=started_days_ago)).isoformat()
+        (state / "run.json").write_text(
+            json.dumps({"pid": os.getpid(), "git_sha": "abc", "started": started}))
+    return path
+
+
+def _aged(kind: str, days_ago: float, **fields):
+    from datetime import timedelta
+
+    from trdrbot import ids
+
+    return {"kind": kind, "ts": (ids.utc_now() - timedelta(days=days_ago)).isoformat(),
+            **fields}
+
+
+def test_a_cause_that_stopped_before_this_run_is_history_not_a_failure(tmp_path):
+    """D-114. Health asks "is anything silently doing nothing", and an
+    append-only journal answered with a LIFETIME TOTAL, which is a different
+    question. Live on 2026-09-02: fourteen opportunities rejected as
+    `horizon_too_late` by a deadline D-102 had already removed, produced by a
+    process D-108 found forty hours stale - under the config on disk all
+    fourteen are admitted, and health called it a systematic mismatch."""
+    rows = [_aged("research_rejected", 2.0, reason="unscoreable:horizon_too_late")] * 14
+    path = _era_journal(tmp_path, rows, started_days_ago=0.02)
+
+    hit = [f for f in health.check(path, []) if f[1].startswith("rejected:")]
+
+    assert hit and hit[0][0] == health.OK
+    assert "none since this run started" in hit[0][2]
+    assert "14x" in hit[0][2], "the history is kept, not deleted"
+
+
+def test_the_same_cause_still_happening_is_still_a_failure(tmp_path):
+    """The other half, and the one that matters: scoping must not be a way of
+    switching the detector off."""
+    rows = [_aged("research_rejected", 0.005, reason="unscoreable:horizon_too_late")] * 14
+    path = _era_journal(tmp_path, rows, started_days_ago=0.02)
+
+    hit = [f for f in health.check(path, []) if f[1].startswith("rejected:")]
+
+    assert hit and hit[0][0] == health.BAD
+    assert "14x this run" in hit[0][2]
+
+
+def test_once_in_this_run_is_weather_and_three_times_is_a_pattern(tmp_path):
+    """Same escalation as before, now over a scope where it means something."""
+    for n, expected in ((1, health.WARN), (2, health.WARN), (3, health.BAD)):
+        rows = [_aged("error", 0.005, cause="transient")] * n
+        path = _era_journal(tmp_path, rows, started_days_ago=0.02)
+        hit = [f for f in health.check(path, []) if f[1] == "error:transient"]
+        assert hit and hit[0][0] == expected, (n, hit)
+
+
+def test_with_no_live_process_the_whole_journal_is_the_honest_scope(tmp_path):
+    """A one-shot CLI run, a test, a stopped loop: there is no "now" to speak
+    of, and the old behaviour is the right answer."""
+    rows = [_aged("error", 5.0, cause="transient")] * 3
+    path = _era_journal(tmp_path, rows, started_days_ago=None)
+
+    hit = [f for f in health.check(path, []) if f[1] == "error:transient"]
+
+    assert hit and hit[0][0] == health.BAD
+    assert health.scope_label(path) == "the whole journal"
+
+
+def test_a_dead_pid_is_not_an_era(tmp_path):
+    """`run.json` outlives the process that wrote it. Scoping to a run that
+    ended would silence everything that happened while it was alive."""
+    import json
+
+    path = _era_journal(tmp_path, [], started_days_ago=0.02)
+    info = json.loads((tmp_path / "state" / "run.json").read_text())
+    (tmp_path / "state" / "run.json").write_text(
+        json.dumps({**info, "pid": 999_999_999}))
+
+    assert health.scope_label(path) == "the whole journal"
+
+
+def test_the_report_says_which_system_it_is_describing(tmp_path):
+    """A count whose scope is unstated is the ambiguity this replaces."""
+    out = health.render([(health.OK, "x", "y")], "this run (46m so far)")
+
+    assert "recurrences scored over this run (46m so far)" in out

@@ -432,7 +432,7 @@ def _health() -> int:
     cfg = config_mod.load(quiet=True)
     store = PositionStore(cfg.paths.wiki)
     findings = health.check(cfg.paths.journal, store.all())
-    print(health.render(findings))
+    print(health.render(findings, health.scope_label(cfg.paths.journal)))
     return 1 if any(f[0] == health.BAD for f in findings) else 0
 
 

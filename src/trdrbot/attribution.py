@@ -33,15 +33,43 @@ def _horizon_passed(pos: Position) -> bool:
         return False
 
 
+def unscoreable_reason(pos: Position) -> str:
+    """Why this position can never be attributed, or "" if it can.
+
+    The two ways a thesis becomes permanently unjudgeable, both of which are
+    decided at ENTRY and neither of which any later event can repair. Kept
+    beside `pending` because it is the other half of the same predicate.
+    """
+    if not pos.thesis_claim:
+        return "no thesis was recorded at entry"
+    try:
+        date.fromisoformat(str(pos.thesis_horizon))
+    except (ValueError, TypeError):
+        return f"the thesis horizon {str(pos.thesis_horizon)!r} is not a date"
+    return ""
+
+
 def pending(store: PositionStore) -> list[Position]:
-    """Closed positions carrying an unattributed thesis whose horizon has arrived."""
+    """Closed positions still owed an attribution: due, or impossible.
+
+    "Impossible" belongs in the queue, and leaving it out is what made this
+    subsystem's null path indistinguishable from its empty one (D-114). The
+    old predicate required a thesis claim and a parseable horizon, so a
+    position missing either was never pending, never attributed, and never
+    counted - a permanently stuck item and a permanently empty queue are the
+    same observation from here, and health could only say so once, forever,
+    about a state nothing would ever change.
+
+    A closed position is now in exactly one of three states rather than four:
+    scoreable and due (attribute it), scoreable and not yet due (wait), or
+    unscoreable (record WHY, once, and stop). There is no fourth.
+    """
     return [
         p
         for p in store.all()
-        if p.thesis_claim
-        and not p.attribution
+        if not p.attribution
         and p.status not in ("proposed", "opening", "open", "adjusting", "closing")
-        and _horizon_passed(p)
+        and (unscoreable_reason(p) or _horizon_passed(p))
     ]
 
 
@@ -79,7 +107,31 @@ async def run(
     done = 0
     waiting = list(pending(store))
     no_price = 0
+    unjudgeable = 0
     for pos in waiting:
+        # A thesis that can never be judged still gets an ANSWER, once. The
+        # verdict already exists and already means exactly this - UNSCOREABLE
+        # carries signal None, "we could not judge it, assert nothing", and
+        # `attributable_rate` already excludes it from what the loop learned
+        # (D-114). Writing it does three things silence did not: the queue
+        # drains, the rate stops flattering itself by ignoring its own
+        # failures, and the position page says what happened instead of
+        # looking like one still waiting for its horizon.
+        why = unscoreable_reason(pos)
+        if why:
+            pos.attribution = experiments.UNSCOREABLE
+            store.save(pos)
+            journal.append("attribution", position_id=pos.position_id,
+                           verdict=experiments.UNSCOREABLE, signal=None,
+                           unscoreable=why, blocks_credited=0, blocks_applied=0,
+                           thesis=pos.thesis_claim, horizon=pos.thesis_horizon)
+            wiki.append_log(f"attributed {pos.position_id}: unscoreable ({why})")
+            if verbose:
+                print(f"[attribution] {pos.position_id}: unscoreable - {why}")
+            unjudgeable += 1
+            done += 1
+            continue
+
         spot = await _spot(tools, pos.underlying)
         if spot is None:
             # Never guess the price - but never fail silently either. This
@@ -171,5 +223,11 @@ async def run(
         pending=len(waiting),
         attributed=done,
         skipped_no_price=no_price,
+        # Counted apart from `attributed`, because they are the opposite of
+        # what this subsystem is for: the loop closed a position and learned
+        # nothing from it. A rising share here is the entry path failing to
+        # record theses, which is where the fix belongs.
+        unscoreable=unjudgeable,
     )
-    return {"attributed": done, "pending": len(waiting), "skipped_no_price": no_price}
+    return {"attributed": done, "pending": len(waiting),
+            "skipped_no_price": no_price, "unscoreable": unjudgeable}

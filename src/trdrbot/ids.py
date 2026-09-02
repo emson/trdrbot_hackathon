@@ -101,6 +101,30 @@ def journal_id(kind: str) -> str:
     return f"jrn_{utc_stamp()}_{kind[:3]}{uuid.uuid4().hex[:6]}"
 
 
+def age_days(stamp: Any) -> float | None:
+    """How long ago an ISO timestamp was, in days. None if it is not one.
+
+    One reader for "how old is this row", because two had already appeared -
+    the Coach's gauge window and health's recurrence scoring ask the same
+    question of the same `ts` field, and a clock this project keeps two copies
+    of is a clock this project eventually disagrees with itself about.
+
+    None means UNPARSEABLE, which is not the same as old: every caller here
+    treats an unknown age as "cannot judge" and takes the path that does not
+    discard the row.
+    """
+    raw = str(stamp or "").strip()
+    if not raw:
+        return None
+    try:
+        dt = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=UTC)
+    return (utc_now() - dt).total_seconds() / 86400.0
+
+
 def opportunity_id(source: str, payload: dict[str, Any]) -> str:
     """Identity of an opportunity is the CLAIM, not the moment it was written.
 

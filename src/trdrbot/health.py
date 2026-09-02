@@ -26,7 +26,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from . import store
+from . import ids, store
 
 OK, WARN, BAD = "ok", "warn", "PROBLEM"
 
@@ -377,9 +377,134 @@ def _stale_process(run_json: Path) -> list[tuple[str, str, str]]:
              f"is NOT running. Restart `trdrbot run` to apply them")]
 
 
+#: An occurrence this many times inside the current era stops being weather.
+#: Three, because one is an incident and two is a coincidence - the same
+#: judgment as `ORDERS_WITHOUT_SIZING`, for the same reason.
+RECURRENCE_LIMIT = 3
+
+
+class Era:
+    """How far back "now" reaches, and how to say so.
+
+    Health asks one question - "is anything silently doing nothing?" - and an
+    append-only journal answers it with a LIFETIME TOTAL, which is a different
+    question. Measured on this system's own output on 2026-09-02: every FAIL
+    and every WARN it reported named something that had already stopped. Three
+    errors from six days earlier. Fourteen opportunities rejected as
+    `horizon_too_late` by a deadline D-102 had removed, produced by a process
+    D-108 found forty hours stale - under the config actually on disk, all
+    fourteen are admitted. One learn error whose guard shipped the same day. A
+    detector whose findings never clear is a detector nobody reads, which is
+    precisely the failure health exists to prevent.
+
+    The boundary is the RUNNING PROCESS rather than a wall-clock window,
+    because that is what actually separates "the system as it is now" from
+    "the system that had that bug" - a fix lands as a restart, not as a
+    timeout - and the file recording it is one health already reads (D-108).
+    A wall-clock window would have kept those fourteen failing for two more
+    days after they became impossible.
+
+    No live process - a one-shot CLI run, a test, a stopped loop - means there
+    is no "now" to speak of, and the whole journal is then the honest scope.
+    That is also the behaviour every caller had before this existed.
+    """
+
+    def __init__(self, run_json: Path) -> None:
+        self.age_days: float | None = None
+        self.label = "the whole journal"
+        import json as _json
+        import os as _os
+
+        try:
+            info = _json.loads(run_json.read_text(encoding="utf-8"))
+            _os.kill(int(info.get("pid", 0)), 0)   # raises if the pid is gone
+            age = ids.age_days(info.get("started"))
+        except (ValueError, TypeError, OSError, _json.JSONDecodeError):
+            return
+        if age is None:
+            return
+        self.age_days = age
+        self.label = f"this run ({_duration(age)} so far)"
+
+    def live(self, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """The rows produced by the system as it is running now.
+
+        An UNSTAMPED row counts as live, the same rule the Coach's gauge window
+        keeps: unknown age is not evidence of staleness, and if `ts` ever
+        stopped being written, dropping those rows would switch this detector
+        off silently, which is worse than it being noisy.
+        """
+        if self.age_days is None:
+            return rows
+        return [r for r in rows
+                if (age := ids.age_days(r.get("ts"))) is None
+                or age <= self.age_days]
+
+
+def _duration(days: float) -> str:
+    if days < 1 / 24:
+        return f"{days * 1440:.0f}m"
+    if days < 1:
+        return f"{days * 24:.0f}h"
+    return f"{days:.1f}d"
+
+
+def _ago(age: float | None) -> str:
+    return f", last {_duration(age)} ago" if age is not None else ""
+
+
+def _recurrences(
+    rows: list[dict[str, Any]], kind: str, prefix: str,
+    key: Callable[[dict[str, Any]], str],
+    sentence: Callable[[dict[str, Any]], str],
+    era: Era,
+) -> list[tuple[str, str, str]]:
+    """One finding per recurring cause, scored over the current era.
+
+    Four tallies had grown the same six-line loop - rejections, errors,
+    fail-open paths, sizing divergences - each with its own escalation and none
+    with any notion of WHEN. One shape, one place, so they cannot drift about
+    what "repeatedly" means.
+
+    A cause with nothing in this era is reported at OK rather than dropped:
+    the history is real and worth seeing, it is simply not a problem with the
+    system that is running.
+    """
+    groups: dict[str, list[dict[str, Any]]] = {}
+    for r in rows:
+        if r.get("kind") == kind:
+            groups.setdefault(key(r), []).append(r)
+
+    out: list[tuple[str, str, str]] = []
+    for subject, seen in groups.items():
+        live, newest = era.live(seen), seen[-1]
+        age = ids.age_days(newest.get("ts"))
+        if not live:
+            out.append((OK, f"{prefix}:{subject}",
+                        f"{len(seen)}x, none since this run started{_ago(age)} - "
+                        f"history, not a live problem"))
+            continue
+        count = (f"{len(live)}x this run" if len(live) == len(seen)
+                 else f"{len(live)}x this run ({len(seen)} ever)")
+        out.append((WARN if len(live) < RECURRENCE_LIMIT else BAD,
+                    f"{prefix}:{subject}", f"{count}{_ago(age)} - {sentence(newest)}"))
+    return sorted(out, key=lambda f: (f[0] != BAD, f[0] != WARN, f[1]))
+
+
+def scope_label(journal_path: Path) -> str:
+    """What `check` scored its recurrences over, for the report header.
+
+    `check` keeps its signature - every caller and every test passes a journal
+    path and gets findings - so the label is asked for separately rather than
+    threaded through a tuple nobody else wants.
+    """
+    return Era(journal_path.parent / "state" / "run.json").label
+
+
 def check(journal_path: Path, positions: list[Any]) -> list[tuple[str, str, str]]:
     """Return (level, subject, detail). Pure - takes data, returns findings."""
     rows = store.read_jsonl(journal_path)[0]
+    era = Era(journal_path.parent / "state" / "run.json")
     findings: list[tuple[str, str, str]] = []
 
     # --- 1. subsystems that run but never produce -----------------------
@@ -447,33 +572,28 @@ def check(journal_path: Path, positions: list[Any]) -> list[tuple[str, str, str]
 
     # --- 2. the null paths, when they explain themselves ----------------
     skipped = sum(int(r.get("skipped_no_price") or 0)
-                  for r in rows if r.get("kind") == "attribution_run")
+                  for r in era.live(rows) if r.get("kind") == "attribution_run")
     if skipped:
         findings.append((BAD, "attribution.spot",
                          f"{skipped} attribution(s) skipped for want of a price - "
                          "the loop is stalled on data, not on judgment"))
 
-    rejects: dict[str, int] = {}
-    for r in rows:
-        if r.get("kind") == "research_rejected":
-            rejects[str(r.get("reason"))] = rejects.get(str(r.get("reason")), 0) + 1
-    for reason, n in sorted(rejects.items(), key=lambda kv: -kv[1]):
-        findings.append((WARN if n < 3 else BAD, f"rejected:{reason}",
-                         f"{n} opportunities dropped - a repeating reason is a "
-                         "systematic mismatch, not bad luck"))
+    findings += _recurrences(
+        rows, "research_rejected", "rejected",
+        key=lambda r: str(r.get("reason")),
+        sentence=lambda r: ("opportunities dropped for one reason - a repeating "
+                            "reason is a systematic mismatch, not bad luck"),
+        era=era)
 
     # --- 3. errors that keep coming back --------------------------------
-    causes: dict[str, int] = {}
-    for r in rows:
-        if r.get("kind") == "error":
-            # Rows predating classification carry no cause; "unclassified" is
-            # what that is, and `error:None` is a Python repr leaking into a
-            # report a human is meant to read.
-            cause = str(r.get("cause") or "unclassified")
-            causes[cause] = causes.get(cause, 0) + 1
-    for cause, n in causes.items():
-        findings.append((WARN if n < 3 else BAD, f"error:{cause}",
-                         f"{n} occurrences - a 'transient' seen repeatedly is permanent"))
+    # Rows predating classification carry no cause; "unclassified" is what that
+    # is, and `error:None` is a Python repr leaking into a report a human is
+    # meant to read.
+    findings += _recurrences(
+        rows, "error", "error",
+        key=lambda r: str(r.get("cause") or "unclassified"),
+        sentence=lambda r: "a 'transient' seen repeatedly is permanent",
+        era=era)
 
     # --- 3.5 fail-open paths that were actually taken --------------------
     #
@@ -483,20 +603,20 @@ def check(journal_path: Path, positions: list[Any]) -> list[tuple[str, str, str]
     # headlines or an uncompacted chain. Same escalation as the errors above,
     # because a fail-open path taken once is weather and taken repeatedly is
     # a subsystem that is quietly no longer running.
-    degradations: dict[tuple[str, str], int] = {}
-    for r in rows:
-        if r.get("kind") == "degraded":
-            key = (str(r.get("subsystem")), str(r.get("reason")))
-            degradations[key] = degradations.get(key, 0) + 1
-    for (subsystem, reason), n in sorted(degradations.items(), key=lambda kv: -kv[1]):
-        findings.append((WARN if n < 3 else BAD, f"degraded:{subsystem}",
-                         f"{n}x fell back - {reason} - the run continued on "
-                         "reduced input, which reads as success everywhere else"))
+    #
+    # Grouped by (subsystem, reason), because "something fell back 6 times" is
+    # not a finding - the reason IS the finding.
+    findings += _recurrences(
+        rows, "degraded", "degraded",
+        key=lambda r: f"{r.get('subsystem')}",
+        sentence=lambda r: (f"fell back - {r.get('reason')} - the run continued on "
+                            "reduced input, which reads as success everywhere else"),
+        era=era)
 
     # The learning probe nets errors against successes, so one good fill and
     # one failed resolution read "produced 1" (D-112). A resolution that fails
     # to learn is the whole point of the row; say so when they ALL do.
-    lr = [r for r in rows if r.get("kind") == "learn_run"]
+    lr = [r for r in era.live(rows) if r.get("kind") == "learn_run"]
     n_res = sum(int(r.get("resolutions") or 0) for r in lr)
     n_err = sum(int(r.get("errors") or 0) for r in lr)
     if n_res and n_err >= n_res:
@@ -531,19 +651,19 @@ def check(journal_path: Path, positions: list[Any]) -> list[tuple[str, str, str]
                          f"read on the most recent exit run - the rules watching "
                          f"them held without a value"))
 
-    # A recorded quantity that is not the one sizing computed means the book
-    # caps were derived from a size that was never traded. Once is a deliberate
-    # override the agent is entitled to make (D-009); a pattern of it means
-    # size_position's answer is not reaching the trade at all.
-    mismatches: dict[str, int] = {}
-    for r in rows:
-        if r.get("kind") == "sizing_mismatch":
-            key = str(r.get("underlying") or "?")
-            mismatches[key] = mismatches.get(key, 0) + 1
-    for underlying, n in sorted(mismatches.items(), key=lambda kv: -kv[1]):
-        findings.append((WARN if n < 3 else BAD, f"sizing_mismatch:{underlying}",
-                         f"{n}x recorded a quantity size_position did not compute - "
-                         "the caps were sized against a trade that was not made"))
+    # A recorded or placed quantity that is not the one sizing computed means
+    # the book caps were derived from a size that was never traded. Once is a
+    # deliberate override the agent is entitled to make (D-009); a pattern of
+    # it means size_position's answer is not reaching the trade at all.
+    findings += _recurrences(
+        rows, "sizing_mismatch", "sizing_mismatch",
+        key=lambda r: str(r.get("underlying") or "?"),
+        sentence=lambda r: (f"traded a quantity size_position did not compute "
+                            f"({r.get('sized_contracts')} sized, "
+                            f"{r.get('placed_qtys') or r.get('recorded_qtys')} "
+                            f"{r.get('seam') or 'recorded'}) - the caps were sized "
+                            f"against a trade that was not made"),
+        era=era)
 
     # --- 4. absence that quietly loosens a constraint --------------------
     # Two open pages sharing an OCC leg (D-111): the broker aggregates by
@@ -608,30 +728,26 @@ def check(journal_path: Path, positions: list[Any]) -> list[tuple[str, str, str]
                                  f"stuck in 'closing' - {failed} close attempt(s) failed; "
                                  "legs may still be live at the broker"))
             continue
-        # A CLOSED position with no scoreable thesis is permanently stuck
-        # (D-109): `attribution.pending` needs a claim AND a parseable horizon,
-        # so it never becomes pending, the probe's `work` reads 0, and the
-        # subsystem reports "idle, not stalled" - a permanently empty queue and
-        # a permanently stuck item are the same observation. Live:
-        # pos_20260826_SPY_bull_put_spread closed +8.2% with thesis_claim ''
-        # and will never be attributed at any future date. Its outcome is lost
-        # to the learning loop, and only this line says so.
+        # A CLOSED position with no scoreable thesis used to be permanently
+        # stuck (D-109): `attribution.pending` needed a claim AND a parseable
+        # horizon, so it never became pending, the probe's `work` read 0, and
+        # the subsystem reported "idle, not stalled" - a permanently empty
+        # queue and a permanently stuck item are the same observation.
+        #
+        # The queue drains now (D-114): attribution records UNSCOREABLE with
+        # the reason, once, so this state lasts from the close until the next
+        # attribution run. That makes the finding SELF-CLEARING, and a
+        # self-clearing finding that does not clear means the sweep is not
+        # running - which is worth exactly as much alarm as the old permanent
+        # one, for a reason that can actually be acted on.
         if getattr(p, "status", "") == "closed" and not getattr(p, "attribution", ""):
-            claim = getattr(p, "thesis_claim", "")
-            horizon = str(getattr(p, "thesis_horizon", "") or "")
-            try:
-                from datetime import date as _d
-                _d.fromisoformat(horizon)
-                horizon_ok = True
-            except (ValueError, TypeError):
-                horizon_ok = False
-            if not claim or not horizon_ok:
+            from .attribution import unscoreable_reason
+            why = unscoreable_reason(p)
+            if why:
                 findings.append((BAD, f"position:{p.position_id[:28]}",
-                                 "closed with " + ("no thesis" if not claim else
-                                                   f"an unparseable horizon {horizon!r}")
-                                 + " - will NEVER be attributed; its outcome is lost "
-                                   "to the learning loop and the attribution probe "
-                                   "cannot see it"))
+                                 f"closed and unscoreable ({why}), and attribution has "
+                                 f"not recorded it - the sweep that answers this runs "
+                                 f"every tick, so it is not running"))
             continue
         if getattr(p, "status", "") not in ("open", "opening"):
             continue
@@ -666,9 +782,13 @@ def check(journal_path: Path, positions: list[Any]) -> list[tuple[str, str, str]
     return findings
 
 
-def render(findings: list[tuple[str, str, str]]) -> str:
+def render(findings: list[tuple[str, str, str]], scope: str = "") -> str:
     mark = {OK: "  ok  ", WARN: " warn ", BAD: " FAIL "}
-    lines = ["", "=== trdrbot health: is anything silently doing nothing? ===", ""]
+    lines = ["", "=== trdrbot health: is anything silently doing nothing? ==="]
+    # WHICH system these findings are about. Recurrences are scored over the
+    # running process (see `Era`), so a report that did not say so would be
+    # ambiguous in exactly the way the totals used to be.
+    lines += [f"    recurrences scored over {scope}" if scope else "", ""]
     for level in (BAD, WARN, OK):
         rows = [f for f in findings if f[0] == level]
         for _, subject, detail in rows:

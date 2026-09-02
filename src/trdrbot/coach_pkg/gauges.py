@@ -11,7 +11,6 @@ from __future__ import annotations
 import json
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -87,13 +86,7 @@ def _candidates_per_run(rows: list[dict[str, Any]]) -> float | None:
 
 def _age_days(row: dict[str, Any]) -> float | None:
     """How long ago a journal row was written. None when it carries no stamp."""
-    try:
-        ts = datetime.fromisoformat(str(row.get("ts", "")).replace("Z", "+00:00"))
-    except ValueError:
-        return None
-    if ts.tzinfo is None:
-        ts = ts.replace(tzinfo=UTC)
-    return (ids.utc_now() - ts).total_seconds() / 86400.0
+    return ids.age_days(row.get("ts"))
 
 
 def _kind_rows(rows: list[dict[str, Any]], kind: str,

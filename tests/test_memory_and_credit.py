@@ -528,7 +528,8 @@ async def test_attribution_without_a_price_says_so_rather_than_guessing(
 
     out = await attribution.run(store, no_price, mem, wiki, journal, verbose=False)
 
-    assert out == {"attributed": 0, "pending": 1, "skipped_no_price": 1}
+    assert out == {"attributed": 0, "pending": 1, "skipped_no_price": 1,
+                   "unscoreable": 0}
     assert journal_rows(journal, "attribution_run")[0]["skipped_no_price"] == 1
     assert mem.credited == []
 
@@ -645,3 +646,81 @@ def test_an_empty_ledger_of_lessons_adds_no_heading_at_all(paths):
     an empty block is the kind of scaffolding a cold-start agent reads as a
     fact about itself."""
     assert learn.recent_lessons(Wiki(paths.wiki)) == ""
+
+
+# ------------------------- D-114 the attribution queue drains completely
+
+async def test_a_thesis_that_can_never_be_judged_is_answered_once(
+    paths, make_position, mem: FakeMem
+):
+    """D-114. `pending` required a claim AND a parseable horizon, so a closed
+    position missing either was never pending, never attributed and never
+    counted - a permanently stuck item and a permanently empty queue are the
+    same observation from the outside. The verdict for this already existed:
+    UNSCOREABLE carries signal None, "we could not judge it, assert nothing"."""
+    store, journal, wiki, _ = _stores(paths)
+    store.save(make_position(status="closed", thesis_claim="", thesis_horizon=""))
+
+    out = await attribution.run(store, _snapshot_tool(700.0), mem, wiki, journal,
+                                verbose=False)
+
+    assert out["unscoreable"] == 1 and out["attributed"] == 1
+    row = journal_rows(journal, "attribution")[0]
+    assert row["verdict"] == "unscoreable" and row["signal"] is None
+    assert "no thesis was recorded at entry" in row["unscoreable"]
+    assert mem.credited == [], "nothing was judged, so nothing may be reinforced"
+
+
+async def test_an_unparseable_horizon_is_the_other_way_a_thesis_dies(
+    paths, make_position, mem: FakeMem
+):
+    """Both ways are decided at ENTRY and neither can be repaired later, which
+    is why they belong in the queue rather than outside it."""
+    store, journal, wiki, _ = _stores(paths)
+    store.save(make_position(status="closed", thesis_claim="c",
+                             thesis_horizon="next Tuesday"))
+
+    out = await attribution.run(store, _snapshot_tool(700.0), mem, wiki, journal,
+                                verbose=False)
+
+    assert out["unscoreable"] == 1
+    assert "not a date" in journal_rows(journal, "attribution")[0]["unscoreable"]
+
+
+async def test_the_answer_is_written_once_and_the_queue_then_empties(
+    paths, make_position, mem: FakeMem
+):
+    """The point of writing it at all. A second run must find nothing to do,
+    or the sweep is a treadmill and the journal fills with the same verdict."""
+    store, journal, wiki, _ = _stores(paths)
+    store.save(make_position(status="closed", thesis_claim="", thesis_horizon=""))
+
+    first = await attribution.run(store, _snapshot_tool(700.0), mem, wiki, journal,
+                                  verbose=False)
+    second = await attribution.run(store, _snapshot_tool(700.0), mem, wiki, journal,
+                                   verbose=False)
+
+    assert first["unscoreable"] == 1
+    assert second == {"attributed": 0, "pending": 0, "skipped_no_price": 0,
+                      "unscoreable": 0}
+    assert len(journal_rows(journal, "attribution")) == 1
+
+
+async def test_an_unscoreable_outcome_counts_against_what_the_loop_learned(
+    paths, make_position, mem: FakeMem
+):
+    """It must not flatter the rate that GATES the top rung. A position we
+    could not learn from is a resolved thesis we could not explain, and
+    leaving it out of the denominator made the loop look better at explaining
+    itself than it was."""
+    from trdrbot import competence
+
+    store, journal, wiki, _ = _stores(paths)
+    store.save(make_position(status="closed", thesis_claim="", thesis_horizon=""))
+
+    before, n_before = competence.attributable_rate(store.all())
+    await attribution.run(store, _snapshot_tool(700.0), mem, wiki, journal, verbose=False)
+    after, n_after = competence.attributable_rate(store.all())
+
+    assert (before, n_before) == (None, 0), "nothing attributed yet is not a rate of zero"
+    assert after == 0.0 and n_after == 1
