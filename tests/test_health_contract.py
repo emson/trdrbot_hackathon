@@ -500,15 +500,26 @@ def test_health_says_so_when_the_live_process_is_older_than_the_code(tmp_path):
     root = tmp_path / "repo"
     (root / "data" / "state").mkdir(parents=True)
     subprocess.run(["git", "init", "-q"], cwd=root, check=True)
-    subprocess.run(["git", "-c", "user.email=t@t", "-c", "user.name=t",
-                    "commit", "-q", "--allow-empty", "-m", "one"], cwd=root, check=True)
-    old_sha = subprocess.run(["git", "rev-parse", "HEAD"], cwd=root,
-                             capture_output=True, text=True).stdout.strip()
-    subprocess.run(["git", "-c", "user.email=t@t", "-c", "user.name=t",
-                    "commit", "-q", "--allow-empty", "-m", "two"], cwd=root, check=True)
-    run_json = root / "data" / "state" / "run.json"
+    def commit(msg, path=None):
+        if path:
+            (root / path).parent.mkdir(parents=True, exist_ok=True)
+            (root / path).write_text(msg)
+            subprocess.run(["git", "add", path], cwd=root, check=True)
+        subprocess.run(["git", "-c", "user.email=t@t", "-c", "user.name=t", "commit",
+                        "-q", "--allow-empty", "-m", msg], cwd=root, check=True)
+        return subprocess.run(["git", "rev-parse", "HEAD"], cwd=root,
+                              capture_output=True, text=True).stdout.strip()
 
-    # 1. alive pid (this test's own), on the OLD sha -> the finding, counting commits
+    old_sha = commit("one", "src/trdrbot/x.py")
+    # A docs-only commit is NOT a fix that is not running - it must not count.
+    docs_only = commit("docs", "specs/decisions.md")
+    run_json = root / "data" / "state" / "run.json"
+    run_json.write_text(json.dumps({"pid": os.getpid(), "git_sha": old_sha}))
+    assert health._stale_process(run_json) == [], "a docs commit demanded a restart"
+    assert docs_only != old_sha
+    commit("two", "src/trdrbot/y.py")
+
+    # 1. alive pid (this test's own), on the OLD sha -> the finding, counting CODE commits
     run_json.write_text(json.dumps({"pid": os.getpid(), "git_sha": old_sha,
                                     "started": "2026-08-31T15:53:35"}))
     found = health._stale_process(run_json)

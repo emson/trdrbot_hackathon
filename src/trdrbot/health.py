@@ -356,8 +356,14 @@ def _stale_process(run_json: Path) -> list[tuple[str, str, str]]:
                        text=True, timeout=5).stdout.strip()
         if not head or head == sha:
             return []
-        behind = _sp.run(["git", "rev-list", "--count", f"{sha}..{head}"], cwd=root,
-                         capture_output=True, text=True, timeout=5).stdout.strip() or "?"
+        # Commits that touch what the PROCESS runs. A decision record or a dev
+        # journal is not a fix that is not running, and a probe that demanded a
+        # restart for every docs commit would be ignored by the second day.
+        behind = _sp.run(["git", "rev-list", "--count", f"{sha}..{head}", "--",
+                          "src/", "config.yaml", "scripts/", "pyproject.toml", "uv.lock"],
+                         cwd=root, capture_output=True, text=True, timeout=5).stdout.strip()
+        if behind in ("", "0"):
+            return []
     except Exception:  # noqa: BLE001 - git is optional evidence, not a dependency
         return []
     return [(BAD, "live_process",
