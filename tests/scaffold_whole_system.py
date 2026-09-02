@@ -53,10 +53,10 @@ from trdrbot import (  # noqa: E402
     reconcile,
     sizing,
 )
-from trdrbot import (
+from trdrbot import (  # noqa: E402
     config as config_mod,
 )
-from trdrbot import (
+from trdrbot import (  # noqa: E402
     ledger as ledger_mod,
 )
 from trdrbot.calibration import CalibrationStore  # noqa: E402

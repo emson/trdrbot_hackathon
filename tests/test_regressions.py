@@ -1537,7 +1537,7 @@ def test_a_traded_thesis_enters_calibration_at_the_confidence_it_was_traded_at()
     assert len(fc) == 1 and fc[0].probability == pytest.approx(0.42), \
         "the traded thesis must reach calibration at the confidence it was traded at"
     # The one caller with no number keeps the old behaviour: linked, not stated.
-    e2 = book.register(kind="thesis", underlying="NVDA", claim="c", probability=0.5,
+    book.register(kind="thesis", underlying="NVDA", claim="c", probability=0.5,
                        horizon="2026-09-05", band_low=None, band_high=100.0,
                        probability_stated=False)
     assert book.mark_traded("NVDA", "2026-09-05", "pos_y")
