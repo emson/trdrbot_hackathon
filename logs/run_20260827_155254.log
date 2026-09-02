@@ -1,3 +1,0 @@
-[config] .env overrode a different shell value for ANTHROPIC_API_KEY
-[config] .env overrode a different shell value for OPENAI_API_KEY
-[run] another run loop is already alive (pid 25013). Stop it first, or delete logs/run.pid if you know it is dead.

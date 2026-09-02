@@ -12,3 +12,9 @@ dist/
 data/inbox/
 data/journal.jsonl
 data/state/
+
+# Raw stdout/stderr capture of the live loop process - build noise (uv sync,
+# MCP server startup) with no product value, and it repeats the operator's
+# local filesystem path on every line. Never worth committing.
+data/run.log
+logs/
