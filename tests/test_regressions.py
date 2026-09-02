@@ -3762,16 +3762,21 @@ def test_every_thesis_source_asks_the_same_question():
     of its live forecasts landed on the last useful day."""
     import inspect
 
-    from trdrbot import discovery, muse
+    from trdrbot import discovery, muse, research
 
-    for mod in (muse, discovery):
+    for mod in (muse, discovery, research):
         src = inspect.getsource(mod)
         assert "competence.forecast_window" in src, f"{mod.__name__} derives its own window"
 
     # And the prompts carry the derived dates rather than a hardcoded count.
+    # CHANGED (D-106): research added. It was the one source that told the
+    # model "within the next 10 days" and never today's date - 14 of 14 of its
+    # rejections were horizon_too_late, and it produced nothing for five days.
     for token in ("{earliest}", "{preferred}", "{latest}"):
         assert token in muse.MUSE_PROMPT, f"muse prompt lost {token}"
+        assert token in research.RESEARCH_PROMPT, f"research prompt lost {token}"
     assert "{earliest}" in discovery.SYNTH_PROMPT, "a one-sided rule invites today"
+    assert "{today}" in research.RESEARCH_PROMPT, "a horizon dated from memory is wrong by days"
     assert "7 calendar" not in muse.MUSE_PROMPT, "the hardcoded range is gone"
     assert "{latest}" in discovery.SYNTH_PROMPT
 

@@ -71,8 +71,11 @@ view. Each: {{"underlying": str, "claim": str, "direction": "bullish"|"bearish"|
 "drift_pct": float, "band_low": float|null, "band_high": float|null,
 "horizon": "YYYY-MM-DD", "why": str, "suggested_structures": [str, ...]}}.
 band_low/band_high are the prices between which the claim HOLDS - at least
-one must be non-null or the thesis cannot be scored. horizon must be within
-the next 10 days. An empty array is a valid, often correct answer.)
+one must be non-null or the thesis cannot be scored. Date every horizon from
+TODAY ({today}), never from memory: **it must fall between {earliest} and {latest}
+inclusive; anything outside is rejected.** Aim at {preferred} or sooner - a
+forecast teaches nothing until it resolves. An empty array is a valid, often
+correct answer.)
 """
 
 
@@ -237,11 +240,22 @@ async def run(
     prior_text = prior.body[:1500] if prior else "(none yet)"
 
     # ---- LLM synthesis: one call for the whole cycle ----
+    # The window, STATED (D-106). Research was the one source whose prompt
+    # never told the model today's date or the bounds - it said "within the
+    # next 10 days" and left the model to date horizons from memory. Live:
+    # 14 of 14 research rejections were `horizon_too_late`, nine LLM calls
+    # for zero opportunities over five days, on the path whose output the
+    # agent reads every morning. Muse and discovery interpolate the same three
+    # dates; the test that pins all three sources to one window now covers
+    # research too.
+    _earliest, _preferred, _latest = competence.forecast_window(config.deadline, ids.today())
     prompt = RESEARCH_PROMPT.format(
         stats_block=stats_block,
         news_block=news_block,
         odds_block=odds_block,
         prior_regime=prior_text,
+        today=ids.today().isoformat(), earliest=_earliest,
+        preferred=_preferred, latest=_latest,
     )
     text = await ask(config, "research", prompt)
 
@@ -290,7 +304,7 @@ async def run(
     # gate - so the D-035 defect (percentage moves emitted as dollar bands,
     # making holds_at always-False and scoring every thesis as failed) was
     # still open on the path whose output the agent reads every morning.
-    latest = competence.forecast_window(config.deadline, ids.today())[2]
+    latest = _latest
     for raw in raw_opps:
         o = Opportunity.from_payload(raw)
         if o is None:

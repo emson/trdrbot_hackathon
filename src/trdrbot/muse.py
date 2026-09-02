@@ -449,7 +449,15 @@ async def _evaluate(
 
             gkey = f"gate|{u}"
             if gkey not in cache:
-                cache[gkey] = await _options_gate(tools, u, config.deadline)
+                # `latest`, not `config.deadline` (D-106). D-101 made the deadline
+                # optional and moved discovery's gate onto the window's own bound;
+                # this call was missed, so it passed None - and Alpaca's
+                # `expiration_date_lte` is an optional string, so the filter either
+                # vanished (any name with options passes, horizon unchecked) or,
+                # if the generated schema refused None, every candidate was
+                # rejected for good. The window's `latest` is what the gate
+                # always meant.
+                cache[gkey] = await _options_gate(tools, u, latest)
             gate = cache[gkey]
             if not gate.get("tradeable"):
                 verdict["fate"] = "rejected: no options chain inside the deadline"
