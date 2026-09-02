@@ -1,0 +1,168 @@
+[config] .env overrode a different shell value for ANTHROPIC_API_KEY
+[config] .env overrode a different shell value for OPENAI_API_KEY
+[run] pid 49141 looping indefinitely (no deadline); open=300s closed=1800s watchdog=2400.0s
+
+
+╭──────────────────────────────────────────────────────────────────────────────╮
+│                                                                              │
+│                                                                              │
+│                         ▄▀▀ ▄▀█ █▀▀ ▀█▀ █▀▄▀█ █▀▀ █▀█                        │
+│                         █▀  █▀█ ▄▄█  █  █ ▀ █ █▄▄ █▀▀                        │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                FastMCP 3.4.7                                 │
+│                            https://gofastmcp.com                             │
+│                                                                              │
+│                  🖥  Server:      Alpaca MCP Server, 3.4.7                    │
+│                  🚀 Deploy free: https://horizon.prefect.io                  │
+│                                                                              │
+╰──────────────────────────────────────────────────────────────────────────────╯
+╭──────────────────────────────────────────────────────────────────────────────╮
+│                          🎉 Update available: 4.0.0                          │
+│                      Run: pip install --upgrade fastmcp                      │
+╰──────────────────────────────────────────────────────────────────────────────╯
+
+
+[09/02/26 08:14:21] INFO     Starting MCP server 'Alpaca MCP    transport.py:241
+                             Server' with transport 'stdio'                     
+[config] .env overrode a different shell value for ANTHROPIC_API_KEY
+[config] .env overrode a different shell value for OPENAI_API_KEY
+[run] pid 54700 looping indefinitely (no deadline); open=300s closed=1800s watchdog=2400.0s
+
+
+╭──────────────────────────────────────────────────────────────────────────────╮
+│                                                                              │
+│                                                                              │
+│                         ▄▀▀ ▄▀█ █▀▀ ▀█▀ █▀▄▀█ █▀▀ █▀█                        │
+│                         █▀  █▀█ ▄▄█  █  █ ▀ █ █▄▄ █▀▀                        │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                FastMCP 3.4.7                                 │
+│                            https://gofastmcp.com                             │
+│                                                                              │
+│                  🖥  Server:      Alpaca MCP Server, 3.4.7                    │
+│                  🚀 Deploy free: https://horizon.prefect.io                  │
+│                                                                              │
+╰──────────────────────────────────────────────────────────────────────────────╯
+╭──────────────────────────────────────────────────────────────────────────────╮
+│                          🎉 Update available: 4.0.0                          │
+│                      Run: pip install --upgrade fastmcp                      │
+╰──────────────────────────────────────────────────────────────────────────────╯
+
+
+[09/02/26 08:19:30] INFO     Starting MCP server 'Alpaca MCP    transport.py:241
+                             Server' with transport 'stdio'                     
+[config] .env overrode a different shell value for ANTHROPIC_API_KEY
+[config] .env overrode a different shell value for OPENAI_API_KEY
+[run] pid 59149 looping indefinitely (no deadline); open=300s closed=1800s watchdog=2400.0s
+
+
+╭──────────────────────────────────────────────────────────────────────────────╮
+│                                                                              │
+│                                                                              │
+│                         ▄▀▀ ▄▀█ █▀▀ ▀█▀ █▀▄▀█ █▀▀ █▀█                        │
+│                         █▀  █▀█ ▄▄█  █  █ ▀ █ █▄▄ █▀▀                        │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                FastMCP 3.4.7                                 │
+│                            https://gofastmcp.com                             │
+│                                                                              │
+│                  🖥  Server:      Alpaca MCP Server, 3.4.7                    │
+│                  🚀 Deploy free: https://horizon.prefect.io                  │
+│                                                                              │
+╰──────────────────────────────────────────────────────────────────────────────╯
+╭──────────────────────────────────────────────────────────────────────────────╮
+│                          🎉 Update available: 4.0.0                          │
+│                      Run: pip install --upgrade fastmcp                      │
+╰──────────────────────────────────────────────────────────────────────────────╯
+
+
+[09/02/26 08:23:34] INFO     Starting MCP server 'Alpaca MCP    transport.py:241
+                             Server' with transport 'stdio'                     
+[config] .env overrode a different shell value for ANTHROPIC_API_KEY
+[config] .env overrode a different shell value for OPENAI_API_KEY
+[run] pid 64091 looping indefinitely (no deadline); open=300s closed=1800s watchdog=2400.0s
+
+
+╭──────────────────────────────────────────────────────────────────────────────╮
+│                                                                              │
+│                                                                              │
+│                         ▄▀▀ ▄▀█ █▀▀ ▀█▀ █▀▄▀█ █▀▀ █▀█                        │
+│                         █▀  █▀█ ▄▄█  █  █ ▀ █ █▄▄ █▀▀                        │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                FastMCP 3.4.7                                 │
+│                            https://gofastmcp.com                             │
+│                                                                              │
+│                  🖥  Server:      Alpaca MCP Server, 3.4.7                    │
+│                  🚀 Deploy free: https://horizon.prefect.io                  │
+│                                                                              │
+╰──────────────────────────────────────────────────────────────────────────────╯
+╭──────────────────────────────────────────────────────────────────────────────╮
+│                          🎉 Update available: 4.0.0                          │
+│                      Run: pip install --upgrade fastmcp                      │
+╰──────────────────────────────────────────────────────────────────────────────╯
+
+
+[09/02/26 08:28:12] INFO     Starting MCP server 'Alpaca MCP    transport.py:241
+                             Server' with transport 'stdio'                     
+[config] .env overrode a different shell value for ANTHROPIC_API_KEY
+[config] .env overrode a different shell value for OPENAI_API_KEY
+[run] pid 67287 looping indefinitely (no deadline); open=300s closed=1800s watchdog=2400.0s
+
+
+╭──────────────────────────────────────────────────────────────────────────────╮
+│                                                                              │
+│                                                                              │
+│                         ▄▀▀ ▄▀█ █▀▀ ▀█▀ █▀▄▀█ █▀▀ █▀█                        │
+│                         █▀  █▀█ ▄▄█  █  █ ▀ █ █▄▄ █▀▀                        │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                FastMCP 3.4.7                                 │
+│                            https://gofastmcp.com                             │
+│                                                                              │
+│                  🖥  Server:      Alpaca MCP Server, 3.4.7                    │
+│                  🚀 Deploy free: https://horizon.prefect.io                  │
+│                                                                              │
+╰──────────────────────────────────────────────────────────────────────────────╯
+╭──────────────────────────────────────────────────────────────────────────────╮
+│                          🎉 Update available: 4.0.0                          │
+│                      Run: pip install --upgrade fastmcp                      │
+╰──────────────────────────────────────────────────────────────────────────────╯
+
+
+[09/02/26 08:31:03] INFO     Starting MCP server 'Alpaca MCP    transport.py:241
+                             Server' with transport 'stdio'                     
+[config] .env overrode a different shell value for ANTHROPIC_API_KEY
+[config] .env overrode a different shell value for OPENAI_API_KEY
+[run] pid 77216 looping indefinitely (no deadline); open=300s closed=1800s watchdog=2400.0s
+
+
+╭──────────────────────────────────────────────────────────────────────────────╮
+│                                                                              │
+│                                                                              │
+│                         ▄▀▀ ▄▀█ █▀▀ ▀█▀ █▀▄▀█ █▀▀ █▀█                        │
+│                         █▀  █▀█ ▄▄█  █  █ ▀ █ █▄▄ █▀▀                        │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                FastMCP 3.4.7                                 │
+│                            https://gofastmcp.com                             │
+│                                                                              │
+│                  🖥  Server:      Alpaca MCP Server, 3.4.7                    │
+│                  🚀 Deploy free: https://horizon.prefect.io                  │
+│                                                                              │
+╰──────────────────────────────────────────────────────────────────────────────╯
+╭──────────────────────────────────────────────────────────────────────────────╮
+│                          🎉 Update available: 4.0.0                          │
+│                      Run: pip install --upgrade fastmcp                      │
+╰──────────────────────────────────────────────────────────────────────────────╯
+
+
+[09/02/26 08:40:07] INFO     Starting MCP server 'Alpaca MCP    transport.py:241
+                             Server' with transport 'stdio'                     

@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -36,6 +37,15 @@ from .state import (
 # a chart it is indistinguishable from a real collapse to zero.
 
 GAUGE_WINDOW = 10
+
+#: How old a DAILY source's run may be and still describe the present.
+#:
+#: Research and discovery run once a day, so `GAUGE_WINDOW` rows of them span
+#: a fortnight and an outage inside that span is invisible - the same ten rows
+#: are re-averaged every pulse and the number never moves. Three days, because
+#: a Friday run is the freshest thing that exists on a Sunday and a bound that
+#: fires every weekend is a bound nobody reads.
+DAILY_SOURCE_MAX_AGE_DAYS = 3.0
 
 #: What "survived the gauntlet" means, in ONE place. The muse relabels a
 #: survivor to `EMITTED` or `candidate, not emitted (rank)` AFTER the gates have
@@ -75,13 +85,43 @@ def _candidates_per_run(rows: list[dict[str, Any]]) -> float | None:
     return round(sum(int(r.get("candidates") or 0) for r in muse) / len(muse), 3)
 
 
+def _age_days(row: dict[str, Any]) -> float | None:
+    """How long ago a journal row was written. None when it carries no stamp."""
+    try:
+        ts = datetime.fromisoformat(str(row.get("ts", "")).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if ts.tzinfo is None:
+        ts = ts.replace(tzinfo=UTC)
+    return (ids.utc_now() - ts).total_seconds() / 86400.0
+
+
 def _kind_rows(rows: list[dict[str, Any]], kind: str,
-               n: int = GAUGE_WINDOW) -> list[dict[str, Any]]:
+               n: int = GAUGE_WINDOW,
+               max_age_days: float | None = None) -> list[dict[str, Any]]:
     """Recent rows of one journal kind. `_muse_rows` generalised, because
     three of the module map's metrics needed the same slice of a different
     kind and copying it three times is how `_muse_rows` became muse-shaped in
-    the first place."""
-    return [r for r in rows if r.get("kind") == kind][-n:]
+    the first place.
+
+    "Recent" was COUNT only, and that is not the same thing for a subsystem
+    that runs once a day (D-113). Research's last 10 rows are ten days of
+    history: if the daily cycle died on Thursday, the same ten rows kept being
+    averaged and `research.opportunities_per_run` went on reporting a healthy
+    number all week, computed entirely from a period that had ended. An
+    age bound makes the window mean what its name says - and a gauge with
+    nothing recent to read returns None, which this module OMITS rather than
+    writing as a zero, because a zero on a chart is a collapse.
+    """
+    of_kind = [r for r in rows if r.get("kind") == kind]
+    if max_age_days is not None:
+        # An UNKNOWN age is not evidence of staleness, so an unstamped row is
+        # kept. Every real journal row carries `ts`; if that ever stopped being
+        # true, dropping them here would silently zero the gauge, while keeping
+        # them leaves `<kind>.days_since_run` to go missing and say so.
+        of_kind = [r for r in of_kind
+                   if (age := _age_days(r)) is None or age <= max_age_days]
+    return of_kind[-n:]
 
 
 def _research_yield(rows: list[dict[str, Any]]) -> float | None:
@@ -90,10 +130,24 @@ def _research_yield(rows: list[dict[str, Any]]) -> float | None:
     Named in the module map (019 s2.2) and measured nowhere, so a glance at
     the report could not answer whether the daily cycle was still producing.
     """
-    runs = _kind_rows(rows, "research")
+    runs = _kind_rows(rows, "research", max_age_days=DAILY_SOURCE_MAX_AGE_DAYS)
     if not runs:
         return None
     return round(sum(int(r.get("opportunities") or 0) for r in runs) / len(runs), 3)
+
+
+def _days_since_run(rows: list[dict[str, Any]], kind: str) -> float | None:
+    """How long since this subsystem last produced a row. None if it never has.
+
+    The companion to the age bound above: a yield gauge that goes missing and
+    one that was never there look identical on a chart, and only one of them
+    is a subsystem that stopped.
+    """
+    of_kind = [r for r in rows if r.get("kind") == kind]
+    if not of_kind:
+        return None
+    age = _age_days(of_kind[-1])
+    return round(age, 2) if age is not None else None
 
 
 def _discovery_survival(rows: list[dict[str, Any]]) -> float | None:
@@ -103,7 +157,7 @@ def _discovery_survival(rows: list[dict[str, Any]]) -> float | None:
     whether its gates are getting stricter or its nominations worse - which
     are opposite problems with the same symptom.
     """
-    runs = _kind_rows(rows, "discovery")
+    runs = _kind_rows(rows, "discovery", max_age_days=DAILY_SOURCE_MAX_AGE_DAYS)
     nominated = sum(len(r.get("nominees") or []) for r in runs)
     if not nominated:
         return None
@@ -300,6 +354,11 @@ def snapshot_gauges(cfg: Any, rows: list[dict[str, Any]]) -> dict[str, Any]:
     # indistinguishable from a collapse on a chart.
     put("research.opportunities_per_run", _research_yield(rows))
     put("discovery.gauntlet_survival", _discovery_survival(rows))
+    # ...and how long ago each last ran, which is the number that says whether
+    # the two above are a measurement or an echo (D-113). Omitting a stale
+    # yield stops the report lying; only this says WHY it went missing.
+    put("research.days_since_run", _days_since_run(rows, "research"))
+    put("discovery.days_since_run", _days_since_run(rows, "discovery"))
     put("attribution.attributable_rate", _attributable_rate(rows))
     # The three seams WU-4.1..4.8 closed, watched where they would reopen.
     # Every one reads a row the system already writes - a gauge needing new

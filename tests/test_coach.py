@@ -191,7 +191,7 @@ async def test_the_shadow_arm_writes_nothing_at_all(tmp_path, monkeypatch):
 
     closes = [100.0 + (i % 7) * 0.5 for i in range(120)]
     monkeypatch.setattr(muse.market_stats, "load_closes", lambda *a, **k: closes)
-    monkeypatch.setattr(muse, "_options_gate",
+    monkeypatch.setattr(muse, "options_gate",
                         lambda *a, **k: _async({"tradeable": True}))
     monkeypatch.setattr(muse, "_plausible_band", lambda *a, **k: True)
     monkeypatch.setattr(muse, "_sample_concepts", lambda *a, **k: [("c/a", "text")])
@@ -1082,3 +1082,37 @@ def test_reconcile_repairs_a_crashed_promotion_and_respects_an_operator_revert(t
     assert coach.reconcile(cfg) == [], "the operator's revert was overturned"
     assert coach.load_state(cfg, "muse.prompt", seed).incumbent.id == "v0"
 
+
+
+def test_a_daily_sources_outage_is_not_hidden_by_a_count_based_window(tmp_path):
+    """D-113. "Recent" was COUNT only, which is not the same thing for a
+    subsystem that runs once a day: research's last 10 rows are ten days of
+    history, so a cycle that died on Thursday kept the same rows being
+    re-averaged and the yield gauge reported a healthy number all week,
+    computed entirely from a period that had ended."""
+    from datetime import timedelta
+
+    from trdrbot import ids
+
+    stale = (ids.utc_now() - timedelta(days=5)).isoformat()
+    rows = [{"kind": "research", "ts": stale, "opportunities": 4}] * 6
+
+    g = coach.snapshot_gauges(_cfg(tmp_path), rows)
+
+    assert "research.opportunities_per_run" not in g, \
+        "a five-day-old average is not a measurement of now"
+    assert g["research.days_since_run"] == pytest.approx(5.0, abs=0.1), \
+        "and the reason it went missing has to be readable"
+
+
+def test_a_daily_source_that_ran_today_still_reports_its_yield(tmp_path):
+    """The bound must not fire on the healthy case, or it is just a way of
+    switching the gauge off."""
+    from trdrbot import ids
+
+    rows = [{"kind": "research", "ts": ids.utc_now().isoformat(), "opportunities": 4}]
+
+    g = coach.snapshot_gauges(_cfg(tmp_path), rows)
+
+    assert g["research.opportunities_per_run"] == 4.0
+    assert g["research.days_since_run"] < 1.0

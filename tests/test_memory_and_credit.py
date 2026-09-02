@@ -24,7 +24,7 @@ from trdrbot.analytics import Snapshot
 from trdrbot.calibration import CalibrationStore
 from trdrbot.journal import Journal
 from trdrbot.positions import PositionStore
-from trdrbot.wiki import Wiki
+from trdrbot.wiki import Concept, Wiki
 
 
 def _stores(paths: Any) -> tuple[PositionStore, Journal, Wiki, CalibrationStore]:
@@ -601,3 +601,47 @@ async def test_a_dead_mcp_session_degrades_one_tick_and_says_so(paths):
     # taken repeatedly becomes visible instead of looking like success.
     rows = journal_rows(journal, "degraded")
     assert any(r["subsystem"] == "analytics.positions" for r in rows)
+
+
+# ------------------------------------- D-113 the loop reads what it wrote
+
+def test_the_decide_prompt_carries_the_lessons_learning_wrote(paths):
+    """D-113. `_write_lesson` has appended one entry per resolved position to
+    `lessons.md` since D-022, and nothing read it back into a decision: the
+    system learned, then decided without consulting what it learned.
+
+    Writer and reader are the same module for exactly this reason - the section
+    format is an internal detail of the two functions, not a wire format."""
+    wiki = Wiki(paths.wiki)
+    wiki.write_concept(
+        Concept(concept_id="lessons", frontmatter={"type": "Lesson"},
+                body="# Lessons\n\n## pos_old\nSPY closed `stop_loss`, P&L -12%.\n"
+                     "\n## pos_new\nNVDA closed `profit_target`, P&L +31%.\n"),
+        type_="Lesson")
+
+    rendered = learn.recent_lessons(wiki, k=5)
+
+    assert "pos_new" in rendered and "+31%" in rendered
+    assert rendered.startswith("## pos_old"), "oldest first, so the last line is the latest"
+
+
+def test_the_reading_window_is_bounded_but_the_page_is_not(paths):
+    """The page keeps every resolution forever. The prompt gets a window - a
+    pattern needs a handful of trades, and an unbounded block would push the
+    whole record into context on every cycle for the rest of the run."""
+    wiki = Wiki(paths.wiki)
+    body = "# Lessons\n" + "".join(f"\n## pos_{i}\nclosed.\n" for i in range(20))
+    wiki.write_concept(Concept(concept_id="lessons", frontmatter={"type": "Lesson"},
+                               body=body), type_="Lesson")
+
+    rendered = learn.recent_lessons(wiki, k=3)
+
+    assert rendered.count("## pos_") == 3
+    assert "pos_19" in rendered and "pos_16" not in rendered
+
+
+def test_an_empty_ledger_of_lessons_adds_no_heading_at_all(paths):
+    """Before the first resolution there is nothing to say, and a heading over
+    an empty block is the kind of scaffolding a cold-start agent reads as a
+    fact about itself."""
+    assert learn.recent_lessons(Wiki(paths.wiki)) == ""

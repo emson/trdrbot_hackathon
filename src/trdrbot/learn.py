@@ -212,6 +212,41 @@ def _write_lesson(wiki: Wiki, pos: Position, *, pnl_fraction: float | None, scor
     return existing.concept_id
 
 
+#: How many resolved positions the decide prompt is shown. Enough to see a
+#: PATTERN (three losers in a row is a pattern; one is weather), few enough
+#: that the block stays a paragraph rather than a second document. The page
+#: itself keeps everything - this is the reading window, not the record.
+LESSONS_IN_PROMPT = 5
+
+
+def recent_lessons(wiki: Wiki, k: int = LESSONS_IN_PROMPT) -> str:
+    """The last `k` resolved-position lessons, rendered for the decide prompt.
+
+    `_write_lesson` has appended to `lessons.md` on every resolution since
+    D-022, and until now NOTHING read it back: the loop wrote down what
+    happened and then decided the next trade without it. The agent's only view
+    of its own trading history was the open book and an aggregate calibration
+    number - so "you have closed four positions and never self-resolved two of
+    them" was on disk, in prose, and unreadable at the one moment it bears on
+    anything.
+
+    Reader and writer live in the same module deliberately. The section format
+    is `## <position_id>` and that is an internal detail of the two functions
+    either side of this comment; the moment it is parsed from somewhere else it
+    becomes a wire format nobody declared.
+    """
+    concept = wiki.read("lessons")
+    if concept is None or not concept.body.strip():
+        return ""
+    # Sections, not lines: one lesson is a heading plus its prose plus the
+    # quoted thesis, and splitting on anything finer would hand the agent half
+    # an entry. `[1:]` drops the "# Lessons" preamble, which is a title.
+    sections = [s.strip() for s in concept.body.split("\n## ")[1:] if s.strip()]
+    if not sections:
+        return ""
+    return "\n\n".join(f"## {s}" for s in sections[-k:])
+
+
 def _new_lessons_concept():
     from .wiki import Concept
 

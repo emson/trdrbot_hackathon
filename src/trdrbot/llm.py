@@ -119,17 +119,70 @@ def text_of(message: Any) -> str:
     return str(content)
 
 
-async def ask(config: Config, role: str, prompt: str) -> str:
+#: What each provider calls "I ran out of completion budget mid-sentence".
+#: OpenAI says `finish_reason: length`, Anthropic `stop_reason: max_tokens`.
+_CUT_OFF = {"length", "max_tokens", "max_output_tokens"}
+
+
+def truncation_reason(message: Any) -> str:
+    """The provider's stop reason when a reply was CUT OFF, else "".
+
+    A truncated reply is the one failure that arrives looking like a smaller
+    success (D-113). `_salvage_truncated_array` recovers the complete elements
+    from an unterminated array - which is right, four good candidates should
+    not be lost to a half-written fifth - and then returns a list the caller
+    cannot distinguish from the model having offered exactly that many. The
+    muse asks for five candidates and gpt-5's reasoning tokens come out of the
+    same budget as its output, so "the model proposed three" and "the model
+    proposed five and we saw three" are both routine, and nothing anywhere
+    said which had happened.
+    """
+    meta = getattr(message, "response_metadata", None) or {}
+    for key in ("finish_reason", "stop_reason"):
+        value = str(meta.get(key) or "").strip().lower()
+        if value in _CUT_OFF:
+            return value
+    return ""
+
+
+async def ask(config: Config, role: str, prompt: str,
+              journal: Any = None) -> str:
     """One prompt, one reply, as text. The plain-chat counterpart to the decide
     agent - no tools, no loop.
 
     Deliberately thin: retries live in `build_model` (LLM_MAX_RETRIES) and
     timeouts belong to the caller that owns the tick's watchdog, so this adds
-    no policy of its own. A caller that needs the reply OBJECT - for
-    `response_metadata`, or to reuse one model across a retry loop - builds the
-    model itself and calls `text_of`.
+    no policy of its own. A caller that needs the reply OBJECT - to reuse one
+    model across a retry loop - builds the model itself and calls `text_of`.
+
+    `journal` is optional and buys one thing: a `degraded` row when the reply
+    was cut off. Not an exception - the partial answer is worth more than
+    nothing, and every caller already parses defensively - but the run
+    continued on less, which is exactly what that row means everywhere else.
     """
-    return text_of(await build_model(config, role=role).ainvoke(prompt))
+    reply = await build_model(config, role=role).ainvoke(prompt)
+    note_truncation(reply, role, journal)
+    return text_of(reply)
+
+
+def note_truncation(message: Any, role: str, journal: Any = None) -> bool:
+    """Record that a reply was cut off. True when it was.
+
+    Separate from `ask` because two callers - discovery and news_extract -
+    build their own model to reuse it across a loop, and a truncation check
+    that only the convenience wrapper performs is a check the biggest prompts
+    in the system skip.
+    """
+    from . import health
+
+    why = truncation_reason(message)
+    if not why:
+        return False
+    health.degraded(journal, f"llm.{role}",
+                    f"the reply hit the completion ceiling ({why}) and was cut off - "
+                    f"whatever parsed out of it is a FRAGMENT of the answer, not the "
+                    f"answer", stop_reason=why)
+    return True
 
 
 def section(text: str, name: str, next_names: list[str]) -> str:

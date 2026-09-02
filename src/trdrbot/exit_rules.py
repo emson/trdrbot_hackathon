@@ -26,7 +26,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import UTC, date, datetime
+from datetime import date
 from pathlib import Path
 from typing import Any
 
@@ -72,8 +72,9 @@ def _days_to(day: str) -> int | None:
         return None
 
 
-#: How much of the underlying's OWN expected move must already have happened
-#: before a mark-based breach counts as decisive rather than debounced.
+#: How much of the underlying's OWN expected move for ONE DAY must have
+#: happened THIS SESSION before a mark-based breach counts as decisive
+#: rather than debounced.
 #:
 #: A starting point, not a measurement - and deliberately the only number this
 #: rule adds. Tune it from the journal's own `exit_run` rows once they have
@@ -82,22 +83,6 @@ def _days_to(day: str) -> int | None:
 #: on the first print, while a lone wide quote on an unmoved underlying waits
 #: for the 2-of-3 confirmation that already exists for it.
 CORROBORATION_FRACTION = 0.25
-
-
-def _days_since(iso: str) -> float:
-    """Days a position has been open, floored at one.
-
-    The floor matters: `expected_move` over zero days is zero, which would make
-    every threshold trivially met on the day of entry - the opposite of the
-    intent. One day is the tightest honest yardstick.
-    """
-    try:
-        opened = datetime.fromisoformat(str(iso))
-    except (ValueError, TypeError):
-        return 1.0
-    if opened.tzinfo is None:
-        opened = opened.replace(tzinfo=UTC)
-    return max((ids.utc_now() - opened).total_seconds() / 86400.0, 1.0)
 
 
 def _mark_corroborated(pos: Position, snap: Snapshot, direction: str) -> bool | None:
@@ -116,19 +101,34 @@ def _mark_corroborated(pos: Position, snap: Snapshot, direction: str) -> bool | 
     not. So a loss claim must be matched by a real adverse move before it is
     believed on a single print; otherwise it debounces like any other breach.
 
-    Returns None when the position cannot be judged (a legacy row without entry
-    greeks, an unpriced underlying) - and None debounces, the conservative
-    direction. Gains are left decisive: booking a win early on a wild print
-    costs opportunity, not capital, and is not the failure this guards.
+    WHICH move, over WHAT window (D-113). This asked whether the underlying had
+    drifted adversely SINCE ENTRY, measured against its expected move over the
+    days the position had been open - two horizons that answer a different
+    question from the one being asked. A bad print is an instantaneous event,
+    and cumulative drift is neither instantaneous nor recent: a position that
+    rose for a week and then genuinely gapped down still showed a net
+    FAVOURABLE move from entry, so its stop was refused corroboration on the
+    one day it mattered, while a position that drifted adversely a fortnight
+    ago had every wild quote since confirmed by history. Both horizons are now
+    the session: the move since the previous close, against the expected move
+    over one day. A wide quote on an unmoved underlying prints a session move
+    of nearly zero; a gap prints most of a day's range.
+
+    Returns None when the position cannot be judged (no previous close, an
+    unpriced underlying, a legacy row without entry greeks) - and None
+    debounces, the conservative direction. Gains are left decisive: booking a
+    win early on a wild print costs opportunity, not capital, and is not the
+    failure this guards.
     """
     if direction != "below":
         return True
     spot = snap.underlying_prices.get(pos.underlying)
-    entry, iv = pos.entry_spot, pos.entry_iv
-    if spot is None or not entry or not iv:
+    prev_close = snap.prev_closes.get(pos.underlying)
+    iv = pos.entry_iv
+    if spot is None or not prev_close or not iv:
         return None
-    move = spot - entry
-    em = optmath.expected_move(entry, iv, _days_since(pos.opened))
+    move = spot - prev_close
+    em = optmath.expected_move(prev_close, iv, 1.0)
     if not em:
         return None
     needed = CORROBORATION_FRACTION * em
@@ -319,8 +319,9 @@ def evaluate(pos: Position, snap: Snapshot, deadline: str,
     interesting event here does NOT produce a close and therefore leaves no exit
     row: a decisive mark breach that the underlying refused to corroborate is a
     position NOT closed, and without a count nothing downstream could ever see
-    it happening (WU-4.6). The keys are `mark_breach_suppressed` and
-    `mark_breach_confirmed`.
+    it happening (WU-4.6). The keys are `mark_breach_suppressed`,
+    `mark_breach_confirmed`, and one `blind:<signal>` per rule whose signal
+    could not be read at all.
     """
     pnl = position_pnl_fraction(pos.symbols, snap)
     # Remember the last time we could see it. A position that closes outside
@@ -376,6 +377,18 @@ def evaluate(pos: Position, snap: Snapshot, deadline: str,
 
         x = signal.read(pos, snap, deadline)
         if x is None:
+            # A signal that cannot be READ is a rule that can never fire, and
+            # holding on it is right - but silently is not (D-113). This
+            # `continue` sat before the history append with no stat, no row and
+            # no print, while `invalid_rules` counted only rules that fail to
+            # PARSE. So a stop whose signal has never once been observable
+            # reported identically to one that evaluates every tick and holds:
+            # the live book's only loss guard on three names is an
+            # `underlying_stop` reading a price map that drops a symbol on any
+            # feed hiccup, and the heartbeat said `invalid_rules=0`.
+            if stats is not None:
+                blind = f"blind:{sig_name}"
+                stats[blind] = stats.get(blind, 0) + 1
             continue  # unobservable signal holds; it never fires blind
 
         breached = x <= thr if direction == "below" else x >= thr
@@ -632,10 +645,26 @@ async def run(
                        # the corroboration rule is doing anything at all - and
                        # the data that will eventually tune its fraction.
                        mark_breach_suppressed=stats.get("mark_breach_suppressed", 0),
-                       mark_breach_confirmed=stats.get("mark_breach_confirmed", 0))
+                       mark_breach_confirmed=stats.get("mark_breach_confirmed", 0),
+                       # A rule that PARSED and whose signal could not be read.
+                       # `invalid_rules` above cannot see these: the rule is
+                       # perfectly well-formed, and the observable it names is
+                       # simply not there this tick. Empty is the healthy case
+                       # and says so - which `invalid_rules=0` also did, for a
+                       # completely different reason (D-113).
+                       blind_signals={k.split(":", 1)[1]: v
+                                      for k, v in sorted(stats.items())
+                                      if k.startswith("blind:")})
         if unreadable or errors:
             print(f"[exit] WARNING: {unreadable} unreadable rule(s), "
                   f"{errors} position(s) failed evaluation - those are not being watched")
+        blind = {k.split(":", 1)[1]: v for k, v in sorted(stats.items())
+                 if k.startswith("blind:")}
+        if blind:
+            print("[exit] WARNING: unreadable signal(s) this tick: "
+                  + ", ".join(f"{k} x{v}" for k, v in blind.items())
+                  + " - every rule reading them held blind, which is "
+                    "indistinguishable from a rule that evaluated and passed")
         if stats.get("mark_breach_suppressed"):
             print(f"[exit] {stats['mark_breach_suppressed']} mark breach(es) past the "
                   f"immediate threshold held for confirmation - the underlying has not "

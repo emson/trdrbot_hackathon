@@ -81,7 +81,7 @@ from typing import Any
 
 from . import ids, store
 from .config import Config
-from .llm import build_model, parse_json_array, text_of
+from .llm import build_model, note_truncation, parse_json_array, text_of
 
 # Deferred import (not at module top level): research.py imports THIS module
 # to render its news block, so an eager import here would be circular. By
@@ -299,6 +299,10 @@ async def enrich(items: list[dict[str, Any]], config: Config,
             articles=articles,
         )
         reply = await model.ainvoke(prompt)
+        # One article per element: a cut-off reply loses the TAIL of the batch,
+        # and `by_id` below then falls back to bare headlines for exactly those
+        # articles without anything saying why (D-113).
+        note_truncation(reply, "news.extract", journal)
         text = text_of(reply)
         served = (getattr(reply, "response_metadata", None) or {}).get("model_name", "news_extract")
         by_id = {str(r.get("id")): r for r in parse_json_array(text) if isinstance(r, dict)}

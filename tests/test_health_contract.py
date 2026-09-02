@@ -584,3 +584,36 @@ def test_health_names_two_open_positions_that_share_a_leg(tmp_path, make_positio
     assert all(f[0] == health.BAD and "pos_a" in f[2] and "pos_b" in f[2] for f in found)
     assert not [f for f in health.check(journal, [a, c]) if f[1].startswith("leg_overlap")]
 
+
+
+def test_a_signal_unreadable_on_every_recent_run_is_a_failure_not_a_hold(tmp_path):
+    """D-113. A rule whose SIGNAL cannot be read never fires, and reads exactly
+    like a rule that evaluated and held. `invalid_rules` cannot see it - the
+    rule parses perfectly; the observable it names is simply not there."""
+    rows = [{"kind": "exit_run", "positions": 3, "rules": 9, "triggered": 0,
+             "blind_signals": {"underlying": 3}}] * health.BLIND_RUN_WINDOW
+
+    hit = [f for f in _check(tmp_path, rows) if f[1] == "exit_blind"]
+
+    assert hit, "a permanently blind stop is invisible in health"
+    assert hit[0][0] == health.BAD
+    assert "underlying" in hit[0][2]
+
+
+def test_one_blind_tick_is_weather_not_a_failure(tmp_path):
+    """A feed hiccup is not a dead stop, and a health check that cries wolf
+    trains the reader to skip the one line that finally matters."""
+    rows = [{"kind": "exit_run", "positions": 1, "rules": 3, "triggered": 0,
+             "blind_signals": {"position_mark": 1}}]
+
+    hit = [f for f in _check(tmp_path, rows) if f[1] == "exit_blind"]
+
+    assert hit and hit[0][0] == health.WARN
+
+
+def test_an_engine_that_can_read_everything_says_nothing(tmp_path):
+    """The healthy case has to be silent, or the probe is noise."""
+    rows = [{"kind": "exit_run", "positions": 1, "rules": 3, "triggered": 0,
+             "blind_signals": {}}] * (health.BLIND_RUN_WINDOW + 2)
+
+    assert not [f for f in _check(tmp_path, rows) if f[1] == "exit_blind"]

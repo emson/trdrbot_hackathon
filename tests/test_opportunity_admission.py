@@ -190,7 +190,13 @@ async def test_research_now_rejects_the_percentage_band_it_used_to_admit(
                           polymarket_queries=[])
     journal = Journal(paths.journal)
 
-    out = await research.run(tools_for(), cfg, Inbox(paths), Wiki(paths.wiki),
+    # Research runs the options gate now too (D-113), so the chain has to
+    # answer - the seam this test guards is the BAND check, and a silent
+    # `failed_options_gate` on both rows would pass the count and prove nothing.
+    tools = tools_for(get_option_chain=lambda **_: {
+        "snapshots": {"SPY260904C00760000": {}, "SPY260904P00755000": {}}})
+
+    out = await research.run(tools, cfg, Inbox(paths), Wiki(paths.wiki),
                              journal, verbose=False, force=True)
 
     assert out["opportunities"] == 1, "the percentage-move band was admitted"
@@ -203,3 +209,47 @@ def _async(value):
     async def _f(*a, **k):
         return value
     return _f()
+
+
+async def test_research_now_refuses_a_name_with_no_chain_in_the_window(
+    paths, monkeypatch
+):
+    """D-113. Research had no options gate at all, so a thesis on a name with
+    no chain inside the useful window was admitted, priced by the agent, and
+    killed at the last possible moment by a `get_option_chain` returning
+    nothing - one whole decide cycle spent on a trade that could not exist."""
+    from types import SimpleNamespace
+
+    from conftest import days_out, tools_for
+
+    from trdrbot import research
+    from trdrbot.inbox import Inbox
+    from trdrbot.journal import Journal
+    from trdrbot.wiki import Wiki
+
+    reply = (
+        "REGIME_MARKDOWN:\n# Assessment\nquiet\n# Drivers\nx\n# Calendar\nx\n# Watch\nx\n"
+        "DOSSIERS_JSON:\n{}\n"
+        'OPPORTUNITIES_JSON:\n[{"underlying":"SPY","claim":"holds","horizon":"' + days_out(2) + '",'
+        '"band_low":760.0,"band_high":775.0,"drift_pct":0.5,"why":"w"}]'
+    )
+    monkeypatch.setattr(research, "ask", lambda *a, **k: _async(reply))
+    monkeypatch.setattr(research.market_stats, "fetch_daily_series",
+                        lambda *a, **k: _async((["2026-08-28"] * 120,
+                                                [766.0 + i % 3 for i in range(120)])))
+    monkeypatch.setattr(research.evidence, "gather",
+                        lambda *a, **k: _async(("(none)", "(none)")))
+
+    cfg = SimpleNamespace(paths=paths, deadline=days_out(4),
+                          research_universe=["SPY"], watchlist=["SPY"],
+                          polymarket_queries=[])
+    journal = Journal(paths.journal)
+    # An error IS an answer, and the answer is no.
+    tools = tools_for(get_option_chain=lambda **_: {"error": "no chain for symbol SPY"})
+
+    out = await research.run(tools, cfg, Inbox(paths), Wiki(paths.wiki),
+                             journal, verbose=False, force=True)
+
+    assert out["opportunities"] == 0
+    rejected = [r for r in journal.read() if r.get("kind") == "research_rejected"]
+    assert [r["reason"] for r in rejected] == ["unscoreable:failed_options_gate"]

@@ -11,9 +11,10 @@ from __future__ import annotations
 from datetime import timedelta
 from typing import Any
 
+import pytest
 from conftest import FakeMem, journal_rows, tools_for
 
-from trdrbot import exit_rules, ids, reconcile
+from trdrbot import analytics, exit_rules, ids, reconcile
 from trdrbot.analytics import Snapshot
 from trdrbot.calibration import CalibrationStore
 from trdrbot.journal import Journal
@@ -236,11 +237,22 @@ def _spread(**kw) -> Position:
         legs=[{"symbol": "A", "side": "sell", "qty": 1}], **kw)
 
 
-def _mark(pnl_fraction: float, underlying: float) -> Snapshot:
+def _mark(pnl_fraction: float, underlying: float,
+          prev_close: float = 100.0) -> Snapshot:
+    """A tick: what the position marks at, and where the underlying is.
+
+    `prev_close` defaults to the entry level, which is what every test here
+    already meant by "the underlying has not moved". Corroboration measures the
+    SESSION move against a one-day expected move now (D-113) - it used to
+    measure cumulative drift from entry against the expected move over however
+    long the position had been open, which answered a question about drift
+    while claiming to answer one about quote artifacts.
+    """
     return Snapshot(
         broker_positions=[{"symbol": "A", "cost_basis": 1000.0,
                            "unrealized_pl": 1000.0 * pnl_fraction}],
-        underlying_prices={"X": underlying})
+        underlying_prices={"X": underlying},
+        prev_closes={"X": prev_close})
 
 
 def test_one_wide_print_no_longer_closes_a_healthy_spread(monkeypatch):
@@ -772,3 +784,150 @@ async def test_a_shared_leg_is_closed_by_quantity_never_by_symbol(paths, make_po
     await _run(store2, snap, journal2, paths, tools=solo)
     assert solo["close_position"].calls and all("qty" not in c for c in solo["close_position"].calls)
 
+
+
+def test_a_gap_is_corroborated_even_after_the_position_drifted_favourably():
+    """D-113. The rule asked whether the underlying had drifted adversely SINCE
+    ENTRY, which is not the question a quote artifact poses.
+
+    A position that rose for a week and then genuinely gapped down still showed
+    a net FAVOURABLE move from entry, so `-move >= needed` was false and its
+    stop was refused corroboration on the one day it mattered. Both horizons
+    are the session now: yesterday's close to now, against one day's expected
+    move."""
+    pos = _spread()  # entry_spot 100, long delta
+
+    # Drifted up to 108 over the week, then gapped to 104 today. Still +4 from
+    # entry - the old reading - and -4 on the session, which is the real event.
+    reason, why, _ = exit_rules.evaluate(pos, _mark(-1.00, 104.0, prev_close=108.0),
+                                         "2099-01-01")
+
+    assert reason == "stop_loss", why
+    assert "underlying confirms" in why
+
+
+def test_an_old_adverse_drift_no_longer_confirms_todays_wild_quote():
+    """The mirror image, and the reason this is a defect in both directions: a
+    position that fell hard a fortnight ago had every wide quote since
+    corroborated by history it could not un-happen."""
+    pos = _spread()
+
+    # 20 points below entry - the old rule's `-move` clears any threshold - but
+    # unmoved since yesterday's close, which is what a bad print looks like.
+    reason, _why, _ = exit_rules.evaluate(pos, _mark(-1.00, 80.0, prev_close=80.0),
+                                          "2099-01-01")
+
+    assert reason is None
+
+
+def test_without_a_previous_close_the_breach_debounces_rather_than_guessing():
+    """None means cannot-judge, and cannot-judge takes the slow path. The feed
+    returns no previous close whenever the snapshot endpoint is unavailable and
+    the latest-trade fallback answers instead."""
+    pos = _spread()
+    blind = Snapshot(broker_positions=[{"symbol": "A", "cost_basis": 1000.0,
+                                        "unrealized_pl": -1000.0}],
+                     underlying_prices={"X": 96.0})  # no prev_closes at all
+
+    assert exit_rules.evaluate(pos, blind, "2099-01-01")[0] is None
+    assert exit_rules.evaluate(pos, blind, "2099-01-01")[0] == "stop_loss"
+
+
+def test_a_rule_whose_signal_cannot_be_read_is_counted_not_silent():
+    """D-113. `if x is None: continue` held with no stat, no row and no print,
+    while `invalid_rules` counted only rules that fail to PARSE - so a stop
+    whose signal has never once been observable reported identically to one
+    that evaluates every tick and holds."""
+    pos = _spread(exit_rules=[{"type": "underlying_stop", "direction": "below",
+                               "level": 95.0}])
+    stats: dict[str, int] = {}
+
+    # The price map has no entry for X: an IEX feed with no recent print, or a
+    # price dropped for being stale. The rule is perfectly well-formed.
+    reason, _why, _ = exit_rules.evaluate(pos, Snapshot(), "2099-01-01", stats=stats)
+
+    assert reason is None
+    assert stats["blind:underlying"] == 1
+    assert exit_rules.invalid_rules(pos) == 0, "it parses; that was never the problem"
+
+
+# ------------------------------------------- D-113 the price feed's own age
+
+@pytest.mark.asyncio
+async def test_a_stale_print_is_dropped_rather_than_stopped_on(tmp_path):
+    """D-113. IEX carries a small share of consolidated volume, so on a thin
+    ETF the last IEX trade can be hours old while the tape moves. Nothing
+    checked: a stale print was accepted as current, and an underlying stop
+    reading it does not merely miss - it decides on fiction."""
+    from datetime import timedelta
+
+    old = (ids.utc_now() - timedelta(hours=3)).isoformat()
+    tools = tools_for(
+        get_clock=lambda **_: {"is_open": True},
+        get_stock_snapshot=lambda symbols="", **_: {
+            symbols: {"latestTrade": {"p": 91.0, "t": old},
+                      "prevDailyBar": {"c": 90.0}}},
+    )
+    journal = Journal(tmp_path / "j.jsonl")
+
+    snap = await analytics.snapshot(tools, underlyings=["XLE"], journal=journal)
+
+    assert "XLE" not in snap.underlying_prices, "a three-hour-old print is not a price"
+    degraded = journal_rows(journal, "degraded")
+    assert [r for r in degraded if r["subsystem"] == "analytics.spot"], \
+        "dropping a price silently is the failure this replaces"
+
+
+@pytest.mark.asyncio
+async def test_an_old_print_outside_market_hours_is_not_a_fault(tmp_path):
+    """After the close every last trade is old by definition. A staleness rule
+    that fires all evening is a rule nobody reads."""
+    from datetime import timedelta
+
+    old = (ids.utc_now() - timedelta(hours=14)).isoformat()
+    tools = tools_for(
+        get_clock=lambda **_: {"is_open": False},
+        get_stock_snapshot=lambda symbols="", **_: {
+            symbols: {"latestTrade": {"p": 91.0, "t": old},
+                      "prevDailyBar": {"c": 90.0}}},
+    )
+    journal = Journal(tmp_path / "j.jsonl")
+
+    snap = await analytics.snapshot(tools, underlyings=["XLE"], journal=journal)
+
+    assert snap.underlying_prices["XLE"] == 91.0
+    assert snap.prev_closes["XLE"] == 90.0
+    assert not [r for r in journal_rows(journal, "degraded")
+                if r["subsystem"] == "analytics.spot"]
+
+
+@pytest.mark.asyncio
+async def test_the_latest_trade_endpoint_still_answers_when_the_snapshot_does_not(tmp_path):
+    """One reader, two endpoints, in the order attribution already used. The
+    fallback carries no previous close and none is invented - the corroboration
+    rule debounces without one, which is the safe side."""
+    tools = tools_for(
+        get_clock=lambda **_: {"is_open": True},
+        get_stock_snapshot=lambda **_: (_ for _ in ()).throw(RuntimeError("no snapshot")),
+        get_stock_latest_trade=lambda symbols="", **_: {
+            "trades": {symbols: {"p": 767.46}}},
+    )
+
+    snap = await analytics.snapshot(tools, underlyings=["SPY"],
+                                    journal=Journal(tmp_path / "j.jsonl"))
+
+    assert snap.underlying_prices["SPY"] == 767.46
+    assert "SPY" not in snap.prev_closes
+
+
+def test_a_nanosecond_timestamp_parses_rather_than_reading_as_unknown():
+    """Alpaca stamps trades in RFC3339 with NANOSECONDS, which
+    `fromisoformat` rejects outright - and a dropped timestamp reads as "age
+    unknown", silently disabling the staleness check that is the whole point of
+    reading it."""
+    node = {"p": 1.0, "t": "2026-09-02T15:30:00.123456789Z"}
+
+    parsed = analytics._time_in(node)
+
+    assert parsed is not None
+    assert parsed.year == 2026 and parsed.minute == 30

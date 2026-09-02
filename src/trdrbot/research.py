@@ -30,7 +30,7 @@ from .config import Config
 from .inbox import Inbox
 from .journal import Journal
 from .llm import ask, parse_json_array, parse_json_object, section
-from .opportunity import Opportunity, admit
+from .opportunity import Opportunity, admit, options_gate
 from .wiki import Concept, Wiki
 
 RESEARCH_PROMPT = """You are the research desk for an options trading agent. Produce a daily \
@@ -257,7 +257,7 @@ async def run(
         today=ids.today().isoformat(), earliest=_earliest,
         preferred=_preferred, latest=_latest,
     )
-    text = await ask(config, "research", prompt)
+    text = await ask(config, "research", prompt, journal)
 
     regime_md = section(text, "REGIME_MARKDOWN", ["DOSSIERS_JSON", "OPPORTUNITIES_JSON"])
     dossiers = parse_json_object(section(text, "DOSSIERS_JSON", ["OPPORTUNITIES_JSON"]))
@@ -310,6 +310,22 @@ async def run(
     # making holds_at always-False and scoring every thesis as failed) was
     # still open on the path whose output the agent reads every morning.
     latest = _latest
+    # The options gate was the one of discovery's three this path never got
+    # (D-113). Research's own universe is optionable by construction, but
+    # nothing constrains what the MODEL names in OPPORTUNITIES_JSON, and an
+    # opportunity on a name with no chain inside the window is a thesis that
+    # cannot be expressed - admitted here, priced by the agent, and rejected at
+    # the last possible moment by a `get_option_chain` that returns nothing.
+    # Cached per ticker: the same name usually appears in several rows, and
+    # this is one MCP round trip each.
+    gates: dict[str, bool] = {}
+
+    async def tradeable(ticker: str) -> bool:
+        if ticker not in gates:
+            gate = await options_gate(tools, ticker, latest)
+            gates[ticker] = bool(gate.get("tradeable"))
+        return gates[ticker]
+
     for raw in raw_opps:
         o = Opportunity.from_payload(raw)
         if o is None:
@@ -317,7 +333,8 @@ async def run(
                            reason="unscoreable:not_an_object", raw=str(raw)[:300])
             continue
         verdict = admit(o, spot=last_close.get(o.underlying),
-                        latest_useful=latest or None, earliest_useful=_earliest)
+                        latest_useful=latest or None, earliest_useful=_earliest,
+                        options_tradeable=await tradeable(o.underlying))
         if not verdict.ok:
             journal.append("research_rejected", source="research",
                            reason=f"unscoreable:{verdict.defect}", raw=str(raw)[:300])

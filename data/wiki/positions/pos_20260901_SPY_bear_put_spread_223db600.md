@@ -47,9 +47,9 @@ exit_state:
   - false
   - false
   days_to_expiry:below:1:
-  - false
-  - false
-  - false
+  - true
+  - true
+  - true
   underlying:above:765.5:
   - false
   - false
@@ -65,7 +65,7 @@ sources:
   author: muse
 generated:
   by: openai:gpt-5.6-sol | anthropic:claude-opus-5 | openai:gpt-5
-  at: '2026-09-01T21:33:09.830031+00:00'
+  at: '2026-09-02T07:40:10.427704+00:00'
 verified:
 - by: trdrbot/reconcile
   at: '2026-09-01T14:11:41.095462+00:00'

@@ -34,12 +34,12 @@ from typing import Any
 
 from . import coach, competence, evidence, ids, market_stats
 from .config import Config
-from .discovery import _options_gate, _plausible_band
+from .discovery import _plausible_band
 from .inbox import Inbox
 from .journal import Journal
 from .ledger import Ledger
 from .llm import ask, parse_json_array
-from .opportunity import Opportunity, admit
+from .opportunity import Opportunity, admit, options_gate
 from .wiki import Wiki
 
 #: How many wiki concepts collide with the news per run.
@@ -254,7 +254,7 @@ async def _generate(prompt_text: str, fields: dict[str, Any], config: Config,
     seam the Coach's prompt lever moves, and the only thing that differs
     between the two arms of a trial."""
     prompt = prompt_text.format(**fields)
-    text = await ask(config, "muse", prompt)
+    text = await ask(config, "muse", prompt, journal)
     # A model wrapping the array in an object ({"candidates": [...]}) used to
     # arrive here as a dict, be silently skipped by the list-guard below, and
     # report "0 candidates" with no evidence of why. That unwrap is now
@@ -457,7 +457,7 @@ async def _evaluate(
                 # if the generated schema refused None, every candidate was
                 # rejected for good. The window's `latest` is what the gate
                 # always meant.
-                cache[gkey] = await _options_gate(tools, u, latest)
+                cache[gkey] = await options_gate(tools, u, latest)
             gate = cache[gkey]
             if not gate.get("tradeable"):
                 verdict["fate"] = "rejected: no options chain inside the deadline"

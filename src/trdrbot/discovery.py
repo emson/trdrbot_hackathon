@@ -27,12 +27,19 @@ import json
 from datetime import UTC, datetime
 from typing import Any
 
-from . import competence, evidence, ids, market_stats, mcp_client, optmath
+from . import competence, evidence, ids, market_stats
 from .config import Config
 from .inbox import Inbox
 from .journal import Journal
-from .llm import build_model, parse_json_array, parse_json_object, section, text_of
-from .opportunity import Opportunity, admit
+from .llm import (
+    build_model,
+    note_truncation,
+    parse_json_array,
+    parse_json_object,
+    section,
+    text_of,
+)
+from .opportunity import Opportunity, admit, options_gate
 from .research import dossier
 from .wiki import Concept, Wiki
 
@@ -136,51 +143,6 @@ async def _fundamentals(ticker: str) -> dict[str, Any]:
         return {"unavailable": type(exc).__name__}
 
 
-async def _options_gate(tools: dict[str, Any], ticker: str, latest: str) -> dict[str, Any]:
-    """Does a chain exist with an expiry on/before `latest`?
-
-    `latest` is the forecast window's own upper bound, not the deadline
-    (D-101). The question the gate asks is "can a thesis on this name resolve
-    while it is still worth acting on", and that has an answer whether or not a
-    competition is running - the hard stop merely tightens it when one exists.
-    Passing the raw deadline meant this gate had no bound at all without one.
-
-    Counts real contracts, by parsing the OCC keys the chain is actually keyed
-    by. It used to count the SUBSTRING "symbol" in `str(response)`, which made
-    an error payload like `{"error": "no chain for symbol XYZ"}` score 1 and
-    return tradeable - the gate answering yes on the evidence that it failed.
-    The same heuristic would have broken the other way the moment chain
-    compaction ran first: a compacted table contains neither "symbol" nor the
-    ticker, so every candidate would have been rejected as untradeable,
-    permanently and silently.
-    """
-    try:
-        r = await mcp_client.call(
-            tools, "get_option_chain", underlying_symbol=ticker,
-            expiration_date_lte=latest,
-        )
-        snaps = r.get("snapshots") if isinstance(r, dict) else None
-        if isinstance(snaps, dict):
-            n = sum(1 for occ in snaps if optmath.parse_occ(str(occ)))
-            return {"tradeable": n > 0, "contracts_seen": n, "via": "snapshots"}
-        if isinstance(r, dict) and r.get("error"):
-            # An error is an answer, and the answer is no. Under the old
-            # substring count this was the WORST case: the message itself
-            # usually contains the word "symbol", so a failure scored 1 and
-            # the gate returned tradeable.
-            return {"tradeable": False, "contracts_seen": 0,
-                    "error": str(r["error"])[:120], "via": "error_payload"}
-        # Unrecognised shape. Keep the old heuristic so a schema change
-        # degrades rather than blocking every candidate - but SAY which path
-        # answered, because a silent fallback is how the substring count
-        # survived unnoticed in the first place (D-038).
-        text = str(r)
-        n = text.count("symbol") or text.count(ticker)
-        return {"tradeable": n > 0, "contracts_seen": n, "via": "substring_fallback"}
-    except Exception as exc:  # noqa: BLE001
-        return {"tradeable": False, "error": type(exc).__name__}
-
-
 async def run(
     tools: dict[str, Any], config: Config, inbox: Inbox, wiki: Wiki, journal: Journal,
     *, verbose: bool = True,
@@ -198,12 +160,15 @@ async def run(
     news_block, odds_block = await evidence.gather(
         tools, config, symbols=None, news_limit=40, journal=journal)
     # ---- LLM call 1: nominate from evidence ----
-    text = text_of(await model.ainvoke(NOMINATE_PROMPT.format(
+    reply1 = await model.ainvoke(NOMINATE_PROMPT.format(
         horizon=horizon, exclude=", ".join(exclude),
         news_block=news_block,
         odds_block=odds_block,
-    )))
-    nominees = parse_json_array(text)
+    ))
+    # A cut-off reply parses to FEWER nominees, not to an error (D-113), and
+    # `nominees[:5]` below would then silently be a shortlist of three.
+    note_truncation(reply1, "discovery.nominate", journal)
+    nominees = parse_json_array(text_of(reply1))
     nominees = [n for n in nominees if isinstance(n, dict) and n.get("ticker")][:5]
     if verbose:
         print(f"[discovery] nominated: {[n['ticker'] for n in nominees]}")
@@ -264,7 +229,7 @@ async def run(
 
         f = await _fundamentals(t)
         lines.append("Fundamentals (Yahoo): " + json.dumps(f))
-        gate = await _options_gate(tools, t, _latest)
+        gate = await options_gate(tools, t, _latest)
         lines.append(
             f"Options gate (expiries on/before {_latest}): "
             + ("PASS" if gate.get("tradeable") else f"FAIL {gate}")
@@ -278,6 +243,7 @@ async def run(
     reply2 = await model.ainvoke(SYNTH_PROMPT.format(
         candidates_block="\n\n".join(blocks), horizon=horizon,
         earliest=_earliest, preferred=_preferred, latest=_latest))
+    note_truncation(reply2, "discovery.synthesise", journal)
     text2 = text_of(reply2)
 
     # `section` rather than two inline regexes: one parser for one LABEL:

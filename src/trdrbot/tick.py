@@ -42,9 +42,11 @@ from . import (
     housekeeping,
     idle,
     ids,
+    learn,
     local_tools,
     mcp_client,
     news_extract,
+    optmath,
     prompts,
     reconcile,
     sensors,
@@ -398,6 +400,62 @@ def _usage_went_dark(model_served: list[str], llm_turns: int) -> bool:
     return llm_turns > 0 and not model_served
 
 
+def _order_legs(call: dict[str, Any]) -> list[dict[str, Any]]:
+    return [leg for leg in ((call.get("args") or {}).get("legs") or [])
+            if isinstance(leg, dict)]
+
+
+def _opens_a_position(call: dict[str, Any]) -> bool:
+    """Does this order OPEN exposure, rather than close it?
+
+    `position_intent` lives on the LEGS in Alpaca's multi-leg payload, and this
+    was reading it off the top level - where it is never present - so the test
+    was `"close" not in ""`, permanently True. Every `place_option_order` read
+    as opening, including the closes the agent submits through the same tool
+    (live: `theo-close-spy-bps-20260901-0957`, three sell_to_close legs), so
+    the "no exit rules were recorded" warning cried wolf on every exit.
+    """
+    if not str(call.get("name", "")).startswith("place_"):
+        return False
+    args = call.get("args") or {}
+    intents = " ".join([*(str(leg.get("position_intent", "")) for leg in _order_legs(call)),
+                        str(args.get("position_intent", ""))]).lower()
+    if "to_open" in intents:
+        return True
+    # Stated and every leg closes -> a close. Nothing stated at all -> assume
+    # opening, which is the side that WARNS: a missed warning on an exit is
+    # noise, a missed warning on an entry is a position with no stops.
+    return "close" not in intents
+
+
+def _placed_contracts(call: dict[str, Any]) -> list[int]:
+    """Contracts this order actually sends per leg: `qty` x each `ratio_qty`."""
+    args = call.get("args") or {}
+    try:
+        qty = int(float(args.get("qty") or args.get("quantity") or 0))
+    except (TypeError, ValueError):
+        return []
+    if qty <= 0:
+        return []
+    out: set[int] = set()
+    for leg in _order_legs(call):
+        try:
+            ratio = int(float(leg.get("ratio_qty") or 1))
+        except (TypeError, ValueError):
+            ratio = 1
+        if ratio > 0:
+            out.add(qty * ratio)
+    return sorted(out) or [qty]
+
+
+def _order_underlying(call: dict[str, Any]) -> str:
+    for leg in _order_legs(call):
+        parsed = optmath.parse_occ(str(leg.get("symbol", "")))
+        if parsed:
+            return str(parsed["underlying"]).upper()
+    return ""
+
+
 def _guarded_mcp_tools(tools_list: list[Any], config: Config, batch: str,
                        store: PositionStore, journal: Any = None) -> list[Any]:
     """The MCP tools the decide agent may call, wrapped in the four guards.
@@ -523,6 +581,22 @@ async def _build_decide_prompt(
                           for i in news_items]
     obs_lines += [f"- [{i.type} | trust={i.trust}] {json.dumps(i.payload)}" for i in other_items]
     prompt_parts.append("## Observations this cycle\n\n" + "\n".join(obs_lines))
+    # THE LOOP'S OTHER HALF (D-113). `learn._write_lesson` has appended one
+    # entry per resolved position to `lessons.md` since D-022, and nothing has
+    # ever read it back into a decision: the system learned and then decided
+    # without consulting what it learned. Its own trading history was on disk
+    # and out of context, while the prompt carried an aggregate calibration
+    # number that cannot say WHICH trades produced it.
+    #
+    # Placed immediately before that number for exactly that reason - the
+    # base rate, then the trades it is made of.
+    lessons = learn.recent_lessons(wiki)
+    if lessons:
+        prompt_parts.append(
+            "## What happened when you traded\n\n"
+            "Your last resolved positions, most recent last. These are the "
+            "outcomes behind the calibration figure below.\n\n" + lessons
+        )
     # Same `cal_now` the ladder and the sizing tool read - one number, one
     # meaning. The prompt used to show a position-only figure while size
     # was gated on a ledger-inclusive one.
@@ -925,6 +999,31 @@ async def _run_tick(
             health.degraded(journal, "orders", "broker rejected an order the agent placed",
                             rejected=rejected)
 
+        # I-60 AT THE RIGHT SEAM (D-113). The mismatch check lived only inside
+        # `record_position`, where it compares sizing's contract count against
+        # the legs the agent WROTE DOWN. Those two agreeing says nothing about
+        # what went to the broker: sizing computes 3, the order sends 10, the
+        # page records 3, and `max_loss_usd` - what every book cap sums - is
+        # denominated in a size that was never traded, with no row anywhere.
+        # Reported, never refused (D-009): this holds the agent's own two tool
+        # calls against each other rather than gating either.
+        sized = shared.sizing
+        for call in orders:
+            if sized is None or not _opens_a_position(call):
+                continue
+            placed = _placed_contracts(call)
+            u = _order_underlying(call)
+            if sized.underlying not in ("", u) or not placed:
+                continue
+            if placed != [sized.contracts]:
+                journal.append("sizing_mismatch", seam="placed", underlying=u,
+                               sized_contracts=sized.contracts, placed_qtys=placed,
+                               decision_ref=decision_id)
+                print(f"\n[tick {n}] WARNING: size_position computed "
+                      f"{sized.contracts} contract(s) for {u}; the order placed "
+                      f"{placed}. The book caps are sized against "
+                      f"{sized.contracts}.")
+
         # `model` is the configured INTENT (chain head); `served` is what
         # actually answered. They differ whenever the fallback fires, and
         # recording only the former made the journal confidently wrong about
@@ -975,13 +1074,10 @@ async def _run_tick(
         # this fired on `replace_order_by_id` when the agent repriced its own
         # exit, demanding a record_position for a position it was closing. A
         # warning that cries wolf teaches everyone to ignore warnings - the
-        # same class as the underlying_stop=None rendering bug (D-056).
-        opening_orders = [
-            o for o in orders
-            if str(o.get("name", "")).startswith("place_")
-            and "close" not in str(o.get("args_as_model_supplied", {})
-                                   .get("position_intent", "")).lower()
-        ]
+        # same class as the underlying_stop=None rendering bug (D-056). It
+        # cried wolf anyway until D-113: the intent it read lives on the LEGS,
+        # so the filter was `"close" not in ""` and every close qualified.
+        opening_orders = [o for o in orders if _opens_a_position(o)]
         if opening_orders and not recorded:
             print("\n[tick] WARNING: order placed but record_position was not called - "
                   "this position has no exit rules and the evaluator cannot see it.")

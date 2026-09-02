@@ -259,3 +259,54 @@ def test_research_holds_its_own_cadence(paths, monkeypatch):
     due, why = research._due_today(cfg)
     assert not due and why == "already_ran_today"
     assert (paths.state / "last_research").read_text() == ids.today().isoformat()
+
+
+# ------------------------------------- D-113 a fragment is not a short answer
+
+
+class _Cut:
+    """A reply whose provider said it ran out of room."""
+
+    def __init__(self, reason_key: str, reason: str) -> None:
+        self.content = '[{"underlying":"S"}]'
+        self.response_metadata = {reason_key: reason, "model_name": "gpt-5"}
+
+
+def test_both_providers_conventions_for_a_cut_off_reply_are_read():
+    """OpenAI says `finish_reason: length`, Anthropic `stop_reason: max_tokens`,
+    and the fallback chain runs both in the same role."""
+    assert llm.truncation_reason(_Cut("finish_reason", "length")) == "length"
+    assert llm.truncation_reason(_Cut("stop_reason", "max_tokens")) == "max_tokens"
+
+
+def test_a_reply_that_finished_normally_is_not_flagged():
+    """A check that fires on healthy replies is a check nobody reads."""
+    assert llm.truncation_reason(_Cut("finish_reason", "stop")) == ""
+    assert llm.truncation_reason(_Reply("plain text, no metadata at all")) == ""
+
+
+def test_a_truncated_reply_leaves_a_row_saying_the_answer_is_a_fragment(tmp_path):
+    """The whole point (D-113). The salvage recovers the complete elements of an
+    unterminated array - which is right - and then hands the caller a list
+    indistinguishable from the model having offered exactly that many. The muse
+    asks for five candidates and gpt-5's reasoning tokens come out of the same
+    budget as its output, so "proposed three" and "proposed five, we saw three"
+    are both routine and nothing said which had happened."""
+    from conftest import journal_rows
+
+    from trdrbot.journal import Journal
+
+    journal = Journal(tmp_path / "j.jsonl")
+
+    flagged = llm.note_truncation(_Cut("finish_reason", "length"), "muse", journal)
+
+    assert flagged is True
+    rows = journal_rows(journal, "degraded")
+    assert rows and rows[0]["subsystem"] == "llm.muse"
+    assert "FRAGMENT" in rows[0]["reason"]
+
+
+def test_the_truncation_check_never_needs_a_journal_to_be_safe():
+    """Instrumentation that can break the run it instruments is worse than
+    none - the same contract `health.degraded` already keeps."""
+    assert llm.note_truncation(_Cut("finish_reason", "length"), "muse", None) is True

@@ -11,7 +11,7 @@ from typing import Any
 
 from conftest import tools_for
 
-from trdrbot import discovery, muse
+from trdrbot import muse, opportunity
 
 
 def _soon(days: int = 3) -> str:
@@ -30,7 +30,7 @@ async def test_an_error_payload_is_not_a_tradeable_chain():
     answering yes on the evidence that it had failed."""
     tools = tools_for(get_option_chain=lambda **k: {"error": "no chain for symbol XYZ"})
 
-    gate = await discovery._options_gate(tools, "XYZ", "2026-09-04")
+    gate = await opportunity.options_gate(tools, "XYZ", "2026-09-04")
 
     assert gate["tradeable"] is False
 
@@ -40,7 +40,7 @@ async def test_a_real_chain_counts_its_contracts():
         "SPY260904C00770000": {}, "SPY260904P00770000": {}, "not-an-occ": {},
     }})
 
-    gate = await discovery._options_gate(tools, "SPY", "2026-09-04")
+    gate = await opportunity.options_gate(tools, "SPY", "2026-09-04")
 
     assert gate["tradeable"] is True
     assert gate["contracts_seen"] == 2, "counted a key that is not a contract"
@@ -52,7 +52,7 @@ async def test_an_unrecognised_shape_degrades_but_says_which_path_answered():
     is how the substring count survived unnoticed, so the path is reported."""
     tools = tools_for(get_option_chain=lambda **k: "SPY260904C00770000 symbol")
 
-    gate = await discovery._options_gate(tools, "SPY", "2026-09-04")
+    gate = await opportunity.options_gate(tools, "SPY", "2026-09-04")
 
     assert gate["via"] == "substring_fallback"
 
@@ -61,7 +61,7 @@ async def test_a_raising_chain_call_is_not_tradeable():
     def boom(**_: Any) -> Any:
         raise RuntimeError("mcp down")
 
-    gate = await discovery._options_gate(tools_for(get_option_chain=boom),
+    gate = await opportunity.options_gate(tools_for(get_option_chain=boom),
                                          "SPY", "2026-09-04")
 
     assert gate["tradeable"] is False and "error" in gate
@@ -94,7 +94,7 @@ async def test_one_malformed_candidate_costs_one_candidate_not_the_run(paths, mo
     async def gate(*a: Any, **k: Any) -> dict[str, Any]:
         return {"tradeable": True}
 
-    monkeypatch.setattr(muse, "_options_gate", gate)
+    monkeypatch.setattr(muse, "options_gate", gate)
 
     # The poison: `chain` is a string where the gate cascade expects a list,
     # so `" -> ".join(...)` raises partway through - the shape of a real

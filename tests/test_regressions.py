@@ -47,10 +47,14 @@ def pos(**kw):
     return Position(position_id="t", **kw)
 
 
-def snap(mark_pnl=None, underlying=None):
+def snap(mark_pnl=None, underlying=None, prev_close=100.0):
     s = Snapshot()
     if underlying is not None:
         s.underlying_prices = {"SPY": underlying}
+        # Corroboration measures the SESSION move now, not the drift since
+        # entry (D-113), so the reference the fixtures always meant - "where
+        # the underlying was before it did this" - has to be stated.
+        s.prev_closes = {"SPY": prev_close}
     if mark_pnl is not None:
         s.broker_positions = [{"symbol": "A", "cost_basis": 100, "unrealized_pl": mark_pnl}]
     return s
@@ -5563,3 +5567,64 @@ def test_the_single_shot_tick_classifies_its_failure_instead_of_crashing(tmp_pat
         code = asyncio.run(cli._tick())
 
     assert code == 1, "a failed tick must signal failure to cron, not exit 0"
+
+
+# ------------------------------- D-113 the order path reads what it PLACED
+
+def test_a_placed_quantity_sizing_did_not_compute_is_journalled():
+    """I-60 lived only inside `record_position`, comparing sizing's contract
+    count against the legs the agent WROTE DOWN. Those two agreeing says
+    nothing about what went to the broker: sizing computes 3, the order sends
+    10, the page records 3, and `max_loss_usd` - what every book cap sums - is
+    denominated in a size that was never traded."""
+    from trdrbot import tick
+
+    call = {"name": "place_option_order", "args": {
+        "qty": "10", "legs": [
+            {"symbol": "SPY260903P00763000", "ratio_qty": "1",
+             "position_intent": "buy_to_open"},
+            {"symbol": "SPY260903P00758000", "ratio_qty": "1",
+             "position_intent": "sell_to_open"}]}}
+
+    assert tick._opens_a_position(call) is True
+    assert tick._placed_contracts(call) == [10]
+    assert tick._order_underlying(call) == "SPY"
+
+
+def test_a_ratio_leg_places_more_contracts_than_the_order_quantity():
+    """A 1x2 sends `qty` on one leg and `2 x qty` on the other. Reading `qty`
+    alone would call a ratio spread correctly sized at half its real size."""
+    from trdrbot import tick
+
+    call = {"name": "place_option_order", "args": {
+        "qty": "3", "legs": [
+            {"symbol": "SPY260903P00763000", "ratio_qty": "1"},
+            {"symbol": "SPY260903P00758000", "ratio_qty": "2"}]}}
+
+    assert tick._placed_contracts(call) == [3, 6]
+
+
+def test_a_close_submitted_through_the_order_tool_is_not_an_opening_order():
+    """`position_intent` lives on the LEGS, and this was read off the top
+    level - where it is never present - so the test was `"close" not in ""`,
+    permanently True. Live shape: theo-close-spy-bps, three sell_to_close legs,
+    which demanded a record_position for a position it was closing."""
+    from trdrbot import tick
+
+    closing = {"name": "place_option_order", "args": {
+        "qty": "13", "legs": [
+            {"symbol": "SPY260903P00766000", "position_intent": "sell_to_close"},
+            {"symbol": "SPY260903P00758000", "position_intent": "buy_to_close"}]}}
+
+    assert tick._opens_a_position(closing) is False
+
+
+def test_an_order_stating_no_intent_at_all_is_treated_as_opening():
+    """The side that warns. A missed warning on an exit is noise; a missed
+    warning on an entry is a live position with no stops."""
+    from trdrbot import tick
+
+    bare = {"name": "place_option_order",
+            "args": {"qty": "2", "legs": [{"symbol": "SPY260903P00763000"}]}}
+
+    assert tick._opens_a_position(bare) is True

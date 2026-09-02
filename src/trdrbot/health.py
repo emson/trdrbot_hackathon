@@ -123,7 +123,7 @@ PROBES: tuple[Probe, ...] = (
         "positions were watched and no rule ever fired - check that the "
         "thresholds are reachable against the net-cost base",
         work=lambda rows: sum(int(r.get("rules") or 0) for r in rows),
-        heartbeat_fields=("positions", "rules", "triggered"),
+        heartbeat_fields=("positions", "rules", "triggered", "blind_signals"),
         never_producing_is_ok=True,
         stopping_after_output_is_ok=True,
     ),
@@ -308,6 +308,11 @@ STALE_AFTER_RUNS = 20
 #: `STALE_AFTER_RUNS`, which is the same judgment for a different subsystem.
 #: Three because one is an ordering artifact and two is a coincidence.
 ORDERS_WITHOUT_SIZING = 3
+
+#: Consecutive exit runs with the same signal unreadable before it stops being
+#: weather. Five, because the engine runs every tick and a data feed that has
+#: missed five in a row is not having a moment - it is not serving that symbol.
+BLIND_RUN_WINDOW = 5
 
 
 def _runs_since_last_output(ran: list[dict[str, Any]], probe: Probe) -> int:
@@ -498,6 +503,33 @@ def check(journal_path: Path, positions: list[Any]) -> list[tuple[str, str, str]
         findings.append((BAD, "learning",
                          f"{n_res} resolution(s) and {n_err} learn error(s) - every outcome "
                          f"that reached the learner failed to be learned from; see learn_error"))
+
+    # A rule whose SIGNAL cannot be read is a stop that never fires, and it
+    # reads exactly like a stop that evaluated and held (D-113). One tick of it
+    # is a feed hiccup; every tick of it is a position guarded by nothing. The
+    # live shape this was found on: three ETF positions whose only loss guard
+    # is an `underlying_stop`, reading a price map that drops a symbol whenever
+    # the IEX feed has no recent print for it - and `watched_signals` below
+    # still reports "underlying" as watched, because the RULE is there.
+    exit_rows = [r for r in rows if r.get("kind") == "exit_run"]
+    recent = exit_rows[-BLIND_RUN_WINDOW:]
+    if len(recent) >= BLIND_RUN_WINDOW:
+        every = [r for r in recent if r.get("blind_signals")]
+        if len(every) == len(recent):
+            names: dict[str, int] = {}
+            for r in every:
+                for sig, n in (r.get("blind_signals") or {}).items():
+                    names[str(sig)] = names.get(str(sig), 0) + int(n or 0)
+            findings.append((BAD, "exit_blind",
+                             f"{', '.join(sorted(names))} unreadable on every one of the "
+                             f"last {len(recent)} exit runs - the rules that watch "
+                             f"{'them' if len(names) > 1 else 'it'} have never had a value "
+                             f"to compare against, and holding blind reads as holding"))
+    elif exit_rows and exit_rows[-1].get("blind_signals"):
+        findings.append((WARN, "exit_blind",
+                         f"{', '.join(sorted(exit_rows[-1]['blind_signals']))} could not be "
+                         f"read on the most recent exit run - the rules watching "
+                         f"them held without a value"))
 
     # A recorded quantity that is not the one sizing computed means the book
     # caps were derived from a size that was never traded. Once is a deliberate

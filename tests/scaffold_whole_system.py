@@ -91,6 +91,10 @@ class Broker:
     def __init__(self, equity: float = 104_060.0) -> None:
         self.equity = equity
         self.prices: dict[str, float] = {"SPY": 640.0, "NVDA": 120.0, "XLE": 90.0}
+        #: Where each name closed yesterday. A scenario that moves `prices`
+        #: without touching this has produced a session MOVE, which is what
+        #: the exit engine's corroboration rule reads (D-113).
+        self.prev_closes: dict[str, float] = dict(self.prices)
         self.positions: list[dict[str, Any]] = []      # broker-side legs
         self.orders: list[dict[str, Any]] = []
         self.market_open = True
@@ -114,10 +118,18 @@ class Broker:
         return list(self.orders)
 
     def get_stock_latest_trade(self, symbols: str = "", **_: Any) -> dict[str, Any]:
-        return {"trades": {symbols: {"p": self.prices.get(symbols, 0.0)}}}
+        return {"trades": {symbols: {"p": self.prices.get(symbols, 0.0),
+                                     "t": ids.utc_now().isoformat()}}}
 
     def get_stock_snapshot(self, symbols: str = "", **_: Any) -> dict[str, Any]:
-        return {symbols: {"latestTrade": {"p": self.prices.get(symbols, 0.0)}}}
+        return {symbols: {
+            "latestTrade": {"p": self.prices.get(symbols, 0.0),
+                            # A fresh print. A scenario testing staleness moves
+                            # this back; the default must never be old, or every
+                            # underlying stop in the scaffold reads blind.
+                            "t": ids.utc_now().isoformat()},
+            "prevDailyBar": {"c": self.prev_closes.get(symbols, 0.0)},
+        }}
 
     def close_position(self, symbol_or_asset_id: str = "", **_: Any) -> dict[str, Any]:
         self.closed.append(symbol_or_asset_id)

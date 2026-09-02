@@ -9,7 +9,9 @@ cannot see.
 from __future__ import annotations
 
 import contextlib
+import re
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -53,6 +55,15 @@ class Snapshot:
     #: watching. `broker_readable` closed this hole for positions (I-55); the
     #: orders read had the same shape and the same bare print.
     orders_readable: bool = False
+    #: Previous session's CLOSE per underlying, when the feed carried one.
+    #:
+    #: The exit engine's corroboration rule needs a RECENT reference point to
+    #: tell a wide quote from a real move, and the only one it had was the
+    #: entry price - which is days old and drifts (D-113). Absent rather than
+    #: guessed when the snapshot endpoint is unavailable: a fabricated
+    #: reference is worse than an admitted one, and the rule debounces without
+    #: it, which is the safe direction.
+    prev_closes: dict[str, float] = field(default_factory=dict)
 
     @property
     def equity(self) -> float:
@@ -200,6 +211,126 @@ def filled_legs(symbols: list[str], snap: Snapshot) -> list[Any] | None:
     return out or None
 
 
+#: The data feed a paper account is entitled to. One constant, because
+#: `attribution` and this module were passing their own copies of the string.
+FEED = "iex"
+
+#: How stale the last trade may be before it stops counting as a price.
+#:
+#: Enforced only while the market is open, where it means "the tape has moved
+#: and this print has not". Fifteen minutes is the delayed-data convention and
+#: is deliberately loose: the failure being guarded is an hours-old print on a
+#: thin ETF, not a quiet minute on SPY. Tune it from `degraded` rows carrying
+#: `analytics.spot`, never from taste.
+SPOT_MAX_AGE_MINUTES = 15.0
+
+
+@dataclass(frozen=True)
+class SpotQuote:
+    """One underlying's price, when it printed, and the previous close.
+
+    The previous close travels WITH the price because the two are read from
+    one endpoint and are only comparable to each other: a spot from one feed
+    against a close from another is a made-up gap.
+    """
+
+    price: float
+    #: When the trade printed. None when the feed omitted a timestamp - which
+    #: means the age is unknown, and unknown is not the same as fresh.
+    as_of: datetime | None = None
+    prev_close: float | None = None
+
+    def age_minutes(self) -> float | None:
+        if self.as_of is None:
+            return None
+        return (ids.utc_now() - self.as_of).total_seconds() / 60.0
+
+
+def _price_in(node: Any) -> float | None:
+    """A price out of any of the shapes Alpaca uses for one."""
+    if not isinstance(node, dict):
+        return None
+    for key in ("p", "c", "price", "close"):
+        px = _f(node.get(key), 0.0)
+        if px > 0:
+            return px
+    return None
+
+
+def _time_in(node: Any) -> datetime | None:
+    """The trade timestamp, or None. Never raises - an unparseable stamp is an
+    unknown age, and the caller already treats unknown as unjudgeable."""
+    if not isinstance(node, dict):
+        return None
+    raw = str(node.get("t") or node.get("timestamp") or "").strip()
+    if not raw:
+        return None
+    # RFC3339 with NANOSECONDS ("...T15:30:00.123456789Z"), which
+    # `fromisoformat` rejects outright - it takes at most microseconds. Trim
+    # the fraction rather than the whole stamp: a dropped timestamp reads as
+    # "age unknown" and would silently disable the staleness check that is the
+    # entire point of reading it.
+    raw = raw.replace("Z", "+00:00")
+    raw = re.sub(r"\.(\d{6})\d+", r".\1", raw)
+    try:
+        dt = datetime.fromisoformat(raw)
+    except ValueError:
+        return None
+    return dt if dt.tzinfo else dt.replace(tzinfo=UTC)
+
+
+async def spot_quote(tools: dict[str, Any], symbol: str,
+                     *, feed: str = FEED) -> SpotQuote | None:
+    """Last price for one underlying, with its age and the previous close.
+
+    ONE reader for a question three modules were answering separately - this
+    module by `get_stock_latest_trade`, `attribution` by `get_stock_snapshot`
+    with a latest-trade fallback, each with its own shape-guessing. The
+    snapshot endpoint returns everything the trade endpoint does and two things
+    it does not: when the trade printed, and where the previous session
+    closed. Both are load-bearing now (D-113), so the richer call leads and the
+    older one remains the fallback, exactly as attribution already had it.
+
+    Returns None when no usable price came back at all. Never raises: an
+    unreachable data endpoint must not take the tick down (INV-8).
+    """
+    try:
+        snap = await mcp_client.call(tools, "get_stock_snapshot",
+                                     symbols=symbol, feed=feed)
+        if isinstance(snap, dict):
+            # Alpaca nests per symbol on a multi-symbol request and returns the
+            # bare object on a single one. Both shapes are live.
+            node = snap.get(symbol) if isinstance(snap.get(symbol), dict) else snap
+            trade = node.get("latestTrade") or node.get("latest_trade")
+            px = _price_in(trade) or _price_in(node.get("dailyBar") or node.get("daily_bar"))
+            prev = _price_in(node.get("prevDailyBar") or node.get("prev_daily_bar"))
+            if px:
+                return SpotQuote(px, _time_in(trade), prev)
+    except Exception as exc:  # noqa: BLE001
+        print(f"[analytics] snapshot unavailable for {symbol}: {exc!r}")
+
+    try:
+        t = await mcp_client.call(tools, "get_stock_latest_trade",
+                                  symbols=symbol, feed=feed)
+        # Shape is {"trades": {"SPY": {"p": 767.46, ...}}} - nested under
+        # `trades`, not under the symbol directly. The original parser looked
+        # one level too shallow, found nothing, and left the price map EMPTY
+        # without raising: the underlying_stop exit rules that read it were
+        # therefore inert in production while passing every unit test, because
+        # the tests supplied the map directly (D-042).
+        node = None
+        if isinstance(t, dict):
+            node = (t.get("trades") or {}).get(symbol) or t.get(symbol) or t
+        px = _price_in(node)
+        if px:
+            # No previous close on this endpoint, and none invented: the
+            # corroboration rule debounces without one, which is the safe side.
+            return SpotQuote(px, _time_in(node), None)
+    except Exception as exc:  # noqa: BLE001
+        print(f"[analytics] underlying {symbol} price unavailable: {exc!r}")
+    return None
+
+
 async def snapshot(tools: dict[str, Any], underlyings: list[str] | None = None,
                    journal: Any = None) -> Snapshot:
     """Gather deterministic state. A failing call degrades, never aborts."""
@@ -239,24 +370,33 @@ async def snapshot(tools: dict[str, Any], underlyings: list[str] | None = None,
                         "may be drawn this tick", error=repr(exc)[:200])
 
     for u in underlyings or []:
-        try:
-            t = await mcp_client.call(tools, "get_stock_latest_trade", symbols=u, feed="iex")
-            # Shape is {"trades": {"SPY": {"p": 767.46, ...}}} - nested under
-            # `trades`, not under the symbol directly. The original parser
-            # looked one level too shallow, found nothing, and left the price
-            # map EMPTY without raising: the underlying_stop exit rules that
-            # read it were therefore inert in production while passing every
-            # unit test, because the tests supplied the map directly (D-042).
-            node = None
-            if isinstance(t, dict):
-                node = (t.get("trades") or {}).get(u) or t.get(u)
-            px = _f((node or {}).get("p") or (node or {}).get("price"), 0.0)
-            if px > 0:
-                snap.underlying_prices[u] = px
-            else:
-                print(f"[analytics] underlying {u}: no usable price in response")
-        except Exception as exc:  # noqa: BLE001
-            print(f"[analytics] underlying {u} price unavailable: {exc!r}")
+        q = await spot_quote(tools, u)
+        if q is None:
+            # Still a print, not a `degraded` row: an absent price is not
+            # itself a fail-open, and on a thin name it would write one every
+            # tick forever. What it CAUSES is counted where it bites - the
+            # exit engine's `blind:underlying` tally, which names the position
+            # left unwatched rather than the symbol left unquoted (D-113).
+            print(f"[analytics] underlying {u}: no usable price in response")
+            continue
+        # A STALE print is different in kind, and this is the one the exit
+        # rules cannot survive: a real number, from a real trade, that stopped
+        # describing the market some time ago. IEX carries a small share of
+        # consolidated volume, so on XLE/XLP/XLV the last IEX trade can be
+        # minutes or hours old while the tape moves - and an underlying stop
+        # reading it does not merely miss, it decides on fiction. Only while
+        # the market is OPEN: after the close every last trade is old by
+        # definition and that is not a fault.
+        age = q.age_minutes()
+        if snap.market_open and age is not None and age > SPOT_MAX_AGE_MINUTES:
+            health.degraded(journal, "analytics.spot",
+                            f"{u} last traded {age:.0f} minutes ago on the {FEED} feed - "
+                            f"too old to stop on, so the price is DROPPED and the rules "
+                            f"that read it hold", symbol=u, age_minutes=round(age, 1))
+            continue
+        snap.underlying_prices[u] = q.price
+        if q.prev_close:
+            snap.prev_closes[u] = q.prev_close
 
     try:
         orders = await mcp_client.call(tools, "get_orders", status="open")
