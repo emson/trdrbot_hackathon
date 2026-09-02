@@ -234,10 +234,65 @@ input[type=range]:focus-visible{outline:2px solid var(--accent); outline-offset:
 svg.chart{display:block; width:100%; height:auto; overflow:visible}
 .axis{font-family:var(--mono); font-size:10px; fill:var(--ink-faint)}
 
+/* ── print / PDF export ───────────────────────────────────────────────
+   One slide = one 16:9 widescreen page (13.333in × 7.5in, the standard
+   PowerPoint/Slides size a judge expects to open). Forces the LIGHT
+   palette regardless of the exporting machine's colour scheme - a
+   submitted PDF should not gamble on which theme a viewer's renderer
+   picks - and trims padding/type scale for a fixed 7.5in-tall page
+   rather than the 100vh a browser tab can grow to. */
+@page{ size:13.333in 7.5in; margin:0; }
 @media print{
+  :root, :root[data-theme]{
+    --paper:#F1F4EF; --paper-raised:#FFFFFF; --paper-sunk:#E8EDE7; --paper-line:#D8E0D9;
+    --ink:#17242B; --ink-soft:#4B5D59; --ink-faint:#7C8C87;
+    --accent:#1F6F5C; --accent-soft:#E4EFEA;
+    --danger:#B23A2E; --danger-soft:#F7E6E3;
+    --caution:#8A6A16; --caution-soft:#F3ECD3;
+    --warm:#A8582C; --warm-soft:#F6EAE1;
+    --d1:2.5rem; --d2:1.7rem; --lead:.9rem; --pad:.55in;
+  }
+  html,body{background:#F1F4EF; font-size:14px; -webkit-print-color-adjust:exact; print-color-adjust:exact}
   .deck{height:auto; overflow:visible}
-  .slide{min-height:auto; page-break-after:always; border:0; padding:1.4rem}
+  /* Chrome's --print-to-pdf layout does not evaluate min-width media
+     queries against the @page size - measured: every multi-column slide
+     otherwise collapses to a single narrow column, which is what actually
+     overflowed slide 5's five-card row into the next page's margin. */
+  .cols.c2{grid-template-columns:1fr 1fr}
+  .cols.c3{grid-template-columns:repeat(3,1fr)}
+  .cols.c4{grid-template-columns:repeat(4,1fr)}
+  .cols.c5{grid-template-columns:repeat(5,1fr)}
+  .cols.side{grid-template-columns:1.15fr .85fr; align-items:center}
+  .cols.side-r{grid-template-columns:.85fr 1.15fr; align-items:center}
+  .ladder{grid-template-columns:repeat(4,1fr) !important}
+  .slide{width:13.333in; height:7.5in; max-width:13.333in; max-height:7.5in; margin:0 auto;
+    box-sizing:border-box; min-height:0; border:0; padding:.5in .75in; overflow:hidden;
+    page-break-after:always; break-after:page; page-break-inside:avoid}
+  .slide:last-of-type{page-break-after:auto; break-after:auto}
+  .inner{gap:.55rem}
+  .card{padding:.6rem .75rem; gap:.28rem; box-shadow:none}
+  .cols{gap:.55rem}
+  .lead{line-height:1.35}
+  .muted{font-size:.82rem; line-height:1.35}
+  .fine{font-size:.72rem}
+  h3{font-size:.92rem}
+  table{font-size:.78rem}
+  th,td{padding:.32rem .5rem}
+  .stage h3{font-size:1rem}
+  .plate img{max-height:3in; object-fit:contain}
+  .rung{padding:.6rem .7rem}
+  .rung .req{min-height:2.6em; font-size:.72rem}
+  .qgrid > div{padding:.55rem .7rem; min-height:2.8rem}
+  .quote{padding:.7rem .9rem}
+  .quote p{font-size:.95rem}
+  .ctl{gap:.1rem}
+  input[type=range]{height:.9rem; margin:.1rem 0}
+  #wAsym{max-height:1.5in}
   .chrome,.toc{display:none !important}
+  /* the 5-card row + diagram is the tallest single slide in the deck */
+  [data-title="The five stages"] .inner{gap:.35rem}
+  [data-title="The five stages"] .card{padding:.4rem .55rem; gap:.12rem}
+  [data-title="The five stages"] .muted{font-size:.72rem; line-height:1.25}
 }
 </style>
 </head>
@@ -339,8 +394,8 @@ svg.chart{display:block; width:100%; height:auto; overflow:visible}
         not. When it resolves, attribution asks which of the four boxes it lands in.</p></div>
       <div class="card"><span class="tag code">memory</span>
         <h3>Memory keeps what was useful</h3>
-        <p class="muted">Four stores with four different jobs. Blocks that informed a decision are
-        credited or decayed by that decision's <em>verdict</em> — never by its P&amp;L.</p></div>
+        <p class="muted">Four stores with four different jobs. Memory credits or decays each block
+        that informed a decision by that decision's <em>verdict</em> — never by its P&amp;L.</p></div>
       <div class="card"><span class="tag code">the lever</span>
         <h3>Size is the reward</h3>
         <p class="muted">Demonstrated calibration raises the Kelly fraction the agent is allowed.
@@ -534,7 +589,7 @@ svg.chart{display:block; width:100%; height:auto; overflow:visible}
     <div class="cols c4">
       <div class="card stage"><h3>journal</h3><p class="muted">Append-only events. What happened,
         when, and which model said so. The record, never rewritten.</p>
-        <p class="fine">1,239 rows</p></div>
+        <p class="fine">1,890 rows</p></div>
       <div class="card stage"><h3>wiki</h3><p class="muted">Stable reference that rewrites itself:
         position pages, company dossiers, the regime page.</p>
         <p class="fine">markdown on disk</p></div>
@@ -543,7 +598,7 @@ svg.chart{display:block; width:100%; height:auto; overflow:visible}
         <p class="fine">credited by verdict, not P&amp;L</p></div>
       <div class="card stage"><h3>ledger</h3><p class="muted">Every falsifiable claim ever made,
         traded or not — so the trial count a multiple-testing correction needs cannot be lost.</p>
-        <p class="fine">48 resolved</p></div>
+        <p class="fine">95 resolved</p></div>
     </div>
     <p class="lead">The ledger is the quiet one that matters most. <strong>Forecasts on setups we
     declined are scored too</strong>, at zero capital risk — and they are the only realistic route
@@ -621,7 +676,7 @@ svg.chart{display:block; width:100%; height:auto; overflow:visible}
       <p class="fine"><strong style="color:var(--ink)">Chassis:</strong> one scheduler, a singleton
       lock, an ordered model fallback chain, and a health probe that asks every subsystem
       “you ran — but did you <em>produce</em> anything?”</p>
-      <p class="fine">Roughly 15,700 lines of Python · 535 offline tests · four trader-readable
+      <p class="fine">Roughly 19,700 lines of Python · 609 offline tests · four trader-readable
       simulation scaffolds</p>
     </div>
   </div>
@@ -749,18 +804,21 @@ svg.chart{display:block; width:100%; height:auto; overflow:visible}
         </tbody></table></div>
         <p class="muted">The agent named the underlying stop as the one it trusts most: <em>if SPY
         makes new highs, the premise that equities haven't discounted the hike is simply false, and
-        the position should die regardless of what the mark says.</em></p></div>
+        the position should die regardless of what the mark says.</em></p>
+        <p class="fine">None of the five rules fired — the position closed on an external event
+        before expiry, stop or target.</p></div>
       <div class="inner" style="gap:.9rem">
-        <div class="card"><span class="tag good">where it stands</span>
-          <p><span class="big" style="color:var(--accent)">+19.6%</span></p>
-          <p class="muted">on net debit at last mark. But the P&amp;L is <strong>not</strong> the
-          question that moves anything.</p></div>
-        <div class="card"><span class="tag warn">what actually gets asked on 3 September</span>
+        <div class="card"><span class="tag good">where it closed</span>
+          <p><span class="big" style="color:var(--accent)">+129.1%</span></p>
+          <p class="muted">on net debit. But the P&amp;L is <strong>not</strong> the question that
+          moves anything.</p></div>
+        <div class="card"><span class="tag warn">what gets asked on 3 September — one day out</span>
           <ul class="clean">
             <li>Did SPY close below the level the thesis named? → <strong>was the view right?</strong></li>
             <li>Given that answer, did this structure express it well? → <strong>was the expression right?</strong></li>
           </ul>
-          <p class="fine">a profit with a wrong view scores as luck and moves nothing</p></div>
+          <p class="fine">the horizon hasn't passed yet — a 129% gain still scores as unattributed,
+          not as proof, until it does</p></div>
       </div>
     </div>
   </div>
@@ -814,6 +872,9 @@ svg.chart{display:block; width:100%; height:auto; overflow:visible}
     uses for a genuinely earned outcome, nowhere else. Climbing costs <strong>evidence</strong>,
     not confidence: each rung names exactly what must be demonstrated, and none of them can be
     talked round.</p>
+    <p class="fine">Theo sits on SCALE today, on 76 resolved theses — promotion counts resolved
+    forecasts, not just trades, and it is a different question from whether this week's trades have
+    been attributed yet (next two slides).</p>
 
     <div class="cols c2">
       <ul class="clean">
@@ -870,25 +931,25 @@ svg.chart{display:block; width:100%; height:auto; overflow:visible}
 <!-- ═══ 18 ═══════════════════════════════════════════════════════════ -->
 <section class="slide ledger" data-title="Results, reported plainly">
   <div class="inner">
-    <span class="kicker">Results · paper account · as of 31 Aug 2026, 18:00 UTC</span>
+    <span class="kicker">Results · paper account · as of 2 Sep 2026, 17:26 UTC</span>
     <h2>The P&amp;L, and why we will not use it as proof.</h2>
     <div class="cols c4">
-      <div class="card"><span class="tag code">equity</span><span class="big">$101,678</span>
+      <div class="card"><span class="tag code">equity</span><span class="big">$111,415</span>
         <p class="muted">from a $100,000 start</p></div>
       <div class="card"><span class="tag good">return</span>
-        <span class="big" style="color:var(--accent)">+1.68%</span>
-        <p class="muted">peak $102,432 · max drawdown 0.7%</p></div>
-      <div class="card"><span class="tag code">positions</span><span class="big">3</span>
-        <p class="muted">2 closed at +8.2% and +52.8% on debit; 1 open at +19.6%</p></div>
-      <div class="card"><span class="tag code">decide cycles</span><span class="big">95</span>
-        <p class="muted">82 ended in a deliberate no-op</p></div>
+        <span class="big" style="color:var(--accent)">+11.4%</span>
+        <p class="muted">high water $111,945 · drawdown 0.5% off it</p></div>
+      <div class="card"><span class="tag code">positions</span><span class="big">7</span>
+        <p class="muted">6 closed, from −2.9% to +129.1% on debit; 1 open, currently −12.6%</p></div>
+      <div class="card"><span class="tag code">decisions</span><span class="big">255</span>
+        <p class="muted">157 theses formed, 98 declined outright</p></div>
     </div>
     <div class="card" style="border-left:3px solid var(--caution)">
-      <p><strong>Three positions over five days is not evidence of skill, and we can prove it
-      rather than merely say it.</strong> That is exactly the range in which a zero-skill agent
-      lands somewhere between −7.8% and +8.2%. We report the number plainly because it is real —
-      and we built the calibration and attribution machinery precisely so there is something
-      better than this number to judge us on.</p>
+      <p><strong>Seven positions in a week is still not evidence of skill, and the sharper reason
+      is not sample size.</strong> It is that not one of them has been credited as a genuinely
+      explained win yet — the queue that scores view-right-vs-lucky was found stuck this same week
+      (next slide). We report the number because it is real, and we built the machinery precisely
+      so there is something better than this number to judge us on.</p>
     </div>
   </div>
 </section>
@@ -903,25 +964,31 @@ svg.chart{display:block; width:100%; height:auto; overflow:visible}
         <div class="scroll"><table>
           <thead><tr><th>Measure</th><th class="n">Value</th><th>Reading</th></tr></thead>
           <tbody>
-            <tr><td>resolved forecasts</td><td class="n">48</td><td class="muted">12.4 <em>effective</em> — concentrated in a few names</td></tr>
-            <tr><td>Brier score</td><td class="n">0.225</td><td class="muted">0.25 is a coin flip</td></tr>
-            <tr><td>reliability</td><td class="n">0.000</td><td><span class="tag good">well calibrated</span> not overconfident</td></tr>
+            <tr><td>resolved forecasts</td><td class="n">76</td><td class="muted">9.8 <em>effective</em> — concentrated in a few names</td></tr>
+            <tr><td>Brier score</td><td class="n">0.237</td><td class="muted">0.25 is a coin flip</td></tr>
+            <tr><td>reliability</td><td class="n">n/a</td><td><span class="tag warn">not yet computable</span> too few effective buckets</td></tr>
             <tr><td><strong>resolution</strong></td><td class="n">0.000</td><td><span class="tag bad">no discrimination</span> forecasts are not separating winners from losers</td></tr>
           </tbody>
         </table></div>
       </div>
       <div class="inner" style="gap:.8rem">
-        <p class="lead">Theo says 40% and it happens about 40% of the time — <strong>honest</strong>.
-        But it has not yet shown that its 60%s come in more often than its 30%s — <strong>not yet
-        skilful</strong>. Those are different claims, and only a decomposed score can tell them apart.</p>
+        <p class="lead">Resolution is still zero — a stated 70% is not yet landing more often than
+        a stated 55%. Reliability, whether a 40% call actually lands 40% of the time, cannot be
+        computed at all right now: 76 nominal forecasts are only 9.8 <em>effective</em> once
+        repeated names are discounted, too thin to bucket by confidence. Two different failures —
+        only a decomposed score tells them apart.</p>
         <div class="card" style="border-left:3px solid var(--accent)">
-          <p><strong>The size ladder already reflects this.</strong> Theo is still on the second
-          rung of four. It has not promoted itself on a good week, because the criterion is
-          attribution, not profit. The system that would let us hide this is the same system that
-          found it.</p>
+          <p><strong>Attribution went the same way, for a sharper reason.</strong> The queue that
+          scores a closed position view-right, view-wrong, or lucky was silently stuck for days —
+          found and drained this same week (D-114). Its first-ever verdict: <strong>UNSCOREABLE</strong>,
+          for the one trade with no thesis recorded at entry. Six more, including the +129% position
+          on the previous slide, are still waiting on their own horizon dates. All four boxes from
+          slide 3 currently read zero. The system that would let us hide this is the same system
+          that found it.</p>
         </div>
-        <p class="fine">Every threshold that matters needs ~50 resolved forecasts. The record is
-        young and the ladder correctly says so.</p>
+        <p class="fine">76 resolved forecasts clears every count threshold the ladder sets.
+        Concentration, not count, is what still limits reliability — 9.8 effective is the real
+        number.</p>
       </div>
     </div>
   </div>
@@ -939,16 +1006,18 @@ svg.chart{display:block; width:100%; height:auto; overflow:visible}
         the vega-weighted vol, with the EV span across legs printed beside it — but a
         smile-consistent terminal distribution is refused for the same reason.</p></div>
       <div class="card"><h3>The first position can never be attributed</h3><p class="muted">No thesis
-        was recorded at entry. Fabricating one retroactively would be worse than the gap.</p></div>
-      <div class="card"><h3>Declines are not yet scored</h3><p class="muted">12 theses simulated, 1
-        traded. A decline that was right about vol and one that was right about direction are
-        currently indistinguishable. Logged as an open issue.</p></div>
+        was recorded at entry. Fabricating one retroactively would be worse than the gap — its
+        permanent verdict is <strong>UNSCOREABLE</strong>, the book's first attribution row.</p></div>
+      <div class="card"><h3>A decline's structure isn't re-priced</h3><p class="muted">98 declines
+        are each scored as a forecast, at zero capital risk — but the specific spread that got
+        declined is never priced retroactively. "Right about the move" and "right about the trade"
+        stay separate questions for a decline. Logged as an open issue (I-16).</p></div>
       <div class="card"><h3>No approval gate, by choice</h3><p class="muted">Paper account, and
         gates block the feedback loop. What replaces it is stricter: the agent cannot execute a
         mistake the arithmetic refuses to compute.</p></div>
       <div class="card"><h3>Everything above is in the repo</h3><p class="muted">A living bug ledger
         records every defect the moment it is found and removes it only in the commit that fixes
-        it. 69 numbered issues so far.</p></div>
+        it. 123 numbered issues so far.</p></div>
     </div>
   </div>
 </section>
@@ -967,8 +1036,9 @@ svg.chart{display:block; width:100%; height:auto; overflow:visible}
         and allowed to change how much capital the next decision gets — with a lucky win worth
         exactly nothing.</p>
         <div class="scroll"><table><tbody>
-          <tr><td class="muted">Repo</td><td><code>github.com/…/trdrbot</code></td></tr>
+          <tr><td class="muted">Live record</td><td><a href="https://trdrbot.com">trdrbot.com</a> — every trade, decline and forecast, updated continuously</td></tr>
           <tr><td class="muted">Deep dive</td><td><a href="research_risk_appetite.html">the risk research note</a> · <a href="risk_appetite_explorer.html">the interactive explorer</a></td></tr>
+          <tr><td class="muted">Repo &amp; demo URL</td><td>submitted with this entry's application form</td></tr>
           <tr><td class="muted">Account</td><td>Alpaca paper · $100,000 start</td></tr>
         </tbody></table></div>
       </div>
