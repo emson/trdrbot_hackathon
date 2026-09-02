@@ -317,7 +317,7 @@ async def run(
                            reason="unscoreable:not_an_object", raw=str(raw)[:300])
             continue
         verdict = admit(o, spot=last_close.get(o.underlying),
-                        latest_useful=latest or None)
+                        latest_useful=latest or None, earliest_useful=_earliest)
         if not verdict.ok:
             journal.append("research_rejected", source="research",
                            reason=f"unscoreable:{verdict.defect}", raw=str(raw)[:300])

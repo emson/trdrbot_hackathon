@@ -418,7 +418,8 @@ def evaluate(pos: Position, snap: Snapshot, deadline: str,
     return kind, why, pnl
 
 
-async def _close_legs(tools: dict[str, Any], symbols: list[str]) -> bool:
+async def _close_legs(tools: dict[str, Any], symbols: list[str],
+                      qty_by_symbol: dict[str, int] | None = None) -> bool:
     """Attempt to close every symbol. True iff every attempt succeeded.
 
     One helper, two callers - a fresh trigger and a retry - because the two
@@ -428,8 +429,18 @@ async def _close_legs(tools: dict[str, Any], symbols: list[str]) -> bool:
     """
     ok = True
     for symbol in symbols:
+        # BY QUANTITY when the symbol is shared (D-112). `close_position` on a
+        # bare symbol closes the broker's whole AGGREGATE in it, so closing
+        # position A also closed the leg position B held in the same contract -
+        # legging B out into a bare short for two ticks until divergence
+        # noticed. The tool accepts `qty`; it is passed exactly when another
+        # open page holds the symbol, and never otherwise (INV-19: a whole
+        # position closes whole).
+        kw: dict[str, Any] = {"symbol_or_asset_id": symbol}
+        if qty_by_symbol and symbol in qty_by_symbol:
+            kw["qty"] = str(qty_by_symbol[symbol])
         try:
-            r = await mcp_client.call(tools, "close_position", symbol_or_asset_id=symbol)
+            r = await mcp_client.call(tools, "close_position", **kw)
         except Exception as exc:  # noqa: BLE001
             ok = False
             print(f"[exit] failed closing leg {symbol}: {exc!r}")
@@ -443,23 +454,19 @@ async def _close_legs(tools: dict[str, Any], symbols: list[str]) -> bool:
         # broker with nothing watching it. The contract test that would have
         # caught this was skipped with a note saying exactly that. Same
         # error shapes discovery already reads off its option-chain call.
-        why = _in_band_error(r)
+        why = mcp_client.in_band_error(r)
         if why:
             ok = False
             print(f"[exit] broker refused closing leg {symbol}: {why}")
     return ok
 
 
-def _in_band_error(r: Any) -> str:
-    """The broker's own refusal, if the unwrapped payload carries one."""
-    if isinstance(r, dict):
-        if r.get("error"):
-            return str(r["error"])[:160]
-        if str(r.get("status", "")).lower() in ("rejected", "canceled", "cancelled", "expired"):
-            return f"order {r.get('status')}"
-    elif isinstance(r, str) and "error" in r.lower()[:200]:
-        return r[:160]
-    return ""
+def _shared_leg_qtys(pos: Position, store: PositionStore) -> dict[str, int]:
+    """{symbol: this position's own qty} for legs another open page also holds."""
+    others = {s for p in store.open_positions() if p.position_id != pos.position_id
+              for s in p.symbols}
+    return {str(l.get("symbol")): abs(int(l.get("qty") or 0))
+            for l in pos.legs if l.get("symbol") in others and int(l.get("qty") or 0)}
 
 
 def _legs_to_close(pos: Position, snap: Snapshot) -> list[str]:
@@ -578,7 +585,8 @@ async def run(
         if verbose:
             print(f"[exit] {pos.position_id}: {reason} - {why}")
 
-        closed_ok = await _close_legs(tools, remaining)  # ALL surviving legs (INV-19)
+        closed_ok = await _close_legs(tools, remaining,  # ALL surviving legs (INV-19)
+                                      qty_by_symbol=_shared_leg_qtys(pos, store))
 
         journal.append(
             "exit",

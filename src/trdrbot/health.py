@@ -488,6 +488,17 @@ def check(journal_path: Path, positions: list[Any]) -> list[tuple[str, str, str]
                          f"{n}x fell back - {reason} - the run continued on "
                          "reduced input, which reads as success everywhere else"))
 
+    # The learning probe nets errors against successes, so one good fill and
+    # one failed resolution read "produced 1" (D-112). A resolution that fails
+    # to learn is the whole point of the row; say so when they ALL do.
+    lr = [r for r in rows if r.get("kind") == "learn_run"]
+    n_res = sum(int(r.get("resolutions") or 0) for r in lr)
+    n_err = sum(int(r.get("errors") or 0) for r in lr)
+    if n_res and n_err >= n_res:
+        findings.append((BAD, "learning",
+                         f"{n_res} resolution(s) and {n_err} learn error(s) - every outcome "
+                         f"that reached the learner failed to be learned from; see learn_error"))
+
     # A recorded quantity that is not the one sizing computed means the book
     # caps were derived from a size that was never traded. Once is a deliberate
     # override the agent is entitled to make (D-009); a pattern of it means

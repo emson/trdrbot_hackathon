@@ -275,9 +275,17 @@ def score(forecasts: list[Forecast]) -> Calibration:
         for _, os_ in bins.values() if len(os_) > 1
     ) / n
     overall = base * (1 - base) / (n - 1) if n > 1 else 0.0
-    # Reliability cannot truly be negative; clamping keeps the gate honest
-    # rather than rewarding an over-correction on a tiny sample.
-    reliability = max(0.0, reliability - within)
+    # An over-correction is UNMEASURED, not perfect (D-112). Clamping to 0.0
+    # said "flawlessly calibrated": `shrink_probability` then trusted every
+    # stated edge in full (trust = 1 - 0.0/0.05 = 1.0) and MATURE's
+    # `max_rel` gate was auto-passed - the overconfidence brake fully open on
+    # the strength of a sample too small to measure with. Live: raw 0.0103,
+    # within-bin noise 0.0172, reported 0.0. None is what "reliability is
+    # indistinguishable from zero at this n" means, and every reader already
+    # handles None as "not yet a measurement": the shrink halves the edge and
+    # the top rung stays shut.
+    corrected = reliability - within
+    reliability = corrected if corrected >= 0.0 else None
     resolution = max(0.0, resolution - within + overall)
     uncertainty = uncertainty + overall
 

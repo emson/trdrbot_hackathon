@@ -67,6 +67,26 @@ async def session_tools(config: Config) -> AsyncIterator[list[Any]]:
         yield await load_mcp_tools(session)
 
 
+def in_band_error(r: Any) -> str:
+    """The broker's own refusal, if an UNWRAPPED payload carries one (D-112).
+
+    Alpaca's server returns `{"error": ...}` with `isError=False`, so nothing
+    raises: a rejected order and a filled one are both "the call returned".
+    Every caller that acts on an order result must read this - exit_rules did
+    not (a refused close became a closed position, D-109) and the decide path
+    did not (a rejected entry became an `execution` row and a healthy order
+    probe). One reader, two callers, so they cannot disagree about the shape.
+    """
+    if isinstance(r, dict):
+        if r.get("error"):
+            return str(r["error"])[:160]
+        if str(r.get("status", "")).lower() in ("rejected", "canceled", "cancelled", "expired"):
+            return f"order {r.get('status')}"
+    elif isinstance(r, str) and "error" in r.lower()[:200]:
+        return r[:160]
+    return ""
+
+
 def unwrap(result: Any) -> Any:
     """Pull the payload out of the MCP server's response envelope.
 

@@ -367,7 +367,14 @@ def test_a_mutated_prompt_missing_a_placeholder_is_rejected():
     inc = muse.MUSE_PROMPT
     broken = inc.replace("{concepts}", "the concepts")
     why = coach.validate_prompt(broken, inc, _MUSE_LEVER.placeholders)
-    assert why == "", "a MISSING placeholder is only a problem if code needs it"
+    # CHANGED (D-112). This asserted `why == ""` - "a MISSING placeholder is
+    # only a problem if code needs it" - which is true of `str.format` and
+    # false of the lever: {concepts}/{news}/{odds} ARE the muse's mandate, the
+    # entropy sentinel measures what was SAMPLED rather than what the prompt
+    # used, and a challenger that dropped all three passed validation, could
+    # score 5/5 on gate survival, and could promote. Every declared placeholder
+    # must still be used.
+    assert "dropped the placeholder {concepts}" in why, why
     # ...but an UNKNOWN one is a live KeyError on the next muse run
     unknown = inc.replace("{news}", "{nonexistent_field}")
     assert "not a safe format template" in coach.validate_prompt(

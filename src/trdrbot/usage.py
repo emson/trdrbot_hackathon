@@ -71,11 +71,15 @@ def price(pricing: dict[str, Any], model: str,
     """
     entry = pricing.get(model)
     if entry is None:
+        # LONGEST match, not first (D-112): "gpt-5-mini-2025-08-07" starts
+        # with "gpt-5", and dict order put "openai:gpt-5" first, so every
+        # mini call was priced at the gpt-5 rate - 5x, on 27 recorded calls,
+        # in every cost report and the cost sentinel's numerator.
+        best = ""
         for key, val in pricing.items():
             bare = key.split(":", 1)[-1]
-            if model.startswith(bare) or bare.startswith(model):
-                entry = val
-                break
+            if (model.startswith(bare) or bare.startswith(model)) and len(bare) > len(best):
+                best, entry = bare, val
     if not isinstance(entry, dict):
         return None
     try:

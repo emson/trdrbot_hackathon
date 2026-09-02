@@ -150,6 +150,7 @@ def admit(
     spot: float | None = None,
     latest_useful: str | None = None,
     options_tradeable: bool | None = None,
+    earliest_useful: str | None = None,
 ) -> Admission:
     """May this enter the inbox? One answer, for all three sources.
 
@@ -165,6 +166,12 @@ def admit(
     if latest_useful:
         if o.horizon > latest_useful:
             return Admission(defect="horizon_too_late")
+        # The window has TWO sides (D-112). The muse's own cascade refused
+        # `days <= 0`; this shared gate only checked the far end, so research
+        # and discovery could admit a thesis dated today - which resolves in
+        # zero days and teaches nothing.
+        if earliest_useful and o.horizon < earliest_useful:
+            return Admission(defect="horizon_too_early")
     else:
         unchecked.append("horizon_window")
 

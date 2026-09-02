@@ -904,6 +904,26 @@ async def _run_tick(
         calls = [tc for m in messages for tc in (getattr(m, "tool_calls", None) or [])]
         orders = [tc for tc in calls if tc.get("name") in mcp_client.ORDER_TOOLS]
         recorded = [tc for tc in calls if tc.get("name") == "record_position"]
+        # READ WHAT THE BROKER SAID (D-112). The order tool RETURNS
+        # `{"error": ...}` with isError=False, so a rejected order and a
+        # filled one both count as "an order call was made": the execution row
+        # was written and the order probe read healthy on a book of rejections.
+        # Pair each order call with its ToolMessage and read the payload.
+        results = {getattr(m, "tool_call_id", None): getattr(m, "content", "")
+                   for m in messages if getattr(m, "type", "") == "tool"}
+        rejected: list[dict[str, Any]] = []
+        for tc in orders:
+            raw = results.get(tc.get("id"))
+            try:
+                payload = json.loads(raw) if isinstance(raw, str) else raw
+            except (TypeError, ValueError):
+                payload = raw
+            why = mcp_client.in_band_error(mcp_client.unwrap(payload))
+            if why:
+                rejected.append({"name": tc.get("name"), "error": why})
+        if rejected:
+            health.degraded(journal, "orders", "broker rejected an order the agent placed",
+                            rejected=rejected)
 
         # `model` is the configured INTENT (chain head); `served` is what
         # actually answered. They differ whenever the fallback fires, and
@@ -929,6 +949,7 @@ async def _run_tick(
                 for tc in orders
             ],
             positions_recorded=len(recorded),
+            orders_rejected=rejected,
             summary=summary_text[:2000],
         )
         if _usage_went_dark(served, llm_turns):

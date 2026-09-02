@@ -1544,6 +1544,104 @@ def test_a_traded_thesis_enters_calibration_at_the_confidence_it_was_traded_at()
     assert not next(x for x in book.all() if x.underlying == "NVDA").probability_stated
 
 
+def test_an_over_corrected_reliability_is_unmeasured_not_perfect():
+    """D-112. PILLAR-4. The Ferro-Fricker within-bin correction can exceed the
+    raw estimate at small n. Clamping the result to 0.0 said "flawlessly
+    calibrated": `shrink_probability` then trusted every stated edge in full
+    and MATURE's max_rel gate was auto-passed. Live: raw 0.0103, within 0.0172,
+    reported 0.0 - the overconfidence brake fully open on a sample too small to
+    measure with. None is what "indistinguishable from zero" means, and every
+    reader already treats None as not-yet-a-measurement."""
+    import random
+
+    from trdrbot import calibration, sizing
+
+    rng = random.Random(3)
+    # A tiny, well-calibrated sample: the correction overshoots the estimate.
+    fcs = [calibration.Forecast(position_id=f"p{i}", probability=0.6,
+                                outcome=rng.random() < 0.6, resolved_at="2026-09-01")
+           for i in range(12)]
+    cal = calibration.score(fcs)
+    assert cal.reliability is None, f"clamped to a number: {cal.reliability}"
+    # ...and the shrink then behaves as UNMEASURED - it halves the edge.
+    assert sizing.shrink_probability(0.80, cal) == pytest.approx(0.65)
+    # A genuinely large, badly calibrated sample still measures a real number.
+    bad = [calibration.Forecast(position_id=f"q{i}", probability=0.9,
+                                outcome=rng.random() < 0.5, resolved_at="2026-09-01")
+           for i in range(200)]
+    assert calibration.score(bad).reliability is not None
+    assert calibration.score(bad).reliability > 0.05
+
+
+def test_a_mutated_prompt_that_drops_a_placeholder_is_refused():
+    """D-112. `str.format` catches an EXTRA placeholder and says nothing about
+    a MISSING one, so a challenger could delete {concepts}/{news}/{odds} - the
+    muse's whole mandate - score 5/5 on gate survival, and promote. Verified by
+    execution before the fix: dropping all three passed validation."""
+    from trdrbot import coach
+    from trdrbot.coach_pkg import mutate
+
+    lever = coach.lever("muse.prompt")
+    seed = coach.seeds()["muse.prompt"]
+    assert mutate.validate_prompt(seed + " tweak", seed, lever.placeholders,
+                                  must_contain=lever.must_contain) == ""
+    gutted = seed.replace("{concepts}", "").replace("{news}", "").replace("{odds}", "")
+    verdict = mutate.validate_prompt(gutted, seed, lever.placeholders,
+                                     must_contain=lever.must_contain)
+    assert "dropped the placeholder" in verdict, verdict
+    no_prob = seed.replace('"probability": float', "")
+    assert "probability" in mutate.validate_prompt(no_prob, seed, lever.placeholders,
+                                                   must_contain=lever.must_contain)
+
+
+def test_gpt5_mini_is_priced_as_mini_not_as_gpt5():
+    """D-112. Prefix matching over dict order: "gpt-5-mini-2025-08-07" starts
+    with "gpt-5", and "openai:gpt-5" came first, so every mini call was priced
+    at the gpt-5 rate - 5x, across 27 recorded calls, every cost report and the
+    cost sentinel's numerator. The LONGEST matching key wins."""
+    from trdrbot import usage
+
+    pricing = {"openai:gpt-5": {"input": 1.25, "output": 10.0},
+               "openai:gpt-5-mini": {"input": 0.25, "output": 2.0}}
+    mini = usage.price(pricing, "gpt-5-mini-2025-08-07", 1_000_000, 1_000_000)
+    full = usage.price(pricing, "gpt-5-2025-08-07", 1_000_000, 1_000_000)
+    assert mini == pytest.approx(2.25), mini
+    assert full == pytest.approx(11.25), full
+
+
+def test_the_shared_admission_gate_refuses_a_horizon_dated_today():
+    """D-112. The muse's own cascade refused `days <= 0`; the shared `admit`
+    used by research and discovery checked only the far end of the window, so
+    a thesis dated today - which resolves in zero days and teaches nothing -
+    was admitted. A window has two sides."""
+    from trdrbot.opportunity import Opportunity, admit
+
+    o = Opportunity.from_payload({"underlying": "SPY", "claim": "c", "direction": "bearish",
+                                  "drift_pct": -1.0, "band_low": None, "band_high": 600.0,
+                                  "horizon": "2026-09-02", "why": "w"})
+    assert o is not None
+    assert admit(o, spot=640.0, latest_useful="2026-09-11",
+                 earliest_useful="2026-09-03").defect == "horizon_too_early"
+    assert admit(o, spot=640.0, latest_useful="2026-09-11",
+                 earliest_useful="2026-09-02").ok
+    # Unsupplied stays UNCHECKED, never silently passed.
+    assert admit(o, spot=640.0, latest_useful="2026-09-11").ok
+
+
+def test_a_broker_refusal_is_read_off_the_payload_by_one_reader():
+    """D-112. Alpaca returns {"error": ...} with isError=False, so nothing
+    raises. One reader for both callers - the exit engine (D-109) and the
+    decide path's execution row - so they cannot disagree about the shape."""
+    from trdrbot import mcp_client
+
+    assert mcp_client.in_band_error({"error": "insufficient buying power"})
+    assert mcp_client.in_band_error({"status": "rejected", "id": "x"})
+    assert mcp_client.in_band_error("Error: symbol not found")
+    assert mcp_client.in_band_error({"status": "filled", "id": "x"}) == ""
+    assert mcp_client.in_band_error({"symbol": "SPY", "qty": 1}) == ""
+    assert mcp_client.in_band_error(None) == ""
+
+
 def test_gate_regret_is_computed_from_outcomes_the_gate_cannot_reach():
     """I-73 / D-104. The one self-improvement signal that does not violate the
     measured/measurer rule (specs/notes/015), recorded since D-081 and never
@@ -1771,15 +1869,19 @@ def test_a_perfect_forecaster_is_not_penalised_at_small_n():
     most of the time, with the phantom penalty shrinking as n grew so it would
     have looked exactly like learning."""
     from trdrbot.calibration import score
-    rels = [score(_synthetic("perfect", 20, seed=s)).reliability for s in range(40)]
+    # CHANGED (D-112): an over-corrected reliability is None - "indistinguishable
+    # from zero at this n" - rather than a clamped 0.0 that read as PERFECT and
+    # opened the overconfidence brake fully. For this average, None IS zero.
+    rels = [score(_synthetic("perfect", 20, seed=s)).reliability or 0.0 for s in range(40)]
     assert sum(rels) / len(rels) < 0.035, "small-sample bias is back"
 
 
 def test_a_genuinely_overconfident_forecaster_is_still_caught():
     """The correction must not launder real miscalibration."""
     from trdrbot.calibration import score
-    perfect = [score(_synthetic("perfect", 60, seed=s)).reliability for s in range(30)]
-    bad = [score(_synthetic("overconf", 60, seed=s)).reliability for s in range(30)]
+    # CHANGED (D-112): None reads as zero here, as above.
+    perfect = [score(_synthetic("perfect", 60, seed=s)).reliability or 0.0 for s in range(30)]
+    bad = [score(_synthetic("overconf", 60, seed=s)).reliability or 0.0 for s in range(30)]
     assert sum(bad) / len(bad) > 3 * (sum(perfect) / len(perfect))
 
 
@@ -1796,7 +1898,9 @@ def test_reliability_is_never_negative():
     from trdrbot.calibration import score
     for s in range(20):
         c = score(_synthetic("perfect", 12, seed=s))
-        assert c.reliability >= 0.0 and c.resolution >= 0.0
+        # CHANGED (D-112): never negative, and never a fake zero either - an
+        # over-correction is reported as None, unmeasured.
+        assert (c.reliability is None or c.reliability >= 0.0) and c.resolution >= 0.0
 
 
 # --------------------------- D-051 vol clock and gamma breakeven

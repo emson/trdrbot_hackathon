@@ -46,6 +46,13 @@ class Snapshot:
     #: live and unwatched because a terminal position is no longer evaluated.
     #: False means "no conclusions may be drawn from what is missing here".
     broker_readable: bool = False
+    #: Same rule for the order book (D-112). Reconcile reads "no working order"
+    #: off an EMPTY list, which is the one conclusion an unreadable order book
+    #: cannot support - it transitioned an `opening` position to `abandoned`
+    #: (terminal) whose limit order then filled with no exit rules and nothing
+    #: watching. `broker_readable` closed this hole for positions (I-55); the
+    #: orders read had the same shape and the same bare print.
+    orders_readable: bool = False
 
     @property
     def equity(self) -> float:
@@ -202,7 +209,13 @@ async def snapshot(tools: dict[str, Any], underlyings: list[str] | None = None,
         clock = await mcp_client.call(tools, "get_clock")
         snap.market_open = bool(clock.get("is_open")) if isinstance(clock, dict) else False
     except Exception as exc:  # noqa: BLE001
-        print(f"[analytics] clock unavailable: {exc!r}")
+        # `market_open` stays False, which is the SAFE side - nothing submits -
+        # but a submit gate latched shut by a flaky clock on expiry day is a
+        # position riding into pin risk while the heartbeat reads clean (D-112).
+        # Positions and orders failures write a `degraded` row; so does this.
+        health.degraded(journal, "analytics.clock",
+                        "could not read the market clock - treated as CLOSED, so no "
+                        "close will be submitted this tick", error=repr(exc)[:200])
 
     try:
         acct = await mcp_client.call(tools, "get_account_info")
@@ -249,8 +262,11 @@ async def snapshot(tools: dict[str, Any], underlyings: list[str] | None = None,
         orders = await mcp_client.call(tools, "get_orders", status="open")
         if isinstance(orders, list):
             snap.open_orders = orders
+            snap.orders_readable = True
     except Exception as exc:  # noqa: BLE001
-        print(f"[analytics] orders unavailable: {exc!r}")
+        health.degraded(journal, "analytics.orders",
+                        "could not read the order book - no absence conclusions may be "
+                        "drawn about working orders this tick", error=repr(exc)[:200])
 
     return snap
 

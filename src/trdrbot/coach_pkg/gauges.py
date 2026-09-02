@@ -312,7 +312,11 @@ def snapshot_gauges(cfg: Any, rows: list[dict[str, Any]]) -> dict[str, Any]:
     def _calibration_gauges() -> None:
         book = _led.Ledger(Path(cfg.paths.state) / "ledger.jsonl")
         resolved = book.resolved()
-        stated = [e for e in book.all() if e.probability_stated]
+        # The SAME n the ladder reads: stated AND resolved (D-112). Counting
+        # pending rows put 102 on the report beside the ladder's 73 - two
+        # calibration numbers, which this module's own header names as this
+        # project's most familiar bug.
+        stated = [e for e in book.all() if e.probability_stated and e.outcome is not None]
         put("calibration.n", len(stated) or None)
         put("calibration.resolved", len(resolved) or None)
         if resolved:

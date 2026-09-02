@@ -715,3 +715,60 @@ async def test_assigned_shares_are_flattened_not_held_forever(paths, make_positi
         {"symbol": "SPY", "qty": 100, "cost_basis": 75_800.0, "unrealized_pl": 0.0}])
     assert await _run(store, night, journal, paths, tools=broker) == []
 
+
+async def test_an_unreadable_order_book_does_not_abandon_an_opening_position(paths, make_position):
+    """D-112. Reconcile read "no working order" off an EMPTY list, which is the
+    one conclusion an unreadable order book cannot support: an `opening`
+    position whose limit order was merely unreadable was transitioned to
+    `abandoned` (terminal), and then filled at the broker with no exit rules
+    and nothing watching. `broker_readable` closed this for positions (I-55);
+    orders had the same shape and the same bare print."""
+    from trdrbot.calibration import CalibrationStore
+
+    store, journal = PositionStore(paths.wiki), Journal(paths.journal)
+    store.save(make_position(status="opening"))
+    unreadable = Snapshot(market_open=True, broker_positions=[], broker_readable=True,
+                          open_orders=[], orders_readable=False)
+    await reconcile.reconcile(store, unreadable, journal, FakeMem(), Wiki(paths.wiki),
+                              CalibrationStore(paths.state / "forecasts.jsonl"))
+    assert store.all()[0].status == "opening", "abandoned on an order book it could not read"
+    assert any(r.get("finding") == "orders_unreadable"
+               for r in journal_rows(journal, "reconciliation"))
+    # A READABLE, empty order book with no fill is the genuine abandon.
+    readable = Snapshot(market_open=True, broker_positions=[], broker_readable=True,
+                        open_orders=[], orders_readable=True)
+    await reconcile.reconcile(store, readable, journal, FakeMem(), Wiki(paths.wiki),
+                              CalibrationStore(paths.state / "forecasts.jsonl"))
+    assert store.all()[0].status == "abandoned"
+
+
+async def test_a_shared_leg_is_closed_by_quantity_never_by_symbol(paths, make_position):
+    """D-112. `close_position(symbol)` closes the broker's whole AGGREGATE in
+    that contract, so closing position A also closed the leg position B held
+    in the same symbol - legging B out into a bare short for two ticks. The
+    tool accepts qty; it is passed exactly when another open page holds the
+    symbol, and never otherwise (INV-19: a whole position closes whole)."""
+    store, journal = PositionStore(paths.wiki), Journal(paths.journal)
+    a = make_position(position_id="pos_a")
+    b = make_position(position_id="pos_b")           # identical legs by default
+    store.save(a)
+    store.save(b)
+    broker = tools_for(close_position=lambda **kw: {"status": "accepted"})
+    snap = _underwater(a.symbols, -0.80)
+    await _run(store, snap, journal, paths, tools=broker)   # arms both
+    await _run(store, snap, journal, paths, tools=broker)   # confirms both
+    calls = broker["close_position"].calls
+    assert len(calls) == 4, f"expected both pages' two legs each: {calls}"
+    # A closes first, while B still holds the same contracts: by quantity.
+    assert all(c.get("qty") == "13" for c in calls[:2]), \
+        f"a shared leg was closed by bare symbol: {calls[:2]}"
+    # B then closes as the SOLE holder: whole, by symbol, exactly as before.
+    assert all("qty" not in c for c in calls[2:]), calls[2:]
+    # A lone position closes whole, by symbol, exactly as before.
+    store2, journal2 = PositionStore(paths.wiki / "solo"), Journal(paths.journal)
+    store2.save(make_position(position_id="pos_solo"))
+    solo = tools_for(close_position=lambda **kw: {"status": "accepted"})
+    await _run(store2, snap, journal2, paths, tools=solo)
+    await _run(store2, snap, journal2, paths, tools=solo)
+    assert solo["close_position"].calls and all("qty" not in c for c in solo["close_position"].calls)
+

@@ -160,7 +160,7 @@ async def test_research_now_rejects_the_percentage_band_it_used_to_admit(
     """
     from types import SimpleNamespace
 
-    from conftest import tools_for
+    from conftest import days_out, tools_for
 
     from trdrbot import research
     from trdrbot.inbox import Inbox
@@ -173,9 +173,9 @@ async def test_research_now_rejects_the_percentage_band_it_used_to_admit(
     reply = (
         "REGIME_MARKDOWN:\n# Assessment\nquiet\n# Drivers\nx\n# Calendar\nx\n# Watch\nx\n"
         "DOSSIERS_JSON:\n{}\n"
-        'OPPORTUNITIES_JSON:\n[{"underlying":"SPY","claim":"holds","horizon":"2026-09-02",'
+        'OPPORTUNITIES_JSON:\n[{"underlying":"SPY","claim":"holds","horizon":"' + days_out(2) + '",'
         '"band_low":760.0,"band_high":775.0,"drift_pct":0.5,"why":"w"},'
-        '{"underlying":"SPY","claim":"pct band","horizon":"2026-09-02",'
+        '{"underlying":"SPY","claim":"pct band","horizon":"' + days_out(2) + '",'
         '"band_low":-6.0,"band_high":8.0,"drift_pct":0.5,"why":"w"}]'
     )
     monkeypatch.setattr(research, "ask", lambda *a, **k: _async(reply))
@@ -185,7 +185,7 @@ async def test_research_now_rejects_the_percentage_band_it_used_to_admit(
     monkeypatch.setattr(research.evidence, "gather",
                         lambda *a, **k: _async(("(none)", "(none)")))
 
-    cfg = SimpleNamespace(paths=paths, deadline="2026-09-04",
+    cfg = SimpleNamespace(paths=paths, deadline=days_out(4),
                           research_universe=["SPY"], watchlist=["SPY"],
                           polymarket_queries=[])
     journal = Journal(paths.journal)

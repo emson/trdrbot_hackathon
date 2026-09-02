@@ -329,7 +329,7 @@ async def run(
         verdict = admit(
             o,
             spot=last_close.get(o.underlying),
-            latest_useful=_latest or None,
+            latest_useful=_latest or None, earliest_useful=_earliest,
             options_tradeable=o.underlying in ok_tickers,
         )
         if not verdict.ok:

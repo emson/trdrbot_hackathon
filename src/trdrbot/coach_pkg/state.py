@@ -107,7 +107,11 @@ LEVERS: tuple[Lever, ...] = (
         "muse.prompt", "muse", ("muse.gates",), "prompt",
         seed_ref=("trdrbot.muse", "MUSE_PROMPT"),
         placeholders=_MUSE_PLACEHOLDERS,
-        must_contain=("band_low_pct", "band_high_pct", "JSON array"),
+        # The schema keys the gates READ. Drop `"probability"` and `_prob`
+        # defaults every candidate to 0.5, every gate still passes, and
+        # fabricated 0.5s enter calibration via mark_stated (D-112).
+        must_contain=("band_low_pct", "band_high_pct", "JSON array",
+                      '"probability"', '"horizon"', '"underlying"', '"claim"'),
         evidence_kind="muse",
     ),
 )

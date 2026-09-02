@@ -110,10 +110,18 @@ def validate_prompt(text: str, incumbent: str, placeholders: tuple[str, ...],
     for token in must_contain:
         if token not in text:
             return f"dropped the contract token {token!r}"
+    # Safety first: an UNKNOWN placeholder is a live KeyError on the next run.
     try:
         text.format(**{p: "x" for p in placeholders})
     except (KeyError, IndexError, ValueError) as exc:
         return f"not a safe format template ({type(exc).__name__}: {exc})"
+    # Then PRESENCE (D-112). `str.format` catches an EXTRA placeholder and says
+    # nothing about a missing one, so a challenger could delete
+    # {concepts}/{news}/{odds} - the muse's whole mandate - score 5/5 on gate
+    # survival, and promote. Every declared placeholder must still be used.
+    for p in placeholders:
+        if "{" + p + "}" not in text:
+            return f"dropped the placeholder {{{p}}}"
     return ""
 
 

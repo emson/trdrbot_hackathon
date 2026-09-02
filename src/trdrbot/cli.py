@@ -175,7 +175,10 @@ def _calibration() -> int:
     print(f"\n{cal.verdict()}\n")
     if cal.n:
         print(f"  Brier score  : {cal.brier:.4f}   (0 = perfect, 0.25 = coin flip)")
-        print(f"  reliability  : {cal.reliability:.4f}   (lower is better - overconfidence signal)")
+        print("  reliability  : "
+              + (f"{cal.reliability:.4f}   (lower is better - overconfidence signal)"
+                 if cal.reliability is not None else
+                 "unmeasured   (within-bin noise exceeds the estimate at this n)"))
         print(f"  resolution   : {cal.resolution:.4f}   (higher is better - discrimination)")
         print(f"  uncertainty  : {cal.uncertainty:.4f}   (irreducible, given the base rate)")
         print(f"  base rate    : {cal.base_rate:.0%} of resolved forecasts came in")

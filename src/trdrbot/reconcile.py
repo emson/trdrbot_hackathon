@@ -133,6 +133,13 @@ async def reconcile(
                 result["filled"].append(pos.position_id)
             elif pending:
                 pass  # still working - leave it alone
+            elif not snap.orders_readable:
+                # An UNREADABLE order book is not an EMPTY one (D-112). Leave
+                # the position `opening`; the next readable tick decides.
+                journal.append("reconciliation", position_id=pos.position_id,
+                               finding="orders_unreadable",
+                               detail="no fill seen and the order book could not be read - "
+                                      "not abandoned")
             else:
                 # No fill, no live order: the order died (expired, rejected,
                 # cancelled). Never became real exposure, so `abandoned`.
