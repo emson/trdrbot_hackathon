@@ -75,4 +75,8 @@ No further action taken.
 
 ## Outcome
 
-_Open - this section fills in when the position resolves._
+**Closed:** time_stop
+
+**Why:** retry: a previous close attempt did not complete
+
+**Result:** -29.9% of net entry cost

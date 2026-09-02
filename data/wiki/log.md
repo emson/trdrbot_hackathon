@@ -1,4 +1,21 @@
 ## 2026-09-02
+- lesson recorded for pos_20260902_NVDA_bull_call_spread_7251e91e (external)
+- lesson recorded for pos_20260902_NVDA_bull_call_spread_c1bca8b8 (external)
+- lesson recorded for pos_20260901_SPY_bear_put_spread_223db600 (time_stop)
+- housekeeping: 0 interim score(s), consolidation ok, 0 attribution(s), 0 concept(s) tombstoned
+- housekeeping: 0 interim score(s), consolidation ok, 0 attribution(s), 0 concept(s) tombstoned
+- housekeeping: 0 interim score(s), consolidation ok, 0 attribution(s), 0 concept(s) tombstoned
+- housekeeping: 0 interim score(s), consolidation ok, 0 attribution(s), 0 concept(s) tombstoned
+- housekeeping: 0 interim score(s), consolidation ok, 0 attribution(s), 0 concept(s) tombstoned
+- housekeeping: 0 interim score(s), consolidation ok, 0 attribution(s), 0 concept(s) tombstoned
+- housekeeping: 0 interim score(s), consolidation ok, 0 attribution(s), 0 concept(s) tombstoned
+- housekeeping: 0 interim score(s), consolidation ok, 0 attribution(s), 0 concept(s) tombstoned
+- housekeeping: 0 interim score(s), consolidation ok, 1 attribution(s), 0 concept(s) tombstoned
+- attributed pos_20260826_SPY_bull_put_spread_ebf0dcde: unscoreable (no thesis was recorded at entry)
+- housekeeping: 0 interim score(s), consolidation ok, 0 attribution(s), 0 concept(s) tombstoned
+- housekeeping: 0 interim score(s), consolidation ok, 0 attribution(s), 0 concept(s) tombstoned
+- housekeeping: 0 interim score(s), consolidation ok, 0 attribution(s), 0 concept(s) tombstoned
+- housekeeping: 0 interim score(s), consolidation ok, 0 attribution(s), 0 concept(s) tombstoned
 - housekeeping: 0 interim score(s), consolidation ok, 0 attribution(s), 0 concept(s) tombstoned
 - housekeeping: 0 interim score(s), consolidation ok, 0 attribution(s), 0 concept(s) tombstoned
 - housekeeping: 0 interim score(s), consolidation ok, 0 attribution(s), 0 concept(s) tombstoned

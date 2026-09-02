@@ -1,10 +1,10 @@
 ---
 type: Position
 position_id: pos_20260901_SPY_bear_put_spread_223db600
-status: open
+status: closed
 interim_band: 0
 max_loss_usd: 2052.0
-last_pnl_pct: 0.05263157894736842
+last_pnl_pct: -0.029239766081871343
 greeks_at_entry:
   delta_shares: -310.73
   delta_dollars: -236886.05
@@ -54,7 +54,7 @@ exit_state:
   - false
   - false
   - false
-close_reason: null
+close_reason: time_stop
 decision_ref: jrn_20260901T140535Z_decb74482
 sources:
 - id: opp_20260901_muse_0302912482f8
@@ -65,7 +65,7 @@ sources:
   author: muse
 generated:
   by: openai:gpt-5.6-sol | anthropic:claude-opus-5 | openai:gpt-5
-  at: '2026-09-02T07:40:10.427704+00:00'
+  at: '2026-09-02T14:02:32.210466+00:00'
 verified:
 - by: trdrbot/reconcile
   at: '2026-09-01T14:11:41.095462+00:00'
@@ -101,7 +101,7 @@ thesis_band_low: 754.6
 thesis_band_high: 763.4
 thesis_drift: -0.0034999999999999996
 thesis_vol_view: null
-leg_divergence_count: 0
+leg_divergence_count: 1
 attribution: ''
 provenance: agent
 ---

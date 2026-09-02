@@ -57,7 +57,7 @@ decision_ref: jrn_20260826T185819Z_dece972
 sources: []
 generated:
   by: ''
-  at: '2026-08-27T21:10:28.759475+00:00'
+  at: '2026-09-02T09:25:04.723939+00:00'
 verified:
 - by: trdrbot/reconcile
   at: '2026-08-26T20:05:59.099229+00:00'
@@ -70,7 +70,9 @@ thesis_horizon: ''
 thesis_band_low: null
 thesis_band_high: null
 thesis_drift: 0.0
-attribution: ''
+thesis_vol_view: null
+leg_divergence_count: 0
+attribution: unscoreable
 provenance: agent
 ---
 
