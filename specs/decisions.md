@@ -5014,3 +5014,50 @@ as unreadable and **both stops go permanently unobservable**. Reachable now at s
 positions. Reported in the tool's reply and journalled as `leg_overlap` - never refused, because the
 fill has already happened and an unrecorded fill is an orphan - and health names both pages as BAD.
 `_render_positions` already lists every held leg in the prompt, so the agent can avoid it.
+
+## D-112 - Ten more from the audits: the order path reads the broker, the brake closes
+
+The four auditors' full reports arrived after the first ten fixes had landed. Ten more, every
+one with file:line, every one small, all in one commit.
+
+**The order path.** An unreadable order book was read as an *empty* one, so an `opening` position
+whose limit order was merely unreadable was transitioned to `abandoned` - terminal - and then
+filled at the broker with no exit rules and nothing watching. `Snapshot.orders_readable` now
+mirrors `broker_readable`, with a `degraded` row on failure. `place_option_order` returns
+`{"error": ...}` with `isError=False`, so a rejected entry and a filled one both counted as "an
+order call was made": the execution row was written and the order probe read healthy on a book of
+rejections. The decide path now pairs each order call with its ToolMessage and reads the payload -
+one reader, `mcp_client.in_band_error`, shared with the exit engine's close path (D-109), so the
+two cannot disagree about the shape. A clock failure latched the submit gate shut with a bare
+print; now a `degraded` row. And `close_position(symbol)` closes the broker's whole **aggregate**
+in a contract, so closing position A closed the leg position B held in the same symbol - legging B
+out into a bare short for two ticks. The tool accepts `qty`; it is passed exactly when another
+open page holds the symbol and never otherwise, so a whole position still closes whole (INV-19).
+
+**The overconfidence brake was fully open.** Reliability was clamped to `0.0` - "flawlessly
+calibrated" - whenever the Ferro-Fricker within-bin correction exceeded the raw estimate, which at
+this sample size it does. `shrink_probability` then trusted every stated edge in full (trust = 1 -
+0.0/0.05 = 1.0) and MATURE's `max_rel` gate was auto-passed. Live: raw 0.0103, within 0.0172,
+reported 0.0. An over-correction means "indistinguishable from zero at this n", which is
+**unmeasured**, and every reader already handles `None` as not-yet-a-measurement: the shrink
+halves the edge, the top rung stays shut. Three tests that had pinned the clamp now read `None` as
+zero in their averages, with the reason.
+
+**The Coach could promote a gutted prompt.** `validate_prompt` ran `str.format`, which catches an
+*extra* placeholder and says nothing about a *missing* one. Verified by execution: a challenger
+that deleted `{concepts}`/`{news}`/`{odds}` - the muse's entire mandate - passed validation, and
+the entropy sentinel could not see it because it measures what was *sampled*, never what the
+prompt used. Every declared placeholder must now be present, checked after format safety, and the
+schema keys the gates read are contract tokens. The test that had pinned the opposite ("a missing
+placeholder is only a problem if code needs it") is reversed, with the reason.
+
+**Smaller, and each real:** gpt-5-mini was priced as gpt-5 by prefix match in dict order - 5x on
+27 calls, every cost report and the cost sentinel's numerator; longest match wins. The shared
+`admit` gate checked only the far side of the horizon window, so research and discovery could
+admit a thesis dated today; two sides now, matching the muse's own cascade. Two live
+`calibration.n`s (73 on the ladder, 102 on the report) are one. The learning probe netted a failed
+resolution against a good fill and read "produced 1"; health now says when every resolution
+failed to be learned from.
+
+**Verified:** 572 tests (+7), lint clean, the whole-system scaffold at 0 failing checks, the live
+loop restarted onto this commit with the stale-process probe silent.
