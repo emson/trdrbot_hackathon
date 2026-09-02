@@ -65,7 +65,7 @@ sources:
   author: muse
 generated:
   by: openai:gpt-5.6-sol | anthropic:claude-opus-5 | openai:gpt-5
-  at: '2026-09-02T14:02:32.210466+00:00'
+  at: '2026-09-02T20:03:57.046354+00:00'
 verified:
 - by: trdrbot/reconcile
   at: '2026-09-01T14:11:41.095462+00:00'
@@ -102,7 +102,7 @@ thesis_band_high: 763.4
 thesis_drift: -0.0034999999999999996
 thesis_vol_view: null
 leg_divergence_count: 1
-attribution: ''
+attribution: thesis_wrong_expression_faithful
 provenance: agent
 ---
 

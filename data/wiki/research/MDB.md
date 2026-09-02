@@ -4,24 +4,24 @@ sources:
 - id: src-1
   resource: discovery:news+polymarket+yahoo
   author: trdrbot/discovery
-  last_modified: '2026-09-02T16:07:41.823732+00:00'
+  last_modified: '2026-09-02T18:12:37.653436+00:00'
 generated:
-  at: '2026-09-02T16:07:41.824237+00:00'
-stale_after: '2026-09-03T16:07:41.824240+00:00'
+  at: '2026-09-02T18:12:37.653881+00:00'
+stale_after: '2026-09-03T18:12:37.653885+00:00'
 status: stable
 ---
 
 # What it is
-MongoDB provides a developer-focused document database platform used to build and run modern applications.
+Provides a cloud-based document database platform used by developers to build and operate modern applications.
 
 # Bull case
-A sharp post-earnings selloff creates a two-sided dislocation: 30% revenue growth and AI-workload strength conflict with slowing near-term guidance. Persistently high inflation and almost no expected Fed easing add valuation pressure, making the disagreement especially actionable for options. Volatile and two-sided with a slight near-term downside skew. The stock is below its SMA20 but above its SMA50, while the bootstrap assigns 23% probability to a loss of at least 5% versus 19% to a gain of at least 5%.
+A 10.8% post-earnings decline despite 30% revenue growth and continued bullish analyst commentary creates a potential overreaction or mean-reversion setup. Watch for stabilization after the earnings selloff, but the five-day bootstrap is slightly downside-skewed: 24% probability of a loss of at least 5% versus 19% probability of a gain of at least 5%. Revenue growth and the position above SMA50 support rebound potential, while elevated volatility and the price below SMA20 limit conviction.
 
 # Bear case
-Strong revenue growth and the $453.91 analyst target could drive a sharp rebound after the earnings selloff.
+The earnings decline may reflect durable valuation or growth-quality concerns rather than a temporary overreaction.
 
 # People
 (not researched - discovery pass)
 
 # Environment
-Verdict: watch. Evidence: MongoDB reported 30% revenue growth but shares fell 10.8% despite bullish analyst outlook.; MongoDB shares fell 13% premarket due to slowing Q3 guidance overshadowing the earnings beat.; Prediction market: 1% odds of a Fed rate cut by the September 2026 meeting and 3% by the October 2026 meeting.; P
+Verdict: watch. Evidence: MongoDB reported 30% revenue growth but shares fell 10.8% despite a bullish analyst outlook.; A broader headline said software stocks declined despite reporting quarterly earnings.
