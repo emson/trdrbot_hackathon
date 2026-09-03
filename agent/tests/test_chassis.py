@@ -646,3 +646,33 @@ def test_build_positions_summary_omits_extrema_when_nothing_has_closed():
         [{"status": "open", "last_pnl_pct": 0.1}])
 
     assert summary == {"closed_count": 0, "closed_pnl_min_pct": None, "closed_pnl_max_pct": None}
+
+
+def test_counts_tallies_never_filled_from_the_abandoned_status(tmp_path, monkeypatch):
+    """`abandoned` is this codebase's own name for an order that never
+    filled (`positions.py`'s docstring says so verbatim) - the deck's
+    'N never filled' line used to count these by hand."""
+    import dataclasses
+    import json
+
+    from trdrbot import config as config_mod
+    from trdrbot import site_export
+
+    live = config_mod.load()
+    cfg = dataclasses.replace(live, paths=config_mod.Paths.build(tmp_path))
+    cfg.paths.ensure()
+    monkeypatch.setattr(site_export.config_mod, "load", lambda *a, **k: cfg)
+
+    from trdrbot.positions import Position, PositionStore
+
+    store = PositionStore(cfg.paths.wiki)
+    for i, status in enumerate(("open", "closed", "abandoned", "abandoned")):
+        store.save(Position(position_id=f"pos_{i}", status=status, underlying="X",
+                            strategy="s", opened="2026-09-01T00:00:00+00:00"))
+
+    out = tmp_path / "snapshot.json"
+    assert site_export.export(out=out) == 0
+    counts = json.loads(out.read_text(encoding="utf-8"))["counts"]
+    assert counts["positions_never_filled"] == 2
+    assert counts["positions_open"] == 1
+    assert counts["positions"] == 4

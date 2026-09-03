@@ -38,6 +38,17 @@ export function num(v, digits = 0) {
 	return v.toLocaleString('en-US', { minimumFractionDigits: digits, maximumFractionDigits: digits });
 }
 
+// The injector calls a data-format name with no arguments (notes/027) - one
+// formatter, one meaning, matching how usd0/usdCompact already sit beside
+// usd rather than usd(v, {digits}). These two exist only for figures that
+// need a non-zero decimal count: n_eff ("9.8") and resolution ("0.000").
+export function num1(v) {
+	return num(v, 1);
+}
+export function num3(v) {
+	return num(v, 3);
+}
+
 export function dateOnly(iso) {
 	if (!iso) return 'not recorded';
 	return iso.slice(0, 10);

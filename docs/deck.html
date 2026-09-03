@@ -438,7 +438,7 @@ svg.chart{display:block; width:100%; height:auto; overflow:visible}
       <p class="fine"><strong style="color:var(--ink)">The ledger is the quiet one.</strong>
       Forecasts on setups Theo <em>declined</em> are scored too, at zero risk — the only realistic
       way to build a track record that means anything inside a week.
-      <br><br>22,900 lines of Python · 745 offline tests · 7 trader-readable simulation scaffolds</p>
+      <br><br><span data-figure="repo.python_lines" data-format="num">23,050</span> lines of Python · <span data-figure="repo.tests" data-format="num">757</span> offline tests · <span data-figure="repo.scaffolds" data-format="num">7</span> trader-readable simulation scaffolds</p>
     </div>
   </div>
 </section>
@@ -637,7 +637,7 @@ svg.chart{display:block; width:100%; height:auto; overflow:visible}
       <div class="inner" style="gap:.5rem">
         <p class="muted"><strong>Falling is faster than climbing.</strong> A 5% drawdown drops a
         whole rung immediately; 10% goes back to the start.</p>
-        <p class="fine">Theo sits on SCALE today, on 76 scored claims. The sizer also refuses
+        <p class="fine">Theo sits on <span data-figure="competence.tier" data-format="upper">SCALE</span> today, on <span data-figure="calibration.n" data-format="num">77</span> scored claims. The sizer also refuses
         outright any trade whose worst case is unlimited.</p>
       </div>
     </div>
@@ -681,25 +681,25 @@ svg.chart{display:block; width:100%; height:auto; overflow:visible}
 <!-- ═══ 11 ═══════════════════════════════════════════════════════════ -->
 <section class="slide ledger" data-title="Results, and what the record says">
   <div class="inner">
-    <span class="kicker">Results · paper account · as of 3 Sep 2026, 17:04 UTC · tick 821</span>
+    <span class="kicker">Results · paper account · as of <span data-figure="generated_at" data-format="deckDateTime">3 Sep 2026, 18:50 UTC</span> · tick <span data-figure="tick" data-format="num">840</span></span>
     <h2>The P&amp;L — and the number we would rather not show you.</h2>
     <div class="cols c4">
-      <div class="card"><span class="tag code">equity</span><span class="big">$114,085</span>
+      <div class="card"><span class="tag code">equity</span><span class="big" data-figure="account.equity" data-format="usd0">$116,580</span>
         <p class="muted">from a $100,000 start</p></div>
       <div class="card"><span class="tag good">return</span>
-        <span class="big" style="color:var(--accent)">+14.1%</span>
+        <span class="big" style="color:var(--accent)" data-figure="account.pnl_pct" data-format="pct">+16.6%</span>
         <p class="muted">at its high water mark, no drawdown</p></div>
-      <div class="card"><span class="tag code">positions</span><span class="big">11</span>
-        <p class="muted">6 closed, from −2.9% to +129.1%; 2 open, 3 never filled</p></div>
-      <div class="card"><span class="tag code">claims</span><span class="big">185</span>
-        <p class="muted">145 declined outright, 9 traded</p></div>
+      <div class="card"><span class="tag code">positions</span><span class="big" data-figure="counts.positions" data-format="num">13</span>
+        <p class="muted"><span data-figure="positions_summary.closed_count" data-format="num">7</span> closed, from <span data-figure="positions_summary.closed_pnl_min_pct" data-format="pct">−2.9%</span> to <span data-figure="positions_summary.closed_pnl_max_pct" data-format="pct">+129.1%</span>; <span data-figure="counts.positions_open" data-format="num">3</span> open, <span data-figure="counts.positions_never_filled" data-format="num">3</span> never filled</p></div>
+      <div class="card"><span class="tag code">claims</span><span class="big" data-figure="counts.theses" data-format="num">197</span>
+        <p class="muted"><span data-figure="counts.declined" data-format="num">161</span> declined outright, <span data-figure="counts.traded" data-format="num">11</span> traded</p></div>
     </div>
     <div class="cols c2">
       <div class="card" style="border-left:3px solid var(--danger)">
         <p><strong>By its own scorecard, Theo has not yet shown skill.</strong> The measure of
-        whether its forecasts separate winners from losers reads <strong>0.000</strong>: a stated
+        whether its forecasts separate winners from losers reads <strong><span data-figure="calibration.resolution" data-format="num3">0.004</span></strong>: a stated
         70% is not landing more often than a stated 55%. And whether a 40% call really lands 40% of
-        the time cannot be answered yet — 76 scored claims are only <strong>9.8 independent</strong>
+        the time cannot be answered yet — <span data-figure="calibration.n" data-format="num">77</span> scored claims are only <strong><span data-figure="calibration.n_eff" data-format="num1">9.8</span> independent</strong>
         ones once repeated names are discounted.</p>
       </div>
       <div class="card" style="border-left:3px solid var(--accent)">
@@ -734,7 +734,7 @@ svg.chart{display:block; width:100%; height:auto; overflow:visible}
         it is stricter: the agent cannot execute what the arithmetic refuses to compute.</p></div>
       <div class="card"><h3>Every defect is public</h3>
         <p class="muted">A living bug ledger records each one the moment it is found and removes it
-        only in the commit that fixes it. 125 numbered issues so far.</p></div>
+        only in the commit that fixes it. <span data-figure="repo.issues_max_id" data-format="num">125</span> numbered issues so far.</p></div>
     </div>
     <p class="lead tight">None of these is a rough edge we ran out of time to sand. Each is a place
     where the honest answer was to refuse, and say so.</p>

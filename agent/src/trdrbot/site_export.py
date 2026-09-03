@@ -779,12 +779,17 @@ def export(out: Path = DEFAULT_OUT, *, strict: bool = True,
     tick = int(tick_path.read_text().strip()) if tick_path.exists() else None
 
     open_positions = sum(1 for p in positions if p.get("status") == "open")
+    # `abandoned` is this codebase's own status name for an order that never
+    # filled (`positions.py`'s own docstring: "abandoned/never_filled") - the
+    # deck's "N never filled" line used to count these by hand.
+    never_filled = sum(1 for p in positions if p.get("status") == "abandoned")
     traded = sum(1 for t in theses if t.traded)
     declined = sum(1 for it in ledger_items if it["kind"] == "declined")
 
     counts = {
         "positions": len(positions),
         "positions_open": open_positions,
+        "positions_never_filled": never_filled,
         "traded": traded,
         "declined": declined,
         "theses": len(theses),
