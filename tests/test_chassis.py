@@ -351,16 +351,41 @@ def test_the_single_shot_tick_is_bounded_by_the_same_watchdog(monkeypatch, tmp_p
     assert _asyncio.run(cli._tick()) == 1, "a hung tick must exit non-zero, not hang"
 
 
-def test_the_closed_cadence_honours_the_same_floor_as_the_open_one():
+def test_the_closed_cadence_honours_the_same_floor_as_the_open_one(monkeypatch, tmp_path):
     """I-111: the 30s floor guarded `--interval` only, so `--closed-interval 0`
     ticked back to back all weekend - the same live broker, the same LLM spend,
-    through the argument nobody thought of as the polling one."""
+    through the argument nobody thought of as the polling one.
+
+    Hermetic on purpose. `_run_loop` writes `run.json` and takes the tick lock
+    in the REAL state directory, and `trdrbot health` compares that file's git
+    sha against HEAD - so a test driving it against the live tree overwrites the
+    running loop's own provenance record. It also must not be able to trade: a
+    stub `run_tick` and a temp state dir mean a broken floor fails the assertion
+    rather than reaching a broker.
+    """
     import asyncio as _asyncio
+    import dataclasses
 
     from trdrbot import cli
+    from trdrbot import config as config_mod
+
+    cfg = dataclasses.replace(config_mod.load(quiet=True),
+                              paths=config_mod.Paths.build(tmp_path))
+    cfg.paths.ensure()
+    ticked: list[int] = []
+
+    async def _stub(*a: Any, **k: Any) -> dict[str, Any]:
+        ticked.append(1)
+        return {"market_open": False, "status": "housekeeping"}
+
+    monkeypatch.setattr(cli.config_mod, "load", lambda *a, **k: cfg)
+    monkeypatch.setattr(cli, "run_tick", _stub)
 
     assert _asyncio.run(cli._run_loop(300, 0, max_ticks=1)) == 2
     assert _asyncio.run(cli._run_loop(0, 1800, max_ticks=1)) == 2
+    assert ticked == [], "a refused cadence must not tick at all"
+    assert not (tmp_path / "data" / "state" / "run.json").exists(), \
+        "the refusal comes before anything is written"
 
 
 def test_an_unchanged_export_leaves_the_snapshot_byte_identical(tmp_path, monkeypatch):
