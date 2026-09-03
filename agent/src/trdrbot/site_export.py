@@ -50,8 +50,13 @@ from .experiments import (
 from .journal import Journal
 from .positions import Position, PositionStore
 
+#: `agent/` - the agent's own state, and the `.env` the redaction scan reads.
 ROOT = config_mod.ROOT
-DEFAULT_OUT = ROOT / "web" / "src" / "lib" / "data" / "snapshot.json"
+#: The repository, one level up. This exporter is the only component that reads
+#: the repo's own documents (`docs/`, `specs/`, `README.md`) and the only one
+#: that writes into `web/`, so it is the only one that needs both anchors.
+REPO_ROOT = config_mod.REPO_ROOT
+DEFAULT_OUT = REPO_ROOT / "web" / "src" / "lib" / "data" / "snapshot.json"
 PREV_SNAPSHOT_GLOB = "snapshot.json"
 
 #: Hackathon rule (submission_and_judging.md), not a derived figure - the
@@ -168,7 +173,7 @@ def clean_prose(text: str | None) -> str | None:
 def _git(args: list[str]) -> str:
     try:
         return subprocess.run(
-            ["git", *args], cwd=ROOT, capture_output=True, text=True, timeout=5
+            ["git", *args], cwd=REPO_ROOT, capture_output=True, text=True, timeout=5
         ).stdout.strip()
     except Exception:
         return ""
@@ -655,8 +660,8 @@ def export(out: Path = DEFAULT_OUT, *, strict: bool = True) -> int:
     }
 
     notes = build_notes(cfg.paths.wiki)
-    journals = build_journals(ROOT / "docs" / "dev_journals")
-    decisions_index = build_decisions_index(ROOT / "specs" / "decisions.md")
+    journals = build_journals(REPO_ROOT / "docs" / "dev_journals")
+    decisions_index = build_decisions_index(REPO_ROOT / "specs" / "decisions.md")
     counts["notes"] = len(notes)
     counts["journals"] = len(journals)
     counts["decisions_logged"] = len(decisions_index)
@@ -742,11 +747,11 @@ def export(out: Path = DEFAULT_OUT, *, strict: bool = True) -> int:
         "notes": notes,
         "journals": journals,
         "docs": {
-            "submission_html": md((ROOT / "SUBMISSION.md").read_text(encoding="utf-8"))
-                                if (ROOT / "SUBMISSION.md").exists() else "",
-            "readme_html": md((ROOT / "README.md").read_text(encoding="utf-8"))
-                           if (ROOT / "README.md").exists() else "",
-            "open_issues_html": build_open_issues(ROOT / "specs" / "issues.md"),
+            "submission_html": md((REPO_ROOT / "SUBMISSION.md").read_text(encoding="utf-8"))
+                                if (REPO_ROOT / "SUBMISSION.md").exists() else "",
+            "readme_html": md((REPO_ROOT / "README.md").read_text(encoding="utf-8"))
+                           if (REPO_ROOT / "README.md").exists() else "",
+            "open_issues_html": build_open_issues(REPO_ROOT / "specs" / "issues.md"),
             "decisions_index": decisions_index,
         },
         "counts": counts,
@@ -765,6 +770,8 @@ def export(out: Path = DEFAULT_OUT, *, strict: bool = True) -> int:
     from .ids import utc_now
     snapshot["generated_at"] = utc_now().isoformat()
 
+    # ROOT, deliberately, where its neighbours use REPO_ROOT: the scan loads
+    # the agent's own `.env` to check no live secret reached the export.
     hits = redaction_scan(snapshot, ROOT)
     if hits:
         print("[site_export] REFUSED - possible secret(s) in export:", file=sys.stderr)

@@ -12,7 +12,9 @@ const STATIC = path.resolve(__dirname, '..', 'static');
 
 const FILES = [
 	{ src: 'docs/deck.html', dest: 'deck.html', label: 'Slide deck' },
-	{ src: 'data/report.html', dest: 'coach-report.html', label: 'The Coach — live report' },
+	// The one source written by the agent rather than kept in docs/, so it is
+	// the one that moved when the agent did.
+	{ src: 'agent/data/report.html', dest: 'coach-report.html', label: 'The Coach — live report' },
 	{
 		src: 'docs/risk_appetite_explorer.html',
 		dest: 'resources/risk-appetite-explorer.html',

@@ -39,7 +39,8 @@ import sys
 from pathlib import Path
 from types import SimpleNamespace
 
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = Path(__file__).resolve().parent.parent          # agent/ - the code and the state
+REPO_ROOT = ROOT.parent                                # the repo - docs/ lives here
 sys.path.insert(0, str(ROOT / "src"))
 
 from trdrbot import competence, ids, market_stats, optmath, sizing  # noqa: E402
@@ -47,7 +48,7 @@ from trdrbot.calibration import Calibration  # noqa: E402
 from trdrbot.experiments import THESIS_RIGHT_EXPRESSION_RIGHT  # noqa: E402
 from trdrbot.optmath import Leg  # noqa: E402
 
-PAGE = ROOT / "docs" / "risk_appetite_explorer.html"
+PAGE = REPO_ROOT / "docs" / "risk_appetite_explorer.html"
 BEGIN = "/* BEGIN GENERATED - scripts/gen_risk_explorer.py - do not edit by hand */"
 END = "/* END GENERATED */"
 

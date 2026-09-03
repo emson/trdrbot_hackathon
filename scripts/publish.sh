@@ -4,10 +4,13 @@
 # loop. Run this in a loop (see the header comment below) or once by hand.
 set -euo pipefail
 
+# This script spans both projects - it reads the agent's record and writes the
+# website - so it lives at the repo root rather than inside either one.
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+AGENT="$ROOT/agent"
 WEB="$ROOT/web"
-LOCK="$ROOT/data/.publish.lock"
-LOG="$ROOT/data/publish_log.jsonl"
+LOCK="$AGENT/data/.publish.lock"
+LOG="$AGENT/data/publish_log.jsonl"
 SNAPSHOT="$WEB/src/lib/data/snapshot.json"
 
 log_row() {
@@ -40,7 +43,10 @@ if ! mkdir "$LOCKDIR" 2>/dev/null; then
 fi
 trap 'rm -rf "$LOCKDIR"' EXIT
 
-cd "$ROOT"
+# `uv run` resolves its project from the working directory, and the agent's
+# `pyproject.toml` now lives in `agent/`. From the repo root there is no
+# project to find and every `uv run` below would fail.
+cd "$AGENT"
 
 echo "[publish] refreshing the coach report"
 uv run trdrbot report || true  # best-effort; never blocks the site export

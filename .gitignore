@@ -9,12 +9,18 @@ dist/
 # Runtime state. The inbox archive and journal are the raw layer and ground
 # truth (D-014); keep them out of git for now, revisit before submission if we
 # want the trade record in the repo as evidence.
-data/inbox/
-data/journal.jsonl
-data/state/
+#
+# These four are anchored, because they contain a slash: a pattern like
+# `data/state/` matches only at THIS file's own level. When the agent moved
+# under `agent/`, the unqualified spellings silently stopped matching and the
+# whole live state - journal, inbox, the elfmem database - became stageable.
+# Written out with the `agent/` prefix so the anchoring is the thing you read.
+agent/data/inbox/
+agent/data/journal.jsonl
+agent/data/state/
 
 # Raw stdout/stderr capture of the live loop process - build noise (uv sync,
 # MCP server startup) with no product value, and it repeats the operator's
 # local filesystem path on every line. Never worth committing.
-data/run.log
+agent/data/run.log
 logs/

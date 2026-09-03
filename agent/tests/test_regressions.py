@@ -1386,8 +1386,11 @@ def test_the_published_explorer_still_matches_the_sizer_it_claims_to_model():
     import json
     import re
 
+    # Two anchors, because the generator and the page it writes no longer live
+    # in the same tree: the script is the agent's (`agent/scripts/`), the page
+    # is the repo's (`docs/`), published as part of the website.
     root = Path(__file__).resolve().parent.parent
-    page = (root / "docs" / "risk_appetite_explorer.html").read_text(encoding="utf-8")
+    page = (root.parent / "docs" / "risk_appetite_explorer.html").read_text(encoding="utf-8")
     m = re.search(r"const DATA = (\{.*?\});\n/\* END GENERATED \*/", page, re.S)
     assert m, "the explorer has no generated DATA block - run scripts/gen_risk_explorer.py"
     data = json.loads(m.group(1))

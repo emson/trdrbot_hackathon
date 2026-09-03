@@ -10,7 +10,19 @@ from typing import Any
 import yaml
 from dotenv import load_dotenv
 
+#: The AGENT's own directory - `agent/`, holding `data/`, `config.yaml`, `.env`
+#: and the memory ledger. Everything the running process reads or writes hangs
+#: off this, so the agent is startable from its own directory and needs to know
+#: nothing about what sits beside it.
 ROOT = Path(__file__).resolve().parents[2]
+
+#: The REPOSITORY root, one level up: `docs/`, `specs/`, `web/`, `README.md`.
+#: Only `site_export` reaches for these - it is the one component whose job is
+#: to publish the repo's own documents, not the agent's state. Kept as a
+#: separate name because the two were the same directory until the agent moved
+#: into `agent/`, and a single `ROOT` that silently meant both is exactly how a
+#: path starts resolving somewhere plausible and wrong.
+REPO_ROOT = ROOT.parent
 
 
 @dataclass(frozen=True)

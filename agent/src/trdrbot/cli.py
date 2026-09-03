@@ -899,4 +899,22 @@ def main() -> None:
     _H["site"] = lambda a: _site(a.out)
 
     args = p.parse_args()
+
+    # **Run from the agent's own directory, whatever directory we were called
+    # from.** elfmem finds the memory ledger it appends to by walking UP from
+    # the process's cwd to the first `.git`/`pyproject.toml`/`.elfmem` marker
+    # (`elfmem.project.find_project_root`). Launched from `agent/` that is
+    # `agent/.elfmem`; launched from the repo root it is the repo's `.git`, and
+    # the run would append its memory history to a second, empty ledger beside
+    # the real one - no error, no warning, just a record that quietly splits in
+    # two. Nothing else here is cwd-relative, so anchoring the process once is
+    # cheaper than auditing every dependency that might read cwd later.
+    #
+    # `--out` is resolved BEFORE the chdir, so a relative path a caller typed
+    # still means what they meant when they typed it.
+    out = getattr(args, "out", None)
+    if out is not None:
+        args.out = Path(out).resolve()
+    os.chdir(config_mod.ROOT)
+
     sys.exit(_H[args.cmd](args))
