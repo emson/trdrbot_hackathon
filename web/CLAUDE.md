@@ -28,17 +28,75 @@ never hand-edit them; run `node scripts/sync-static.mjs` (from `web/`) to
 regenerate them after editing the `docs/` originals.
 
 `docs/deck.pdf` is also generated from `docs/deck.html`, and it is what the
-submission form links to — so it goes stale silently. After any deck edit:
-
-```
-cd docs && python3 -m http.server 8899 &        # file:// breaks the webfonts
-"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" --headless \
-  --disable-gpu --no-pdf-header-footer --virtual-time-budget=8000 \
-  --print-to-pdf=deck.pdf http://localhost:8899/deck.html
-```
+submission form links to — so it goes stale silently. After any deck edit
+(prose, layout, or figures), regenerate it with `../scripts/release.sh` from
+`web/` (or run it from the repo root as `./scripts/release.sh`) — it re-exports
+the record, refreshes every tagged figure in `docs/deck.html` in place, and
+re-renders the PDF from the updated HTML, all in one command. It touches
+tracked source files and is meant to be run by hand and reviewed
+(`git diff docs/deck.html`) before committing — never on a loop, and it never
+commits, pushes, or deploys on its own.
 
 One slide per 13.333in × 7.5in page, light palette forced, print rules in the
-deck's own `@media print` block. Check the page count matches the slide count.
+deck's own `@media print` block. Check the page count matches the slide count
+(`release.sh`'s own PDF step prints the byte count it wrote; open the file to
+confirm the page count by eye after a structural change to the slides).
+
+## Figures: numbers the deck reads from the record instead of carrying by hand
+
+The deck used to have ~16 hand-typed numbers (equity, position counts,
+calibration, lines of code, issue counts…) that duplicated what
+`web/src/lib/data/snapshot.json` already knows, and drifted the moment anyone
+edited the deck without also re-deriving every figure in it by hand. Any
+number in `docs/deck.html` that is a FACT FROM THE RECORD — not narrative
+prose about a specific dated event — should be a tagged figure instead:
+
+```html
+<span data-figure="account.equity" data-format="usd0">$116,301</span>
+```
+
+- `data-figure` is a dot-path into `snapshot.json` (e.g. `calibration.n`,
+  `repo.python_lines`, `positions_summary.closed_pnl_max_pct`).
+- `data-format` names a formatter exported from `web/src/lib/format.js` -
+  the SAME module the Svelte pages use, so the deck and the site can never
+  render one fact two different ways. Add a formatter there before tagging a
+  figure that needs one that doesn't exist yet; keep it a plain function of
+  one value (see `usd0`/`num1`/`num3`/`upper`/`deckDateTime` for the shapes
+  already in use) since the injector calls it with no other arguments.
+- The element must be a `<span>` containing **only** the number - no nested
+  markup, and no other words inside the same span (wrap only the digits:
+  `<strong><span data-figure="...">9.8</span> independent</strong>`, not
+  `<strong data-figure="...">9.8 independent</strong>`).
+
+**A worked example is not the same thing as a live figure.** The "A real
+trade" slides quote specific numbers from one named, dated trade (`+129.1%`
+on the 28 August SPY spread) - that is a historical fact about an event, not
+a fact the current record restates, and tagging it would let some *other*
+position's later result silently overwrite what that specific trade actually
+did. Only the Results slide's book-wide aggregate is tagged. The same
+reasoning protects the ladder diagram's four rung names (EXPLORE / ESTABLISH
+/ SCALE / MATURE) - permanent column headers, not "the current tier" (only
+the prose line naming the current tier is tagged).
+
+Two scripts, two different jobs - see `../scripts/release.sh` and
+`../scripts/publish.sh` for the full reasoning:
+
+- **`./scripts/release.sh`** (by hand, before submitting) refreshes the
+  figures IN `docs/deck.html` itself, regenerates the PDF, and stops - review
+  the diff, then commit. This is the "one command" for a figures refresh.
+- **`./scripts/publish.sh`** (the automated loop) refreshes figures only in
+  the generated `web/static/deck.html` copy, so the live site's numbers never
+  go stale without ever dirtying the tracked deck source.
+- **`node web/scripts/inject-figures.mjs snapshot.json doc.html`** (no flag)
+  checks without writing - it exits non-zero if any tagged figure disagrees
+  with the record, which is the drift check itself. Add `--write` to fix it
+  in place.
+
+Adding a NEW tagged figure: put the current, correct value as the element's
+baked text (so the document is still right if the script never runs again),
+run `node web/scripts/inject-figures.mjs web/src/lib/data/snapshot.json
+docs/deck.html` (no `--write`) to confirm it resolves cleanly, then
+`--write` once to fix any typo before committing.
 
 ## Paraphrases the hero for a different audience (check for contradiction, not exact wording)
 
@@ -68,3 +126,9 @@ Don't rely on `../scripts/publish.sh` for a copy-only change — it exports
 the trading snapshot first and **no-ops if that snapshot's hash is
 unchanged**, which it will be if no trades happened. It's built for
 data refreshes, not content edits.
+
+For a FIGURES-only refresh (nobody edited any prose, the numbers just went
+stale), use `../scripts/release.sh` instead of this checklist - it does
+steps 1-3 above for the deck's tagged figures specifically, plus the PDF, in
+one command. Reach for the manual checklist when prose, layout, or anything
+outside `docs/deck.html` changed.

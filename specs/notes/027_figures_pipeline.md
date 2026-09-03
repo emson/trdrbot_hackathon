@@ -1,5 +1,19 @@
 # 027 - One command, one set of figures
 
+> **BUILT 2026-09-03, commits 1-5 the same day.** Every rollout step shipped; `release.sh` and
+> `publish.sh` both run for real (not just syntax-checked) before being called done. Kept as the
+> design record. **Where the build diverged from this plan, the build is right** - the rule
+> notes/016 and notes/026 both state, applied again:
+>
+> | Plan said | Built instead | Why |
+> |---|---|---|
+> | (implied by section 2's validation table, not specified) | a new top-level `positions_summary` block (`closed_count`, `closed_pnl_min_pct`, `closed_pnl_max_pct`) | the derived P&L range needed a real key to tag; `counts` is for COUNTS, and this is an extremum |
+> | (not anticipated) | `counts.positions_never_filled` | found tagging the deck's "N never filled" line - the count of orders that never filled has this codebase's own name, `abandoned` (`positions.py`'s own docstring says "abandoned/never_filled"), and nothing exported a count of it |
+> | "Add only what is missing" (format.js) | `usd0`, `num1`, `num3`, `upper`, `deckDateTime` as concrete named exports, and `pct()`/`usd()` fixed to emit a real U+2212 minus sign instead of ASCII hyphen | the injector calls a `data-format` name with NO arguments, so a parameterised `num(v, digits)` cannot be tagged directly; the minus-sign fix reaches the live site too (confirmed in the built output), matching the deck's typography instead of the deck being the one place it disagreed |
+> | "the derived P&L range... matching the deck exactly" (section 2) | that number is tagged; the WORKED EXAMPLE'S numerically-identical "+129.1%" is deliberately left untagged | a specific dated trade's own result is a historical fact, not a restatement of the book's current aggregate - they agree today by coincidence, and tagging it would let a future bigger winner silently rewrite what that one trade did. Same reasoning kept the ladder diagram's four rung names (EXPLORE/ESTABLISH/SCALE/MATURE) untagged - permanent headers, not "the current tier" |
+> | zero new npm dependencies (implied by "no config knobs... unless justified") | Node's built-in `node --test`, `npm test` running `scripts/*.test.mjs` | Node 24 ships a test runner; adding Jest/Vitest for nine assertions would be exactly the machinery-before-need the coding principles warn against |
+> | (not anticipated) | a real bug in `release.sh` itself, found by running it rather than syntax-checking it: `(cd docs && python3 -m http.server) &` backgrounds a SUBSHELL, so `$!` is the subshell's pid and `kill "$PDF_PID"` in the cleanup trap killed nothing - confirmed by `lsof` still showing the port listening after a completed run. Fixed with `--directory`, which needs no subshell | "ran it for real" caught what "syntax-checked it" could not - the same discipline the project's own testing principles state about seams |
+
 Audience: an LLM implementer with full repo access. The problem, the design, why
 the alternatives lost, the edge cases with their required handling, and the
 tests that must exist.
