@@ -2,7 +2,7 @@
 // the corresponding asset exists; a CTA that points at an empty value is
 // omitted rather than rendered as a dead link (see Nav/Footer).
 export const siteConfig = {
-	repoUrl: '',
+	repoUrl: 'https://github.com/emson/trdrbot_hackathon',
 	videoUrl: '',
 	deckPath: '/deck.html',
 	// Who built it. One source, so the byline on a page and the byline in
