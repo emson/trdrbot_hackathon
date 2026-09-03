@@ -565,6 +565,23 @@ def build_calibration(cfg) -> dict[str, Any]:
     }
 
 
+def build_positions_summary(positions: list[dict[str, Any]]) -> dict[str, Any]:
+    """The closed book's P&L range - `min`/`max` of `last_pnl_pct` over CLOSED
+    positions only. A derived aggregate, computed once here rather than by
+    whatever later reads it (D-037's derive-not-declare, applied to a summary
+    stat rather than option math): the deck used to state this range by
+    hand, and a second place capable of computing it is a second place
+    capable of getting it wrong.
+    """
+    closed_pnl = [p["last_pnl_pct"] for p in positions
+                 if p.get("status") == "closed" and p.get("last_pnl_pct") is not None]
+    return {
+        "closed_count": len(closed_pnl),
+        "closed_pnl_min_pct": min(closed_pnl) if closed_pnl else None,
+        "closed_pnl_max_pct": max(closed_pnl) if closed_pnl else None,
+    }
+
+
 def build_attribution(positions: list[dict[str, Any]]) -> dict[str, Any]:
     counts = {
         THESIS_RIGHT_EXPRESSION_RIGHT: 0, THESIS_RIGHT_EXPRESSION_WRONG: 0,
@@ -849,6 +866,7 @@ def export(out: Path = DEFAULT_OUT, *, strict: bool = True,
         },
         "calibration": build_calibration(cfg),
         "attribution": build_attribution(positions),
+        "positions_summary": build_positions_summary(positions),
         "equity_curve": [
             {"ts": r["ts"], "equity": r.get("equity"), "high_water": r.get("high_water")}
             for r in comp_rows

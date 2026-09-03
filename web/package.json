@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "vite dev",
     "build": "vite build",
-    "preview": "vite preview --strict-port"
+    "preview": "vite preview --strict-port",
+    "test": "node --test scripts/*.test.mjs"
   },
   "devDependencies": {
     "@sveltejs/adapter-static": "^3.0.10",

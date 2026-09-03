@@ -1,19 +1,34 @@
+// A real minus sign (U+2212), not the ASCII hyphen-minus `.toFixed()` and
+// template interpolation produce for a negative number. The deck was hand-set
+// with the typographic minus (notes/027's injector pins it byte-for-byte
+// against the deck), so the shared formatter now matches everywhere it is
+// used rather than the deck being the one place the two disagree.
+const MINUS = '−';
+
 export function usd(v, { sign = false } = {}) {
 	if (v === null || v === undefined || Number.isNaN(v)) return 'not recorded';
-	const s = v < 0 ? '-' : sign && v > 0 ? '+' : '';
+	const s = v < 0 ? MINUS : sign && v > 0 ? '+' : '';
 	return `${s}$${Math.abs(v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
+/** Whole dollars, no cents - `$114,085`, not `$114,085.00`. */
+export function usd0(v, { sign = false } = {}) {
+	if (v === null || v === undefined || Number.isNaN(v)) return 'not recorded';
+	const s = v < 0 ? MINUS : sign && v > 0 ? '+' : '';
+	return `${s}$${Math.round(Math.abs(v)).toLocaleString('en-US', { maximumFractionDigits: 0 })}`;
 }
 
 export function usdCompact(v) {
 	if (v === null || v === undefined || Number.isNaN(v)) return 'not recorded';
 	const abs = Math.abs(v);
-	const sign = v < 0 ? '-' : '';
+	const sign = v < 0 ? MINUS : '';
 	if (abs >= 1000) return `${sign}$${(abs / 1000).toFixed(1)}k`;
 	return usd(v);
 }
 
 export function pct(v, { digits = 1, sign = true } = {}) {
 	if (v === null || v === undefined || Number.isNaN(v)) return 'not recorded';
+	if (v < 0) return `${MINUS}${(Math.abs(v) * 100).toFixed(digits)}%`;
 	const s = v > 0 && sign ? '+' : '';
 	return `${s}${(v * 100).toFixed(digits)}%`;
 }
@@ -57,6 +72,31 @@ export function relativeTime(iso, now) {
 export function titleCase(s) {
 	if (!s) return '';
 	return s.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+/** `scale` -> `SCALE`. The competence tier as the deck's kicker line renders it. */
+export function upper(s) {
+	if (s === null || s === undefined) return '';
+	return String(s).toUpperCase();
+}
+
+/**
+ * The deck's own dateline house style - `3 Sep 2026, 17:04 UTC` - day before
+ * month, 24-hour clock, no comma-separated weekday. Deliberately its own
+ * formatter rather than a `dateTime()` option: this is the terse form a
+ * printed document's byline uses, not the site's relative-time card style,
+ * and the two have never been meant to match.
+ */
+export function deckDateTime(iso) {
+	if (!iso) return 'not recorded';
+	const d = new Date(iso);
+	if (Number.isNaN(d.getTime())) return 'not recorded';
+	const day = d.getUTCDate();
+	const month = d.toLocaleString('en-US', { month: 'short', timeZone: 'UTC' });
+	const year = d.getUTCFullYear();
+	const hh = String(d.getUTCHours()).padStart(2, '0');
+	const mm = String(d.getUTCMinutes()).padStart(2, '0');
+	return `${day} ${month} ${year}, ${hh}:${mm} UTC`;
 }
 
 export function strategyLabel(s) {

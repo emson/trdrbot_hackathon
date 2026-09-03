@@ -615,3 +615,34 @@ def test_the_monotonicity_guard_ignores_repo_facts(tmp_path, monkeypatch):
     monkeypatch.setattr(site_export, "count_tests_collected", lambda _root: 3)
     assert site_export.export(out=out, refresh_test_count=True) == 0
     assert json.loads(out.read_text(encoding="utf-8"))["repo"]["tests"] == 3
+
+
+def test_build_positions_summary_ranges_over_closed_positions_only():
+    """The deck's 'from -2.9% to +129.1%' line - a derived min/max, computed
+    once here rather than left for a later reader to re-derive (and possibly
+    include an OPEN position's still-moving mark, which is not the same
+    claim as a settled outcome)."""
+    from trdrbot import site_export
+
+    positions = [
+        {"status": "closed", "last_pnl_pct": -0.029239766081871343},
+        {"status": "closed", "last_pnl_pct": 1.2911392405063291},
+        {"status": "closed", "last_pnl_pct": 0.08190045248868778},
+        {"status": "open", "last_pnl_pct": 5.0},  # must not win the max
+        {"status": "abandoned", "last_pnl_pct": None},
+    ]
+
+    summary = site_export.build_positions_summary(positions)
+
+    assert summary["closed_count"] == 3
+    assert summary["closed_pnl_min_pct"] == -0.029239766081871343
+    assert summary["closed_pnl_max_pct"] == 1.2911392405063291
+
+
+def test_build_positions_summary_omits_extrema_when_nothing_has_closed():
+    from trdrbot import site_export
+
+    summary = site_export.build_positions_summary(
+        [{"status": "open", "last_pnl_pct": 0.1}])
+
+    assert summary == {"closed_count": 0, "closed_pnl_min_pct": None, "closed_pnl_max_pct": None}
