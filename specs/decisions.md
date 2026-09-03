@@ -5652,3 +5652,94 @@ TODAY rather than at a fixed literal, because staleness is measured from the las
 tests that reached the real project state (`cli._tick` taking the live lock, `site_export` reading the
 live journal) are hermetic: a pass or fail decided by what else is running on the machine is not a
 test result.
+
+## D-122 - The Playbook: structure choice becomes a measured lever
+**Date:** 2026-09-03
+**Status:** accepted
+**Plan:** [notes/026](notes/026_playbook_structure_lever.md), built in six commits the same day
+(1-5 plus 4b), each green on its own and each restarting the live loop.
+
+**Context.** Checked in code, not assumed: `optmath` prices any single-expiry leg set, friction is
+summed per real leg, `payoff_ratio` is the conditional pair (D-077), and nothing in exit rules,
+positions or sizing assumes a leg count - iron condors, flies and strangles were legal and
+priceable from D-028. Yet the journal showed only one- and two-leg structures ever traded, because
+nothing told the decide agent which structure family fits which thesis shape: the technique pages
+that discuss it (`what-am-i-actually-betting-on`, `credit-vs-debit-is-not-a-choice`) are never
+read by the decide prompt, which reads the regime page, elfmem recall, `lessons.md` and
+calibration. The obvious fix - a mapping paragraph in `SYSTEM_PROMPT` - is a human-asserted rule
+nothing scores, and the project's own rule (D-088) is that a choice like this should be DATA the
+Coach can move, scored by arithmetic it cannot reach, promoted on evidence.
+
+**Choice: the playbook.** A catalogue (YAML, the lever) of structure families, each declaring the
+thesis SHAPES it fits - range, bull target, bear target, bull floor, bear ceiling, derived from the
+band and the spot, never from the model's `direction` label - and where its strikes sit against
+the band in expected-move units. For every admitted opportunity, at all three emission sites, the
+incumbent is instantiated on the live chain and each instance meets fixed gates: every leg quoted,
+loss bounded, **pays after entry costs if the band holds, and wins at least 25 points more often
+when the band holds than when it fails.** That pair is `experiments.attribute` mirrored pre-trade
+(`optmath.band_conditional`): if the view is right, does the expression pay, and does it stop
+paying when the view is wrong. Survivors reach the decide agent as a priced menu rendered beside
+the claim as legs it can put straight into `simulate_experiments`; the shadow challenger prices on
+the same board and reaches `record_trial` and nothing else. Reward: the fraction of instances that
+survive. Every proposal - and every structure the agent simulates itself - is journalled with its
+legs and resolved at the expiry close (`playbook_outcome`), exact arithmetic, the slow evidence
+that audits the fast reward and I-16's declined structures scored at last.
+
+**Why band-conditional and not EV-after-costs.** Muse opportunities carry `drift_pct = 0.0` - their
+view is a band and a probability - so an EV reward under the thesis drift ties both arms at
+minus friction on the source that emits most, and the lever could never learn from it. The claim
+supplies the conditioning; no second measure is invented. Rejected alongside: a decide-prompt
+lever (a second decide loop per cycle, every order tool stubbed, no Bernoulli event); scoring the
+sources' free-text `suggested_structures`; "the trade matched the menu" (scores obedience); a
+capital-efficiency gate (kills condors on narrow ranges - D-077's max/max bias rebuilt in the
+reward; deep-ITM gaming is closed structurally by bounding anchors to +/-2.5 sigma instead).
+
+**Evidence.** On a fair-value zoo priced on the stack's own grid (spot 100, 7d, 25% vol): under a
+narrow range the 97/99-101/103 condor wins 100% when the claim holds and 4% when it fails while a
+100/105 call debit pays -$85 when the claim holds; under a bullish target it is the reverse (debit
+100%/21%, the spot-centred condor pays -$19); a fly narrower than the band loses inside the band it
+claims (-$13). Pinned as PILLAR-4 on fixed leg sets and mutation-verified (gates 4-5 disabled ->
+fails). Live the same day: NVDA 222-232 at 224.44 on the 09-11 chain (IV 31%) is a RANGE claim and
+the condor, iron fly and call fly survive; SPY 758-772 the same three; SPY floor 760 keeps the put
+credit and refuses the 765/777 call debit for paying -$202 when the floor merely holds; the loop's
+first muse emissions after wiring priced AVGO (bull target: both debit families survive) and MRK.
+
+**Two things the build found that the plan did not.** (1) A condor whose short strikes sit ON a
+target band is a faithful expression of that target - the reward passes it, and it should; the
+plan's table was computed at spot-centred strikes, and the pillar test now says so. (2) The
+options gate's chain is the feed's first page - the nearest expiry, 100 contracts, and on MRK
+one put at 135 against a 150 spot - so `attach` refetches, targeted at the horizon's expiry with a
+strike window around spot, whenever the page lacks the expiry OR enough quoted strikes of either
+right (`Chain.covers`, commit 4b). The plan's "zero extra network calls" became "one, usually".
+
+**The registry learned what it always claimed to know.** `MUTATE_PROMPT` carried the muse's
+scoring paragraph and contract sentence verbatim, so a second lever's challengers would have been
+generated against another subsystem's ruler. Both moved onto `Lever` (`reward_description`,
+`contract_note`), a `policy` lever names its own `validator_ref`, `validate_prompt` runs the
+`.format()` checks for prompt levers only, and the muse's rendered mutation prompt is pinned
+byte-identical by test. Also found on the way: the live muse challenger `v1` ends with a nine-dash
+echo of the rule line the ten-dash fence cleaner missed (I-124, cleaner fixed, text not edited -
+I-91 would close the trial); and at a ~50% base rate the existing floors promote an EQUAL
+challenger one time in three by sequential peeking (I-125) - `promote_at: 0.95` per lever, with
+the simulation table in `config.yaml`.
+
+**What it cannot reach, by construction.** The gates and their constants (`MIN_BAND_EDGE`,
+`ENTRY_CROSSINGS`, `MAX_ANCHOR_SIGMA`), the validator, the sentinels and the resolver are code;
+the catalogue is data. Sentinels are scoped to their lever now (`Sentinel.levers`), so the muse's
+entropy floor cannot revert a playbook experiment over concept diversity it cannot affect, and the
+playbook has its own (`playbook_entropy_floor`, distinct surviving families over the window).
+Nothing goes into the constitution (full, I-17); the knowledge went to one cued lesson
+(`structure-follows-the-thesis-shape`) and one technique page.
+
+**Verified:** 745 default tests (68 new), ruff clean, mypy clean on the new module (every error
+elsewhere pre-dates this), all seven scaffolds and `suite_at 30` green; `trdrbot playbook try` on
+NVDA, SPY range and SPY floor; `coach status` listing two levers; the `playbook_run` heartbeat and
+probe live; the AVGO and MRK rows and their decide-prompt rendering read back from the journal and
+the processed inbox. The playbook's first experiment opens on the Coach's next pulse after the
+mutation cooldown; its first expiry resolutions land 2026-09-04.
+
+**Revisit if:** promotions on `playbook.catalogue` outrun what `playbook.outcome_hit_rate` can
+explain (build I-125's sequential correction); the outcome stream shows rejected-as-indifferent
+candidates winning (retune `MIN_BAND_EDGE` from those rows, never from taste); or the agent keeps
+trading verticals with condors on the menu (then the deferred auto-join of menu survivors into
+`simulate_experiments` at live quotes, notes/026 section 15, earns its network call).

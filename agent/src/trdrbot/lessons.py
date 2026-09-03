@@ -245,6 +245,30 @@ LESSONS: tuple[Lesson, ...] = (
         cue="when judging a structure by how often it wins",
         tags=("expectancy", "calibration"),
     ),
+    Lesson(
+        "structure-follows-the-thesis-shape",
+        "A structure is faithful to a thesis only if it pays when the claim "
+        "holds and stops paying when it fails - and that is a property of "
+        "where the strikes sit against the band, not of the family's name. "
+        "Measured on a fair-value board (spot 100, 7 days, 25% vol, 1-sigma "
+        "$3.46): under a narrow range claim [98, 102] the 97/99-101/103 condor "
+        "wins 100% when the claim holds and 4% when it fails, while a "
+        "100/105 call debit PAYS -$85 when the claim holds; under a bullish "
+        "target [103, 108] it is the reverse - the debit wins 100% vs 21% and "
+        "the spot-centred condor pays -$19 when the target is reached. A fly "
+        "narrower than the band loses inside the band it claims to express "
+        "(-$13 on 99/100/101 under [98, 102]). And on live NVDA (224.44, IV "
+        "31%, 8 days) a 222-232 claim is a RANGE, not a rally: the condor "
+        "frees a third of the vertical's capital at similar P(win), the iron "
+        "fly trades P(win) for payoff, and only a long strangle wants vol "
+        "expansion. So before comparing EVs, ask which shape the claim is - "
+        "range, target, floor, ceiling - and read the playbook's holds/fails "
+        "columns: a candidate that wins about as often either way is "
+        "decoration, whatever its EV says.",
+        cue="when choosing between structures for a thesis, or when every "
+            "candidate on the board is a vertical",
+        tags=("structure", "expectancy", "playbook"),
+    ),
 )
 
 

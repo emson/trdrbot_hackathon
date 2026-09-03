@@ -1,5 +1,22 @@
 # 026 - The Playbook: structure choice becomes a Coach lever, measured before trusted
 
+> **BUILT 2026-09-03 (D-122), commits 1-5 of notes/026.** Live on the running loop from the
+> first commit; two levers on `trdrbot coach status`; the first live menus priced on AVGO and
+> MRK within an hour of wiring. This document is kept as the design record. **Where the build
+> diverged from this plan, the build is right** - 016's own closing rule, applied again:
+>
+> | Plan said | Built instead | Why |
+> |---|---|---|
+> | `Opportunity.proposed_structures: tuple[dict, ...]` | `Opportunity.playbook: dict` - a header (shape, expiry, spot, sigma, IV, priced_at, variant) plus `candidates` | the renderer and the resolver both need the board the menu was priced on; one key, one shape |
+> | zero extra network calls - price on the gate's chain | one targeted fetch (expiry at the horizon, a strike window around spot) whenever the gate's page has no expiry at the horizon OR too few quoted strikes of either right | measured live: the gate's page is the nearest expiry, 100 contracts, and on MRK it matched the horizon and carried one put at 135 against a 150 spot |
+> | validator refuses naked shorts via bounded loss | plus a per-right coverage rule: shorts must not exceed longs | a naked short PUT's loss is bounded at its strike (-$9,499 on a $96 strike) and the arithmetic alone would have passed it |
+> | the pillar test asserts a condor is refused on a target claim | asserted on FIXED spot-centred legs; the seed's band-anchored condor placed on a target band puts its shorts AT the band and the reward rightly passes it | faithfulness is where the strikes sit, not the family's name - the note's section-5 table was computed at fixed strikes |
+> | extend the loop smoke so the decide prompt contains `PLAYBOOK (` | the renderer is unit-tested and the tick's observation path is one call into it; verified live on the AVGO row | `_build_decide_prompt` needs a snapshot, a store, elfmem context and a posture - a smoke there is a second whole-system scaffold, and `scaffold_whole_system.py` already exists for that job |
+> | `render_comparison` gains the holds/fails line (optional sixth commit) | not shipped | the golden test's byte-identity is worth more than a duplicate of what the menu already shows; revisit when the outcome stream says the agent is ignoring the menu |
+> | `promote_at: 0.95` per lever | as planned, in `config.yaml` with the section-5 table as its comment | - |
+> | `trdrbot playbook status` in commit 4 | shipped in commit 3 with survival by shape and family; outcomes joined in commit 4 | - |
+
+
 Audience: an LLM implementer with full repo access. This document is self-contained: the
 finding, the design and why the alternatives lost, the simulation evidence, exact schemas,
 module-by-module specs, the edge cases with their required handling, the tests that must

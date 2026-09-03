@@ -196,14 +196,17 @@ uv run trdrbot usage          # spend by model and role, with cached share
 | `lessons show\|seed\|verify` | measured lessons, and whether they still recall |
 | `prompts` | every prompt the models read, with fingerprints |
 | `coach status\|pulse` | the self-improvement loop: levers, open trials, promotions |
+| `playbook show\|try\|status` | the structure lever: the live catalogue, priced on a real chain, and its survival by family |
 | `report` | write `data/report.html` - gauges over time, experiments, what the Coach did |
 | `modelcal status\|fit` | the model layer's calibration: fitted bootstrap inflation, holdout-vetoed |
 
 ## The Coach — subsystems that improve themselves
 
 Everything above improves when a human finds a defect. The Coach makes improvement a runtime
-behaviour: it runs paired A/B trials on the muse's collision prompt, scores each variant by the
-**fraction of its candidates that survive the muse's own deterministic gauntlet**, and promotes a
+behaviour: it runs paired A/B trials on declared **levers** - the muse's collision prompt, and the
+playbook's catalogue of structure families - scores each variant by a deterministic reward the
+lever cannot move (the fraction of the muse's candidates that survive its own gauntlet; the
+fraction of the playbook's instances that survive its band-conditional gates), and promotes a
 winner without asking.
 
 It is autonomous on purpose — approval gates block the feedback loop, and this is paper trading.
@@ -226,7 +229,23 @@ What makes that safe is that autonomy is bounded **by construction**, not by ask
 overlaid. To intervene, edit the lever's state file: `"paused": true` stops experimentation,
 which closes any open experiment and freezes the incumbent — that is how you hold behaviour
 still for a demo.
-Editing the incumbent prompt by hand is supported; the fingerprint is recomputed from the text.
+Editing the incumbent by hand is supported; the fingerprint is recomputed from the text - and it
+closes any open trial on that lever, because the pairing no longer describes what ran.
+
+**The playbook** is the second lever, and the answer to "which structure fits this thesis"
+(notes/026). The catalogue (YAML, `data/state/levers/playbook.catalogue.json`) declares structure
+families - verticals, condors, butterflies - each naming the thesis shapes it fits (range, bull
+target, bear target, bull floor, bear ceiling, derived from the band, never the label) and where
+its strikes sit against the band in expected-move units. For every admitted opportunity the
+incumbent is instantiated on the live chain and each instance meets fixed gates: every leg quoted,
+loss bounded, **pays after entry costs if the band holds, and wins at least 25 points more often
+when the band holds than when it fails** - `experiments.attribute` mirrored pre-trade. Survivors
+reach the decide agent as a priced menu beside the claim; the shadow challenger is scored on the
+same chain and writes nothing. Every proposal - and every structure the agent simulates itself -
+resolves at its expiry close, the slow evidence that audits the fast reward. Its promotion bar is
+0.95 rather than 0.90, because a reward near 50% has symmetric headroom and the same sequential
+peeking promotes an equal catalogue one time in three at 0.90. `trdrbot playbook try SPY --band
+758,772 --horizon 2026-09-10` prices the catalogue on a real chain.
 
 ## How a thesis is formed
 
@@ -240,8 +259,9 @@ Three independent sources, all landing in the same inbox seam:
 - **muse** — creative collision. Random wiki concepts × news × odds → argue the domino chains →
   every candidate pre-registered → adversarial evaluation → the top 2 graduate.
 
-The decide cycle then owns the trade: it validates against live quotes, simulates competing
-structures, sizes by earned calibration, and very often declines.
+Each opportunity arrives with the playbook's priced menu of structures for its shape. The decide
+cycle then owns the trade: it validates against live quotes, simulates competing structures
+(starting from the menu, adding its own), sizes by earned calibration, and very often declines.
 
 ## What makes it work
 
@@ -378,8 +398,12 @@ Rationale and rules: [`docs/principles_testing.md`](../docs/principles_testing.m
   the agent's own exit rules, sizing that refuses unbounded-LOSS structures (unbounded profit
   with a finite conditional payoff is sizeable - a long call is not a naked short), and
   book-level caps.
+- **The playbook's menu is indicative.** It is priced when the opportunity is admitted - by the
+  research desk that may be minutes or hours before a decision - on the market's own lognormal at
+  the expiry's ATM IV, and the decide cycle re-simulates at live quotes. Realized-vol theses carry
+  no menu: they are forecasts, not band claims.
 - **Known issues are tracked openly** in [`specs/issues.md`](../specs/issues.md) — recorded the
   moment they are found, removed only by the commit that fixes them.
 
-Design decisions and their reasoning: [`specs/decisions.md`](../specs/decisions.md) (D-001…D-094).
+Design decisions and their reasoning: [`specs/decisions.md`](../specs/decisions.md) (D-001…D-122).
 Architecture and invariants: [`specs/architecture.md`](../specs/architecture.md).
