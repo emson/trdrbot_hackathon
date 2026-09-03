@@ -4,24 +4,24 @@ sources:
 - id: src-1
   resource: discovery:news+polymarket+yahoo
   author: trdrbot/discovery
-  last_modified: '2026-09-01T21:24:15.679974+00:00'
+  last_modified: '2026-09-03T15:48:41.561474+00:00'
 generated:
-  at: '2026-09-01T21:24:15.679989+00:00'
-stale_after: '2026-09-02T21:24:15.679991+00:00'
+  at: '2026-09-03T15:48:41.561996+00:00'
+stale_after: '2026-09-04T15:48:41.562002+00:00'
 status: stable
 ---
 
 # What it is
-A consumer financial-services platform offering brokerage, options, cryptocurrency and event-contract trading.
+Robinhood operates a digital brokerage offering stocks, options, cryptocurrencies, cash management, and event contracts to retail customers.
 
 # Bull case
-Morgan Stanley upgraded the stock with a $150 target specifically on prediction-market growth, while the simultaneous geopolitical risk-off move in cryptocurrency creates a sharp conflict between an emerging growth catalyst and pressure on a major trading category. The upgrade and intact 21-day and 63-day uptrends support rebound potential after the 7.7% weekly decline, but the bootstrap remains non-directional with a slightly negative median and downside-tail probability marginally above upside-tail probability.
+A greater-than-10% upgrade-driven surge coincides with a crypto rally and evidence that event contracts have become material revenue. That creates strong momentum but also reversal risk because the prediction-market business faces a Supreme Court test. Momentum is strong above both moving averages after a 10.6% weekly gain, but volatility is elevated and the bootstrap slightly favors a drop of at least 5% (32%) over a gain of at least 5% (29%).
 
 # Bear case
-Further cryptocurrency weakness or geopolitical risk aversion could pressure trading activity and extend the pullback.
+Reversal after the upgrade-driven surge, compounded by regulatory risk around event contracts and limited upside to the analyst target.
 
 # People
 (not researched - discovery pass)
 
 # Environment
-Verdict: watch. Evidence: "Morgan Stanley upgraded Robinhood with a price target of $150, citing growth in prediction markets" — Benzinga, 2026-09-01; "Bitcoin and Ethereum fall as Trump orders military strikes, increasing risk-off sentiment" — Benzinga, 2026-09-01; "Bitcoin stalls near $77,000 as Ethereum, XRP, Dogecoin dro
+Verdict: watch. Evidence: Robinhood stock surged over 10% after receiving Wall Street upgrades and strong revenue.; Robinhood earned $156 million from event contracts in Q2 amid a Supreme Court test.; Bitcoin surged above $80,000 following Fed Governor Waller's support for a rate hold.; Prediction-market odds show only a 1% 

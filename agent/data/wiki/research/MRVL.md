@@ -4,7 +4,7 @@ sources:
 - id: src-1
   resource: discovery:news+polymarket+yahoo
   author: trdrbot/discovery
-  last_modified: '2026-09-02T14:04:25.823174+00:00'
+  last_modified: '2026-09-03T13:44:31.228509+00:00'
 - id: src-2
   resource: discovery:news+polymarket+yahoo
   author: trdrbot/discovery
@@ -22,22 +22,22 @@ sources:
   author: trdrbot/discovery
   last_modified: '2026-08-28T15:31:02.123203+00:00'
 generated:
-  at: '2026-09-02T14:04:25.824214+00:00'
-stale_after: '2026-09-03T14:04:25.824220+00:00'
+  at: '2026-09-03T13:44:31.229656+00:00'
+stale_after: '2026-09-04T13:44:31.229665+00:00'
 status: stable
 ---
 
 # What it is
-A semiconductor company focused on data-center, networking, storage and connectivity chips.
+Marvell designs semiconductors for data-center, networking, carrier-infrastructure, automotive, and storage applications.
 
 # Bull case
-The stock declined despite strong earnings because investors focused on margins, creating a potential post-earnings dislocation between operating momentum and profitability concerns. Highly volatile and two-sided with a slight downside skew. The stock is below both SMA20 and SMA50 after a 16.5% five-day decline; the bootstrap gives a 24% chance of gaining at least 5% versus a 26% chance of losing at least 5%.
+The stock pulled back despite revenue exceeding estimates, with the decline attributed to market rotation rather than a disclosed deterioration in results. That divergence offers a cleaner potential dislocation than chasing an earnings winner. Through 2026-09-11, a rebound is plausible because the revenue beat was not accompanied by disclosed fundamental deterioration, but the 15.0% five-day decline and position below both moving averages keep the near-term setup bearish-to-neutral. The bootstrap is slightly downside-skewed, with 33% probability of a loss of at least 5% versus 28% probability of a gain of at least 5%.
 
 # Bear case
-Margin concerns and weak trend persistence could overwhelm any post-earnings rebound.
+Market rotation and semiconductor multiple compression may continue despite sound operating results.
 
 # People
 (not researched - discovery pass)
 
 # Environment
-Verdict: watch. Evidence: Benzinga: "Marvell Technology's stock is lower due to margin concerns despite strong earnings."; Benzinga: U.S. stock futures fell as global tensions escalated, providing a risk-off backdrop that could amplify the post-earnings decline.
+Verdict: watch. Evidence: Marvell's Q2 revenue beat estimates.; The post-results stock pullback was attributed to market rotation.

@@ -21,3 +21,7 @@ one component that publishes.
   hand-edit or regenerate.
 - Defects and decisions are logged, not rediscovered:
   [`specs/decisions.md`](specs/decisions.md), [`specs/issues.md`](specs/issues.md).
+- Before adding or changing a Coach lever: the `TO REGISTER A NEW LEVER` comment in
+  `agent/src/trdrbot/coach_pkg/state.py`, and
+  [`specs/notes/026_playbook_structure_lever.md`](specs/notes/026_playbook_structure_lever.md)
+  for the second lever's build record and the rules a reward must obey.

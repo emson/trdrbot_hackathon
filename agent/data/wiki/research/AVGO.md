@@ -5,23 +5,27 @@ sources:
   resource: computed:market_stats
   author: trdrbot/research
   last_modified: '2026-09-03T00:05:59.754012+00:00'
+- id: src-2
+  resource: discovery:news+polymarket+yahoo
+  author: trdrbot/discovery
+  last_modified: '2026-09-03T15:48:41.559411+00:00'
 generated:
-  at: '2026-09-03T00:05:59.754024+00:00'
-stale_after: '2026-09-04T00:05:59.754025+00:00'
+  at: '2026-09-03T15:48:41.559890+00:00'
+stale_after: '2026-09-04T15:48:41.559893+00:00'
 status: stable
 ---
 
 # What it is
-Broadcom is a semiconductor and infrastructure-software company with exposure to networking, custom accelerators, connectivity, and enterprise software. Its results are increasingly associated with AI infrastructure demand. (model knowledge)
+Broadcom supplies semiconductors and infrastructure software used in data centers, networking, connectivity, and enterprise systems.
 
 # Bull case
-Broadcom beat Q3 estimates and reported a 221% increase in AI revenue, validating strong underlying AI demand. Its 5-day gain of 3.3% suggests that buyers were attempting a rebound before or around the report.
+The post-earnings decline may be an overreaction to supply-limited guidance rather than weakening demand: AI revenue grew more than 200%, and a market expert explicitly expects recovery as that strength is recognized. Fundamental AI demand supports rebound potential, but the 5-day setup remains weak: price is below both moving averages, RSI is 35, and the bootstrap shows P(+5%) of 20% versus P(-5%) of 23%.
 
 # Bear case
-Shares slid on soft guidance and remain below both moving averages after declines of 12.1% over 21 days and 23.2% over 63 days. The earnings beat may therefore be insufficient to reverse the established downtrend immediately.
+Supply-constrained guidance and persistent downside momentum could delay recognition of AI strength.
 
 # People
-Hock Tan is Broadcom's chief executive and leads its semiconductor and infrastructure-software strategy. (model knowledge) No named individual is included in the supplied Broadcom summaries, although its earnings call and competitive positioning are discussed.
+(not researched - discovery pass)
 
 # Environment
-AI revenue growth is a major tailwind, but investors are distinguishing between backward-looking beats and forward guidance. Weak QQQ breadth and rising yields make the market less forgiving of guidance disappointments.
+Verdict: watch. Evidence: Broadcom's Q2 AI revenue grew over 200%, but supply constraints limit guidance for FY27-28.; Broadcom stock declined post Q3 results, though a market expert expects recovery due to AI revenue recognition.; Jensen Huang's framework identified Broadcom among companies positioned to benefit from advanc
