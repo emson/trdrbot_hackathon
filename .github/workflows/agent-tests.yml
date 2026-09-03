@@ -1,0 +1,25 @@
+# The agent's offline suite. No secrets, no network: pytest runs with sockets
+# disabled by default (see agent/pyproject.toml), so a green run here means the
+# same thing it means locally - and a test that quietly reached a real API
+# would fail rather than pass slowly.
+name: agent tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: agent      # the agent owns its own project and venv
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - run: uv sync --locked
+      - run: uv run pytest -q
+      - run: uvx ruff check .
