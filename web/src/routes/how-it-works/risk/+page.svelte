@@ -79,7 +79,7 @@
 		<p class="standfirst" style="margin-top:.5rem">
 			Everything above is <em>earned</em> — the ladder decides how much size the record
 			justifies. <strong>Risk appetite</strong> is the one quantity on that posture the agent
-			did not earn and may not touch: a single scalar in <span class="code">config.yaml</span>,
+			did not earn and may not touch: a single scalar in <span class="code">agent/config.yaml</span>,
 			clamped to <span class="code">[0.25, 2.0]</span>, where 1.0 means "the posture the ladder
 			alone would choose".
 		</p>

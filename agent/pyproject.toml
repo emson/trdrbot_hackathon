@@ -2,6 +2,11 @@
 name = "trdrbot"
 version = "0.1.0"
 description = "AI options trading agent for the Alpaca AI Trading Agents Hackathon"
+# The LICENSE file itself lives at the repository root, one level up, and
+# hatchling cannot reach above the project root to package it - `license-files`
+# pointing there built cleanly and shipped nothing, which is worse than not
+# saying it. The SPDX expression is what actually reaches the metadata.
+license = "MIT"
 requires-python = ">=3.11"
 dependencies = [
     "langgraph>=0.2",

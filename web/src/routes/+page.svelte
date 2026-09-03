@@ -50,7 +50,7 @@
 			<div class="card">
 				<span class="stat-tile"><span class="label">Equity</span>
 					<span class="big">{usd(acct.equity)}</span>
-					<span class="provenance">data/journal.jsonl · competence</span></span>
+					<span class="provenance">agent/data/journal.jsonl · competence</span></span>
 			</div>
 			<div class="card">
 				<span class="stat-tile"><span class="label">P&amp;L since $100,000 start</span>
