@@ -27,5 +27,7 @@ export const glossary = [
 	{ term: 'MCP (Model Context Protocol)', def: 'The open protocol this agent uses to call Alpaca’s trading tools directly — quotes, option chains, order placement — as structured tool calls rather than a bespoke API integration.' },
 	{ term: 'Paper trading', def: 'Simulated trading against real live market prices with fake money — no real capital or counterparty risk, which is why this project can publish its full record.' },
 	{ term: 'Assignment', def: 'When an option seller is required to fulfil the contract (buy or sell the underlying) because the buyer exercised it — usually because it finished in the money.' },
-	{ term: 'Pin risk', def: 'The uncertainty of whether an option finishing very close to its strike at expiry will be exercised, which can leave an unexpected stock position behind.' }
+	{ term: 'Pin risk', def: 'The uncertainty of whether an option finishing very close to its strike at expiry will be exercised, which can leave an unexpected stock position behind.' },
+	{ term: 'Edge', def: 'P(profit | claim holds) minus P(profit | claim fails) — how much more often a structure wins when the thesis is right than when it is wrong. Zero means the structure is indifferent to the claim.' },
+	{ term: 'P(profit | claim holds)', def: 'The probability this structure profits, computed only over the outcomes where the thesis band actually held — the market’s own lognormal distribution, conditioned on the claim.' }
 ];

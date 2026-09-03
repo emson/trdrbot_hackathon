@@ -1,7 +1,11 @@
 <script>
 	import { usd } from '$lib/format.js';
 
-	let { payoff = {}, entrySpot = null } = $props();
+	// `band`, when given, shades the thesis's claimed range behind the payoff
+	// (notes/028's demo replay) - {low, high}, either end nullable for a
+	// one-sided claim. A plain position page never passes it, and the shading
+	// is skipped entirely - unchanged from before this prop existed.
+	let { payoff = {}, entrySpot = null, band = null } = $props();
 	const uid = $props.id();
 
 	const W = 640, H = 280, M = { l: 64, r: 20, t: 20, b: 34 };
@@ -31,6 +35,12 @@
 	);
 	let breakevens = $derived((payoff.breakevens || []).filter((b) => b >= xmin && b <= xmax));
 	let xTicks = $derived([xmin, (xmin + xmax) / 2, xmax]);
+
+	// The claimed band, clamped to the visible price range. A one-sided
+	// claim (band_high null, say) shades to the chart's own edge rather than
+	// drawing nothing - the claim IS one-sided, that's not missing data.
+	let bandX0 = $derived(band ? xs(Math.max(band.low ?? xmin, xmin)) : null);
+	let bandX1 = $derived(band ? xs(Math.min(band.high ?? xmax, xmax)) : null);
 </script>
 
 {#if payoff.derivable && points.length}
@@ -38,6 +48,14 @@
 		<svg class="chart" viewBox="0 0 {W} {H}" role="img" aria-label="Payoff at expiry chart">
 			<clipPath id="above-{uid}"><rect x={M.l} y={M.t} width={innerW} height={Math.max(0, zeroY - M.t)} /></clipPath>
 			<clipPath id="below-{uid}"><rect x={M.l} y={zeroY} width={innerW} height={Math.max(0, M.t + innerH - zeroY)} /></clipPath>
+
+			{#if band && bandX1 > bandX0}
+				<!-- No inline label - it would collide with a breakeven or axis
+				     label at exactly this y-position on a narrow band (measured:
+				     it did). The caption above the chart names it instead. -->
+				<rect x={bandX0} y={M.t} width={bandX1 - bandX0} height={innerH}
+					fill="var(--accent)" opacity="0.09" />
+			{/if}
 
 			<path d={areaPath} fill="var(--accent-soft)" clip-path="url(#above-{uid})" />
 			<path d={areaPath} fill="var(--danger-soft)" clip-path="url(#below-{uid})" />

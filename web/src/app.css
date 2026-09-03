@@ -362,6 +362,42 @@ details.expand > summary::before { content: "show reasoning \2192"; }
 details.expand[open] > summary::before { content: "hide reasoning \2193"; }
 details.expand .prose { margin-top: .6rem; }
 
+/* ── /demo — the replay reel ──────────────────────────────────────── */
+.reel { display: flex; gap: .6rem; overflow-x: auto; padding-bottom: .3rem; scroll-snap-type: x proximity; }
+.reel-chip { flex: none; scroll-snap-align: start; display: flex; flex-direction: column; gap: .3rem;
+	font: inherit; text-align: left; cursor: pointer; padding: .7rem .9rem; min-width: 11rem;
+	border: 1px solid var(--paper-line); border-radius: var(--r-sharp); background: var(--paper-raised); }
+.reel-chip[aria-pressed="true"] { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+.reel-chip:hover { border-color: var(--accent); }
+.reel-chip-name { font-weight: 650; }
+
+/* ── /demo — replay frames ────────────────────────────────────────── */
+.frame { animation: rise .24s ease-out; }
+@keyframes rise { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) { .frame { animation: none; } }
+
+/* ── /demo — candidate structures table ───────────────────────────── */
+.cand-table tbody tr { cursor: pointer; }
+.cand-table tbody tr.rejected { color: var(--ink-faint); }
+.cand-table tbody tr.selected { background: var(--accent-soft); }
+.cand-table tbody tr:hover { background: var(--paper-sunk); }
+
+/* ── /demo — funnel ────────────────────────────────────────────────── */
+.funnel { display: flex; flex-direction: column; gap: .9rem; }
+.funnel-step { display: grid; grid-template-columns: 6.5rem 1fr; gap: .2rem .9rem; align-items: center; }
+.funnel-label { font-family: var(--mono); font-size: .74rem; letter-spacing: .06em; text-transform: uppercase;
+	color: var(--ink-soft); }
+.funnel-track { grid-column: 2; height: 8px; background: var(--paper-sunk); border-radius: 4px; overflow: hidden; }
+.funnel-bar { height: 100%; background: var(--accent); border-radius: 4px; }
+.funnel-step .fine { grid-column: 2; }
+
+/* ── /demo — the Coach's posterior bar ────────────────────────────── */
+.posterior { display: flex; align-items: center; gap: .6rem; }
+.posterior-track { position: relative; flex: 1; height: 8px; background: var(--paper-sunk); border-radius: 4px; }
+.posterior-fill { height: 100%; background: var(--accent); border-radius: 4px; }
+.posterior-tick { position: absolute; top: -3px; width: 2px; height: 14px; background: var(--accent); opacity: .6; }
+.posterior-tick.caution { background: var(--caution); }
+
 /* ── responsive helpers ────────────────────────────────────────────── */
 img, svg { max-width: 100%; }
 ::selection { background: var(--accent-soft); color: var(--ink); }
