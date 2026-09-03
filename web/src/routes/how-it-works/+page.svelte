@@ -33,19 +33,19 @@
 <section class="block ledger" style="padding-top:0">
 	<div class="wrap">
 		<div class="cols c5">
-			<div class="card stage"><span class="fine">01</span><h3>Sense</h3>
+			<div class="card"><span class="fine">01</span><h3>Sense</h3>
 				<p class="muted">Prices, positions, news, odds, technicals.</p>
 				<p class="fine">every 60s · no LLM</p></div>
-			<div class="card stage"><span class="fine">02</span><h3>Think</h3>
+			<div class="card"><span class="fine">02</span><h3>Think</h3>
 				<p class="muted">Form a falsifiable view; price ≥2 ways to express it.</p>
 				<p class="fine">~15 min · LLM + arithmetic</p></div>
-			<div class="card stage"><span class="fine">03</span><h3>Act</h3>
+			<div class="card"><span class="fine">03</span><h3>Act</h3>
 				<p class="muted">Place the multi-leg order, verify against broker truth.</p>
 				<p class="fine">Alpaca MCP</p></div>
-			<div class="card stage"><span class="fine">04</span><h3>Learn</h3>
+			<div class="card"><span class="fine">04</span><h3>Learn</h3>
 				<p class="muted">Guard the position deterministically; judge it honestly.</p>
 				<p class="fine">every 60s · no LLM</p></div>
-			<div class="card stage"><span class="fine">05</span><h3>Remember</h3>
+			<div class="card"><span class="fine">05</span><h3>Remember</h3>
 				<p class="muted">Route what was learned to the store shaped to hold it.</p>
 				<p class="fine">four stores</p></div>
 		</div>
@@ -146,13 +146,13 @@
 		<span class="kicker">Stage 5 · Remember</span>
 		<h2 style="margin:.4rem 0 .8rem">Four stores, one for each kind of knowledge.</h2>
 		<div class="cols c4">
-			<div class="card stage"><h3>journal</h3><p class="muted">Append-only events. What
+			<div class="card"><h3>journal</h3><p class="muted">Append-only events. What
 				happened, when, and which model said so. Never rewritten.</p></div>
-			<div class="card stage"><h3>wiki</h3><p class="muted">Stable reference that rewrites
+			<div class="card"><h3>wiki</h3><p class="muted">Stable reference that rewrites
 				itself: position pages, company dossiers, the regime page.</p></div>
-			<div class="card stage"><h3>elfmem</h3><p class="muted">Evolving memory with decay and
+			<div class="card"><h3>elfmem</h3><p class="muted">Evolving memory with decay and
 				reinforcement — credited by verdict, never by raw P&amp;L.</p></div>
-			<div class="card stage"><h3>ledger</h3><p class="muted">Every falsifiable claim ever
+			<div class="card"><h3>ledger</h3><p class="muted">Every falsifiable claim ever
 				made, traded or not — the trial count a multiple-testing correction needs.</p></div>
 		</div>
 		<p class="lead" style="margin-top:1rem">The ledger is the quiet one that matters most: it
@@ -193,7 +193,15 @@
 
 <section class="block ledger">
 	<div class="wrap">
-		<div class="cols c3">
+		<div class="cols c4">
+			<div>
+				<span class="kicker">See it live</span>
+				<h2 style="margin-top:.5rem">Watch it decide.</h2>
+				<p class="standfirst" style="margin-top:.6rem">One real cycle of this loop, replayed
+					stage by stage - the claim, the structures priced, what it did, how it scored.</p>
+				<a class="btn ghost sm" style="margin-top:.9rem" href="/demo">
+					Watch it decide <Icon name="arrowRight" size={14} /></a>
+			</div>
 			<div>
 				<span class="kicker">Go deeper</span>
 				<h2 style="margin-top:.5rem">Risk &amp; sizing.</h2>

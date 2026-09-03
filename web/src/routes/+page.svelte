@@ -30,9 +30,10 @@
 					a more honest one.
 				</PageHeader>
 				<div style="display:flex; gap:.7rem; flex-wrap:wrap">
-					<a class="btn primary" href="/ledger">
-						See the ledger <Icon name="arrowRight" size={16} />
+					<a class="btn primary" href="/demo">
+						Watch it decide <Icon name="arrowRight" size={16} />
 					</a>
+					<a class="btn ghost" href="/ledger">See the ledger</a>
 					<a class="btn ghost" href="/submission">For judges</a>
 				</div>
 				<TickIndicator tick={data.tick} generatedAt={data.generatedAt} now={new Date(data.generatedAt).getTime()} />

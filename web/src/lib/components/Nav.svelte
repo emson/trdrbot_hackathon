@@ -5,12 +5,21 @@
 	import ThemeToggle from './ThemeToggle.svelte';
 
 	const links = [
+		{ href: '/demo', label: 'Demo' },
 		{ href: '/ledger', label: 'Ledger' },
 		{ href: '/scoreboard', label: 'Scoreboard' },
 		{ href: '/how-it-works', label: 'How it works' },
 		{ href: '/resources', label: 'Resources' },
 		{ href: '/build-log', label: 'Build log' },
 		{ href: '/submission', label: 'For judges' }
+	];
+	// Mobile-sheet-only links, folded into one array with `links` rather than
+	// hardcoded separately in the markup below (found while wiring up /demo -
+	// two lists of nav destinations is one more than this needs).
+	const mobileExtraLinks = [
+		{ href: '/notes', label: 'Notes' },
+		{ href: '/data', label: 'Data' },
+		{ href: '/glossary', label: 'Glossary' }
 	];
 
 	let open = $state(false);
@@ -52,9 +61,9 @@
 			{#each links as l}
 				<a href={l.href} onclick={() => (open = false)}>{l.label}</a>
 			{/each}
-			<a href="/notes" onclick={() => (open = false)}>Notes</a>
-			<a href="/data" onclick={() => (open = false)}>Data</a>
-			<a href="/glossary" onclick={() => (open = false)}>Glossary</a>
+			{#each mobileExtraLinks as l}
+				<a href={l.href} onclick={() => (open = false)}>{l.label}</a>
+			{/each}
 		</div>
 	</div>
 {/if}

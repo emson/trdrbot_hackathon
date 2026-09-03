@@ -305,6 +305,10 @@ svg.chart { display: block; width: 100%; height: auto; overflow: visible; }
 .nav-links a { color: var(--ink-soft); text-decoration: none; }
 .nav-links a:hover, .nav-links a[aria-current="page"] { color: var(--accent); }
 @media (min-width: 760px) { .nav-links { display: flex; } }
+/* Seven links at 1.5rem gaps crowds the bar right above the 760px
+   breakpoint (measured while adding /demo, notes/028) - tighten the gap
+   only in that narrow band; 900px+ has room for the roomier spacing. */
+@media (min-width: 760px) and (max-width: 900px) { .nav-links { gap: 1.1rem; } }
 .nav-right { display: flex; align-items: center; gap: .7rem; }
 .icon-btn { background: none; border: 1px solid var(--paper-line); border-radius: var(--r-sharp);
 	width: 34px; height: 34px; display: grid; place-items: center; cursor: pointer; color: var(--ink-soft); }

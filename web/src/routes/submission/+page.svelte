@@ -49,6 +49,7 @@
 			did it just get lucky? Only the first two ever move its confidence. Paper trading only.
 		</PageHeader>
 		<div style="display:flex; gap:.7rem; flex-wrap:wrap; margin-top:1rem">
+			<a class="btn primary" href="/demo">Watch it decide <Icon name="arrowRight" size={14} /></a>
 			<a class="btn ghost" href={siteConfig.deckPath} target="_blank" rel="noopener noreferrer">Slide deck <Icon name="external" size={14} /></a>
 			{#if siteConfig.videoUrl}
 				<a class="btn ghost" href={siteConfig.videoUrl} target="_blank" rel="noopener noreferrer">Video walkthrough <Icon name="external" size={14} /></a>

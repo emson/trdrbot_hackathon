@@ -108,10 +108,35 @@ docs/deck.html` (no `--write`) to confirm it resolves cleanly, then
 - `web/src/routes/+page.svelte` — the tiles/cards below the hero:
   - "Two questions, not one." section (the attribution 2×2)
   - "Three ways in." cards — The record / The machine / The scorecard
+- `web/src/routes/demo/+page.svelte` — the standfirst under "Watch Theo
+  decide.", and each frame's own heading (see "The demo page" below)
 - `docs/deck.html` — the "What the model decides, and what the code decides"
   slide and the closing slide ("Any agent can make money for a week…"). Treat
   these as the *backing evidence* for the hero's claims — if the hero says
   something these slides don't support, fix the hero, not the slides.
+
+## The demo page (notes/028)
+
+`/demo` replays real decide cycles from `snapshot.cycles[]` (the `cycles`,
+`funnel`, `coach`, and extended `forecasts_resolved` sections `site_export.py`
+builds - see `build_cycles`, `build_funnel`, `build_coach`,
+`extend_forecasts`). The copy in `+page.svelte`'s frames is the source of
+truth for that page's wording; check it, not this file, before rewriting it.
+
+Two rules that matter more than the wording:
+
+- **The reel selects itself.** `build_cycles`' reel rule (the latest cycle
+  always qualifies; an older one needs to have traded, recorded a thesis, or
+  priced a structure) picks which cycles appear - never hand-pick a "good"
+  cycle by editing the exporter or the page.
+- **A frame renders `not recorded` or its own stated empty line, never a
+  reconstruction.** If a value is not on a `cycles[]` row, it does not
+  appear - it is not derived, parsed from prose, or guessed at on the page.
+
+`web/src/lib/demo.js` holds the page's view-model logic (cycle/thesis/
+candidate selection, the URL hash round-trip, `daysUntil` computed from
+`generatedAt` rather than the browser clock) - node-tested in
+`scripts/demo.test.mjs`, same runner as `inject-figures.test.mjs`.
 
 ## Publish checklist for a copy or code change
 

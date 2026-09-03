@@ -5743,3 +5743,71 @@ explain (build I-125's sequential correction); the outcome stream shows rejected
 candidates winning (retune `MIN_BAND_EDGE` from those rows, never from taste); or the agent keeps
 trading verticals with condors on the menu (then the deferred auto-join of menu survivors into
 `simulate_experiments` at live quotes, notes/026 section 15, earns its network call).
+
+## D-123 - Watch it decide: the demo replays recorded cycles, and the snapshot stops shipping to the browser
+**Date:** 2026-09-03
+**Status:** accepted
+**Plan:** [notes/028](notes/028_demo_page.md), built in six commits the same day.
+
+**Context.** A hackathon judge cannot watch this loop think - the reasoning is real and complete
+on the record (the journal already writes candidate structures, sizing decisions, and every
+declined thesis), but it is scattered across four pages a visitor has to assemble by hand. A
+reference site in the same competition ships a live-looking dashboard instead - connection
+pills, an activity feed - which reads as busy without showing a single decision. Both extremes
+were rejected: a real-time dashboard contradicts the site's own static build (every page already
+prerenders from `snapshot.json`, nothing fetches at runtime), and a dashboard of panels is not a
+decision.
+
+**Choice: a replay, not a dashboard.** `/demo` picks one real decide cycle from a rule-selected
+reel (the latest always qualifies; an older cycle needs to have traded, recorded a thesis, or
+priced a structure) and walks it through the five stages `how-it-works` already teaches - Sense,
+Think, Act, Learn, Remember - using only values already on the record. Nothing is generated for
+the page: a missing value renders `not recorded`, never a guess. Below the replay, three sections
+built from real counts: a funnel from idea to attribution with the not-taken remainder written
+next to the part that went on, every resolved forecast as a dot at its stated probability, and the
+Coach's open experiment rendered through the same `coach.tally`/`coach.verdict` calls
+`trdrbot coach status` uses.
+
+**The join, validated before it was trusted.** A decide cycle is a `decision` journal row and its
+one outcome row; attributing the rows between them by file order alone breaks on concurrent
+decision batches (found live, 27-28 Aug: two decisions open before either closes, outcome rows
+landing out of order). `structures_simulated` and `sizing` rows now carry `decision_ref` at the
+source; `structures_simulated` already carried `thesis_entry_id`, a direct link to the exact
+ledger entry it priced. Everything else falls back to timestamp membership with an underlying
+tie-break, and the exporter counts and prints how often that fallback had to guess.
+
+**Found on the way: every page was downloading the whole snapshot.** Every `+page.js` was a
+UNIVERSAL load, so Vite bundled the 898 KB `snapshot.json` into one shared client chunk and every
+page fetched the whole thing before slicing it in the browser - the `load()` narrowing believed to
+protect page weight protected nothing (I-126). Renamed to `+page.server.js` throughout; under
+`adapter-static` + `prerender` these still run at build time, but only each page's own returned
+slice reaches its HTML. Verified, not assumed: the largest client chunk went from 864,845 bytes
+(containing the snapshot's own text) to 46,316 bytes, and the rendered `<body>` of three pages
+diffed byte-identical before and after.
+
+**Rejected alongside:** a live dashboard with a runtime fetch (the reference site's shape, and a
+contradiction of the static build); a typewriter "activity stream" of journal rows (motion without
+meaning); a standalone HTML document like the risk explorer (would duplicate `format.js`, the
+chart components, and the snapshot slicing - the exact drift notes/027 removed); a charting
+library (every chart here is a polyline, a rectangle, and dots - the zero-dependency pattern
+`EquityCurve`/`PayoffChart` already prove); a Sankey for the funnel (bars with the remainder
+written out say the same thing legibly for eight stages of very different scale); parsing the
+blog's own "Structures considered" markdown table for cycles before 3 Sep (reconstruction from a
+rendered artifact - the page links to the story instead); client-side payoff arithmetic from
+candidate legs (a second `optmath.pnl_at`, forbidden by the same rule notes/027 states - the
+kinked polyline is computed once, in Python, from the candidate's own quoted legs).
+
+**Evidence.** Run for real against the live journal (2,711 rows) before any Svelte was written:
+20 of 204 cycles selected for the reel, 74.7 KB, 3 in-progress decisions, 3 ambiguous joins (both
+real concurrent batches). Verified in the browser, light and dark: a real traded PLTR cycle end
+to end - both candidates priced, the chosen one marked, the payoff chart shaded with the claimed
+band, sizing bound by Kelly, the resolution chart. 14 new Python tests on the join's actual
+failure modes (concurrent batches, `decision_ref` beating interval containment,
+`thesis_entry_id` beating both, the reel's latest-always-included rule); 10 new JS tests on the
+page's view-model (`daysUntil` from `generated_at` rather than the browser clock, calibration
+deciles excluding code-default probabilities).
+
+**Revisit if:** `playbook_outcome` starts writing (11 Sep) and the Coach section should show the
+slow audit resolving; the muse-vs-playbook prompt diff becomes worth showing (deferred, needs the
+opportunity to carry the muse row id first); a sizing refusal actually occurs (the `Callout
+caution` path is built, never yet exercised).
