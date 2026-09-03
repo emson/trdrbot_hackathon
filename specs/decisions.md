@@ -4997,6 +4997,10 @@ same paragraph five times. `all_concepts` excludes `.history.md` the way it excl
 the muse can never sample yesterday's regime as an idea. Any page can use it; the regime is the
 one that needed it today.
 
+*(Amended by D-121: it is `Wiki.archive(concept_id, body)` and research calls it AFTER the write
+succeeds. Calling it before meant every refusal by the augmentation guard archived anyway, so a
+page frozen by one stray heading grew an identical copy per daily refresh - I-121.)*
+
 ## D-111 - The Coach respects a revert, and shared legs are named
 
 `coach.reconcile` re-applied the last promotion whenever the incumbent was not the promoted

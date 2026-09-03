@@ -1,5 +1,16 @@
 # Remediation plan: I-75 to I-123
 
+> **COMPLETE, 2026-09-03.** All six waves shipped as D-115 to D-121, plus D-117 (which closed I-74
+> as a side effect). No entry from I-75 to I-123 remains open in `specs/issues.md`. I-29 is
+> **re-opened and amended** rather than closed - the harness that produced its 15-18pp measurement
+> was itself mis-specified, so the magnitude is unsupported until re-measured (D-119).
+> `tests/scaffold_adversarial.py` is burnt down: all sixteen attacks are deleted and pinned as
+> regression tests, and only the X12 control remains. Suite: 609 -> 680 passing, ruff clean, all
+> seven scaffolds green, and `scripts/suite_at.py` green at +1, +7, +30, +90 and +400 days.
+>
+> This document is kept as written, in the present tense, because it is the audit trail for those
+> seven decisions and the reasoning is what makes them checkable.
+
 **Forty-nine defects, eleven root causes, six waves.** Every entry in `specs/issues.md` from I-75
 to I-123 was reproduced against the real code before it was written down, and none is caught by
 the current suite (609 green). This plan says what to fix, in what order, at which seam, and how
@@ -509,14 +520,32 @@ The project's own rules, restated because this plan produces a lot of commits:
 
 ## 13. Checklist
 
-- [ ] W1 lands and the loop is restarted; scaffold X1, X2, X3 flip to FAIL
-- [ ] W2 lands; X4, X9, X13, X14, X15, X16 flip
-- [ ] W3 lands; X5, X6, X7, X8, X10 flip; D-105 amended in `decisions.md`
-- [ ] W4: harness fixed, re-fitted, holdout consulted, I-29 re-measured or the correction withdrawn
-- [ ] W5: nine Coach issues closed across four commits; `coach_repro_1..9` all flip
-- [ ] W6: the remaining sixteen; `chassis_repro_*`, `sources_repro_*`, `memory_repro_*` flip
-- [ ] X11, X12, X17 flip (X12 is a control and must keep passing as a control, not as an attack)
-- [ ] `tests/scaffold_adversarial.py` is empty and its scenarios are pinned regression tests
-- [ ] `uv run pytest` green, `uv run python scripts/suite_at.py 30` green, ruff clean
-- [ ] `specs/issues.md` carries no OPEN entry from I-75 to I-123 without a D-number
-- [ ] The reproduction scripts move into the repo or are deliberately discarded
+- [x] W1 lands and the loop is restarted; scaffold X1, X2, X3 flip to FAIL — **D-115**
+- [x] W2 lands; X4, X9, X13, X14, X15, X16 flip — **D-116**
+- [x] W3 lands; X5, X6, X7, X8, X10 flip; D-105 amended in `decisions.md` — **D-116/D-118**
+- [x] W4: harness fixed, re-fitted, holdout consulted, I-29 re-measured or the correction withdrawn
+      — **D-119.** Re-fitted k = 1.10 / 1.05 / **1.00**; the holdout WITHDREW the 10-session
+      correction, and I-29's 15-18pp figure is unsupported until re-measured.
+- [x] W5: nine Coach issues closed — **D-120** (one commit, not four; the four groups are the four
+      sections of that decision)
+- [x] W6: the remaining sixteen — **D-121**
+- [x] X11, X12, X17 flip (X12 is a control and must keep passing as a control, not as an attack).
+      X12's setup was a byte-identical copy of its own position at another quantity - one leg set,
+      i.e. one fill - and was rebuilt as the two genuinely different structures it always meant.
+- [x] `tests/scaffold_adversarial.py` is empty and its scenarios are pinned regression tests —
+      all sixteen attacks deleted, each mapped to its pinned test in the file's own header. The
+      **X12 control stays**: it is the only place the shared-leg close is driven through the whole
+      real decide -> record -> reconcile -> exit path rather than from two pages written straight
+      into the store, and the plan requires it to keep passing.
+- [x] `uv run pytest` green (680), `scripts/suite_at.py` green at +1/+7/+30/+90/+400, ruff clean
+- [x] `specs/issues.md` carries no OPEN entry from I-75 to I-123 without a D-number
+- [x] The reproduction scripts move into the repo or are deliberately **discarded**: every one of
+      them is superseded by a mutation-verified regression test that reproduces the same defect
+      through the public API, which is a stricter form of the same evidence and one the suite runs
+      on every commit. Keeping a second copy that nothing executes is the shape D-060 warns about.
+- [x] `docs/principles_testing.md`'s four rules honoured throughout: 48 mutation checks were run
+      across the six waves and every one of them died; three tests that asserted a defect as a
+      requirement were rewritten as explicit, stated steps (`test_one_wide_print_no_longer_closes_
+      a_healthy_spread`, `test_a_traded_thesis_enters_calibration_at_the_confidence_it_was_traded_
+      at`, `test_maturity_is_judged_against_the_clock_the_horizon_was_written_with`), each with its
+      opposite direction beside it.

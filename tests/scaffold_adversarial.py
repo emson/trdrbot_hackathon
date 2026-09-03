@@ -1,24 +1,48 @@
-"""Scaffold: ADVERSARIAL scenarios against the whole loop, offline.
+"""Scaffold: the whole loop driven end to end, offline. **Burn-down complete.**
 
     uv run python tests/scaffold_adversarial.py
 
-NOT collected by pytest (D-079). Same world as scaffold_whole_system.py - a fake
-broker the scenario controls, real copies of the return histories and the wiki,
-and the REAL code for every deterministic stage - but every scenario here is an
-attack on a seam rather than a happy path. A PASS means the attack LANDED: the
-label states the defect, and the check asserts the code exhibits it. When a
-defect is fixed its check flips to FAIL, which is the signal to move the row
-into a pinned regression test.
+NOT collected by pytest (D-079). A fake broker the scenario controls, real
+copies of the return histories and the wiki, and the REAL code for every
+deterministic stage.
 
-Rows are DELETED as their defect is fixed and its scenario is pinned as a
-regression test - the file is the burn-down chart, and the goal state is an
-empty one. Gone so far: X1 and X2 (I-77/I-76, now
-tests/test_exit_and_risk.py::test_a_persistent_wide_print_on_an_unmoved_underlying_never_closes
-and ::test_the_overnight_mark_does_not_pre_satisfy_the_debounce_window), X3
-(I-75, ::test_an_unreadable_account_sizes_nothing_and_says_why and its three
-siblings), X17 (I-86, ::test_the_high_water_mark_ignores_an_unrealisable_option_print).
+This file was the burn-down chart for the 2026-09-02 adversarial audit: sixteen
+attacks (X1-X17), each written so that a PASS meant the attack LANDED. As each
+defect was fixed its check flipped to FAIL, and the row was deleted and its
+scenario pinned as a regression test. **All sixteen are gone** (D-115 through
+D-121), and every one of them now lives in the suite:
 
-  X12  (control) shared-leg close by quantity leaves the sibling intact
+  X1, X2   -> test_exit_and_risk::test_a_persistent_wide_print_on_an_unmoved_
+              underlying_never_closes, ::test_the_overnight_mark_does_not_pre_
+              satisfy_the_debounce_window, ::test_an_unjudgeable_breach_still_
+              debounces_to_a_close
+  X3       -> test_exit_and_risk::test_an_unreadable_account_sizes_nothing_and_
+              says_why and its three siblings
+  X4       -> test_memory_and_credit::test_a_close_in_flight_is_not_adopted_as_
+              an_orphan and ::test_a_position_closed_moments_ago_keeps_its_legs
+  X5       -> test_regressions::test_an_order_that_never_filled_is_never_attributed
+  X6       -> test_regressions::test_one_trade_contributes_exactly_one_forecast_
+              to_calibration
+  X7       -> test_regressions::test_a_forecast_matures_when_its_session_ends_
+              not_when_its_date_begins
+  X8, X15  -> test_regressions::test_a_frontmatter_fence_is_a_line_never_a_
+              substring, ::test_recording_one_fill_twice_yields_one_page
+  X9       -> test_regressions::test_a_lowercase_leg_symbol_is_stored_as_the_
+              broker_spells_it
+  X10      -> test_regressions::test_marking_a_thesis_traded_leaves_a_standalone_
+              forecast_alone
+  X11      -> the unit refusal in local_tools._suspect_pct_units (D-116)
+  X13, X14 -> test_regressions::test_the_sizing_stash_is_matched_on_the_structure_
+              not_just_the_count, ::test_a_missing_expiry_is_derived_from_the_legs
+  X16      -> test_regressions::test_the_resumed_cycle_adopts_the_orphan_stub_it_raced
+  X17      -> test_exit_and_risk::test_the_high_water_mark_ignores_an_
+              unrealisable_option_print
+
+**X12 stays, and it was never an attack.** It is the control the attacks were
+read against, and it is the only place the shared-leg close is driven all the
+way through the real decide -> record -> reconcile -> exit path rather than
+from two pages written straight into the store. It must keep passing as a
+control; the day it fails, D-112 has regressed.
 """
 from __future__ import annotations
 
@@ -249,9 +273,6 @@ class World:
 
     async def decide_open(self, *, underlying: str, spot: float, expiry: str,
                           long_k: float, short_k: float, stated: float, horizon: str,
-                          thesis_claim: str | None = None, place: bool = True,
-                          record_kwargs: dict[str, Any] | None = None,
-                          symbol_mangle=None, between=None, confirm: bool = True,
                           qty_override: int | None = None) -> dict[str, Any]:
         snap = await self.snapshot()
         posture = self.posture(snap)
@@ -265,7 +286,6 @@ class World:
             self.calib, snap.equity or 0.0, open_risk_usd=open_risk,
             open_risk_by_underlying=by_name, shared=shared, posture=posture,
             extra_forecasts=ledger_mod.as_forecasts(self.ledger.resolved()), journal=self.journal)
-        forecast = local_tools.build_record_forecast(self.ledger, self.paths.state)
         rec = local_tools.build_record_position(
             self.store, "dec_sim", elfmem_blocks={"attention": {"blk_a": 0.9, "blk_b": 0.4}},
             generated_by="sim", calibration=self.calib, sources=[], shared=shared,
@@ -275,7 +295,7 @@ class World:
                 {"symbol": occ(underlying, expiry, "P", short_k), "side": "short", "qty": 1,
                  "right": "P", "strike": short_k, "price": 1.2, "expiry": expiry}]
         dte = (date.fromisoformat(expiry) - ids.today()).days
-        claim = thesis_claim or f"{underlying} falls to {short_k} by {horizon}"
+        claim = f"{underlying} falls to {short_k} by {horizon}"
         sim_out = await sim.ainvoke({
             "thesis_claim": claim, "underlying": underlying, "horizon": horizon,
             "drift_pct": -1.5, "spot": spot, "iv_pct": 18.0, "days_to_expiry": dte,
@@ -283,8 +303,6 @@ class World:
                            {"name": "long_put", "legs": [dict(legs[0])]}],
             "band_high": long_k,
         })
-        if between is not None:
-            await between(forecast)
         st = shared.structures[0] if shared.structures else None
         mp = float(getattr(st, "max_profit", 0.0) or 0.0) if st else 180.0
         ml = float(getattr(st, "max_loss", 0.0) or 0.0) if st else -180.0
@@ -295,19 +313,14 @@ class World:
         qty = qty_override or qty or 1
         order_legs = [{"symbol": l["symbol"], "side": "buy" if l["side"] == "long" else "sell",
                        "qty": qty, "price": l["price"]} for l in legs]
-        placed = self.broker.place_option_order(legs=order_legs, underlying=underlying) if place else None
-        rec_legs = [dict(l) for l in order_legs]
-        if symbol_mangle:
-            for l in rec_legs:
-                l["symbol"] = symbol_mangle(l["symbol"])
-        kw = {"underlying": underlying, "strategy": "bear_put_spread", "legs": rec_legs,
-              "thesis": claim, "confidence": stated, "expiry": expiry,
-              "stop_loss_pct": -65.0, "profit_target_pct": 140.0,
-              "underlying_stop_above": spot * 1.03}
-        kw.update(record_kwargs or {})
-        rec_out = await rec.ainvoke(kw)
-        if confirm:
-            await self.fast_path()
+        placed = self.broker.place_option_order(legs=order_legs, underlying=underlying)
+        rec_out = await rec.ainvoke({
+            "underlying": underlying, "strategy": "bear_put_spread",
+            "legs": [dict(l) for l in order_legs],
+            "thesis": claim, "confidence": stated, "expiry": expiry,
+            "stop_loss_pct": -65.0, "profit_target_pct": 140.0,
+            "underlying_stop_above": spot * 1.03})
+        await self.fast_path()
         return {"sim": str(sim_out), "size": str(size_out), "placed": placed,
                 "record": str(rec_out), "posture": posture, "shared": shared, "qty": qty}
 
@@ -371,6 +384,7 @@ finally:
 # ============================================================== verdict
 h("VERDICT")
 print(f"{len(FAIL)} failing check(s)" + (": " + "; ".join(FAIL) if FAIL else ""))
-print("\nFindings demonstrated:")
-for n in NOTES:
-    print(f"- {n}")
+if NOTES:
+    print("\nFindings demonstrated:")
+    for n in NOTES:
+        print(f"- {n}")
