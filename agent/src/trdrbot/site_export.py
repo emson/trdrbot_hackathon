@@ -584,6 +584,117 @@ def build_attribution(positions: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
+# --------------------------------------------------------------- repo facts
+#
+# Numbers the submission deck used to carry by hand - lines of code, scaffold
+# count, issue count, test count - and that went stale the moment anyone
+# touched the deck without re-deriving them (notes/027). Each is a pure
+# function of a path, so it is testable against a small fixture tree rather
+# than the live repo, which changes every commit.
+
+#: An issue entry's own opening line: `- **I-73 ...` or, once fixed and kept
+#: in place with a strikethrough, `- ~~**I-73 ...`. Anchored at the line start
+#: so a cross-reference inside another entry's prose ("see I-27") is not
+#: double-counted as a second entry.
+_ISSUE_ENTRY = re.compile(r"^- (?:~~)?\*\*(I-\d+)", re.MULTILINE)
+#: Every mention anywhere in the file, entry or cross-reference - the highest
+#: number found is the highest id ever ASSIGNED, which is a different (and
+#: larger) question than how many entries are currently listed. Both are real
+#: and neither implies the other; a deck citing "the issue count" must say
+#: which one it means (notes/027 section 1 found this exact ambiguity live).
+_ISSUE_ANY = re.compile(r"\bI-(\d+)\b")
+
+#: `pytest --collect-only -q`'s summary line, either shape it prints:
+#: "745 tests collected in 0.50s" (nothing deselected) or
+#: "745/764 tests collected (19 deselected) in 0.50s". The number before an
+#: optional slash is what actually runs, which is what "N offline tests" means.
+_PYTEST_COLLECTED = re.compile(r"(\d+)(?:/\d+)? tests? collected")
+
+
+def count_python_lines(src_dir: Path) -> int | None:
+    """Total line count across every `.py` file under `src_dir`. None if the
+    directory does not exist - a fact that cannot be computed is omitted, not
+    guessed at as zero (the absence-as-zero class this project keeps finding)."""
+    if not src_dir.is_dir():
+        return None
+    total = 0
+    for p in sorted(src_dir.rglob("*.py")):
+        with p.open(encoding="utf-8", errors="ignore") as f:
+            total += sum(1 for _ in f)
+    return total
+
+
+def count_scaffolds(tests_dir: Path) -> int | None:
+    """`tests/scaffold_*.py` - deliberately not collected by pytest (D-079),
+    so this is the only count of them anywhere."""
+    if not tests_dir.is_dir():
+        return None
+    return len(list(tests_dir.glob("scaffold_*.py")))
+
+
+def issue_counts(issues_path: Path) -> tuple[int | None, int | None]:
+    """(highest id ever assigned, entries currently listed). Either half is
+    `None` when the file is missing, never a bare 0 standing in for
+    "unreadable" - the same distinction `count_python_lines` draws."""
+    if not issues_path.exists():
+        return None, None
+    text = issues_path.read_text(encoding="utf-8")
+    listed = len({m for m in _ISSUE_ENTRY.findall(text)})
+    ids = [int(n) for n in _ISSUE_ANY.findall(text)]
+    return (max(ids) if ids else None), listed
+
+
+def count_tests_collected(agent_root: Path) -> int | None:
+    """How many tests `uv run pytest` actually runs. A real subprocess that
+    imports the whole suite - slow enough (seconds) that `build_repo_facts`
+    gates it behind `refresh_test_count` rather than paying it on every
+    publish, which runs on a loop. None on any failure: a broken collection
+    step must not take the export down with it, and the caller falls back to
+    the last known count rather than publishing a guess.
+    """
+    try:
+        r = subprocess.run(
+            ["uv", "run", "pytest", "--collect-only", "-q"],
+            cwd=agent_root, capture_output=True, text=True, timeout=120, check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    m = _PYTEST_COLLECTED.search(r.stdout)
+    return int(m.group(1)) if m else None
+
+
+def build_repo_facts(agent_root: Path, repo_root: Path, prev_repo: dict[str, Any],
+                     *, refresh_test_count: bool) -> dict[str, Any]:
+    """Repo facts, refreshed at two different cadences on purpose.
+
+    The cheap ones (file counts, line counts) are file reads - they cost
+    nothing and are recomputed every export, same as everything else here.
+    The test count needs a subprocess that imports the whole suite, which
+    would couple every routine publish (this runs on a loop, `publish.sh`)
+    to the test suite staying importable. So it refreshes only when the
+    caller says so - the release path - and otherwise carries forward
+    whatever the previous snapshot already had, stamped with when THAT was
+    measured rather than claiming freshness it does not have.
+    """
+    issues_max_id, issues_listed = issue_counts(repo_root / "specs" / "issues.md")
+    tests = prev_repo.get("tests")
+    tests_counted_at = prev_repo.get("tests_counted_at")
+    if refresh_test_count:
+        fresh = count_tests_collected(agent_root)
+        if fresh is not None:
+            from .ids import utc_now
+
+            tests, tests_counted_at = fresh, utc_now().isoformat()
+    return {
+        "python_lines": count_python_lines(agent_root / "src" / "trdrbot"),
+        "scaffolds": count_scaffolds(agent_root / "tests"),
+        "issues_max_id": issues_max_id,
+        "issues_listed": issues_listed,
+        "tests": tests,
+        "tests_counted_at": tests_counted_at,
+    }
+
+
 # --------------------------------------------------------------- monotonicity
 
 def _check_monotonic(prev_path: Path, counts: dict[str, int]) -> str | None:
@@ -603,9 +714,18 @@ def _check_monotonic(prev_path: Path, counts: dict[str, int]) -> str | None:
 
 # --------------------------------------------------------------- main export
 
-def export(out: Path = DEFAULT_OUT, *, strict: bool = True) -> int:
+def export(out: Path = DEFAULT_OUT, *, strict: bool = True,
+          refresh_test_count: bool = False) -> int:
     cfg = config_mod.load()
     cfg.paths.ensure()
+
+    # Read whatever is already on disk BEFORE anything else. Two things need
+    # it: the repo-facts test count (build_repo_facts falls back to it rather
+    # than re-running pytest on every publish) and, much later, the decision
+    # not to re-stamp `generated_at` when nothing actually changed (I-114).
+    # One read, two consumers, so they cannot silently disagree about what
+    # "the previous snapshot" was.
+    prior = _prior_snapshot(out)
 
     journal_rows = list(Journal(cfg.paths.journal).read())
     pos_store = PositionStore(cfg.paths.wiki)
@@ -754,6 +874,15 @@ def export(out: Path = DEFAULT_OUT, *, strict: bool = True) -> int:
             "open_issues_html": build_open_issues(REPO_ROOT / "specs" / "issues.md"),
             "decisions_index": decisions_index,
         },
+        # Repo facts the deck used to carry by hand and re-derive by hand
+        # (notes/027): lines of code, scaffold count, both readings of the
+        # issue count, and the test count on its own slower cadence. NOT
+        # folded into `counts` above - those are monotonic trading-record
+        # counts with a guard that refuses a shrinking record, and a falling
+        # test count or a retired scaffold is a legitimate Tuesday, not a
+        # corrupted read.
+        "repo": build_repo_facts(ROOT, REPO_ROOT, (prior or {}).get("repo") or {},
+                                 refresh_test_count=refresh_test_count),
         "counts": counts,
         "integrity": {
             "summaries_dropped": summaries_dropped,
@@ -790,7 +919,11 @@ def export(out: Path = DEFAULT_OUT, *, strict: bool = True) -> int:
     # same. Compared LAST, after the redaction scan has added its own keys, and
     # as serialised text, because the write applies `default=str` and an
     # in-memory value is not `==` to its round-tripped form.
-    prior = _prior_snapshot(out)
+    #
+    # `prior` is the SAME read from the top of this function, not a fresh one -
+    # nothing writes to `out` between them (single-process, like the rest of
+    # this system), and re-reading would just be a second disk hit for the
+    # same answer.
     if prior is not None and _payload_text(prior) == _payload_text(snapshot):
         snapshot["generated_at"] = prior.get("generated_at")
 
@@ -822,8 +955,11 @@ def main(argv: list[str] | None = None) -> int:
     import argparse
     p = argparse.ArgumentParser(prog="trdrbot site export")
     p.add_argument("--out", type=Path, default=DEFAULT_OUT)
+    p.add_argument("--refresh-tests", action="store_true",
+                   help="also re-run pytest --collect-only to refresh repo.tests - "
+                        "slow (imports the whole suite); the release path only")
     args = p.parse_args(argv)
-    return export(out=args.out)
+    return export(out=args.out, refresh_test_count=args.refresh_tests)
 
 
 if __name__ == "__main__":

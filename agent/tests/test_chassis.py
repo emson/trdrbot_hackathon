@@ -423,3 +423,195 @@ def test_an_unchanged_export_leaves_the_snapshot_byte_identical(tmp_path, monkey
                                    encoding="utf-8")
     assert site_export.export(out=out) == 0
     assert out.read_bytes() != first, "a real change must produce a new snapshot"
+
+
+# ------------------------------------------------------- repo facts (notes/027)
+#
+# The submission deck used to carry lines-of-code, scaffold count, issue
+# count and test count by hand, re-derived by hand, and it drifted. These
+# pure functions are what a deck figure now reads instead.
+
+
+def test_count_python_lines_sums_every_py_file_and_omits_a_missing_dir(tmp_path):
+    from trdrbot import site_export
+
+    src = tmp_path / "src"
+    src.mkdir()
+    (src / "a.py").write_text("one\ntwo\nthree\n", encoding="utf-8")
+    (src / "sub").mkdir()
+    (src / "sub" / "b.py").write_text("x\ny\n", encoding="utf-8")
+    (src / "not_python.txt").write_text("ignored\nignored\nignored\n", encoding="utf-8")
+
+    assert site_export.count_python_lines(src) == 5
+    assert site_export.count_python_lines(tmp_path / "nowhere") is None, \
+        "a fact that cannot be computed is omitted, not guessed at as zero"
+
+
+def test_count_scaffolds_matches_only_the_scaffold_naming_convention(tmp_path):
+    from trdrbot import site_export
+
+    tests = tmp_path / "tests"
+    tests.mkdir()
+    for name in ("scaffold_harmony.py", "scaffold_risk_posture.py", "test_regressions.py"):
+        (tests / name).touch()
+
+    assert site_export.count_scaffolds(tests) == 2
+    assert site_export.count_scaffolds(tmp_path / "nowhere") is None
+
+
+def test_issue_counts_separates_highest_id_from_entries_listed(tmp_path):
+    """The deck once said "125 numbered issues" with no definition of which
+    of two real readings that meant (notes/027 section 1) - the highest id
+    ever assigned, or how many entries are currently in the file. A
+    cross-reference inside another entry's prose must not be counted as a
+    second entry; a fixed entry kept in place with a strikethrough still is."""
+    from trdrbot import site_export
+
+    issues = tmp_path / "issues.md"
+    issues.write_text(
+        "## Open\n"
+        "- **I-5 · a live one** measured. See also I-40 in the notes below.\n"
+        "- ~~**I-3 · a fixed one**~~ **FIXED.** No longer open.\n"
+        "## Resolved\n"
+        "- ~~**I-1 · an old one**~~ **FIXED.**\n",
+        encoding="utf-8",
+    )
+
+    max_id, listed = site_export.issue_counts(issues)
+    assert max_id == 40, "I-40 is only a cross-reference, but it is still the highest id seen"
+    assert listed == 3, "three ENTRIES (I-5, I-3, I-1) - the I-40 mention is not a fourth"
+    assert site_export.issue_counts(tmp_path / "nowhere.md") == (None, None)
+
+
+def test_count_tests_collected_parses_both_summary_shapes(monkeypatch, tmp_path):
+    """Never spawns a real nested pytest - `subprocess.run` is stubbed with
+    the two literal shapes `pytest --collect-only -q` actually prints, so the
+    parser is pinned without the slowness or recursion risk of a real
+    subprocess-in-a-subprocess."""
+    import subprocess as _subprocess
+
+    from trdrbot import site_export
+
+    def fake_run(*_a, **_k):
+        return _subprocess.CompletedProcess([], 0, stdout="745 tests collected in 0.50s\n")
+
+    monkeypatch.setattr(site_export.subprocess, "run", fake_run)
+    assert site_export.count_tests_collected(tmp_path) == 745
+
+    def fake_run_deselected(*_a, **_k):
+        return _subprocess.CompletedProcess(
+            [], 0, stdout="745/764 tests collected (19 deselected) in 0.50s\n")
+
+    monkeypatch.setattr(site_export.subprocess, "run", fake_run_deselected)
+    assert site_export.count_tests_collected(tmp_path) == 745, \
+        "the number before the slash is what actually RUNS"
+
+
+def test_count_tests_collected_returns_none_rather_than_raise(monkeypatch, tmp_path):
+    from trdrbot import site_export
+
+    def boom(*_a, **_k):
+        raise OSError("uv not found")
+
+    monkeypatch.setattr(site_export.subprocess, "run", boom)
+    assert site_export.count_tests_collected(tmp_path) is None
+
+
+def test_build_repo_facts_only_refreshes_the_test_count_when_asked(monkeypatch, tmp_path):
+    from trdrbot import site_export
+
+    agent_root = tmp_path / "agent"
+    (agent_root / "src" / "trdrbot").mkdir(parents=True)
+    (agent_root / "src" / "trdrbot" / "m.py").write_text("x\n", encoding="utf-8")
+    (agent_root / "tests").mkdir()
+    (agent_root / "tests" / "scaffold_x.py").touch()
+    repo_root = tmp_path / "repo"
+    (repo_root / "specs").mkdir(parents=True)
+    (repo_root / "specs" / "issues.md").write_text("- **I-1 · x**\n", encoding="utf-8")
+
+    monkeypatch.setattr(site_export, "count_tests_collected", lambda _root: 999)
+
+    # refresh_test_count=False: the cheap facts still compute, the test count
+    # does not - this runs on `publish.sh`'s loop and must not pay for a
+    # subprocess that imports the whole suite on every cycle.
+    facts = site_export.build_repo_facts(agent_root, repo_root, {}, refresh_test_count=False)
+    assert facts["python_lines"] == 1 and facts["scaffolds"] == 1
+    assert facts["tests"] is None and facts["tests_counted_at"] is None
+
+    # refresh_test_count=True: it does.
+    facts = site_export.build_repo_facts(agent_root, repo_root, {}, refresh_test_count=True)
+    assert facts["tests"] == 999 and facts["tests_counted_at"]
+
+
+def test_build_repo_facts_keeps_the_prior_test_count_when_the_collector_fails(
+    monkeypatch, tmp_path
+):
+    """A broken pytest collection step must not take the export down with it,
+    and must not silently publish a guess - it carries forward the last KNOWN
+    count, stamped with when that was actually measured."""
+    from trdrbot import site_export
+
+    agent_root = tmp_path / "agent"
+    (agent_root / "src" / "trdrbot").mkdir(parents=True)
+    (agent_root / "tests").mkdir()
+    repo_root = tmp_path / "repo"
+    (repo_root / "specs").mkdir(parents=True)
+
+    monkeypatch.setattr(site_export, "count_tests_collected", lambda _root: None)
+    prev = {"tests": 745, "tests_counted_at": "2026-09-03T18:40:11+00:00"}
+
+    facts = site_export.build_repo_facts(agent_root, repo_root, prev, refresh_test_count=True)
+
+    assert facts["tests"] == 745
+    assert facts["tests_counted_at"] == "2026-09-03T18:40:11+00:00"
+
+
+def test_repo_facts_are_computed_and_survive_a_pytest_failure(tmp_path, monkeypatch):
+    """End to end through `export()`: the repo block lands in the snapshot,
+    and asking for a refresh while the collector is broken degrades to the
+    prior value rather than refusing the whole publish."""
+    import dataclasses
+    import json
+
+    from trdrbot import config as config_mod
+    from trdrbot import site_export
+
+    live = config_mod.load()
+    cfg = dataclasses.replace(live, paths=config_mod.Paths.build(tmp_path))
+    cfg.paths.ensure()
+    monkeypatch.setattr(site_export.config_mod, "load", lambda *a, **k: cfg)
+    monkeypatch.setattr(site_export, "count_tests_collected", lambda _root: None)
+
+    out = tmp_path / "snapshot.json"
+    assert site_export.export(out=out, refresh_test_count=True) == 0
+    repo = json.loads(out.read_text(encoding="utf-8"))["repo"]
+    assert repo["tests"] is None, "no prior snapshot to fall back to, and the collector failed"
+    assert isinstance(repo["python_lines"], int) and repo["python_lines"] > 0
+    assert repo["issues_max_id"] is not None and repo["issues_listed"] is not None
+
+
+def test_the_monotonicity_guard_ignores_repo_facts(tmp_path, monkeypatch):
+    """Trading-record counts refuse to shrink (positions, journal rows,
+    theses); repo facts must NOT be swept into that guard - a falling test
+    count or a retired scaffold is a legitimate Tuesday, not a corrupted
+    read, and refusing to publish over it would be the guard fighting the
+    wrong battle."""
+    import dataclasses
+    import json
+
+    from trdrbot import config as config_mod
+    from trdrbot import site_export
+
+    live = config_mod.load()
+    cfg = dataclasses.replace(live, paths=config_mod.Paths.build(tmp_path))
+    cfg.paths.ensure()
+    monkeypatch.setattr(site_export.config_mod, "load", lambda *a, **k: cfg)
+
+    out = tmp_path / "snapshot.json"
+    monkeypatch.setattr(site_export, "count_tests_collected", lambda _root: 100)
+    assert site_export.export(out=out, refresh_test_count=True) == 0
+
+    # A SHRINKING repo fact - fewer tests than last time - must not refuse.
+    monkeypatch.setattr(site_export, "count_tests_collected", lambda _root: 3)
+    assert site_export.export(out=out, refresh_test_count=True) == 0
+    assert json.loads(out.read_text(encoding="utf-8"))["repo"]["tests"] == 3

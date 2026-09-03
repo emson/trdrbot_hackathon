@@ -886,9 +886,12 @@ def _report() -> int:
     return 0
 
 
-def _site(out: Path | None) -> int:
+def _site(out: Path | None, refresh_tests: bool = False) -> int:
     from . import site_export
-    return site_export.export(out=out) if out else site_export.export()
+    kwargs: dict[str, Any] = {"refresh_test_count": refresh_tests}
+    if out:
+        kwargs["out"] = out
+    return site_export.export(**kwargs)
 
 
 def _modelcal(action: str) -> int:
@@ -993,6 +996,9 @@ def main() -> None:
     site = sub.add_parser("site", help="export the agent's record to web/src/lib/data/snapshot.json")
     site.add_argument("action", choices=["export"], default="export", nargs="?")
     site.add_argument("--out", type=Path, default=None, help="override the snapshot output path")
+    site.add_argument("--refresh-tests", action="store_true",
+                      help="also re-run pytest --collect-only to refresh repo.tests - "
+                           "slow; the release path only, not the publish loop")
 
     con = sub.add_parser("constitution", help="the epistemic constitution in elfmem's SELF frame")
     con.add_argument("action", choices=["show", "seed", "verify", "review", "reseed"], default="show",
@@ -1025,7 +1031,7 @@ def main() -> None:
     _H["run"] = lambda a: asyncio.run(_run_loop(a.interval, a.closed_interval,
                                        max_ticks=a.max_ticks, allow_fast=a.allow_fast))
     _H["constitution"] = lambda a: asyncio.run(_constitution(a.action))
-    _H["site"] = lambda a: _site(a.out)
+    _H["site"] = lambda a: _site(a.out, a.refresh_tests)
 
     args = p.parse_args()
 
