@@ -35,7 +35,7 @@ from typing import Any
 import markdown as _md
 import yaml
 
-from . import competence, optmath
+from . import competence, market_stats, optmath
 from . import config as config_mod
 from . import ledger as ledger_mod
 from .attribution import _horizon_passed  # noqa: F401 (documents the horizon rule reused below)
@@ -601,6 +601,590 @@ def build_attribution(positions: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
+# --------------------------------------------------------------- cycles (notes/028)
+#
+# Every decide cycle already writes a write-ahead `decision` journal row and
+# reads back exactly one outcome row (`no_op`, `execution`, or `error`,
+# joined by `decision_ref`). The rows a cycle's own tools write
+# (`structures_simulated`, `sizing`) carry `decision_ref` straight to their
+# cycle from the commit that added this exporter section on; older rows,
+# and the `competence`/`muse`/`playbook` rows that never carried it, are
+# attributed by TIMESTAMP MEMBERSHIP in the cycle's own [decision, outcome]
+# interval - validated against the live journal first (notes/028 section 2):
+# a naive "everything since the last outcome" window breaks on concurrent
+# batches, so a row whose timestamp falls in more than one open window is
+# given to the window whose thesis underlyings it matches, and failing that
+# to the earlier decision.
+
+_CYCLE_CAP = 20
+#: A cycle qualifies for the reel if it did anything worth replaying. The
+#: latest cycle always qualifies regardless, so the reel never opens on
+#: nothing (section 4.0).
+_QUALIFYING_OUTCOMES = ("traded", "acted")
+
+
+def _sense_item(item_id: str, index: dict[str, dict[str, Any]]) -> dict[str, Any]:
+    """One inbox item, rendered from whichever of the six real payload shapes
+    it turned out to be - checked against the live inbox before writing this,
+    not guessed: opportunity, position_review, market_pulse, news,
+    prediction_market, manual."""
+    d = index.get(item_id)
+    if d is None:
+        return {"id": item_id, "kind": item_id.split("_")[0], "text": None}
+    payload = d.get("payload") or {}
+    kind = d.get("type", "other")
+    out: dict[str, Any] = {"id": item_id, "kind": kind, "source": d.get("source")}
+    if kind == "opportunity":
+        out.update({
+            "underlying": payload.get("underlying"), "claim": payload.get("claim"),
+            "band_low": payload.get("band_low"), "band_high": payload.get("band_high"),
+            "horizon": payload.get("horizon"),
+            "suggested_structures": payload.get("suggested_structures") or [],
+        })
+    elif kind == "news":
+        out.update({
+            "headline": payload.get("headline"), "created_at": payload.get("created_at"),
+            "symbols": payload.get("symbols") or [],
+        })
+    elif kind in ("position_review", "market_pulse"):
+        out.update({"reason": payload.get("reason"),
+                    "underlyings": sorted((payload.get("moves") or {}).keys())})
+    elif kind == "prediction_market":
+        out.update({"question": payload.get("question"),
+                    "implied_probability": payload.get("implied_probability")})
+    elif kind == "manual":
+        out["text"] = payload.get("note")
+    return out
+
+
+def _inbox_index(inbox_processed: Path) -> dict[str, dict[str, Any]]:
+    """id -> the item's own dict. Tolerant of an unreadable file - a demo
+    replay must not take the whole export down over one bad JSON page."""
+    out: dict[str, dict[str, Any]] = {}
+    if not inbox_processed.is_dir():
+        return out
+    for day_dir in sorted(inbox_processed.iterdir()):
+        if not day_dir.is_dir():
+            continue
+        for p in day_dir.glob("*.json"):
+            try:
+                d = json.loads(p.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                continue
+            if isinstance(d, dict) and d.get("id"):
+                out[d["id"]] = d
+    return out
+
+
+def closes_window(state_dir: Path, underlying: str, decision_day: str,
+                  horizon: str | None) -> dict[str, Any] | None:
+    """Up to 48 daily closes ending at the claim's horizon (or the decision
+    day, if the horizon hasn't been reached yet) - NOT the ticker's most
+    recent closes. `returns/<TICKER>.json` holds one continuously-updated
+    series, not a snapshot per decision, so replaying an old cycle without
+    this bound would draw the chart through sessions the cycle could not
+    have known about yet."""
+    dated = market_stats.load_dated_closes(state_dir, underlying, max_age_days=99999)
+    if not dated:
+        return None
+    dates, closes = dated
+    end_day = horizon if horizon and horizon >= decision_day else decision_day
+    idxs = [i for i, dt in enumerate(dates) if dt <= end_day]
+    end = (idxs[-1] + 1) if idxs else len(dates)
+    start = max(0, end - 48)
+    if start >= end:
+        return None
+    return {"dates": dates[start:end], "closes": closes[start:end]}
+
+
+def candidate_payoff(legs: list[dict[str, Any]]) -> dict[str, Any]:
+    """A candidate's payoff at expiry, from its RECORDED (already priced)
+    legs - unlike `derive_payoff`, nothing here is solved for, because a
+    candidate's legs already carry a real quoted price. Sampled only at the
+    kinks (each strike, plus the two outer bounds) rather than
+    `derive_payoff`'s 160-point grid: a piecewise-LINEAR payoff needs nothing
+    between its kinks to draw exactly."""
+    if not legs:
+        return {"derivable": False, "reason": "no legs recorded"}
+    try:
+        parsed = [
+            optmath.Leg(right=str(l["right"]), strike=float(l["strike"]), side=str(l["side"]),
+                       qty=int(l.get("qty", 1) or 1), price=float(l.get("price", 0.0) or 0.0),
+                       expiry=str(l.get("expiry", "")),
+                       iv=(float(l["iv_pct"]) / 100.0 if l.get("iv_pct") is not None else None))
+            for l in legs
+        ]
+    except (KeyError, TypeError, ValueError):
+        return {"derivable": False, "reason": "a leg did not parse"}
+    try:
+        optmath.require_single_expiry(parsed)
+    except optmath.MultiExpiryError:
+        return {"derivable": False,
+                "reason": "legs span more than one expiry (a calendar) - refused, same as "
+                          "the position payoff"}
+    max_profit, max_loss = optmath.max_profit_loss(parsed)
+    strikes = sorted({leg.strike for leg in parsed})
+    lo, hi = strikes[0] * 0.85, strikes[-1] * 1.15
+    xs = sorted({round(x, 4) for x in optmath._critical_points(parsed)}
+               | {round(lo, 4), round(hi, 4)})
+    points = [[round(x, 2), round(optmath.pnl_at(parsed, x), 2)] for x in xs if x > 0]
+    return {
+        "derivable": True, "points": points,
+        "max_profit": round(max_profit, 2) if max_profit is not None else None,
+        "max_profit_unbounded": max_profit is None,
+        "max_loss": round(abs(max_loss), 2) if max_loss is not None else None,
+        "breakevens": optmath.breakevens(parsed),
+    }
+
+
+def _candidate_name(underlying: str, cand: dict[str, Any]) -> str:
+    """`structures_simulated` candidates already carry a name; `playbook`
+    candidates do not (`playbook.run_arm` builds legs and a family, never a
+    label - `menu_of` sends the model a table, not a name). Built the same
+    way here as everywhere else this codebase names a structure: strikes in
+    leg order, then the family in words."""
+    if cand.get("name"):
+        return str(cand["name"])
+    strikes = "/".join(
+        (f"{leg['strike']:g}" if isinstance(leg.get("strike"), (int, float)) else "?")
+        for leg in cand.get("legs") or []
+    )
+    family = str(cand.get("family", "")).replace("_", " ")
+    return f"{underlying} {strikes} {family}".strip()
+
+
+def _export_candidate(underlying: str, cand: dict[str, Any], *, chosen_name: str) -> dict[str, Any]:
+    name = _candidate_name(underlying, cand)
+    out = {
+        "name": name, "family": cand.get("family"), "legs": cand.get("legs") or [],
+        "fate": cand.get("fate"), "chosen": name == chosen_name,
+        "net": cand.get("net"), "max_profit": cand.get("max_profit"),
+        "max_loss": cand.get("max_loss"), "entry_friction": cand.get("entry_friction"),
+        "p_band": cand.get("p_band"), "e_hold": cand.get("e_hold"),
+        "p_hold": cand.get("p_hold"), "p_fail": cand.get("p_fail"), "edge": cand.get("edge"),
+    }
+    out["payoff"] = candidate_payoff(cand.get("legs") or [])
+    return out
+
+
+def _thesis_dict(t: Any, *, closes: dict[str, Any] | None,
+                 candidates_ref: str | None) -> dict[str, Any]:
+    return {
+        "entry_id": t.id, "kind": t.kind, "underlying": t.underlying, "claim": t.claim,
+        "probability": t.probability, "probability_stated": t.probability_stated,
+        "horizon": t.horizon, "band_low": t.band_low, "band_high": t.band_high,
+        "metric": t.metric, "traded": t.traded, "position_id": t.position_id,
+        "rejected_by": t.rejected_by, "outcome": t.outcome, "resolved_at": t.resolved_at,
+        "price_at_horizon": t.price_at_horizon, "notes": t.notes,
+        "closes": closes, "candidates_ref": candidates_ref,
+    }
+
+
+def build_cycles(
+    journal_rows: list[dict[str, Any]], theses: list[Any],
+    positions_by_id: dict[str, dict[str, Any]], inbox_index: dict[str, dict[str, Any]],
+    state_dir: Path, *, cap: int = _CYCLE_CAP,
+) -> tuple[list[dict[str, Any]], dict[str, int]]:
+    """The replay reel: one entry per decide cycle, newest first, capped.
+
+    Returns (cycles, stats) where stats carries `cycles_total` (every
+    decision with a recorded outcome) and `ambiguous_joins` (rows whose
+    cycle could not be told apart by timestamp alone and were assigned by
+    the underlying tie-break) - printed on every export so drift in the
+    join is visible immediately, not discovered on the page.
+    """
+    idx = {r["id"]: i for i, r in enumerate(journal_rows) if r.get("id")}
+    decisions = [r for r in journal_rows if r.get("kind") == "decision"]
+    outcome_by_ref: dict[str, dict[str, Any]] = {}
+    for r in journal_rows:
+        if r.get("kind") in ("no_op", "execution", "error") and r.get("decision_ref"):
+            outcome_by_ref[r["decision_ref"]] = r
+
+    windows: list[dict[str, Any]] = []
+    in_progress = 0
+    for d in decisions:
+        d_id = d.get("id")
+        outcome = outcome_by_ref.get(d_id) if d_id else None
+        if outcome is None or d_id not in idx or outcome.get("id") not in idx:
+            in_progress += 1
+            continue
+        windows.append({
+            "decision": d, "outcome": outcome,
+            "start": d["ts"], "end": outcome["ts"], "underlyings": set(),
+        })
+    windows.sort(key=lambda w: w["start"])
+
+    def _owner(ts: str, underlying: str | None, ambiguous_counter: list[int]) -> dict[str, Any] | None:
+        """Which window a timestamp (and optionally an underlying) belongs
+        to. None if it falls in none of them."""
+        hits = [w for w in windows if w["start"] <= ts <= w["end"]]
+        if not hits:
+            return None
+        if len(hits) == 1:
+            return hits[0]
+        ambiguous_counter[0] += 1
+        if underlying:
+            by_name = [w for w in hits if underlying in w["underlyings"]]
+            if len(by_name) == 1:
+                return by_name[0]
+        return hits[0]  # earlier decision wins - `hits` inherits `windows`' sort order
+
+    ambiguous = [0]
+
+    # Pass 1: theses attach by `created`, and seed each window's underlying
+    # set - the tie-break every other row's attachment then reads.
+    theses_by_window: dict[int, list[Any]] = {}
+    for t in theses:
+        w = _owner(t.created, None, ambiguous)
+        if w is None:
+            continue
+        w["underlyings"].add(t.underlying)
+        theses_by_window.setdefault(id(w), []).append(t)
+
+    # Pass 2: everything else. `sizing` joins directly by `decision_ref` when
+    # the row has one (post notes/028 commit 2) and falls back to timestamp
+    # membership for older rows. `structures_simulated` carries
+    # `thesis_entry_id` from the day it was added - a direct link to the
+    # exact ledger entry it priced, which needs no window at all.
+    # `competence` never carries a ref of any kind, so it always falls back.
+    sizing_by_window: dict[int, dict[str, Any]] = {}
+    competence_by_window: dict[int, dict[str, Any]] = {}
+    candidates_by_thesis: dict[str, dict[str, Any]] = {}  # entry_id -> {row, source}
+    playbook_rows = [r for r in journal_rows if r.get("kind") == "playbook"]
+    muse_rows = [r for r in journal_rows if r.get("kind") == "muse"]
+    window_by_decision_id = {w["decision"]["id"]: w for w in windows}
+
+    for r in journal_rows:
+        kind = r.get("kind")
+        if kind == "sizing":
+            ref = r.get("decision_ref")
+            w = window_by_decision_id.get(ref) if ref else _owner(
+                r.get("ts", ""), r.get("underlying"), ambiguous)
+            if w is not None:
+                sizing_by_window[id(w)] = r  # last sizing call in a cycle wins
+        elif kind == "structures_simulated":
+            entry_id = r.get("thesis_entry_id")
+            if entry_id:
+                candidates_by_thesis[entry_id] = {"row": r, "source": kind}
+        elif kind == "competence":
+            w = _owner(r.get("ts", ""), None, ambiguous)
+            if w is not None:
+                competence_by_window[id(w)] = r
+
+    # playbook rows never carry a decision_ref (written before the decide
+    # cycle they feed even starts) - matched to a thesis by (underlying,
+    # horizon), the row nearest before the thesis was created.
+    for t in theses:
+        if t.id in candidates_by_thesis:
+            continue
+        best = None
+        for r in playbook_rows:
+            if r.get("underlying") != t.underlying or r.get("horizon") != t.horizon:
+                continue
+            if r["ts"] > t.created:
+                continue
+            if best is None or r["ts"] > best["ts"]:
+                best = r
+        if best is not None:
+            candidates_by_thesis[t.id] = {"row": best, "source": "playbook"}
+
+    window_index = {id(w): i for i, w in enumerate(windows)}
+    cycles: list[dict[str, Any]] = []
+    for w in reversed(windows):  # newest first
+        d, outcome = w["decision"], w["outcome"]
+        wid = id(w)
+        matched_position = next(
+            (p for p in positions_by_id.values() if p.get("decision_ref") == d["id"]), None)
+        if outcome["kind"] == "no_op":
+            out_kind = "declined"
+        elif outcome["kind"] == "error":
+            out_kind = "error"
+        elif matched_position is not None:
+            out_kind = "traded"
+        else:
+            out_kind = "acted"
+
+        item_ids = list(d.get("item_ids") or [])
+        sense_items = [_sense_item(i, inbox_index) for i in item_ids[:6]]
+
+        cycle_theses = theses_by_window.get(wid, [])
+        sizing_row = sizing_by_window.get(wid)
+        chosen_name = (sizing_row or {}).get("structure", "")
+
+        think_theses = []
+        candidate_blocks = []
+        market = None
+        for t in cycle_theses:
+            cref = candidates_by_thesis.get(t.id)
+            closes = closes_window(state_dir, t.underlying, d["ts"][:10], t.horizon)
+            candidates_ref = cref["row"]["id"] if cref else None
+            think_theses.append(_thesis_dict(t, closes=closes, candidates_ref=candidates_ref))
+            if cref:
+                row = cref["row"]
+                rows = [_export_candidate(t.underlying, c, chosen_name=chosen_name)
+                        for c in (row.get("candidates") or [])]
+                candidate_blocks.append({
+                    "ref": row["id"], "source": cref["source"], "entry_id": t.id, "rows": rows,
+                })
+                if market is None:
+                    market = {
+                        "underlying": t.underlying, "spot": row.get("spot"),
+                        "iv_pct": row.get("iv_pct"), "sigma": row.get("sigma"),
+                        "days": row.get("days"), "expiry": row.get("expiry"),
+                        "priced_at": row.get("priced_at"),
+                    }
+
+        # Muse fates from the gap right before this cycle started - what got
+        # thrown out on the way to whatever this cycle actually considered.
+        prior_window_end = windows[window_index[wid] - 1]["end"] if window_index[wid] > 0 else ""
+        muse_fates: list[dict[str, Any]] = []
+        for r in muse_rows:
+            if not (prior_window_end <= r["ts"] <= d["ts"]):
+                continue
+            for f in (r.get("fates") or []):
+                if str(f.get("fate", "")).startswith("rejected"):
+                    muse_fates.append(f)
+        muse_fates = muse_fates[:6]
+
+        sizing = None
+        if sizing_row is not None:
+            sizing = {
+                "contracts": sizing_row.get("contracts"), "fraction": sizing_row.get("fraction"),
+                "binding": sizing_row.get("binding"), "payoff_ratio": sizing_row.get("payoff_ratio"),
+                "structure": sizing_row.get("structure"), "family": sizing_row.get("family"),
+                "result": sizing_row.get("result"), "reason": sizing_row.get("reason"),
+            }
+        comp_row = competence_by_window.get(wid) or {}
+        competence_block = None
+        if comp_row:
+            competence_block = {
+                "tier": comp_row.get("tier"), "book_cap": comp_row.get("book_cap"),
+                "kelly_multiplier": comp_row.get("kelly_multiplier"),
+                "seed_fraction": comp_row.get("seed_fraction"),
+            }
+
+        summary_html = None
+        error_class = None
+        if out_kind == "declined":
+            summary = clean_prose(outcome.get("summary"))
+            summary_html = md(summary) if summary else None
+        elif out_kind == "error":
+            error_class = str(outcome.get("error", ""))[:120].split("(")[0].strip()
+
+        journal_kinds: dict[str, int] = {}
+        for r in journal_rows:
+            if w["start"] <= r.get("ts", "") <= w["end"]:
+                journal_kinds[r["kind"]] = journal_kinds.get(r["kind"], 0) + 1
+
+        cycles.append({
+            "id": d["id"], "tick": d.get("tick"), "ts": d["ts"],
+            "model": d.get("model"), "batch": d.get("batch"),
+            "tool_calls": len(outcome.get("tool_calls") or []),
+            "outcome": out_kind, "outcome_ref": outcome["id"], "outcome_ts": outcome["ts"],
+            "sense": {"items": sense_items, "items_total": len(item_ids), "market": market},
+            "think": {"theses": think_theses, "candidates": candidate_blocks,
+                      "muse_fates": muse_fates},
+            "act": {"sizing": sizing, "competence": competence_block,
+                    "position_id": matched_position["id"] if matched_position else None,
+                    "summary_html": summary_html, "error_class": error_class},
+            "remember": {"journal_kinds": journal_kinds,
+                        "ledger_entry_ids": [t.id for t in cycle_theses]},
+        })
+
+    # Reel rule (section 4.0): the latest cycle always qualifies; older ones
+    # need to have done something worth replaying.
+    reel: list[dict[str, Any]] = []
+    for i, c in enumerate(cycles):
+        if i == 0 or c["outcome"] in _QUALIFYING_OUTCOMES or c["think"]["theses"] \
+                or c["think"]["candidates"] or c["act"]["sizing"]:
+            reel.append(c)
+        if len(reel) >= cap:
+            break
+
+    return reel, {"cycles_total": len(windows), "in_progress": in_progress,
+                  "ambiguous_joins": ambiguous[0]}
+
+
+# --------------------------------------------------------------- funnel (notes/028)
+
+_GATE_REASON_RE = re.compile(r"\d+")
+
+
+def _group_gate_reasons(reasons: list[str]) -> list[list[Any]]:
+    """Fold `rejected: base probability 7% - a lottery ticket` and its
+    siblings into one bucket by replacing the digits, so a funnel doesn't
+    show nine near-identical one-off rows."""
+    counts: dict[str, int] = {}
+    for r in reasons:
+        r = r[len("rejected: "):] if r.startswith("rejected: ") else r
+        key = _GATE_REASON_RE.sub("N", r)
+        counts[key] = counts.get(key, 0) + 1
+    return sorted(([k, n] for k, n in counts.items()), key=lambda kv: -kv[1])
+
+
+def build_funnel(journal_rows: list[dict[str, Any]], theses: list[Any],
+                 positions: list[dict[str, Any]],
+                 counts: dict[str, int | None]) -> dict[str, Any]:
+    """Where ideas go (section 4.6) - every real count in one place, with the
+    not-taken remainder alongside the part that made it through."""
+    muse_rows = [r for r in journal_rows if r.get("kind") == "muse"]
+    research_rows = [r for r in journal_rows if r.get("kind") == "research"]
+    research_rejected = [r for r in journal_rows if r.get("kind") == "research_rejected"]
+    discovery_rows = [r for r in journal_rows if r.get("kind") == "discovery"]
+    sizing_rows = [r for r in journal_rows if r.get("kind") == "sizing"]
+
+    gate_rejected = [t for t in theses if t.rejected_by]
+    # One `structures_simulated`/`playbook` row is one claim priced, whichever
+    # path priced it - counted as rows rather than by re-joining to a thesis
+    # id (only `structures_simulated` carries one; `playbook` runs before the
+    # thesis it feeds even exists), so this stays consistent with `kept` and
+    # `thrown_out` below, which already sum candidates across both kinds.
+    claims_priced = sum(1 for r in journal_rows
+                        if r.get("kind") in ("structures_simulated", "playbook"))
+    cands_seen, cands_thrown, cands_kept = 0, 0, 0
+    for r in journal_rows:
+        if r.get("kind") not in ("structures_simulated", "playbook"):
+            continue
+        for c in (r.get("candidates") or []):
+            cands_seen += 1
+            if c.get("fate") == "candidate":
+                cands_kept += 1
+            else:
+                cands_thrown += 1
+
+    held = sum(1 for t in theses if t.outcome is True)
+    failed = sum(1 for t in theses if t.outcome is False)
+    open_ = sum(1 for t in theses if t.outcome is None)
+
+    attributed = sum(1 for p in positions if p.get("attribution") not in ("", None, "unscoreable"))
+    unscoreable = sum(1 for p in positions if p.get("attribution") == "unscoreable")
+    awaiting = sum(1 for p in positions if not p.get("attribution"))
+
+    return {
+        "ideas": {
+            "muse_candidates": sum(r.get("candidates") or 0 for r in muse_rows),
+            "muse_emitted": sum(r.get("emitted") or 0 for r in muse_rows),
+            "research_opportunities": sum(r.get("opportunities") or 0 for r in research_rows),
+            "discovery_opportunities": sum(r.get("opportunities") or 0 for r in discovery_rows),
+        },
+        "rejected": {
+            "research": len(research_rejected), "gates": len(gate_rejected),
+            "gate_reasons": _group_gate_reasons([t.rejected_by for t in gate_rejected]),
+        },
+        "claims": {
+            "recorded": len(theses),
+            "code_default_probability": sum(1 for t in theses if not t.probability_stated),
+        },
+        "structures": {
+            "claims_priced": claims_priced, "kept": cands_kept, "thrown_out": cands_thrown,
+        },
+        "sized": {
+            "sized": sum(1 for r in sizing_rows if r.get("result") == "sized"),
+            "refused": sum(1 for r in sizing_rows if r.get("result") == "refused"),
+        },
+        "traded": {
+            "traded": counts["traded"], "never_filled": counts["positions_never_filled"],
+            "cycles_declined": counts["declined"],
+        },
+        "scored": {"held": held, "failed": failed, "open": open_},
+        "attributed": {"attributed": attributed, "unscoreable": unscoreable, "awaiting": awaiting},
+    }
+
+
+# --------------------------------------------------------------- the Coach (notes/028)
+
+def build_coach(cfg: Any) -> dict[str, Any]:
+    """The same calls `trdrbot coach status` makes, so the page's verdict
+    line and the terminal's can never disagree."""
+    from . import coach, ids
+
+    evs = coach.events(cfg)
+    day = ids.utc_now().date().isoformat()
+    levers = []
+    for lv in coach.LEVERS:
+        st = coach.load_state(cfg, lv.name, coach.seeds().get(lv.name, ""))
+        experiment = None
+        if st.exp_id and not coach.is_closed(cfg, st.exp_id):
+            t = coach.tally(cfg, st.exp_id)
+            if t is not None:
+                fl = coach.floors(cfg, lv.name)
+                outcome, reason = coach.verdict(t, fl)
+                series = [r.get("posterior_p_challenger_better") for r in evs
+                         if r.get("kind") == "trial_result" and r.get("exp_id") == st.exp_id]
+                mutation = next(
+                    (r.get("rationale") for r in reversed(evs)
+                     if r.get("kind") == "coach_mutation" and r.get("variant") == st.challenger.id),
+                    None) if st.challenger else None
+                experiment = {
+                    "exp_id": st.exp_id, "opened": t.opened_ts, "runs": t.runs, "voided": t.voided,
+                    "challenger": {"survived": t.s_c, "n": t.n_c},
+                    "incumbent": {"survived": t.s_i, "n": t.n_i},
+                    "posterior": t.posterior, "floors": fl,
+                    "verdict": {"outcome": outcome, "reason": reason},
+                    "posterior_series": series, "mutation_rationale": mutation,
+                }
+        history = [
+            {"challenger": r.get("challenger"), "outcome": r.get("outcome"),
+             "reason": r.get("reason"), "ts": r.get("ts")}
+            for r in evs if r.get("kind") == "experiment_closed" and r.get("lever") == lv.name
+        ][-3:]
+        levers.append({
+            "name": lv.name, "subsystem": lv.subsystem, "kind": lv.kind,
+            "reward_modules": list(lv.reward_modules),
+            "reward_description": lv.reward_description,
+            "incumbent": {"id": st.incumbent.id, "fingerprint": st.incumbent.fingerprint,
+                         "origin": st.incumbent.origin, "since": st.incumbent.since},
+            "challenger": (
+                {"id": st.challenger.id, "fingerprint": st.challenger.fingerprint,
+                 "origin": st.challenger.origin, "since": st.challenger.since}
+                if st.challenger else None
+            ),
+            "state": "running" if not st.pinned else "blocked: pinned",
+            "paused": st.paused, "pinned": st.pinned,
+            "experiment": experiment, "history": history,
+        })
+    trials_today = sum(1 for r in evs if r.get("kind") == "trial_result"
+                       and str(r.get("ts", ""))[:10] == day)
+    promotions = sum(1 for r in evs if r.get("kind") == "experiment_closed"
+                     and r.get("outcome") == "promoted")
+    return {
+        "enabled": coach.enabled(cfg), "promotions_total": promotions,
+        "trials_scored_today": trials_today,
+        "open_experiments": sum(1 for lv in levers if lv["experiment"] is not None),
+        "levers": levers,
+    }
+
+
+def extend_forecasts(forecasts_resolved_rows: list[dict[str, Any]],
+                     theses: list[Any]) -> list[dict[str, Any]]:
+    """Every resolved forecast, joined back to the claim it resolved - the
+    dot on the calibration strip becomes clickable to what was actually
+    said, not just whether it held. Takes the raw `forecast_resolved`
+    journal rows (they already carry `entry_id`) and returns the full
+    exported shape, replacing what used to be a bare field slice."""
+    by_id = {t.id: t for t in theses}
+    out = []
+    for r in forecasts_resolved_rows:
+        t = by_id.get(r.get("entry_id", ""))
+        row = {
+            "ts": r["ts"], "underlying": r.get("underlying"),
+            "stated": r.get("stated"), "held": r.get("held"),
+            "traded": r.get("traded"), "price_at_horizon": r.get("price_at_horizon"),
+            "entry_id": r.get("entry_id"),
+        }
+        if t is not None:
+            row.update({
+                "claim": t.claim, "probability_stated": t.probability_stated,
+                "horizon": t.horizon, "band_low": t.band_low, "band_high": t.band_high,
+                "kind": t.kind,
+            })
+        else:
+            row.update({"claim": None, "probability_stated": None, "horizon": None,
+                       "band_low": None, "band_high": None, "kind": None})
+        out.append(row)
+    return out
+
+
 # --------------------------------------------------------------- repo facts
 #
 # Numbers the submission deck used to carry by hand - lines of code, scaffold
@@ -813,6 +1397,18 @@ def export(out: Path = DEFAULT_OUT, *, strict: bool = True,
         print(f"[site_export] REFUSED: {mono_error}", file=sys.stderr)
         return 1
 
+    # The demo replay (notes/028). Deliberately AFTER the monotonicity guard
+    # and NOT folded into `counts`' guarded keys - the reel is capped and can
+    # shrink or reshuffle from one publish to the next without that meaning
+    # anything went wrong.
+    inbox_index = _inbox_index(cfg.paths.inbox_processed)
+    cycles, cycle_stats = build_cycles(
+        journal_rows, theses, positions_by_id, inbox_index, cfg.paths.state)
+    funnel = build_funnel(journal_rows, theses, positions, counts)
+    coach_block = build_coach(cfg)
+    forecasts_resolved_ext = extend_forecasts(forecasts_resolved, theses)
+    counts["cycles"] = cycle_stats["cycles_total"]
+
     run_started = journal_rows[0]["ts"] if journal_rows else None
 
     snapshot: dict[str, Any] = {
@@ -879,14 +1475,10 @@ def export(out: Path = DEFAULT_OUT, *, strict: bool = True,
 
         "positions": positions,
         "ledger_items": ledger_items,
-        "forecasts_resolved": [
-            {
-                "ts": r["ts"], "underlying": r.get("underlying"),
-                "stated": r.get("stated"), "held": r.get("held"),
-                "traded": r.get("traded"), "price_at_horizon": r.get("price_at_horizon"),
-            }
-            for r in forecasts_resolved
-        ],
+        "forecasts_resolved": forecasts_resolved_ext,
+        "cycles": cycles,
+        "funnel": funnel,
+        "coach": coach_block,
         "notes": notes,
         "journals": journals,
         "docs": {
@@ -953,9 +1545,13 @@ def export(out: Path = DEFAULT_OUT, *, strict: bool = True,
     out.parent.mkdir(parents=True, exist_ok=True)
     text = json.dumps(snapshot, indent=None, separators=(",", ":"), default=str)
     out.write_text(text, encoding="utf-8")
+    cycles_bytes = len(json.dumps(cycles, separators=(",", ":"), default=str))
     print(f"[site_export] wrote {out} ({len(text):,} bytes) - "
           f"{counts['positions']} positions, {counts['theses']} theses, "
           f"{counts['journal_rows']} journal rows, {summaries_dropped} summaries dropped")
+    print(f"[site_export] cycles: {len(cycles)} of {cycle_stats['cycles_total']} "
+          f"(+{cycles_bytes / 1024:.1f} KB), in progress: {cycle_stats['in_progress']}, "
+          f"ambiguous joins: {cycle_stats['ambiguous_joins']}")
     return 0
 
 
