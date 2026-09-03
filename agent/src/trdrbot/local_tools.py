@@ -12,13 +12,13 @@ exit rule that exists only in prose is not an exit rule.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 from typing import Any
 
 from langchain_core.tools import StructuredTool
 
-from . import experiments, ids, market_stats, optmath, sizing
+from . import experiments, ids, market_stats, optmath, playbook, sizing
 from .analytics import MIN_NET_COST_SHARE
 from .calibration import CalibrationStore
 from .ledger import PRICE_BAND, REALIZED_VOL_PCT, STANDALONE
@@ -58,6 +58,9 @@ class SimStructure:
     #: recorded legs rather than asking the model to re-declare it (D-037).
     #: None when the board was flat.
     leg_ivs: dict | None = None
+    #: The structure's family from its leg geometry (`playbook.classify`) -
+    #: derived, never declared, so the sizing row can say WHAT was sized.
+    family: str = ""
 
 
 @dataclass(frozen=True)
@@ -175,7 +178,7 @@ def _unreachable_rules(
 
 
 def build_simulate_experiments(shared: SharedContext, state_dir: Path | None = None,
-                               ledger: Any = None) -> StructuredTool:
+                               ledger: Any = None, journal: Any = None) -> StructuredTool:
     """Tool: score several expressions of one thesis before risking anything.
 
     Takes ALL candidates in a single call rather than one per call - that is
@@ -365,9 +368,45 @@ def build_simulate_experiments(shared: SharedContext, state_dir: Path | None = N
                                   for l in e.legs),
                 leg_ivs={_legs_key([(l.right, l.strike, l.side)]): l.iv
                          for l in e.legs if l.iv is not None} or None,
+                family=playbook.classify(e.legs),
             )
             for e, m in results if m.get("usable")
         ]
+        # THE AGENT'S OWN CANDIDATES, ON THE RECORD WITH THEIR LEGS (I-16,
+        # notes/026). Every structure priced here - traded or declined -
+        # resolves at its expiry close exactly like a playbook proposal, so
+        # "was I right to decline" finally has a number. Not a trial and not
+        # read by the lever's rejection digest: a different journal kind on
+        # purpose. The band-conditional read is recorded when a band exists;
+        # its fate is informational here - the agent is not gated by it.
+        if journal is not None:
+            try:
+                expiry_iso = (ids.market_today() + timedelta(days=days_to_expiry)).isoformat()
+                cands = []
+                for e, m in results:
+                    if not m.get("usable"):
+                        continue
+                    legs_out = [playbook.leg_payload(
+                        optmath.Leg(right=l.right, strike=l.strike, side=l.side, qty=l.qty,
+                                    price=l.price, expiry=expiry_iso, iv=l.iv)) for l in e.legs]
+                    row: dict[str, Any] = {"name": e.name, "family": playbook.classify(e.legs),
+                                           "legs": legs_out, "fate": "candidate",
+                                           "entry_friction": round(
+                                               float(m.get("est_friction") or 0.0)
+                                               * playbook.ENTRY_CROSSINGS, 2)}
+                    if band_low is not None or band_high is not None:
+                        row.update(playbook.evaluate(
+                            list(e.legs), spot=spot, iv=iv_pct / 100.0, days=days_to_expiry,
+                            band_low=band_low, band_high=band_high,
+                            friction_rt=float(m.get("est_friction") or 0.0)))
+                    cands.append(row)
+                journal.append("structures_simulated", underlying=underlying, horizon=horizon,
+                               band_low=band_low, band_high=band_high, spot=spot,
+                               iv_pct=iv_pct, days=days_to_expiry, expiry=expiry_iso,
+                               source="agent", thesis_entry_id=shared.thesis_entry_id,
+                               candidates=cands)
+            except Exception as exc:  # noqa: BLE001 - bookkeeping never blocks a decision
+                print(f"[simulate] could not journal the candidates: {exc!r}")
         return experiments.render_comparison(thesis, ranked)
 
     return StructuredTool.from_function(
@@ -1138,7 +1177,10 @@ def build_size_position(
                         # was (D-099). Without it a risk lever that moved an
                         # inert constraint looked identical to one that worked.
                         binding=d.binding,
-                        payoff_ratio=match.payoff_ratio)
+                        payoff_ratio=match.payoff_ratio,
+                        # WHAT was sized, from the legs (D-037), so "which
+                        # families earn size" is a journal query (notes/026).
+                        family=match.family)
         return d.explain()
 
     return StructuredTool.from_function(

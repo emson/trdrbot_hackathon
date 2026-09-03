@@ -196,6 +196,23 @@ async def run(
             journal.append("forecast_run", due=len(due), resolved=forecasts_resolved,
                            skipped_no_data=len(due) - forecasts_resolved)
 
+    # Resolve the playbook's proposals - and the agent's own simulated
+    # candidates - at their expiry close (notes/026). The slow evidence that
+    # audits the lever's fast reward, and I-16's declined structures scored.
+    # Advisory, isolated like every sibling stage.
+    if tools:
+        from . import playbook as _pb
+        try:
+            r_pb = await _pb.resolve(config, tools, journal, verbose=verbose)
+            if verbose and r_pb["due"]:
+                print(f"[housekeeping] playbook: {r_pb['resolved']}/{r_pb['due']} proposals "
+                      f"resolved at expiry")
+        except Exception as exc:  # noqa: BLE001 - advisory (INV-8)
+            print(f"[housekeeping] playbook resolution failed, continuing: {exc!r}")
+            health.degraded(journal, "playbook_resolve",
+                            "the resolution pass raised - proposals stay resolvable and "
+                            "the rest of housekeeping continues", error=repr(exc)[:200])
+
     # Attribute any thesis whose horizon has now arrived (view vs structure).
     # ADVISORY, like every stage around it (I-117). It was awaited bare, so a
     # raise from memory during credit took the rest of housekeeping down with

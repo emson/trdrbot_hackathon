@@ -22,6 +22,13 @@ from .positions import SCOREABLE_TERMINAL, Position, PositionStore
 from .wiki import Wiki
 
 
+def _family_of(pos: Position) -> str:
+    from . import optmath, playbook
+
+    legs = [l for l in (optmath.Leg.from_position_leg(x) for x in pos.legs) if l is not None]
+    return playbook.classify(legs) if legs else "unknown"
+
+
 def _horizon_passed(pos: Position) -> bool:
     # A DATE IS NOT A SESSION (I-79). D-107 moved this off the UTC date; the
     # morning half survived, because `market_today() >= horizon` is true from
@@ -226,6 +233,11 @@ async def run(
             blocks_credited=requested,
             blocks_applied=applied,
             position_id=pos.position_id,
+            # WHICH family this verdict is about, from the legs that traded
+            # (D-037's derive-not-declare; notes/026). "Which families have
+            # been right, wrong or lucky" is then a journal query rather than
+            # a matter of trusting the model's `strategy` string.
+            family=_family_of(pos),
             thesis=pos.thesis_claim,
             horizon=pos.thesis_horizon,
             price_at_horizon=spot,

@@ -1538,3 +1538,12 @@ def test_playbook_gauges_omit_when_there_is_no_data(tmp_path):
     assert g["playbook.candidates_per_opportunity"] == 2.0
     assert g["playbook.family_entropy"] == 1
     assert g["playbook.runs_total"] == 2, "voids count as runs, not as candidates"
+
+
+def test_the_playbook_outcome_gauge_needs_five_resolutions_before_it_is_a_number(tmp_path):
+    cfg = _cfg(tmp_path)
+    rows = [{"kind": "playbook_outcome", "won": True}] * 4
+    assert "playbook.outcome_hit_rate" not in coach.snapshot_gauges(cfg, rows)
+    rows += [{"kind": "playbook_outcome", "won": False},
+             {"kind": "playbook_outcome", "won": None, "unresolved": "no_price"}]
+    assert coach.snapshot_gauges(cfg, rows)["playbook.outcome_hit_rate"] == 0.8

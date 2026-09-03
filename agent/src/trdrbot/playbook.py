@@ -807,6 +807,117 @@ FETCH_STRIKE_WINDOW = 0.20
 FETCH_LIMIT = 600
 
 
+# --- resolution at expiry: the slow evidence that audits the fast reward ----
+
+#: Journal kinds whose `candidates` carry legs to resolve. `playbook` rows are
+#: the lever's proposals; `structures_simulated` rows are the agent's own
+#: candidates from `simulate_experiments` - traded or declined, they resolve
+#: the same way, which is I-16's shape delivered for every structure priced.
+PROPOSAL_KINDS = ("playbook", "structures_simulated")
+#: A close missing from the stored series is fetched once per name per pass,
+#: but only while the expiry is recent enough for one daily-bars call to cover
+#: it; after this many days without a price the candidate is recorded as
+#: unresolved rather than retried forever.
+RESOLVE_FETCH_DAYS = 5
+RESOLVE_GIVE_UP_DAYS = 10
+
+
+def _close_on(state_dir: Any, symbol: str, day: str) -> float | None:
+    """The stored close ON `day`, whatever the series' freshness.
+
+    `market_stats.load_dated_closes` refuses a stale file, rightly, for
+    callers that want the present; the resolver wants one historical bar and a
+    file last refreshed a week ago answers that honestly.
+    """
+    import json
+
+    from . import market_stats
+
+    p = market_stats.returns_path(state_dir, symbol)
+    if not p.exists():
+        return None
+    try:
+        d = json.loads(p.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return None
+    dates, closes = d.get("dates"), d.get("closes")
+    if not isinstance(dates, list) or not isinstance(closes, list) or len(dates) != len(closes):
+        return None
+    return next((float(c) for dt, c in zip(dates, closes) if str(dt)[:10] == day), None)
+
+
+async def resolve(config: Any, tools: dict[str, Any], journal: Any, *,
+                  verbose: bool = False) -> dict[str, int]:
+    """Score every proposal whose expiry session has closed, at the close.
+
+    Exact arithmetic - `pnl_at` at the expiry close, less the entry friction
+    the proposal was scored with - and never a guess: a missing close is
+    fetched once per name per pass while the expiry is recent, retried on
+    later passes, and recorded as `unresolved` after `RESOLVE_GIVE_UP_DAYS`.
+    One `playbook_outcome` row per (proposal row, candidate); the proposal
+    rows themselves are never rewritten.
+    """
+    from . import health, market_stats
+
+    rows = list(journal.read())
+    done = {(r.get("proposal_id"), r.get("family"), r.get("name"))
+            for r in rows if r.get("kind") == "playbook_outcome"}
+    today = ids.market_today()
+    due = resolved = no_price = given_up = 0
+    fetched: set[str] = set()
+    for r in rows:
+        if r.get("kind") not in PROPOSAL_KINDS or r.get("voided"):
+            continue
+        u = str(r.get("underlying") or "")
+        for c in r.get("candidates") or []:
+            legs = c.get("legs") or []
+            if not legs or not u:
+                continue
+            expiry = str(legs[0].get("expiry") or r.get("expiry") or "")
+            key = (r.get("id"), c.get("family"), c.get("name"))
+            if key in done or not expiry or not ids.session_closed_on(expiry):
+                continue
+            due += 1
+            age = (today - date.fromisoformat(expiry)).days
+            close = _close_on(config.paths.state, u, expiry)
+            if close is None and tools and u not in fetched and age <= RESOLVE_FETCH_DAYS:
+                fetched.add(u)
+                try:
+                    dates, closes = await market_stats.fetch_daily_series(tools, u)
+                    if dates:
+                        market_stats.save_closes(config.paths.state, u, closes, dates=dates)
+                except Exception as exc:  # noqa: BLE001 - one name's fetch, not the pass
+                    print(f"[playbook] could not fetch closes for {u}: {exc!r}")
+                close = _close_on(config.paths.state, u, expiry)
+            base = {"proposal_id": r.get("id"), "proposal_kind": r.get("kind"),
+                    "source": r.get("source", "agent"), "variant": r.get("variant"),
+                    "family": c.get("family"), "name": c.get("name"), "fate": c.get("fate"),
+                    "underlying": u, "expiry": expiry}
+            if close is None:
+                if age > RESOLVE_GIVE_UP_DAYS:
+                    journal.append("playbook_outcome", **base, won=None, unresolved="no_price")
+                    done.add(key)
+                    given_up += 1
+                else:
+                    no_price += 1
+                continue
+            pnl = (optmath.pnl_at(legs_from_payload(legs), close)
+                   - float(c.get("entry_friction") or 0.0))
+            journal.append(
+                "playbook_outcome", **base, close=close, pnl=round(pnl, 2), won=pnl > 0,
+                band_held_at_expiry=optmath.band_holds(close, r.get("band_low"),
+                                                       r.get("band_high")),
+                e_hold=c.get("e_hold"), edge=c.get("edge"))
+            done.add(key)
+            resolved += 1
+            if verbose:
+                print(f"[playbook] {u} {c.get('family')} expired {expiry} at {close:.2f}: "
+                      f"pnl {pnl:+.0f} ({'won' if pnl > 0 else 'lost'})")
+    health.heartbeat(journal, "playbook_resolve_run", due=due, resolved=resolved,
+                     no_price=no_price, given_up=given_up)
+    return {"due": due, "resolved": resolved, "no_price": no_price, "given_up": given_up}
+
+
 async def fetch_chain(tools: dict[str, Any], config: Any, underlying: str, *,
                       horizon: str = "", spot: float | None = None) -> Any:
     """A chain the playbook can actually price on.
@@ -835,6 +946,6 @@ __all__ = [
     "ANCHORS", "SHAPES", "SEED_CATALOGUE", "MIN_BAND_EDGE", "ENTRY_CROSSINGS",
     "Board", "Catalogue", "CatalogueError", "Chain", "Family", "Instance", "LegSpec", "Quote",
     "asked_for", "attach", "board_for", "chain_from_snapshots", "classify", "evaluate", "fetch_chain",
-    "leg_payload", "legs_from_payload", "menu_of", "parse_catalogue", "resolve_legs",
+    "leg_payload", "legs_from_payload", "menu_of", "parse_catalogue", "resolve", "resolve_legs",
     "run_arm", "score_arm", "shape_of", "validate_catalogue",
 ]

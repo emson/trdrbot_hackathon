@@ -320,6 +320,22 @@ def _playbook_family_entropy(rows: list[dict[str, Any]]) -> int | None:
                 if survived(c.get("fate"))})
 
 
+#: Below this many resolved outcomes a hit rate is not a measurement - the
+#: same floor `competence.MIN_ATTR_VERDICTS` and `ledger.MIN_GATE_RESOLVED` use.
+MIN_OUTCOMES = 5
+
+
+def _playbook_outcome_hit_rate(rows: list[dict[str, Any]]) -> float | None:
+    """Share of resolved proposals that made money at expiry, over the
+    window. The lever's slow evidence, trended beside its fast reward so the
+    two can be read against each other (I-28's shape)."""
+    outs = [r for r in _kind_rows(rows, "playbook_outcome", GAUGE_WINDOW * 5)
+            if r.get("won") is not None]
+    if len(outs) < MIN_OUTCOMES:
+        return None
+    return round(sum(1 for r in outs if r.get("won")) / len(outs), 4)
+
+
 def _cost_today(cfg: Any, roles: tuple[str, ...] = ("muse", "coach_mutate")
                 ) -> tuple[float, int]:
     """(priced spend today, count of UNPRICED calls) for the sentineled roles.
@@ -381,6 +397,7 @@ def snapshot_gauges(cfg: Any, rows: list[dict[str, Any]]) -> dict[str, Any]:
     put("playbook.candidates_per_opportunity", _playbook_candidates_per_opportunity(rows))
     put("playbook.family_entropy", _playbook_family_entropy(rows))
     put("playbook.runs_total", sum(1 for r in rows if r.get("kind") == "playbook") or None)
+    put("playbook.outcome_hit_rate", _playbook_outcome_hit_rate(rows))
     # The other two thesis sources and the ladder's own promotion criterion.
     # Each omitted (never zeroed) when there is no data - a gauge reading 0 is
     # indistinguishable from a collapse on a chart.

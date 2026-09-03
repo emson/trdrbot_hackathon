@@ -535,3 +535,130 @@ def test_the_playbook_lever_is_a_declaration_the_registry_can_run():
     rendered = coach.render_mutate_prompt(lever, playbook.SEED_CATALOGUE, rejections="-",
                                           graveyard="-")
     assert "band holds" in rendered and "data, not a template" in rendered
+
+
+# --- resolution at expiry -----------------------------------------------------
+
+from datetime import timedelta  # noqa: E402
+
+from trdrbot import ids, market_stats  # noqa: E402
+
+
+def _iso(days_ago: int) -> str:
+    """`days_ago` before the MARKET date - derived, never literal (D-032), and
+    from the clock `scripts/suite_at.py` shifts, not the wall clock."""
+    return (ids.market_today() - timedelta(days=days_ago)).isoformat()
+
+
+def _proposal_row(journal: Journal, expiry: str, *, kind: str = "playbook",
+                  entry_friction: float = 10.0, family: str = "bull_call_debit") -> str:
+    legs = [playbook.leg_payload(Leg("C", 100.0, "long", 1, 3.0, expiry)),
+            playbook.leg_payload(Leg("C", 105.0, "short", 1, 1.0, expiry))]
+    return journal.append(kind, underlying="XYZ", source="muse", variant="v0",
+                          band_low=103.0, band_high=108.0, expiry=expiry,
+                          candidates=[{"family": family, "fate": "candidate", "legs": legs,
+                                       "entry_friction": entry_friction, "e_hold": 50.0,
+                                       "edge": 0.6}])
+
+
+@pytest.mark.asyncio
+async def test_resolve_scores_a_candidate_at_the_expiry_close_exactly(tmp_path):
+    """Exact arithmetic at the close, less the entry friction the proposal was
+    scored with - computed independently here."""
+    cfg, journal = _cfg(tmp_path), Journal(tmp_path / "journal.jsonl")
+    expiry = _iso(3)
+    dates = [_iso(9 - i) for i in range(10)]
+    closes = [100.0, 101.0, 102.0, 103.0, 104.0, 105.0, 106.0, 107.0, 108.0, 109.0]
+    market_stats.save_closes(cfg.paths.state, "XYZ", closes, dates=dates)
+    rid = _proposal_row(journal, expiry)
+    close = closes[dates.index(expiry)]
+
+    r = await playbook.resolve(cfg, {}, journal)
+
+    out = journal_rows(journal, "playbook_outcome")
+    assert r["resolved"] == 1 and len(out) == 1
+    legs = [Leg("C", 100.0, "long", 1, 3.0), Leg("C", 105.0, "short", 1, 1.0)]
+    assert out[0]["pnl"] == pytest.approx(optmath.pnl_at(legs, close) - 10.0)
+    assert out[0]["won"] is (out[0]["pnl"] > 0)
+    assert out[0]["proposal_id"] == rid and out[0]["family"] == "bull_call_debit"
+    assert out[0]["band_held_at_expiry"] is (103.0 <= close <= 108.0)
+    beat = journal_rows(journal, "playbook_resolve_run")[-1]
+    assert beat["due"] == 1 and beat["resolved"] == 1
+    # idempotent: a second pass finds nothing due
+    r2 = await playbook.resolve(cfg, {}, journal)
+    assert r2["due"] == 0 and len(journal_rows(journal, "playbook_outcome")) == 1
+
+
+@pytest.mark.asyncio
+async def test_resolve_waits_for_the_expiry_session_to_close(tmp_path):
+    cfg, journal = _cfg(tmp_path), Journal(tmp_path / "journal.jsonl")
+    _proposal_row(journal, days_out(2))
+    r = await playbook.resolve(cfg, {}, journal)
+    assert r["due"] == 0 and not journal_rows(journal, "playbook_outcome")
+
+
+@pytest.mark.asyncio
+async def test_resolve_gives_up_after_ten_days_without_a_price_and_says_so(tmp_path):
+    cfg, journal = _cfg(tmp_path), Journal(tmp_path / "journal.jsonl")
+    _proposal_row(journal, _iso(12))
+    r = await playbook.resolve(cfg, {}, journal)
+    out = journal_rows(journal, "playbook_outcome")
+    assert r["given_up"] == 1 and out[0]["unresolved"] == "no_price" and out[0]["won"] is None
+    # ...and a recent one with no price is retried, not given up
+    _proposal_row(journal, _iso(3), family="bear_put_debit")
+    r = await playbook.resolve(cfg, {}, journal)
+    assert r["no_price"] == 1 and r["given_up"] == 0
+    assert len(journal_rows(journal, "playbook_outcome")) == 1
+
+
+@pytest.mark.asyncio
+async def test_resolve_fetches_a_missing_close_once_per_name_and_saves_it(tmp_path):
+    cfg, journal = _cfg(tmp_path), Journal(tmp_path / "journal.jsonl")
+    expiry = _iso(3)
+    _proposal_row(journal, expiry)
+    _proposal_row(journal, expiry, family="bull_put_credit")
+    bars = [{"t": _iso(9 - i) + "T20:00:00Z", "c": 100.0 + i} for i in range(10)]
+    tools = tools_for(get_stock_bars=lambda **_: {"bars": {"XYZ": bars}})
+
+    r = await playbook.resolve(cfg, tools, journal)
+
+    assert r["resolved"] == 2
+    assert len(tools["get_stock_bars"].calls) == 1, "one fetch per name per pass"
+    assert market_stats.returns_path(cfg.paths.state, "XYZ").exists(), "the series is kept"
+
+
+def test_structures_simulated_row_is_written_for_the_agents_own_candidates_and_never_scored(tmp_path):
+    """I-16, delivered: every structure the agent prices - traded or not - is
+    journalled with its legs so the resolver scores it at expiry. A different
+    kind from `playbook` on purpose: not a trial, and not read by the lever's
+    rejection digest or its gauges."""
+    from trdrbot import local_tools
+
+    journal = Journal(tmp_path / "journal.jsonl")
+    shared = local_tools.SharedContext()
+    sim = local_tools.build_simulate_experiments(shared, None, None, journal=journal)
+    sim.func(
+        thesis_claim="up", underlying="SPY", horizon=days_out(5), drift_pct=0.5,
+        spot=771.0, iv_pct=11.0, days_to_expiry=7, band_low=775.0, band_high=782.0,
+        candidates=[
+            {"name": "debit", "legs": [
+                {"right": "C", "strike": 773, "side": "long", "qty": 1, "price": 3.10},
+                {"right": "C", "strike": 778, "side": "short", "qty": 1, "price": 1.35}]},
+            {"name": "credit", "legs": [
+                {"right": "P", "strike": 765, "side": "short", "qty": 1, "price": 1.90},
+                {"right": "P", "strike": 760, "side": "long", "qty": 1, "price": 1.10}]},
+        ])
+    rows = journal_rows(journal, "structures_simulated")
+    assert len(rows) == 1 and rows[0]["source"] == "agent"
+    fams = {c["name"]: c["family"] for c in rows[0]["candidates"]}
+    assert fams == {"debit": "bull_call_debit", "credit": "bull_put_credit"}
+    for c in rows[0]["candidates"]:
+        assert c["legs"] and all(l["expiry"] == rows[0]["expiry"] for l in c["legs"])
+        assert "e_hold" in c and "edge" in c, "the band-conditional read rides along"
+        assert c["entry_friction"] > 0
+    assert not journal_rows(journal, "playbook"), "not a playbook row: never a trial"
+    assert {s.family for s in shared.structures} == {"bull_call_debit", "bull_put_credit"}
+    # the lever's own gauges do not read it
+    assert "playbook.survival_rate" not in coach.snapshot_gauges(
+        SimpleNamespace(paths=SimpleNamespace(state=tmp_path, data=tmp_path), coach={}),
+        list(journal.read()))

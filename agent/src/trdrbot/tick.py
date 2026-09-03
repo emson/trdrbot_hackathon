@@ -845,7 +845,8 @@ async def _run_tick(
 
         shared = local_tools.SharedContext()
         book = ledger_mod.Ledger(config.paths.state / "ledger.jsonl")
-        sim_tool = local_tools.build_simulate_experiments(shared, config.paths.state, book)
+        sim_tool = local_tools.build_simulate_experiments(shared, config.paths.state, book,
+                                                          journal=journal)
         forecast_tool = local_tools.build_record_forecast(book, config.paths.state)
         open_risk = sum(p.max_loss_usd or 0.0 for p in open_pos)
         by_underlying: dict[str, float] = {}

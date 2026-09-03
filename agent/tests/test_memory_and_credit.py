@@ -461,6 +461,10 @@ async def test_attribution_credits_by_verdict_and_weights_by_retrieval_similarit
     credited = {bid: (sig, w) for bid, sig, w, _ in mem.credited}
     assert credited["blk_a"] == (signal, 0.93)   # credit_weight(0.9)
     assert credited["blk_b"] == (signal, 0.55)   # credit_weight(0.4)
+    # ...and the row names the FAMILY the verdict is about, from the legs
+    # that traded (notes/026) - "unknown" when the position carries none.
+    row = journal_rows(journal, "attribution")[-1]
+    assert "family" in row and row["family"]
 
 
 async def test_a_lucky_win_teaches_nothing_at_all(paths, make_position, mem: FakeMem):

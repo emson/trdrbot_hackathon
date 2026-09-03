@@ -238,6 +238,19 @@ PROBES: tuple[Probe, ...] = (
         "or the anchors are broken (read `voided` and `reason` on the rows)",
         heartbeat_fields=("opportunities", "proposed", "survived", "voided"),
     ),
+    # ...and their resolution at expiry. `never_producing_is_ok`: nothing is
+    # due until the first proposal's expiry passes, and that is the normal
+    # first week, not a stall. `work` is what was due, so a queue that grows
+    # while nothing resolves is the shape that reads BAD.
+    Probe(
+        "playbook_resolve", ("playbook_resolve_run",),
+        lambda rows: sum(int(r.get("resolved") or 0) for r in rows), 3,
+        "proposals are never resolved at their expiry - the dated close series "
+        "is missing or the bars fetch is dead (read no_price and given_up)",
+        work=lambda rows: sum(int(r.get("due") or 0) for r in rows),
+        heartbeat_fields=("due", "resolved", "no_price", "given_up"),
+        never_producing_is_ok=True,
+    ),
     Probe(
         "sizing", ("sizing",),
         lambda rows: sum(1 for r in rows
