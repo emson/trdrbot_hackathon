@@ -13,6 +13,16 @@
 					A self-improving options-trading agent that scores itself honestly, not just by P&amp;L.
 					Built for the Alpaca AI Trading Agents Hackathon. Paper trading only.
 				</p>
+				<p class="fine">
+					Built by {siteConfig.author.name} ·
+					<a href={siteConfig.author.site} target="_blank" rel="noopener noreferrer"
+						>{siteConfig.author.siteLabel}</a
+					>
+					·
+					<a href={siteConfig.author.x} target="_blank" rel="noopener noreferrer"
+						>{siteConfig.author.xLabel}</a
+					>
+				</p>
 			</div>
 			<div class="footer-links">
 				<span class="kicker">Explore</span>

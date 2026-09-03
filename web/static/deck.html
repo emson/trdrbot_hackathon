@@ -301,7 +301,11 @@ svg.chart{display:block; width:100%; height:auto; overflow:visible}
         <strong>structure</strong> was right, or whether it just got lucky — and only the first two
         ever move its confidence. That's the self-improving part: not a bigger model, a more honest
         one.</p>
-        <p class="fine">trdrbot · built on Alpaca's MCP server · $100,000 paper account</p>
+        <p class="fine">The project is <strong style="color:var(--ink)">trdrbot</strong>; the agent
+        it runs is called <strong style="color:var(--ink)">Theo</strong>, for theta — the greek its
+        short-dated book lives on. Built on Alpaca's MCP server · $100,000 paper account</p>
+        <p class="fine">Ben Emson · <a href="https://benemson.com">benemson.com</a> ·
+        <a href="https://x.com/emson">x.com/emson</a></p>
       </div>
       <div class="plate"><img src="assets/elf-coding.jpg"
         alt="Theo, trdrbot's elf mascot, working at a laptop beside a trdrbot mug"></div>
@@ -437,7 +441,8 @@ svg.chart{display:block; width:100%; height:auto; overflow:visible}
       stops.</p>
       <p class="fine"><strong style="color:var(--ink)">The ledger is the quiet one.</strong>
       Forecasts on setups Theo <em>declined</em> are scored too, at zero risk — the only realistic
-      way to build a track record that means anything inside a week.</p>
+      way to build a track record that means anything inside a week.
+      <br><br>22,900 lines of Python · 745 offline tests · 7 trader-readable simulation scaffolds</p>
     </div>
   </div>
 </section>
@@ -479,7 +484,7 @@ svg.chart{display:block; width:100%; height:auto; overflow:visible}
 <section class="slide ledger" data-title="Alpaca implementation">
   <div class="inner">
     <span class="kicker">Technology implementation</span>
-    <h2>How Alpaca is used — and three things that were harder than they look.</h2>
+    <h2>How trdrbot uses Alpaca — and three things that were harder than they look.</h2>
     <div class="cols c3">
       <div class="card"><h3>One MCP session per cycle</h3>
         <p class="muted">Alpaca's MCP server runs as a local subprocess. The default adapter starts
@@ -499,7 +504,7 @@ svg.chart{display:block; width:100%; height:auto; overflow:visible}
     </div>
     <div class="card" style="border-left:3px solid var(--caution)">
       <p><strong>The lesson that generalises.</strong> All three had already shipped as code that
-      ran and quietly did nothing, while every log line looked healthy. That is why Theo has a
+      ran and quietly did nothing, while every log line looked healthy. That is why trdrbot has a
       health check that asks a question tests cannot: <em>“you ran — but did you actually
       produce anything?”</em></p>
     </div>
@@ -680,18 +685,18 @@ svg.chart{display:block; width:100%; height:auto; overflow:visible}
 <!-- ═══ 11 ═══════════════════════════════════════════════════════════ -->
 <section class="slide ledger" data-title="Results, and what the record says">
   <div class="inner">
-    <span class="kicker">Results · paper account · as of 2 Sep 2026, 17:26 UTC</span>
+    <span class="kicker">Results · paper account · as of 3 Sep 2026, 17:04 UTC · tick 821</span>
     <h2>The P&amp;L — and the number we would rather not show you.</h2>
     <div class="cols c4">
-      <div class="card"><span class="tag code">equity</span><span class="big">$111,415</span>
+      <div class="card"><span class="tag code">equity</span><span class="big">$114,085</span>
         <p class="muted">from a $100,000 start</p></div>
       <div class="card"><span class="tag good">return</span>
-        <span class="big" style="color:var(--accent)">+11.4%</span>
-        <p class="muted">0.5% off its high water mark</p></div>
-      <div class="card"><span class="tag code">positions</span><span class="big">7</span>
-        <p class="muted">6 closed, from −2.9% to +129.1%; 1 still open</p></div>
-      <div class="card"><span class="tag code">decisions</span><span class="big">255</span>
-        <p class="muted">157 claims formed, 98 declined outright</p></div>
+        <span class="big" style="color:var(--accent)">+14.1%</span>
+        <p class="muted">at its high water mark, no drawdown</p></div>
+      <div class="card"><span class="tag code">positions</span><span class="big">11</span>
+        <p class="muted">6 closed, from −2.9% to +129.1%; 2 open, 3 never filled</p></div>
+      <div class="card"><span class="tag code">claims</span><span class="big">185</span>
+        <p class="muted">145 declined outright, 9 traded</p></div>
     </div>
     <div class="cols c2">
       <div class="card" style="border-left:3px solid var(--danger)">
@@ -705,7 +710,8 @@ svg.chart{display:block; width:100%; height:auto; overflow:visible}
         <p><strong>Worse, and more useful: the scoring queue was stuck.</strong> The step that
         decides right-versus-lucky sat silently jammed for days. We found it, drained it, and its
         first verdict was <strong>UNSCOREABLE</strong> — the one trade with no claim recorded at
-        entry. Every box in the two-questions grid still reads zero. <em>The system that would let us hide this
+        entry. Since then exactly one box has filled — a view that was wrong and lost money, which
+        is the box that teaches. The other three still read zero. <em>The system that would let us hide this
         is the same system that found it.</em></p>
       </div>
     </div>
@@ -732,7 +738,7 @@ svg.chart{display:block; width:100%; height:auto; overflow:visible}
         it is stricter: the agent cannot execute what the arithmetic refuses to compute.</p></div>
       <div class="card"><h3>Every defect is public</h3>
         <p class="muted">A living bug ledger records each one the moment it is found and removes it
-        only in the commit that fixes it. 123 numbered issues so far.</p></div>
+        only in the commit that fixes it. 125 numbered issues so far.</p></div>
     </div>
     <p class="lead tight">None of these is a rough edge we ran out of time to sand. Each is a place
     where the honest answer was to refuse, and say so.</p>

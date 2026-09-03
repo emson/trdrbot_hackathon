@@ -2,12 +2,24 @@
 	import Icon from '$lib/components/Icon.svelte';
 	import Term from '$lib/components/Term.svelte';
 	import PageHeader from '$lib/components/PageHeader.svelte';
+	import { siteConfig } from '$lib/site.config.js';
 </script>
 
 <svelte:head><title>How it works — trdrbot</title></svelte:head>
 
 <section class="block ledger">
 	<div class="wrap">
+		<p class="fine" style="margin-bottom:1rem">
+			<strong>trdrbot</strong> — the agent is called <strong>Theo</strong>, for theta. By
+			{siteConfig.author.name} ·
+			<a href={siteConfig.author.site} target="_blank" rel="noopener noreferrer"
+				>{siteConfig.author.siteLabel}</a
+			>
+			·
+			<a href={siteConfig.author.x} target="_blank" rel="noopener noreferrer"
+				>{siteConfig.author.xLabel}</a
+			>
+		</p>
 		<PageHeader kicker="The machine">
 			{#snippet heading()}Five stages, looped so the system can learn from itself.{/snippet}
 			A scheduler wakes the agent every 60 seconds. Cheap deterministic work runs every tick;
