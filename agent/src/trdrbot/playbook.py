@@ -73,6 +73,11 @@ ENTRY_CROSSINGS = 0.5
 #: switch to the calibrated bootstrap (D-089) is auditable, not silent.
 DIST = "lognormal"
 
+#: A chain must list at least this many quoted strikes of EACH right inside
+#: the anchor window before a family is placed on it; fewer means the page is
+#: a fragment and the targeted fetch is asked for instead.
+MIN_QUOTED_STRIKES_PER_RIGHT = 4
+
 #: The synthetic board the validator instantiates every family on: enough to
 #: prove bounded loss and distinct strikes by the same arithmetic that scores
 #: production, with no chain in sight.
@@ -376,6 +381,19 @@ class Chain:
         not one to route around."""
         cands = self.at(expiry, right)
         return min(cands, key=lambda q: abs(q.strike - strike)) if cands else None
+
+    def covers(self, expiry: str, spot: float, sigma: float) -> bool:
+        """Does this chain list enough QUOTED strikes of both rights around
+        spot to place a family on? The gate's page can match the horizon's
+        expiry and still be nearly all calls (measured live: MRK's page had
+        one put, at 135 against a 150 spot, and every bearish family snapped
+        onto it and was refused as unquoted)."""
+        lo, hi = spot - MAX_ANCHOR_SIGMA * sigma, spot + MAX_ANCHOR_SIGMA * sigma
+        for right in ("C", "P"):
+            n = sum(1 for q in self.at(expiry, right) if q.quoted and lo <= q.strike <= hi)
+            if n < MIN_QUOTED_STRIKES_PER_RIGHT:
+                return False
+        return True
 
     def atm_iv(self, expiry: str, spot: float) -> float | None:
         """Mean IV of the call and put nearest spot, or None if the chain
@@ -735,10 +753,13 @@ async def attach(tools: dict[str, Any], config: Any, journal: Any, o: Opportunit
         board: Board | str = VOID_NO_CHAIN
         if snaps is not None:
             board = board_for(o, spot=spot, chain=chain_from_snapshots(snaps), closes=closes)
-        if board in (VOID_NO_CHAIN, VOID_NO_EXPIRY):
+        thin = (isinstance(board, Board)
+                and not board.chain.covers(board.expiry, board.spot, board.sigma))
+        if board in (VOID_NO_CHAIN, VOID_NO_EXPIRY) or thin:
             # The gate's page is the nearest expiry and usually falls short of
-            # the horizon (measured live: one expiry, 100 contracts). One
-            # targeted fetch, shared by both arms, is the usual cost.
+            # the horizon (measured live: one expiry, 100 contracts) - or
+            # matches it and is nearly all calls. One targeted fetch, shared
+            # by both arms, is the usual cost.
             snaps = await fetch_chain(tools, config, o.underlying, horizon=o.horizon, spot=spot)
             board = board_for(o, spot=spot, chain=chain_from_snapshots(snaps), closes=closes)
         nonce = ids.opportunity_id(source, o.to_payload())

@@ -662,3 +662,25 @@ def test_structures_simulated_row_is_written_for_the_agents_own_candidates_and_n
     assert "playbook.survival_rate" not in coach.snapshot_gauges(
         SimpleNamespace(paths=SimpleNamespace(state=tmp_path, data=tmp_path), coach={}),
         list(journal.read()))
+
+
+@pytest.mark.asyncio
+async def test_attach_refetches_when_the_gates_page_lacks_strikes_around_spot(tmp_path):
+    """Measured live on MRK: the gate's page matched the horizon's expiry and
+    carried one put, at 135 against a 150 spot - every bearish family snapped
+    onto it and was refused as unquoted, and no fetch happened because the
+    expiry test passed. Coverage is the second half of "usable"."""
+    cfg, journal = _cfg(tmp_path), Journal(tmp_path / "journal.jsonl")
+    expiry = days_out(8)
+    full = _snapshots(expiry)
+    calls_only = {occ: s for occ, s in full.items() if "C" in occ[9:10] or occ.endswith("P00085000")}
+    tools = tools_for(get_option_chain=lambda **_: {"snapshots": full})
+
+    out = await playbook.attach(tools, cfg, journal, _opp(90.0, 96.0, days_out(5)),
+                                source="muse", spot=SPOT, chain=calls_only)
+
+    assert len(tools["get_option_chain"].calls) == 1, "a thin page triggers the targeted fetch"
+    kw = tools["get_option_chain"].calls[0]
+    assert kw["expiration_date_gte"] == days_out(5) and kw["strike_price_gte"] < SPOT < kw["strike_price_lte"]
+    assert out.playbook is not None
+    assert any(c["fate"] == "candidate" for c in out.playbook["candidates"]), out.playbook
