@@ -635,7 +635,7 @@ def test_structures_simulated_row_is_written_for_the_agents_own_candidates_and_n
     from trdrbot import local_tools
 
     journal = Journal(tmp_path / "journal.jsonl")
-    shared = local_tools.SharedContext()
+    shared = local_tools.SharedContext(decision_ref="jrn_20260101T000000Z_dec000000")
     sim = local_tools.build_simulate_experiments(shared, None, None, journal=journal)
     sim.func(
         thesis_claim="up", underlying="SPY", horizon=days_out(5), drift_pct=0.5,
@@ -650,6 +650,9 @@ def test_structures_simulated_row_is_written_for_the_agents_own_candidates_and_n
         ])
     rows = journal_rows(journal, "structures_simulated")
     assert len(rows) == 1 and rows[0]["source"] == "agent"
+    assert rows[0]["decision_ref"] == "jrn_20260101T000000Z_dec000000", (
+        "notes/028: a demo replay joins this row to its cycle directly"
+    )
     fams = {c["name"]: c["family"] for c in rows[0]["candidates"]}
     assert fams == {"debit": "bull_call_debit", "credit": "bull_put_credit"}
     for c in rows[0]["candidates"]:

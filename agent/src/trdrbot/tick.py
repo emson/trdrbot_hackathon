@@ -843,7 +843,7 @@ async def _run_tick(
             elfmem_blocks=ctx.blocks,
         )
 
-        shared = local_tools.SharedContext()
+        shared = local_tools.SharedContext(decision_ref=decision_id)
         book = ledger_mod.Ledger(config.paths.state / "ledger.jsonl")
         sim_tool = local_tools.build_simulate_experiments(shared, config.paths.state, book,
                                                           journal=journal)

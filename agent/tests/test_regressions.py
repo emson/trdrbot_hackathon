@@ -5141,7 +5141,7 @@ def test_unbounded_profit_without_a_ratio_refuses_for_the_MISSING_RATIO():
 
 
 def _sim_and_size(tmp_path, candidates, *, journal=None, spot=100.0, iv_pct=25.0,
-                  days=7, equity=100_000.0):
+                  days=7, equity=100_000.0, decision_ref=""):
     """Drive the REAL tool pair over a real SharedContext.
 
     Producer-derived on purpose (the trdrbot testing overlay): the shared
@@ -5151,7 +5151,7 @@ def _sim_and_size(tmp_path, candidates, *, journal=None, spot=100.0, iv_pct=25.0
     """
     from trdrbot.calibration import CalibrationStore
 
-    shared = local_tools.SharedContext()
+    shared = local_tools.SharedContext(decision_ref=decision_ref)
     sim = local_tools.build_simulate_experiments(shared, None, None)
     sim.func(thesis_claim="pinned", underlying="X", horizon="2099-01-05",
              drift_pct=0.0, spot=spot, iv_pct=iv_pct, days_to_expiry=days,
@@ -5265,7 +5265,7 @@ def test_every_sizing_outcome_is_journalled_including_the_refusals(tmp_path):
     shared, size = _sim_and_size(tmp_path, [
         {"name": "narrow condor", "legs": _legs(NARROW)},
         {"name": "wide condor", "legs": _legs(WIDE)},
-    ], journal=journal)
+    ], journal=journal, decision_ref="jrn_20260101T000000Z_dec000000")
     wide = next(s for s in shared.structures if s.name == "wide condor")
 
     size.func(stated_confidence=0.95, max_profit=wide.max_profit,
@@ -5276,6 +5276,8 @@ def test_every_sizing_outcome_is_journalled_including_the_refusals(tmp_path):
     assert [r["result"] for r in rows] == ["sized", "refused"]
     assert rows[0]["contracts"] > 0 and rows[1]["contracts"] == 0
     assert "REFUSED" in rows[1]["reason"]
+    # notes/028: a demo replay joins a sizing row to its cycle directly.
+    assert all(r["decision_ref"] == "jrn_20260101T000000Z_dec000000" for r in rows)
 
 
 def test_breakeven_vol_finds_the_crossing_of_a_name_priced_above_the_old_grid_cap():

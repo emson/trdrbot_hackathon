@@ -94,6 +94,11 @@ class SharedContext:
     to it, and nothing could check that the reader and the writer agreed.
     """
 
+    #: The write-ahead `decision` journal row this cycle's tools are acting
+    #: under. Stamped on `structures_simulated` and `sizing` rows so a demo
+    #: replay can join a cycle's tool-written rows directly instead of
+    #: falling back to interval containment (notes/028).
+    decision_ref: str = ""
     thesis: experiments.Thesis | None = None
     #: The ledger row `simulate_experiments` registered for `thesis`, so
     #: `record_position` can mark THAT row traded rather than walking the
@@ -404,7 +409,7 @@ def build_simulate_experiments(shared: SharedContext, state_dir: Path | None = N
                                band_low=band_low, band_high=band_high, spot=spot,
                                iv_pct=iv_pct, days=days_to_expiry, expiry=expiry_iso,
                                source="agent", thesis_entry_id=shared.thesis_entry_id,
-                               candidates=cands)
+                               decision_ref=shared.decision_ref, candidates=cands)
             except Exception as exc:  # noqa: BLE001 - bookkeeping never blocks a decision
                 print(f"[simulate] could not journal the candidates: {exc!r}")
         return experiments.render_comparison(thesis, ranked)
@@ -1118,10 +1123,12 @@ def build_size_position(
         # of. The caller used to substitute a $100,000 constant, which sized 47
         # contracts against the 12 the real equity permitted. This is the sizer
         # declining to answer a question it has no input for, not a policy gate.
+        decision_ref = shared.decision_ref if shared is not None else ""
         if equity is None:
             _journal_sizing(journal, underlying=underlying.upper(), result="refused",
                             contracts=0, structure=structure_name,
-                            reason="account unreadable - no bankroll to size against")
+                            reason="account unreadable - no bankroll to size against",
+                            decision_ref=decision_ref)
             return (
                 "REFUSED: the account could not be read this tick, so there is no "
                 "bankroll to size against and every cap here is a fraction of one. "
@@ -1131,7 +1138,8 @@ def build_size_position(
         match = _match_structure(shared, max_profit, max_loss, structure_name)
         if isinstance(match, str):
             _journal_sizing(journal, underlying=underlying.upper(), result="refused",
-                            contracts=0, structure=structure_name, reason=match[:160])
+                            contracts=0, structure=structure_name, reason=match[:160],
+                            decision_ref=decision_ref)
             return match
 
         d = sizing.size_position(
@@ -1180,7 +1188,7 @@ def build_size_position(
                         payoff_ratio=match.payoff_ratio,
                         # WHAT was sized, from the legs (D-037), so "which
                         # families earn size" is a journal query (notes/026).
-                        family=match.family)
+                        family=match.family, decision_ref=decision_ref)
         return d.explain()
 
     return StructuredTool.from_function(
