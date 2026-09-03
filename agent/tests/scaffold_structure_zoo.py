@@ -193,6 +193,56 @@ for name, legs in zoo().items():
           f"{'OK' if not a else str(len(a))+' unreachable':<11} "
           f"{'OK' if not b else str(len(b))+' unreachable'}")
 
+# ---------------------------------------------------------------- INV-G
+report("INV-G  The playbook's band-conditional gates classify the zoo per thesis shape as a desk would")
+print("Every structure at fair value, judged against five claims. A structure survives when it")
+print("pays after entry costs IF the band holds AND wins >= 25 points more often when it holds")
+print("than when it fails (notes/026 section 5). Premium on ranges, verticals on direction.\n")
+from trdrbot import playbook  # noqa: E402
+
+sigma = optmath.expected_move(SPOT, IV, DAYS)
+shapes = {
+    f"range narrow [98,102] ({4 / sigma:.1f}s)": (98.0, 102.0),
+    f"range wide [93,107] ({14 / sigma:.1f}s)": (93.0, 107.0),
+    "bullish target [103,108]": (103.0, 108.0),
+    "bullish floor [98, inf)": (98.0, None),
+    "bearish ceiling (-inf,102]": (None, 102.0),
+}
+# A wide condor does not care whether the stock is at 98 or 102 - it is
+# indifferent to a NARROW range and the faithful answer to a WIDE one. The
+# straddle surviving the target is the known soft spot (notes/026 section 5):
+# it pays on the right side, and the sizer and the outcome audit see through it.
+expect_survive = {
+    "range narrow [98,102]": ("iron condor 97/99-101/103", "call butterfly 95/100/105",
+                              "put credit 95/100"),
+    "range wide [93,107]": ("iron condor 90/95-105/110",),
+    "bullish target [103,108]": ("call debit 100/105",),
+}
+expect_reject = {
+    "range narrow [98,102]": ("call debit 100/105", "put debit 95/100", "long straddle 100",
+                              "iron condor 90/95-105/110"),
+    "range wide [93,107]": ("iron condor 97/99-101/103", "long straddle 100"),
+    "bullish target [103,108]": ("iron condor 90/95-105/110", "iron condor 97/99-101/103",
+                                 "call credit 100/105"),
+}
+for sname, (lo, hi) in shapes.items():
+    print(f"--- thesis: {sname}")
+    print(f"{'structure':<28} {'E[pnl|hold]':>11} {'P(win|hold)':>11} {'P(win|fail)':>11} {'edge':>6}  fate")
+    for name, legs in zoo().items():
+        fr = sum(l.price * l.qty * 100 for l in legs) * experiments.DEFAULT_ROUND_TRIP_COST
+        v = playbook.evaluate(legs, spot=SPOT, iv=IV, days=DAYS, band_low=lo, band_high=hi,
+                              friction_rt=fr)
+        e, ph, pf, ed = v.get("e_hold"), v.get("p_hold"), v.get("p_fail"), v.get("edge")
+        nums = (f"{e:>+11.0f} {ph:>11.0%} {pf:>11.0%} {ed:>+6.2f}" if e is not None
+                else f"{'':>11} {'':>11} {'':>11} {'':>6}")
+        print(f"{name:<28} {nums}  {v['fate']}")
+        key = sname.split(" (")[0]
+        if name in expect_survive.get(key, ()):
+            check(v["fate"] == "candidate", f"INV-G: {name} should survive '{key}': {v['fate']}")
+        if name in expect_reject.get(key, ()):
+            check(v["fate"] != "candidate", f"INV-G: {name} should be refused on '{key}'")
+    print()
+
 # ---------------------------------------------------------------- verdict
 report("VERDICT")
 if violations:

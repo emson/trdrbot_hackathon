@@ -504,6 +504,70 @@ _VOL_GRID = tuple(_VOL_GRID_STEP * i
 _DRIFT_GRID = tuple(-0.20 + 0.002 * i for i in range(201))  # -20% .. +20%
 
 
+@dataclass(frozen=True)
+class BandConditional:
+    """A structure's payoff, conditional on the THESIS rather than on the market.
+
+    The pre-trade mirror of `experiments.attribute`. Attribution asks AFTER the
+    fact "was the view right, and was the expression right"; this asks BEFORE:
+    if the view is right, does this expression pay - and does it stop paying
+    when the view is wrong? A structure that wins about as often either way is
+    not expressing the thesis, whatever its expected value says.
+    """
+
+    #: The market's own P(band holds) - context for the reader, never a gate.
+    p_band: float
+    #: E[pnl | S_T in band], dollars, for the legs' own quantities.
+    e_pnl_hold: float
+    #: P(pnl > 0 | S_T in band).
+    p_profit_hold: float
+    #: P(pnl > 0 | S_T not in band).
+    p_profit_fail: float
+
+    @property
+    def edge(self) -> float:
+        """How much more often it wins when the thesis holds than when it fails."""
+        return self.p_profit_hold - self.p_profit_fail
+
+
+def band_conditional(legs: Iterable[Leg], spot: float, iv: float, days: float,
+                     band_low: float | None, band_high: float | None,
+                     ) -> BandConditional | None:
+    """Payoff conditional on the thesis band, under the market's distribution.
+
+    Deliberately the MARKET's grid (drift 0): the claim supplies the
+    conditioning, so no second measure is invented - a muse thesis carries a
+    band and a probability and no drift at all, and a reward that needed one
+    would tie both arms at zero on the source that emits most (notes/026,
+    rejected alternative E). None when there is no band, or when either region
+    carries so little mass that a conditional mean would be noise. Routes
+    through `pnl_at`, so a calendar is refused here the same way it is
+    everywhere else.
+    """
+    legs = list(legs)
+    if band_low is None and band_high is None:
+        return None
+    w_in = w_out = e_in = win_in = win_out = 0.0
+    for s, w in _lognormal_grid(spot, iv, days):
+        pnl = pnl_at(legs, s)
+        if band_holds(s, band_low, band_high):
+            w_in += w
+            e_in += w * pnl
+            win_in += w if pnl > 0 else 0.0
+        else:
+            w_out += w
+            win_out += w if pnl > 0 else 0.0
+    if w_in < BAND_MASS_FLOOR or w_out < BAND_MASS_FLOOR:
+        return None
+    return BandConditional(p_band=w_in, e_pnl_hold=e_in / w_in,
+                           p_profit_hold=win_in / w_in, p_profit_fail=win_out / w_out)
+
+
+#: Below this much probability mass a conditional mean is arithmetic on noise -
+#: a band the grid can barely reach, or one that swallows the whole grid.
+BAND_MASS_FLOOR = 1e-6
+
+
 def _vol_grid(iv_hint: float | None) -> tuple[float, ...]:
     """The vol scan, widened to bracket a high-IV name's own breakeven.
 
