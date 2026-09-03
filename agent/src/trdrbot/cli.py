@@ -615,7 +615,7 @@ async def _coach(action: str) -> int:
         if st.exp_id and not coach.is_closed(cfg, st.exp_id):
             t = coach.tally(cfg, st.exp_id)
             if t:
-                fl = coach.floors(cfg)
+                fl = coach.floors(cfg, lv.name)
                 outcome, reason = coach.verdict(t, fl)
                 print(f"  EXPERIMENT  {t.challenger} vs {t.incumbent}  "
                       f"P(better)={t.posterior:.3f}")

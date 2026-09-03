@@ -641,9 +641,162 @@ def test_a_rejection_reason_is_fed_back_into_the_retry():
 def test_the_mutate_prompt_warns_about_braces_outside_the_json_example():
     """The first live mutation failure wrote `{X and Y}` in ORDINARY PROSE, not
     in the JSON block - the original warning only mentioned the JSON example,
-    so it was true and insufficient."""
-    assert "not only inside the JSON" in coach.MUTATE_PROMPT
-    assert "ordinary prose" in coach.MUTATE_PROMPT
+    so it was true and insufficient.
+
+    CHANGED (notes/026): the warning is a PROMPT-kind format rule now, rendered
+    per lever, so it is asserted on the muse's rendered prompt rather than on
+    the scaffold constant."""
+    rendered = coach.render_mutate_prompt(_MUSE_LEVER, muse.MUSE_PROMPT,
+                                          rejections="-", graveyard="-")
+    assert "not only inside the JSON" in rendered
+    assert "ordinary prose" in rendered
+
+
+#: The mutation prompt EXACTLY as it read before the registry carried the
+#: lever-specific text (notes/026 commit 1). The point of moving the muse's
+#: scoring paragraph and contract sentence into its `Lever(...)` was that a
+#: second lever could declare its own; the acceptance gate is that the muse's
+#: rendered prompt did not change by a byte.
+_OLD_MUSE_MUTATE_PROMPT = """You improve the prompt of an automated system, judged by a \
+deterministic scorer you cannot influence. Return ONE replacement prompt.
+
+## The prompt in production now (everything between the two rule lines)
+- - - - - - - - - -
+{incumbent}
+- - - - - - - - - -
+
+## How it is scored
+Each candidate this prompt produces is run through fixed gates: it needs usable \
+price history, a falsifiable band, a plausible band, a horizon inside the allowed \
+window, a bootstrap base probability that is neither a lottery ticket nor vacuous, \
+and a tradeable options chain. The reward is the FRACTION of candidates that survive \
+every gate. You cannot change the gates.
+
+## What has actually been rejected recently, by gate
+{rejections}
+
+## Variants already tried and beaten (do not re-propose these)
+{graveyard}
+
+Change exactly ONE thing you can argue will raise the survival fraction, and say \
+what in `rationale`. Do not change the output schema, the placeholder names, or the \
+percent-move band convention - those are contracts with code.
+
+**The prompt is passed through Python's `.format()`, so EVERY literal curly brace \
+must be doubled - `{{` and `}}` - everywhere in the text, not only inside the JSON \
+example. `{{X and Y}}` in ordinary prose is a format placeholder and will crash the \
+system. The ONLY single braces allowed are these placeholders, which must all survive, \
+spelled exactly, with no others added: {placeholders}.**
+
+Respond with ONLY a JSON object:
+{{"rationale": "one sentence", "prompt": "the full replacement prompt text"}}
+"""
+
+
+def test_the_muse_mutation_prompt_renders_byte_identical_to_before_the_registry_carried_it():
+    """The generalisation's acceptance gate. `MUTATE_PROMPT` is a scaffold now
+    and the muse's "how it is scored" and contract text live on its `Lever`;
+    rendering them back must reproduce the old prompt exactly, or the live
+    experiment's challengers are being generated from a prompt that changed
+    under it."""
+    want = _OLD_MUSE_MUTATE_PROMPT.format(
+        incumbent=muse.MUSE_PROMPT, rejections="- no_chain  x2", graveyard="(none yet)",
+        placeholders=", ".join("{" + p + "}" for p in _MUSE_LEVER.placeholders))
+    got = coach.render_mutate_prompt(_MUSE_LEVER, muse.MUSE_PROMPT,
+                                     rejections="- no_chain  x2", graveyard="(none yet)")
+    assert got == want
+
+
+def test_the_mutate_prompt_renders_each_levers_own_scoring_and_contract_text():
+    """A policy lever is told how IT is scored and what IT may not change, with
+    the data-not-template format rule instead of the double-brace one."""
+    lv = coach.Lever(
+        "widget.catalogue", "widget", ("widget.scoring",), "policy",
+        reward_description="Scored by widget survival.",
+        contract_note="Keep the widget schema.")
+    rendered = coach.render_mutate_prompt(lv, "families: []", rejections="-", graveyard="-")
+    assert "Scored by widget survival." in rendered
+    assert "Keep the widget schema." in rendered
+    assert "You improve the policy of an automated system" in rendered
+    assert "data, not a template" in rendered
+    assert ".format()" not in rendered, "a policy lever must not be told to double its braces"
+
+
+def test_validate_prompt_runs_format_checks_for_prompt_levers_only_and_the_lever_validator_for_policy():
+    """YAML flow mappings use braces as syntax, so the template safety check
+    that protects a prompt lever would refuse every valid policy text. A policy
+    lever's own validator is the schema check instead - and its defect is the
+    reason returned, so the retry suffix can hand it back."""
+    body = "families: [{name: a, at: {anchor: spot, sigma: 0}}]\n" + "# pad\n" * 40
+    inc = "families: [{name: b, at: {anchor: spot, sigma: 1}}]\n" + "# pad\n" * 40
+    # As a PROMPT this is unsafe (an unknown placeholder `{name: a, ...}`)...
+    assert "not a safe format template" in coach.validate_prompt(body, inc, ())
+    # ...as a POLICY it is data, and only the lever's validator has a say.
+    assert coach.validate_prompt(body, inc, (), kind="policy") == ""
+    assert coach.validate_prompt(
+        body, inc, (), kind="policy",
+        validator=lambda t: "family `a` has an unbounded loss") == "family `a` has an unbounded loss"
+    # The kind-independent checks still run for a policy: identity, contract tokens.
+    assert "identical" in coach.validate_prompt(inc, inc, (), kind="policy")
+    assert "contract token" in coach.validate_prompt(
+        body, inc, (), kind="policy", must_contain=("version:",))
+
+
+def test_clean_prompt_strips_any_dash_only_line():
+    """The live muse challenger `v1` ends with a NINE-dash line - the model
+    echoed the rule line and miscounted, the cleaner matched only the literal
+    ten-dash fence, and the scaffolding went into production (notes/026). The
+    count is the model's to get wrong; the shape is what identifies a fence."""
+    assert coach.clean_prompt("body text\n- - - - - - - - -") == "body text"
+    assert coach.clean_prompt("-----\nbody text\n- -") == "body text"
+    # ...and the exact shape the live v1 carries, at the tail of real content
+    tail = muse.MUSE_PROMPT.rstrip() + "\n\n- - - - - - - - -"
+    assert coach.clean_prompt(tail) == muse.MUSE_PROMPT.strip()
+    # a dash line INSIDE the content is still content
+    assert coach.clean_prompt("a\n- - -\nb") == "a\n- - -\nb"
+
+
+def test_floors_take_a_per_lever_override():
+    """A reward near a 50% base rate has symmetric headroom, and the same
+    sequential peeking that never promotes an equal muse challenger promotes an
+    equal one about one time in three at the global 0.90 (notes/026 section
+    5). The bar is set per lever, and the global values stay the default."""
+    cfg = _floors_cfg(promote_at=0.90, levers={"widget.catalogue": {"promote_at": 0.95}})
+    assert coach.floors(cfg)["promote_at"] == 0.90
+    assert coach.floors(cfg, "muse.prompt")["promote_at"] == 0.90
+    assert coach.floors(cfg, "widget.catalogue")["promote_at"] == 0.95
+    # untouched keys fall through to the global value
+    assert coach.floors(cfg, "widget.catalogue")["min_runs"] == coach.MIN_RUNS
+
+
+@pytest.mark.asyncio
+async def test_sentinel_scope_reverts_only_its_own_lever(tmp_path, monkeypatch):
+    """A sentinel about the muse's concept diversity has nothing to say about
+    another lever's experiment. Without a scope it closed every open experiment
+    and blocked every lever - `entropy_floor` reverting a lever about strike
+    placement over concepts it cannot affect."""
+    widget = _synthetic_lever()
+    levers = (coach.LEVERS[0], widget)
+    monkeypatch.setattr(coach, "LEVERS", levers)
+    monkeypatch.setattr("trdrbot.coach_pkg.state.LEVERS", levers)
+    monkeypatch.setattr("trdrbot.coach_pkg.gauges.LEVERS", levers)
+    scoped = coach.Sentinel("widget_only", lambda cfg, rows: (True, 1, 3), True,
+                            "widget drifted", levers=("widget.prompt",))
+    monkeypatch.setattr(coach, "SENTINELS", (scoped,))
+    cfg = _cfg(tmp_path)
+    journal = _journal(tmp_path)
+    for lv in levers:
+        st = coach.load_state(cfg, lv.name, "seed text " * 30)
+        coach._open(cfg, st, coach.Variant("v1", "challenger text " * 20), journal)
+
+    await coach.pulse(cfg, journal)
+
+    closes = {r["lever"]: r["outcome"] for r in coach.events(cfg)
+              if r.get("kind") == "experiment_closed"}
+    assert closes == {"widget.prompt": "sentinel_reverted"}, closes
+    assert coach.load_state(cfg, "widget.prompt", "").sentinel_block["name"] == "widget_only"
+    assert coach.load_state(cfg, "muse.prompt", "").sentinel_block is None
+    assert coach.load_state(cfg, "muse.prompt", "").exp_id is not None, "the muse's trial survives"
 
 
 # --- crash safety: the log is the truth, state is a cache of it ------------

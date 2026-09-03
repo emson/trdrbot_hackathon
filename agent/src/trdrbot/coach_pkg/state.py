@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import os
+from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
@@ -95,6 +96,21 @@ class Lever:
     #: fed to the mutation prompt so a challenger knows what keeps failing.
     #: Empty means no digest is available, which is a fine steady state.
     evidence_kind: str = ""
+    #: "How it is scored", in the mutator's own prompt. It was a muse-shaped
+    #: paragraph hardcoded in `MUTATE_PROMPT`, so a second lever's challengers
+    #: would have been told they were judged by the muse's gates. The registry
+    #: promised everything the generic machinery needs lives here; this is the
+    #: piece that did not.
+    reward_description: str = ""
+    #: What a variant must not change - the contracts with code, in the
+    #: mutator's prompt. Same reason as `reward_description`.
+    contract_note: str = ""
+    #: An optional deterministic validator, (module, attribute) resolved on
+    #: demand exactly like `seed_ref`: `callable(text) -> ""` when the text is
+    #: safe to run, else the defect. A policy lever's text is DATA with its own
+    #: schema, and the format-template checks that guard a prompt say nothing
+    #: about it.
+    validator_ref: tuple[str, str] = ("", "")
 
 
 #: Placeholders the muse's prompt template must keep. Lives with the lever
@@ -113,12 +129,29 @@ LEVERS: tuple[Lever, ...] = (
         must_contain=("band_low_pct", "band_high_pct", "JSON array",
                       '"probability"', '"horizon"', '"underlying"', '"claim"'),
         evidence_kind="muse",
+        # Verbatim from the mutation prompt it used to be hardcoded in, so the
+        # rendered prompt the muse's challengers are generated from is
+        # byte-identical (test_coach pins it).
+        reward_description=(
+            "Each candidate this prompt produces is run through fixed gates: it needs "
+            "usable price history, a falsifiable band, a plausible band, a horizon "
+            "inside the allowed window, a bootstrap base probability that is neither a "
+            "lottery ticket nor vacuous, and a tradeable options chain. The reward is "
+            "the FRACTION of candidates that survive every gate. You cannot change the "
+            "gates."),
+        contract_note=(
+            "Do not change the output schema, the placeholder names, or the "
+            "percent-move band convention - those are contracts with code."),
     ),
 )
 
 #: TO REGISTER A NEW LEVER, in full:
 #:
-#:   1. Add a `Lever(...)` above declaring its five data fields.
+#:   1. Add a `Lever(...)` above declaring its data fields - including how it
+#:      is scored and what a variant may not change, because the mutator
+#:      renders those per lever and a lever that omits them is mutated blind.
+#:      A `policy` lever (data, not a `.format()` template) names a
+#:      `validator_ref` for its own schema.
 #:   2. Its subsystem calls `coach.arms(cfg, "<name>", seed_text=<seed>)` on
 #:      its hot path and runs BOTH arms through ONE gate cascade - the shadow
 #:      arm reaching identical verdicts while writing nothing.
@@ -151,6 +184,28 @@ def seed_text(lv: Lever) -> str:
     except Exception as exc:  # noqa: BLE001 - a bad ref must not break a pulse
         print(f"[coach] lever {lv.name}: cannot resolve seed {lv.seed_ref}: {exc!r}")
         return ""
+
+
+def validator_of(lv: Lever) -> Callable[[str], str] | None:
+    """The lever's own deterministic validator, imported on demand, or None.
+
+    Same lazy, forgiving shape as `seed_text` and for the same reason: the
+    registry must not import subsystems at module scope. A validator that
+    cannot be resolved is reported and the generic checks still run - but a
+    policy lever without its validator would accept any text that merely
+    parses as nothing in particular, so `mutate` refuses to open on one.
+    """
+    module, attr = lv.validator_ref
+    if not module:
+        return None
+    try:
+        import importlib
+
+        fn = getattr(importlib.import_module(module), attr, None)
+        return fn if callable(fn) else None
+    except Exception as exc:  # noqa: BLE001 - a bad ref must not break a pulse
+        print(f"[coach] lever {lv.name}: cannot resolve validator {lv.validator_ref}: {exc!r}")
+        return None
 
 
 def seeds() -> dict[str, str]:
@@ -367,15 +422,30 @@ def enabled(cfg: Any) -> bool:
     return bool((getattr(cfg, "coach", None) or {}).get("enabled", True))
 
 
-def floors(cfg: Any) -> dict[str, Any]:
+def floors(cfg: Any, lever_name: str = "") -> dict[str, Any]:
+    """Promotion floors: the global `coach.*` values, overridden per lever by
+    `coach.levers.<name>.*` where present.
+
+    Per lever because the right bar depends on the reward's base rate. The
+    muse survives ~89% of its gates, so an equal challenger has almost no room
+    to look better by luck; a lever scored near 50% has symmetric headroom and
+    the same sequential peeking promotes an equal arm about one time in three
+    under the global 0.90 (notes/026 section 5). One number for both is wrong
+    for one of them.
+    """
     c = getattr(cfg, "coach", None) or {}
+    per = ((c.get("levers") or {}).get(lever_name) or {}) if lever_name else {}
+
+    def pick(key: str, default: Any) -> Any:
+        return per.get(key, c.get(key, default))
+
     return {
-        "min_runs": c.get("min_runs", MIN_RUNS),
-        "min_candidates": c.get("min_candidates", MIN_CANDIDATES),
-        "promote_at": c.get("promote_at", PROMOTE_AT),
-        "futility_at": c.get("futility_at", FUTILITY_AT),
-        "futility_min_runs": c.get("futility_min_runs", FUTILITY_MIN_RUNS),
-        "cap_runs": c.get("cap_runs", CAP_RUNS),
+        "min_runs": pick("min_runs", MIN_RUNS),
+        "min_candidates": pick("min_candidates", MIN_CANDIDATES),
+        "promote_at": pick("promote_at", PROMOTE_AT),
+        "futility_at": pick("futility_at", FUTILITY_AT),
+        "futility_min_runs": pick("futility_min_runs", FUTILITY_MIN_RUNS),
+        "cap_runs": pick("cap_runs", CAP_RUNS),
     }
 
 

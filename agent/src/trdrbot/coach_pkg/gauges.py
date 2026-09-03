@@ -464,6 +464,11 @@ class Sentinel:
     #: True = close any open experiment. False = only block NEW ones.
     reverts: bool
     meaning: str
+    #: Which levers this sentinel governs. Empty means every lever (cost,
+    #: churn). A sentinel about one subsystem's behaviour - the muse's concept
+    #: diversity - has nothing to say about another lever's experiment, and
+    #: without a scope it would close it anyway.
+    levers: tuple[str, ...] = ()
 
 
 def _sentinel_cost(cfg: Any, rows: list[dict[str, Any]]) -> tuple[bool, Any, Any]:
@@ -509,7 +514,8 @@ SENTINELS: tuple[Sentinel, ...] = (
              "promoting faster than evidence can plausibly arrive"),
     Sentinel("entropy_floor", _sentinel_entropy, True,
              "the muse has stopped colliding diverse concepts - it is being "
-             "optimised into a momentum machine"),
+             "optimised into a momentum machine",
+             levers=("muse.prompt",)),
 )
 
 

@@ -9,34 +9,40 @@ can correct it.
 from __future__ import annotations
 
 import contextlib
+import re
+from collections.abc import Callable
 from typing import Any
 
 from .. import ids
 from .state import (
     MUTATE_ATTEMPTS,
+    Lever,
     LeverState,
     Variant,
     events,
     fingerprint,
     lever,
+    validator_of,
 )
 
 # --- mutation: generating challengers --------------------------------------
 
-MUTATE_PROMPT = """You improve the prompt of an automated system, judged by a \
-deterministic scorer you cannot influence. Return ONE replacement prompt.
+#: The scaffold. Everything lever-specific - what the artefact is, how it is
+#: scored, what a variant may not change, and the format rules its KIND needs -
+#: is rendered in from the lever's declaration by `render_mutate_prompt`. It
+#: used to carry the muse's scoring paragraph and contract sentence verbatim,
+#: so a second lever's challengers would have been generated against another
+#: subsystem's ruler.
+MUTATE_PROMPT = """You improve the {artefact} of an automated system, judged by a \
+deterministic scorer you cannot influence. Return ONE replacement {artefact}.
 
-## The prompt in production now (everything between the two rule lines)
+## The {artefact} in production now (everything between the two rule lines)
 - - - - - - - - - -
 {incumbent}
 - - - - - - - - - -
 
 ## How it is scored
-Each candidate this prompt produces is run through fixed gates: it needs usable \
-price history, a falsifiable band, a plausible band, a horizon inside the allowed \
-window, a bootstrap base probability that is neither a lottery ticket nor vacuous, \
-and a tradeable options chain. The reward is the FRACTION of candidates that survive \
-every gate. You cannot change the gates.
+{how_scored}
 
 ## What has actually been rejected recently, by gate
 {rejections}
@@ -45,18 +51,43 @@ every gate. You cannot change the gates.
 {graveyard}
 
 Change exactly ONE thing you can argue will raise the survival fraction, and say \
-what in `rationale`. Do not change the output schema, the placeholder names, or the \
-percent-move band convention - those are contracts with code.
+what in `rationale`. {contract}
 
-**The prompt is passed through Python's `.format()`, so EVERY literal curly brace \
+{format_rules}
+
+Respond with ONLY a JSON object:
+{{"rationale": "one sentence", "prompt": "the full replacement {artefact} text"}}
+"""
+
+#: A `prompt` lever's text is a `.format()` template, and this is the rule the
+#: first live mutation broke: literal braces in ORDINARY PROSE, not only in the
+#: JSON example.
+PROMPT_FORMAT_RULES = """**The prompt is passed through Python's `.format()`, so EVERY literal curly brace \
 must be doubled - `{{` and `}}` - everywhere in the text, not only inside the JSON \
 example. `{{X and Y}}` in ordinary prose is a format placeholder and will crash the \
 system. The ONLY single braces allowed are these placeholders, which must all survive, \
-spelled exactly, with no others added: {placeholders}.**
+spelled exactly, with no others added: {placeholders}.**"""
 
-Respond with ONLY a JSON object:
-{{"rationale": "one sentence", "prompt": "the full replacement prompt text"}}
-"""
+#: A `policy` lever's text is data with a schema of its own, validated by the
+#: lever's `validator_ref`. Braces are ordinary characters in it.
+POLICY_FORMAT_RULES = """**The text is data, not a template - braces are ordinary characters. \
+Return the COMPLETE replacement document, not a diff, in the `prompt` field.**"""
+
+
+def render_mutate_prompt(lv: Lever, incumbent: str, *, rejections: str,
+                         graveyard: str) -> str:
+    """The mutation prompt for one lever. One renderer, shared by `mutate` and
+    by the test that pins the muse's rendering byte for byte."""
+    if lv.kind == "prompt":
+        rules = PROMPT_FORMAT_RULES.format(
+            placeholders=", ".join("{" + p + "}" for p in lv.placeholders))
+    else:
+        rules = POLICY_FORMAT_RULES
+    return MUTATE_PROMPT.format(
+        artefact="prompt" if lv.kind == "prompt" else "policy",
+        incumbent=incumbent, how_scored=lv.reward_description,
+        rejections=rejections, graveyard=graveyard,
+        contract=lv.contract_note, format_rules=rules)
 
 #: Appended when a first attempt fails validation. The check is deterministic and
 #: its message names the exact defect, so handing that back is strictly better
@@ -78,28 +109,46 @@ Fix exactly that and return the corrected JSON object. Change nothing else.
 #: into production carrying two lines of this module's own scaffolding. A
 #: prompt is a precise artefact; contaminating it with the harness that
 #: produced it is a quiet quality leak.
-_FENCE_LINES = ("<<<prompt", "prompt", "```", "```json", "```text",
-                "- - - - - - - - - -", "---")
+_FENCE_LINES = ("<<<prompt", "prompt", "```", "```json", "```yaml", "```text")
+
+#: ANY line made only of dashes and spaces, at either edge. The literal
+#: ten-dash fence was matched and nothing else: the live muse challenger `v1`
+#: ends with a NINE-dash echo of the rule line, which passed this cleaner,
+#: passed validation, and has run every paired trial since carrying a line of
+#: this module's scaffolding (notes/026). The count is the model's to get
+#: wrong; the shape is what identifies a fence.
+_DASH_LINE = re.compile(r"[-\s]+")
+
+
+def _is_fence(line: str) -> bool:
+    s = line.strip().lower()
+    return s in _FENCE_LINES or bool(s and _DASH_LINE.fullmatch(s))
 
 
 def clean_prompt(text: str) -> str:
     """Strip echoed delimiters and code fences from a generated prompt."""
     lines = text.strip().splitlines()
-    while lines and lines[0].strip().lower() in _FENCE_LINES:
+    while lines and _is_fence(lines[0]):
         lines.pop(0)
-    while lines and lines[-1].strip().lower() in _FENCE_LINES:
+    while lines and _is_fence(lines[-1]):
         lines.pop()
     return "\n".join(lines).strip()
 
 
 def validate_prompt(text: str, incumbent: str, placeholders: tuple[str, ...],
-                    *, must_contain: tuple[str, ...] = ()) -> str:
+                    *, must_contain: tuple[str, ...] = (), kind: str = "prompt",
+                    validator: Callable[[str], str] | None = None) -> str:
     """"" if the text is safe to run, else the reason it is not.
 
     A mutated prompt is a `.format()` template, so a stray brace from a JSON
     example is a live crash on the next muse run. Every failure mode here is
     cheaper to catch now than in production, and the checks are deterministic -
     the model's opinion of its own output is not evidence.
+
+    The length, identity and contract-token checks apply to every kind. The
+    template checks apply to `prompt` levers only: a `policy` lever's text is
+    data (YAML flow mappings use braces as syntax), and its own `validator`
+    says whether it parses and obeys its schema.
     """
     if not text or len(text) < 200:
         return "too short to be a replacement prompt"
@@ -116,18 +165,24 @@ def validate_prompt(text: str, incumbent: str, placeholders: tuple[str, ...],
     for token in must_contain:
         if token not in text:
             return f"dropped the contract token {token!r}"
-    # Safety first: an UNKNOWN placeholder is a live KeyError on the next run.
-    try:
-        text.format(**{p: "x" for p in placeholders})
-    except (KeyError, IndexError, ValueError) as exc:
-        return f"not a safe format template ({type(exc).__name__}: {exc})"
-    # Then PRESENCE (D-112). `str.format` catches an EXTRA placeholder and says
-    # nothing about a missing one, so a challenger could delete
-    # {concepts}/{news}/{odds} - the muse's whole mandate - score 5/5 on gate
-    # survival, and promote. Every declared placeholder must still be used.
-    for p in placeholders:
-        if "{" + p + "}" not in text:
-            return f"dropped the placeholder {{{p}}}"
+    if kind == "prompt":
+        # Safety first: an UNKNOWN placeholder is a live KeyError on the next run.
+        try:
+            text.format(**{p: "x" for p in placeholders})
+        except (KeyError, IndexError, ValueError) as exc:
+            return f"not a safe format template ({type(exc).__name__}: {exc})"
+        # Then PRESENCE (D-112). `str.format` catches an EXTRA placeholder and
+        # says nothing about a missing one, so a challenger could delete
+        # {concepts}/{news}/{odds} - the muse's whole mandate - score 5/5 on
+        # gate survival, and promote. Every declared placeholder must still be
+        # used.
+        for p in placeholders:
+            if "{" + p + "}" not in text:
+                return f"dropped the placeholder {{{p}}}"
+    if validator is not None:
+        why = validator(text)
+        if why:
+            return why
     return ""
 
 
@@ -190,13 +245,19 @@ async def mutate(cfg: Any, st: LeverState, rows: list[dict[str, Any]],
     if lv is None:
         print(f"[coach] no lever registered as {st.lever!r} - cannot mutate")
         return None
+    validator = validator_of(lv)
+    if lv.validator_ref[0] and validator is None:
+        # A policy lever WITHOUT its validator would accept any text that
+        # merely clears the length and identity checks - and then run it.
+        # Refusing to mutate costs one cooldown; running an unvalidated
+        # catalogue costs whatever it proposes.
+        print(f"[coach] {st.lever}: validator {lv.validator_ref} unavailable - not mutating")
+        return None
     try:
-        prompt = MUTATE_PROMPT.format(
-            incumbent=st.incumbent.text,
+        prompt = render_mutate_prompt(
+            lv, st.incumbent.text,
             rejections=_rejection_digest(rows, lv.evidence_kind),
-            graveyard=_graveyard_digest(cfg, st.lever),
-            placeholders=", ".join("{" + p + "}" for p in lv.placeholders),
-        )
+            graveyard=_graveyard_digest(cfg, st.lever))
         model = build_model(cfg, role="coach_mutate")
         # Two attempts, because the validator's message names the exact defect
         # and a model corrects a named mistake. A rejected challenger otherwise
@@ -217,7 +278,8 @@ async def mutate(cfg: Any, st: LeverState, rows: list[dict[str, Any]],
                 candidate = clean_prompt(str(parsed["prompt"]))
                 bad = validate_prompt(
                     candidate, st.incumbent.text, lv.placeholders,
-                    must_contain=lv.must_contain)
+                    must_contain=lv.must_contain, kind=lv.kind,
+                    validator=validator)
                 if not bad:
                     vid = f"v{st.next_variant_n}"
                     journal.append("coach_mutation", lever=st.lever, variant=vid,

@@ -62,11 +62,14 @@ from .coach_pkg.gauges import (  # noqa: E402,F401 - re-exported for callers
 from .coach_pkg.mutate import (  # noqa: E402,F401 - re-exported for callers
     _FENCE_LINES,
     MUTATE_PROMPT,
+    POLICY_FORMAT_RULES,
+    PROMPT_FORMAT_RULES,
     RETRY_SUFFIX,
     _graveyard_digest,
     _rejection_digest,
     clean_prompt,
     mutate,
+    render_mutate_prompt,
     validate_prompt,
 )
 from .coach_pkg.posterior import (  # noqa: E402,F401 - re-exported for callers
@@ -103,6 +106,7 @@ from .coach_pkg.state import (  # noqa: E402,F401 - re-exported for callers
     opened_event,
     save_state,
     seeds,
+    validator_of,
 )
 
 # --- what a subsystem asks for at run time --------------------------------
@@ -320,15 +324,19 @@ async def pulse(cfg: Any, journal: Any, *, seed_override: dict[str, str] | None 
                 continue
             open_exp = st.exp_id and not is_closed(cfg, st.exp_id)
 
-            # 2b. apply sentinels to this lever
-            reverting = [s for s in fired if s.reverts]
+            # 2b. apply sentinels to this lever - the ones in scope for it.
+            # A sentinel that names levers governs only those; one that names
+            # none governs all. The muse's entropy floor would otherwise close
+            # a playbook experiment over concept diversity it cannot affect.
+            scoped = [s for s in fired if not s.levers or lv.name in s.levers]
+            reverting = [s for s in scoped if s.reverts]
             if reverting and open_exp:
                 _close(cfg, st, "sentinel_reverted",
                        f"sentinel {reverting[0].name}: {reverting[0].meaning}", journal)
                 state["closed"] = "sentinel_reverted"
                 open_exp = False
-            if fired:
-                st.sentinel_block = {"name": fired[0].name, "since": ids.utc_now().isoformat()}
+            if scoped:
+                st.sentinel_block = {"name": scoped[0].name, "since": ids.utc_now().isoformat()}
                 save_state(cfg, st)
             elif st.sentinel_block:
                 st.sentinel_block = None
@@ -348,7 +356,7 @@ async def pulse(cfg: Any, journal: Any, *, seed_override: dict[str, str] | None 
             if open_exp and not st.pinned:
                 t = tally(cfg, st.exp_id or "")
                 if t:
-                    outcome, reason = verdict(t, floors(cfg))
+                    outcome, reason = verdict(t, floors(cfg, lv.name))
                     if outcome == "promoted":
                         # ...and only if it ACTUALLY promoted (I-97). `_promote`
                         # returns early when the challenger is gone, and the
@@ -466,7 +474,7 @@ def _open(cfg: Any, st: LeverState, challenger: Variant, journal: Any) -> None:
         # a hand-edited incumbent mid-trial was undetectable even after the
         # fact - and it is the arm the operator is most likely to edit.
         "incumbent_fp": st.incumbent.fingerprint,
-        "floors": floors(cfg)})
+        "floors": floors(cfg, st.lever)})
     st.challenger = challenger
     st.exp_id = exp_id
     st.next_variant_n = max(st.next_variant_n + 1,
