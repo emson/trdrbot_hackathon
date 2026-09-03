@@ -1,8 +1,63 @@
-# Alpaca AI Trading Agents Hackathon - Documentation
+# Documentation
 
-Welcome to the **trdrbot** team documentation for the **Alpaca AI Trading Agents Hackathon** on lablab.ai.
+Reference material for **trdrbot**, an options-trading agent built for the Alpaca AI Trading
+Agents Hackathon. Start at the [repository README](../README.md) for what the project is and how
+it fits together; this directory is the long-form material behind it.
 
-This documentation provides comprehensive information about the hackathon requirements, technical setup, and resources needed to build an AI-powered trading agent.
+## What's in here
+
+**Engineering principles** — the rules the code is held to, portable to any Python project.
+
+| | |
+|---|---|
+| [`principles_README.md`](principles_README.md) | Index of the three documents below |
+| [`principles_coding.md`](principles_coding.md) | How to write and modify production code |
+| [`principles_testing.md`](principles_testing.md) | When a test earns its place, and what it must prove |
+| [`principles_agent_api.md`](principles_agent_api.md) | How to design tools an LLM agent consumes |
+
+**The build, as it happened**
+
+| | |
+|---|---|
+| [`dev_journals/`](dev_journals) | Nine dated entries: what was built, what broke, why a fix won |
+| [`plan_risk_appetite.md`](plan_risk_appetite.md), [`plan_defect_remediation.md`](plan_defect_remediation.md) | Two completed plans, kept as the record of their reasoning |
+| [`website_build_transcript.md`](website_build_transcript.md) | How trdrbot.com was built and deployed |
+
+**Presentation and design**
+
+| | |
+|---|---|
+| [`deck.html`](deck.html) / [`deck.pdf`](deck.pdf) | The slide deck ([hosted](https://trdrbot.com/deck.html)) |
+| [`design_system.md`](design_system.md) / [`design_system.html`](design_system.html) | The two type-and-shape registers the site and deck share |
+| [`architecture_explorer.html`](architecture_explorer.html), [`risk_appetite_explorer.html`](risk_appetite_explorer.html) | Interactive explainers, published under trdrbot.com/resources |
+
+**Research and domain notes**
+
+| | |
+|---|---|
+| [`research_risk_appetite.md`](research_risk_appetite.md) | The measured basis for the risk-appetite lever |
+| [`market_selection.md`](market_selection.md) | Why this watchlist |
+| [`sources/`](sources) | Deep dives: Alpaca API, the MCP server, options strategies, Greeks, OKF, Polymarket |
+
+**Hackathon reference** — verified against the live event page; the requirements themselves are in
+[`submission_and_judging.md`](submission_and_judging.md).
+
+| | |
+|---|---|
+| [`submission_and_judging.md`](submission_and_judging.md) | Deliverables, judging criteria, deadline, MIT requirement |
+| [`submission_assets_checklist.md`](submission_assets_checklist.md) | What still has to exist before submitting |
+| [`hackathon_overview.md`](hackathon_overview.md), [`quick_reference.md`](quick_reference.md) | Event context and fast answers |
+| [`technical_setup.md`](technical_setup.md), [`getting_started.md`](getting_started.md) | Account, keys and environment setup |
+| [`resources.md`](resources.md), [`social_media_playbook.md`](social_media_playbook.md) | Official links; build-in-public plan |
+
+---
+
+# The original pre-build guide
+
+*Everything below was written on 2026-08-26, before the agent existed, to orient the team at the
+start of the hackathon. It is kept as written - a record of what was known going in. Where it
+describes work still to be done, that work is now done; the sections above are the current map,
+and `agent/` commands run from `agent/`, not the repository root.*
 
 ## Quick Navigation
 
@@ -91,17 +146,21 @@ This documentation provides comprehensive information about the hackathon requir
 ```
 docs/
 ├── README.md (you are here)
-├── quick_reference.md
-├── hackathon_overview.md
-├── technical_setup.md
-├── getting_started.md
-├── submission_and_judging.md
-├── resources.md
-└── sources/
-    ├── alpaca_api_summary.md
-    ├── mcp_server_setup.md
-    ├── options_trading_guide.md
-    └── urls_and_links.md
+├── principles_*.md            the engineering rules the code is held to
+├── dev_journals/              nine dated build entries
+├── plan_*.md                  two completed plans, kept for their reasoning
+├── deck.html / deck.pdf       the slide deck
+├── design_system.*            the shared type-and-shape registers
+├── *_explorer.html            interactive explainers, published to the site
+├── research_risk_appetite.*   the measured basis for the risk lever
+├── hackathon_*.md,            event context, setup and submission reference
+│   submission_*.md,
+│   technical_setup.md,
+│   getting_started.md,
+│   quick_reference.md,
+│   resources.md
+├── assets/                    images used by the deck and the site
+└── sources/                   Alpaca API, MCP server, options, Greeks, OKF, Polymarket
 ```
 
 ## Key Information at a Glance
