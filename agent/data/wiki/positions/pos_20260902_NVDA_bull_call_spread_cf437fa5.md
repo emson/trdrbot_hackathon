@@ -4,7 +4,7 @@ position_id: pos_20260902_NVDA_bull_call_spread_cf437fa5
 status: open
 interim_band: 0
 max_loss_usd: 5700.0
-last_pnl_pct: 0.25263157894736843
+last_pnl_pct: 0.5421052631578948
 greeks_at_entry:
   delta_shares: 830.97
   delta_dollars: 187258.83
@@ -66,7 +66,7 @@ sources:
   author: alpaca_news
 generated:
   by: openai:gpt-5.6-sol | anthropic:claude-opus-5 | openai:gpt-5
-  at: '2026-09-03T16:28:26.975887+00:00'
+  at: '2026-09-03T17:37:03.750176+00:00'
 verified:
 - by: trdrbot/reconcile
   at: '2026-09-02T17:38:43.814575+00:00'

@@ -4,7 +4,7 @@ position_id: pos_20260903_SPY_reverse_iron_condor_e4f1e563
 status: open
 interim_band: 0
 max_loss_usd: 5865.0
-last_pnl_pct: 0.08627450980392157
+last_pnl_pct: 0.09019607843137255
 greeks_at_entry:
   delta_shares: -24.72
   delta_dollars: -19016.54
@@ -69,7 +69,7 @@ sources:
   author: idle
 generated:
   by: openai:gpt-5.6-sol | anthropic:claude-opus-5 | openai:gpt-5
-  at: '2026-09-03T16:28:26.978217+00:00'
+  at: '2026-09-03T17:37:03.752267+00:00'
 verified:
 - by: trdrbot/reconcile
   at: '2026-09-03T14:04:47.704897+00:00'
