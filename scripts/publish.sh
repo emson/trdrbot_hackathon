@@ -2,7 +2,21 @@
 # Re-export the agent's record, rebuild the site, and deploy it - or do
 # nothing and say so. Idempotent, lock-guarded, never touches the trading
 # loop. Run this in a loop (see the header comment below) or once by hand.
+#
+#   ./scripts/publish.sh          the loop's form: deploys only if the record moved
+#   ./scripts/publish.sh --force  by hand, after a code or copy change: deploys
+#                                 even when the record is unchanged, and still
+#                                 re-exports first - so a push never carries
+#                                 yesterday's figures next to today's copy
 set -euo pipefail
+
+FORCE=""
+for arg in "$@"; do
+	case "$arg" in
+		--force) FORCE=1 ;;
+		*) echo "usage: $0 [--force]" >&2; exit 2 ;;
+	esac
+done
 
 # This script spans both projects - it reads the agent's record and writes the
 # website - so it lives at the repo root rather than inside either one.
@@ -63,9 +77,12 @@ fi
 
 AFTER_HASH="$(shasum -a 256 "$SNAPSHOT" | cut -d' ' -f1)"
 if [ "$BEFORE_HASH" = "$AFTER_HASH" ]; then
-	echo "[publish] no change since last export - nothing to deploy"
-	log_row "noop" "snapshot unchanged"
-	exit 0
+	if [ -z "$FORCE" ]; then
+		echo "[publish] no change since last export - nothing to deploy"
+		log_row "noop" "snapshot unchanged"
+		exit 0
+	fi
+	echo "[publish] record unchanged, but --force given - deploying the site anyway"
 fi
 
 echo "[publish] syncing static passthrough documents"

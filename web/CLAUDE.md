@@ -113,19 +113,21 @@ docs/deck.html` (no `--write`) to confirm it resolves cleanly, then
   these as the *backing evidence* for the hero's claims — if the hero says
   something these slides don't support, fix the hero, not the slides.
 
-## Publish checklist for a copy-only change
+## Publish checklist for a copy or code change
 
-1. Edit the source files above.
-2. `cd web && node scripts/sync-static.mjs` (re-syncs the `docs/*.html`
-   standalone documents into `static/`)
-3. `npm run build`, then verify `build/index.html` and `build/ledger.html`
-   are non-empty.
-4. `npx wrangler pages deploy build --project-name trdrbot-com --branch main --commit-dirty=true`
+1. Edit the source files above, commit.
+2. `./scripts/publish.sh --force` from the repo root.
 
-Don't rely on `../scripts/publish.sh` for a copy-only change — it exports
-the trading snapshot first and **no-ops if that snapshot's hash is
-unchanged**, which it will be if no trades happened. It's built for
-data refreshes, not content edits.
+That one command re-exports the trading snapshot, re-syncs the `docs/*.html`
+standalone documents into `static/`, refreshes the static deck's figures,
+builds, verifies `build/index.html` and `build/ledger.html` are non-empty,
+and deploys to production. `--force` is what makes it deploy when the record
+hasn't moved: without it, `publish.sh` is the loop's form and **no-ops if the
+snapshot's hash is unchanged**, which it will be if no trades happened since
+the last tick's publish. Never deploy with a bare `npm run build` +
+`wrangler` - that path skips the export, and the site goes live carrying an
+older tick's figures next to the new copy (it happened; the redeploy on
+2026-09-03 shipped tick 844's numbers after the loop had moved on).
 
 For a FIGURES-only refresh (nobody edited any prose, the numbers just went
 stale), use `../scripts/release.sh` instead of this checklist - it does
