@@ -111,7 +111,6 @@ code{font-family:var(--mono); font-size:.85em; background:var(--paper-sunk);
   .cols.side{grid-template-columns:1.15fr .85fr; align-items:center}
   .cols.side-r{grid-template-columns:.85fr 1.15fr; align-items:center}
 }
-.num{font-family:var(--mono); font-variant-numeric:tabular-nums; font-weight:600}
 .big{font-family:var(--mono); font-size:clamp(1.7rem,3.4vw,2.6rem); font-weight:600;
   font-variant-numeric:tabular-nums; line-height:1.05}
 .tag{font-family:var(--mono); font-size:.63rem; letter-spacing:.13em; text-transform:uppercase;
@@ -141,18 +140,6 @@ tbody tr:last-child td{border-bottom:0}
   display:grid; place-items:center; border:1px solid rgba(0,0,0,.10)}
 .plate img{display:block; width:100%; height:auto; border-radius:calc(var(--r-round) - 6px)}
 .plate.sm{padding:.35rem; border-radius:12px}
-
-/* ── stage cards ───────────────────────────────────────────────────── */
-.stage{border-top:3px solid var(--accent)}
-.stage .n{font-family:var(--mono); font-size:.68rem; color:var(--ink-faint); font-weight:600}
-.stage h3{font-family:var(--round); font-size:1.16rem; letter-spacing:-.01em}
-
-/* ── quote ─────────────────────────────────────────────────────────── */
-.quote{border-left:3px solid var(--warm); background:var(--warm-soft);
-  padding:1rem 1.2rem; border-radius:0 var(--r-sharp) var(--r-sharp) 0}
-.quote p{font-size:clamp(1.02rem,1.5vw,1.2rem); line-height:1.5}
-.quote cite{display:block; margin-top:.5rem; font-style:normal; font-family:var(--mono);
-  font-size:.7rem; letter-spacing:.08em; color:var(--ink-faint); text-transform:uppercase}
 
 /* ── 2×2 outcome grid — thesis (held/failed) × result (profit/loss) ─── */
 .qgrid{display:grid; grid-template-columns:auto 1fr 1fr; gap:2px; background:var(--paper-line);
@@ -277,21 +264,18 @@ svg.chart{display:block; width:100%; height:auto; overflow:visible}
   h3{font-size:.92rem}
   table{font-size:.78rem}
   th,td{padding:.32rem .5rem}
-  .stage h3{font-size:1rem}
   .plate img{max-height:3in; object-fit:contain}
   .rung{padding:.6rem .7rem}
   .rung .req{min-height:2.6em; font-size:.72rem}
   .qgrid > div{padding:.55rem .7rem; min-height:2.8rem}
-  .quote{padding:.7rem .9rem}
-  .quote p{font-size:.95rem}
   .ctl{gap:.1rem}
   input[type=range]{height:.9rem; margin:.1rem 0}
   #wAsym{max-height:1.5in}
   .chrome,.toc{display:none !important}
-  /* the 5-card row + diagram is the tallest single slide in the deck */
-  [data-title="The five stages"] .inner{gap:.35rem}
-  [data-title="The five stages"] .card{padding:.4rem .55rem; gap:.12rem}
-  [data-title="The five stages"] .muted{font-size:.72rem; line-height:1.25}
+  /* the loop diagram plus its caption row is the tallest single slide */
+  [data-title="How it works"] .inner{gap:.4rem}
+  [data-title="How it works"] svg.chart{max-height:4.1in}
+  [data-title="How it works"] .lead{font-size:.82rem}
 }
 </style>
 </head>
@@ -304,7 +288,6 @@ svg.chart{display:block; width:100%; height:auto; overflow:visible}
 <div class="chrome progress" aria-hidden="true"><i id="bar"></i></div>
 
 <div class="deck" id="deck">
-
 <!-- ═══ 01 ═══════════════════════════════════════════════════════════ -->
 <section class="slide brand" data-title="Theo — the one sentence">
   <div class="inner">
@@ -331,21 +314,19 @@ svg.chart{display:block; width:100%; height:auto; overflow:visible}
   <div class="inner">
     <span class="kicker">The problem</span>
     <h2>Over one week, profit and loss cannot tell skill from luck.</h2>
-    <p class="lead">Most trading agents score themselves on P&amp;L. We measured what that
-    actually buys you over a hackathon-length window — and it is close to nothing.</p>
-    <div class="cols c3">
+    <p class="lead">Most trading agents score themselves on the money they made. We simulated what
+    that actually proves over a hackathon-length window. It is close to nothing.</p>
+    <div class="cols c2">
       <div class="card"><span class="big" style="color:var(--caution)">69%</span>
-        <p class="muted">of the time a genuinely skilled agent with a <strong>60% edge</strong>
-        out-scores a coin flip over 20 trades. Barely better than a coin flip about the coin flip.</p></div>
+        <p class="muted">How often a genuinely <strong>skilled</strong> agent — one that really
+        is right 60% of the time — out-scores a coin flip over 20 trades. Nearly a third of the
+        time, the coin wins.</p></div>
       <div class="card"><span class="big" style="color:var(--danger)">−7.8% … +8.2%</span>
-        <p class="muted">the range a <strong>zero-skill</strong> agent lands in over the same
-        window. Any result in that band proves nothing at all.</p></div>
-      <div class="card"><span class="big">1 in 3</span>
-        <p class="muted">roughly the chance a coin flip beats real skill. So a leaderboard over
-        one week ranks variance, not ability.</p></div>
+        <p class="muted">Where a <strong>zero-skill</strong> agent lands over that same window.
+        Any result inside this band is evidence of nothing.</p></div>
     </div>
-    <p class="lead tight">Worse: an agent that <em>learns</em> from P&amp;L alone reinforces
-    whatever story happened to correlate with money. That is how a system acquires a superstition.</p>
+    <p class="lead tight">And an agent that <em>learns</em> from its P&amp;L reinforces whatever
+    story happened to correlate with money. That is how a system acquires a superstition.</p>
   </div>
 </section>
 
@@ -353,269 +334,44 @@ svg.chart{display:block; width:100%; height:auto; overflow:visible}
 <section class="slide brand" data-title="The idea: two questions, not one">
   <div class="inner">
     <span class="kicker">The idea</span>
-    <h2>Theo asks two separate questions instead of one.</h2>
+    <h2>So Theo asks two questions, not one.</h2>
     <div class="cols side-r">
       <div class="plate"><img src="assets/elf-thinking.jpg"
         alt="Theo thinking, with a rising chart in a thought bubble"></div>
       <div class="inner" style="gap:.9rem">
-        <p class="lead"><strong>Was the view right?</strong> &nbsp;and&nbsp;
-        <strong>was the way I expressed it right?</strong></p>
-        <div class="qgrid" role="img" aria-label="A 2 by 2 grid crossing thesis outcome (held or
-          failed) with trading result (profit or loss): held and profit reinforces both; held and
-          loss means the view was fine but the structure was wrong; failed and loss means the view
-          is corrected while the structure gets credit for being faithful; failed and profit —
-          highlighted red — teaches nothing, because it was luck.">
+        <p class="lead"><strong>Was my view of the world right?</strong> &nbsp;and&nbsp;
+        <strong>was the trade I built to express it right?</strong> &nbsp;Profit alone answers
+        neither.</p>
+        <div class="qgrid" role="img" aria-label="A 2 by 2 grid crossing the view (right or wrong)
+          with the money (profit or loss): right and profit reinforces both; right and loss means
+          the view was fine but the trade was wrong; wrong and loss corrects the view while the
+          trade gets credit for being faithful; wrong and profit — highlighted red — teaches
+          nothing, because it was luck.">
           <div></div>
-          <div class="hd">Profit</div>
-          <div class="hd">Loss</div>
-          <div class="rh">Held</div>
-          <div class="cell good"><b>Reinforce both</b><span>the view and the structure earned it</span></div>
-          <div class="cell warn"><b>The view was fine</b><span>the strikes, width or stop were wrong</span></div>
-          <div class="rh">Failed</div>
-          <div class="cell bad"><b>Learn nothing</b><span>this was luck — and it blocks promotion</span></div>
-          <div class="cell warn"><b>Correct the view</b><span>the structure was faithful</span></div>
+          <div class="hd">Made money</div>
+          <div class="hd">Lost money</div>
+          <div class="rh">View right</div>
+          <div class="cell good"><b>Earned it</b><span>reinforce the view and the trade</span></div>
+          <div class="cell warn"><b>Good call, bad trade</b><span>the strikes, width or stop were wrong</span></div>
+          <div class="rh">View wrong</div>
+          <div class="cell bad"><b>Just luck</b><span>learn nothing — and no credit toward trading bigger</span></div>
+          <div class="cell warn"><b>Fair loss</b><span>correct the view; the trade was faithful to it</span></div>
         </div>
-        <p class="muted">Only one cell is unambiguous — <strong>held and profit</strong>, top left,
-        genuinely earned. The two amber cells are still useful: a loss is informative whichever
-        way it points, so both feed learning. The red cell is the trap: <strong>a profit on a
-        failed thesis</strong>. P&amp;L-based scoring treats that as strong confirmation. Here it
-        teaches nothing, and it never counts toward sizing Theo up.</p>
+        <p class="muted">Only the top-left box is unambiguously earned. Either loss still teaches
+        something. The red box is the trap: <strong>money made on a wrong view.</strong> P&amp;L
+        scoring reads that as proof; Theo learns nothing from it.</p>
       </div>
     </div>
   </div>
 </section>
 
 <!-- ═══ 04 ═══════════════════════════════════════════════════════════ -->
-<section class="slide ledger" data-title="What “self-improving” actually means">
-  <div class="inner">
-    <span class="kicker">Self-improving, concretely</span>
-    <h2>Better calibration is not a dashboard metric. It is permission to bet more.</h2>
-    <div class="cols c3">
-      <div class="card"><span class="tag code">feedback loop</span>
-        <h3>Outcomes score the claim</h3>
-        <p class="muted">Every falsifiable claim is pre-registered before it resolves — traded or
-        not. When it resolves, attribution asks which of the four boxes it lands in.</p></div>
-      <div class="card"><span class="tag code">memory</span>
-        <h3>Memory keeps what was useful</h3>
-        <p class="muted">Four stores with four different jobs. Memory credits or decays each block
-        that informed a decision by that decision's <em>verdict</em> — never by its P&amp;L.</p></div>
-      <div class="card"><span class="tag code">the lever</span>
-        <h3>Size is the reward</h3>
-        <p class="muted">Demonstrated calibration raises the Kelly fraction the agent is allowed.
-        Experience → reliability → larger size. No step rewards mere confidence.</p></div>
-    </div>
-    <div class="card" style="border-left:3px solid var(--accent)">
-      <p><strong>And the deterministic half.</strong> The model never executes anything. Code wakes
-      the agent, code runs the gauntlets, code computes Kelly, and code fires the exit rules — every
-      60 seconds, without asking. The LLM's job is narrow: <em>form a view and propose ways to
-      express it</em>. Everything downstream of that is arithmetic that cannot be talked round.</p>
-    </div>
-  </div>
-</section>
-
-<!-- ═══ 05 ═══════════════════════════════════════════════════════════ -->
-<section class="slide ledger" data-title="The five stages">
+<section class="slide ledger" data-title="How it works">
   <div class="inner">
     <span class="kicker">The loop</span>
-    <h2>Five stages, looped so the system can learn from itself.</h2>
-    <div class="cols c5">
-      <div class="card stage"><span class="n">01</span><h3>Sense</h3>
-        <p class="muted">Look at the world. Prices, positions, news, odds, technicals.</p>
-        <p class="fine">every 60s · no LLM</p></div>
-      <div class="card stage"><span class="n">02</span><h3>Think</h3>
-        <p class="muted">Form a falsifiable view; price at least two ways to express it.</p>
-        <p class="fine">~15 min · LLM + arithmetic</p></div>
-      <div class="card stage"><span class="n">03</span><h3>Act</h3>
-        <p class="muted">Place the multi-leg order, then verify it against broker truth.</p>
-        <p class="fine">Alpaca MCP</p></div>
-      <div class="card stage"><span class="n">04</span><h3>Learn</h3>
-        <p class="muted">Guard the position deterministically; then judge it honestly.</p>
-        <p class="fine">every 60s · no LLM</p></div>
-      <div class="card stage"><span class="n">05</span><h3>Remember</h3>
-        <p class="muted">Route what was learned to the store shaped to hold it.</p>
-        <p class="fine">four stores</p></div>
-    </div>
-    <svg class="chart" viewBox="0 0 920 92" role="img" aria-label="Learn feeds back into Think through calibration">
-      <defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5"
-        orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="var(--accent)"/></marker></defs>
-      <path d="M644,6 C644,56 276,56 276,12" fill="none" stroke="var(--accent)" stroke-width="2"
-        stroke-dasharray="5 4" marker-end="url(#ah)"/>
-      <text x="460" y="80" class="axis" text-anchor="middle" fill="var(--accent)"
-        style="font-weight:600">attribution → calibration → permission to size</text>
-    </svg>
-  </div>
-</section>
-
-<!-- ═══ 06 ═══════════════════════════════════════════════════════════ -->
-<section class="slide ledger" data-title="Stage 1 — Sense">
-  <div class="inner">
-    <span class="kicker">Stage 01 · Sense</span>
-    <h2>Look at the world — cheap, automatic, every minute.</h2>
-    <div class="cols c2">
-      <div class="inner" style="gap:.8rem">
-        <h3>What it does</h3>
-        <p class="lead">Refreshes account and position state from the broker, pulls news and
-        prediction-market odds, and computes technicals, realised volatility, beta and a bootstrap
-        forecast from each name's own return history.</p>
-        <h3>Why it is built this way</h3>
-        <ul class="clean">
-          <li><strong>No LLM here at all.</strong> Observation is not judgement. Sensing is
-          arithmetic, so it runs every tick for almost nothing.</li>
-          <li><strong>A stop checked hourly is worthless.</strong> The cost of not looking scales
-          with what is at risk; the cost of looking scales with LLM spend. So the cheap half runs
-          constantly and the expensive half rarely.</li>
-          <li><strong>A failure renders itself.</strong> An empty news block means the world was
-          quiet; “(unavailable)” means we could not look. Those are different claims.</li>
-        </ul>
-      </div>
-      <div class="card">
-        <span class="tag code">subsystems</span>
-        <div class="scroll"><table><tbody>
-          <tr><td><code>analytics</code></td><td class="muted">account, positions, quotes, book greeks</td></tr>
-          <tr><td><code>sensors</code></td><td class="muted">news + Polymarket odds into one inbox</td></tr>
-          <tr><td><code>market_stats</code></td><td class="muted">technicals, realised vol, beta, bootstrap</td></tr>
-          <tr><td><code>reconcile</code></td><td class="muted">our record vs the broker's truth</td></tr>
-        </tbody></table></div>
-        <p class="fine">Measured live: SPY and QQQ correlate at 0.92 — so the research universe was
-        rebuilt for <em>low mutual correlation</em>, not familiarity.</p>
-      </div>
-    </div>
-  </div>
-</section>
-
-<!-- ═══ 07 ═══════════════════════════════════════════════════════════ -->
-<section class="slide ledger" data-title="Stage 2 — Think">
-  <div class="inner">
-    <span class="kicker">Stage 02 · Think</span>
-    <h2>Three independent ways to have an idea — then one narrow job for the model.</h2>
-    <div class="cols c3">
-      <div class="card"><h3>research</h3><p class="muted">Daily, top-down. Technicals + news +
-        prediction-market odds → a regime page and company dossiers → falsifiable opportunities.</p></div>
-      <div class="card"><h3>discovery</h3><p class="muted">Bottom-up. <em>The news nominates the
-        companies.</em> Every nominee must clear a deterministic gauntlet — technicals, forecast,
-        fundamentals, options liquidity — before an LLM writes anything up.</p></div>
-      <div class="card"><h3>the muse</h3><p class="muted">Creative collision. Random concepts ×
-        news × odds, argued into domino chains, every candidate pre-registered and adversarially
-        gated. The top two graduate.</p></div>
-    </div>
-    <div class="cols c2">
-      <div class="card"><span class="tag ai">what the LLM decides</span>
-        <ul class="clean">
-          <li>A <strong>falsifiable thesis</strong> — a claim with a date and a level</li>
-          <li>At least <strong>two structurally different</strong> ways to express it</li>
-          <li>An honest <strong>probability</strong>, and a vol view if the trade is about vol</li>
-        </ul></div>
-      <div class="card"><span class="tag code">what the code decides</span>
-        <ul class="clean">
-          <li><code>simulate_experiments</code> prices every candidate under <strong>one declared
-          measure</strong> — the thesis's own drift and vol, with the market's pricing beside it</li>
-          <li><code>size_position</code> computes Kelly from the <strong>conditional</strong>
-          payoff and shrinks the claim by measured calibration</li>
-          <li>A no-op is a logged, legitimate answer. Theo declines far more often than it trades.</li>
-        </ul></div>
-    </div>
-  </div>
-</section>
-
-<!-- ═══ 08 ═══════════════════════════════════════════════════════════ -->
-<section class="slide ledger" data-title="Stage 3 — Act">
-  <div class="inner">
-    <span class="kicker">Stage 03 · Act</span>
-    <h2>Place the order, then double-check it against the broker.</h2>
-    <div class="cols c2">
-      <div class="inner" style="gap:.8rem">
-        <h3>What it does</h3>
-        <p class="lead">Submits a genuine multi-leg options order through Alpaca's MCP server,
-        stamps it with an idempotent client order id, then reconciles every leg against what the
-        broker actually filled.</p>
-        <h3>Why it is built this way</h3>
-        <ul class="clean">
-          <li><strong>The model authors every tool argument.</strong> So a guard rewrites the
-          order id before it leaves — without it, idempotency is whatever the model invented.</li>
-          <li><strong>Risk is repriced from the fill</strong>, not from the model's word. Every
-          book cap sums <code>max_loss_usd</code>; if that number came from a model and never met a
-          fill, every later cap is denominated in fiction.</li>
-          <li><strong>The system refuses a whole-book close</strong> above one open position, and
-          adopts any orphan it finds at the broker into the managed set rather than just logging
-          it.</li>
-        </ul>
-      </div>
-      <div class="card">
-        <span class="tag code">the real order</span>
-        <div class="scroll"><table><tbody>
-          <tr><td class="muted">class</td><td><code>mleg</code> — 2-leg vertical, one ticket</td></tr>
-          <tr><td class="muted">legs</td><td><code>SPY260903P00766000</code> buy_to_open<br><code>SPY260903P00758000</code> sell_to_open</td></tr>
-          <tr><td class="muted">type</td><td>limit, net debit <span class="num">$1.70</span>, day</td></tr>
-          <tr><td class="muted">id</td><td><code>theo-spy-bps-20260828-766758</code></td></tr>
-        </tbody></table></div>
-        <p class="fine">Every position traces back to its reasoning through one
-        <code>position_id</code> — journal, wiki, memory, and back to the broker.</p>
-      </div>
-    </div>
-  </div>
-</section>
-
-<!-- ═══ 09 ═══════════════════════════════════════════════════════════ -->
-<section class="slide ledger" data-title="Stage 4 — Learn">
-  <div class="inner">
-    <span class="kicker">Stage 04 · Learn</span>
-    <h2>Guard the position without consulting the agent. Then judge it honestly.</h2>
-    <div class="cols c2">
-      <div class="card"><span class="tag code">the guard — every 60 seconds</span>
-        <p class="muted">Exit rules are the agent's own commitments, executed deterministically.
-        One signal registry: every rule reads a signal, compares to a threshold, debounces.
-        Thesis-level stops watch the <strong>underlying</strong>, not the noisy option mark.</p>
-        <p class="muted">An exit rule stated only in prose does not exist. Percentages mean what a
-        trader means — a percent of the <em>net debit paid</em>, not of gross premium. On the wrong
-        base, three of the four mark-based rules this book has ever carried could not fire at all.</p></div>
-      <div class="card"><span class="tag code">the scoring — at the thesis horizon</span>
-        <p class="muted">Attribution waits for the horizon the claim named, then asks the two
-        questions from slide 3. A profit on a wrong view counts as <strong>luck</strong> and
-        teaches nothing.</p>
-        <p class="muted">Calibration then scores every stated probability with a Brier score and
-        its Murphy decomposition — reliability (am I overconfident?) separated from resolution
-        (do my forecasts actually separate winners from losers?).</p></div>
-    </div>
-    <div class="quote">
-      <p>Attribution is the distinctive signal, and it is deliberately expensive to earn: promotion
-      past the second rung requires that <em>most resolved theses were actually explicable</em>.
-      A book of luck is not competence, however good the P&amp;L looks.</p>
-    </div>
-  </div>
-</section>
-
-<!-- ═══ 10 ═══════════════════════════════════════════════════════════ -->
-<section class="slide ledger" data-title="Stage 5 — Remember">
-  <div class="inner">
-    <span class="kicker">Stage 05 · Remember</span>
-    <h2>Four stores, one for each kind of knowledge.</h2>
-    <div class="cols c4">
-      <div class="card stage"><h3>journal</h3><p class="muted">Append-only events. What happened,
-        when, and which model said so. The record, never rewritten.</p>
-        <p class="fine">1,890 rows</p></div>
-      <div class="card stage"><h3>wiki</h3><p class="muted">Stable reference that rewrites itself:
-        position pages, company dossiers, the regime page.</p>
-        <p class="fine">markdown on disk</p></div>
-      <div class="card stage"><h3>elfmem</h3><p class="muted">Evolving memory with decay and
-        reinforcement — and a ratified constitution of epistemic principles.</p>
-        <p class="fine">credited by verdict, not P&amp;L</p></div>
-      <div class="card stage"><h3>ledger</h3><p class="muted">Every falsifiable claim ever made,
-        traded or not — so the trial count a multiple-testing correction needs cannot be lost.</p>
-        <p class="fine">95 resolved</p></div>
-    </div>
-    <p class="lead">The ledger is the quiet one that matters most. <strong>Forecasts on setups we
-    declined are scored too</strong>, at zero capital risk — and they are the only realistic route
-    to a calibration sample that means anything inside a week.</p>
-  </div>
-</section>
-
-<!-- ═══ 11 ═══════════════════════════════════════════════════════════ -->
-<section class="slide ledger" data-title="Architecture">
-  <div class="inner">
-    <span class="kicker">Architecture</span>
-    <h2>Where the model sits, and how little of the system it is.</h2>
+    <h2>One loop, four stages, and a verdict that feeds back into the next trade.</h2>
     <svg class="chart" viewBox="0 0 920 350" role="img"
-      aria-label="Architecture: Sense, Think, Act and Learn in a pipeline over four memory stores, with a feedback path from Learn to Think">
+      aria-label="The loop: Sense, Think, Act and Learn in a pipeline over four memory stores, with the verdict from Learn feeding back into Think">
       <defs>
         <marker id="a2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7"
           orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="var(--ink-faint)"/></marker>
@@ -625,14 +381,14 @@ svg.chart{display:block; width:100%; height:auto; overflow:visible}
       <path d="M775,96 C775,20 355,20 355,90" fill="none" stroke="var(--accent)" stroke-width="2"
         stroke-dasharray="5 4" marker-end="url(#a3)"/>
       <text x="565" y="16" class="axis" text-anchor="middle" fill="var(--accent)"
-        style="font-weight:600">calibration &amp; attribution → the size the next trade is allowed</text>
+        style="font-weight:600">the verdict sets how much the next trade is allowed to risk</text>
 
       <g>
         <rect x="20" y="96" width="200" height="118" rx="4" fill="var(--paper-raised)" stroke="var(--paper-line)"/>
         <rect x="20" y="96" width="200" height="3" fill="var(--accent)"/>
         <text x="34" y="124" class="axis" style="font-size:13px;font-weight:700" fill="var(--ink)">SENSE</text>
-        <text x="34" y="146" class="axis">analytics · sensors</text>
-        <text x="34" y="162" class="axis">market_stats · reconcile</text>
+        <text x="34" y="146" class="axis">prices · news · odds</text>
+        <text x="34" y="162" class="axis">what the history implies</text>
         <text x="34" y="186" class="axis" fill="var(--ink-faint)">every 60s · no LLM</text>
       </g>
       <line x1="224" y1="155" x2="246" y2="155" stroke="var(--ink-faint)" stroke-width="2" marker-end="url(#a2)"/>
@@ -640,8 +396,8 @@ svg.chart{display:block; width:100%; height:auto; overflow:visible}
         <rect x="255" y="96" width="200" height="118" rx="4" fill="var(--paper-raised)" stroke="var(--paper-line)"/>
         <rect x="255" y="96" width="200" height="3" fill="var(--warm)"/>
         <text x="269" y="124" class="axis" style="font-size:13px;font-weight:700" fill="var(--ink)">THINK</text>
-        <text x="269" y="146" class="axis">research · discovery · muse</text>
-        <text x="269" y="162" class="axis">simulate → size</text>
+        <text x="269" y="146" class="axis">a dated, falsifiable claim</text>
+        <text x="269" y="162" class="axis">two ways to trade it, priced</text>
         <text x="269" y="186" class="axis" fill="var(--warm)">the only LLM judgement</text>
       </g>
       <line x1="459" y1="155" x2="481" y2="155" stroke="var(--ink-faint)" stroke-width="2" marker-end="url(#a2)"/>
@@ -649,8 +405,8 @@ svg.chart{display:block; width:100%; height:auto; overflow:visible}
         <rect x="490" y="96" width="200" height="118" rx="4" fill="var(--paper-raised)" stroke="var(--paper-line)"/>
         <rect x="490" y="96" width="200" height="3" fill="var(--accent)"/>
         <text x="504" y="124" class="axis" style="font-size:13px;font-weight:700" fill="var(--ink)">ACT</text>
-        <text x="504" y="146" class="axis">Alpaca MCP · mleg order</text>
-        <text x="504" y="162" class="axis">tool_guard · reconcile</text>
+        <text x="504" y="146" class="axis">one multi-leg Alpaca order</text>
+        <text x="504" y="162" class="axis">checked against the fill</text>
         <text x="504" y="186" class="axis" fill="var(--ink-faint)">idempotent, verified</text>
       </g>
       <line x1="694" y1="155" x2="716" y2="155" stroke="var(--ink-faint)" stroke-width="2" marker-end="url(#a2)"/>
@@ -658,8 +414,8 @@ svg.chart{display:block; width:100%; height:auto; overflow:visible}
         <rect x="725" y="96" width="175" height="118" rx="4" fill="var(--paper-raised)" stroke="var(--paper-line)"/>
         <rect x="725" y="96" width="175" height="3" fill="var(--accent)"/>
         <text x="739" y="124" class="axis" style="font-size:13px;font-weight:700" fill="var(--ink)">LEARN</text>
-        <text x="739" y="146" class="axis">exit_rules · attribution</text>
-        <text x="739" y="162" class="axis">calibration · coach</text>
+        <text x="739" y="146" class="axis">exits, without asking</text>
+        <text x="739" y="162" class="axis">right, wrong, or lucky?</text>
         <text x="739" y="186" class="axis" fill="var(--ink-faint)">every 60s · no LLM</text>
       </g>
 
@@ -670,259 +426,249 @@ svg.chart{display:block; width:100%; height:auto; overflow:visible}
 
       <rect x="20" y="286" width="880" height="52" rx="4" fill="var(--paper-sunk)" stroke="var(--paper-line)"/>
       <text x="34" y="312" class="axis" style="font-size:12px;font-weight:700" fill="var(--ink)">REMEMBER</text>
-      <text x="150" y="316" class="axis">journal — append-only events</text>
-      <text x="345" y="316" class="axis">wiki — stable reference</text>
-      <text x="515" y="316" class="axis">elfmem — evolving memory</text>
-      <text x="705" y="316" class="axis">ledger — every claim</text>
+      <text x="150" y="316" class="axis">journal — what happened</text>
+      <text x="345" y="316" class="axis">wiki — what it knows</text>
+      <text x="515" y="316" class="axis">memory — what it learned</text>
+      <text x="705" y="316" class="axis">ledger — every claim made</text>
     </svg>
     <div class="cols c2">
-      <p class="fine"><strong style="color:var(--ink)">Chassis:</strong> one scheduler, a singleton
-      lock, an ordered model fallback chain, and a health probe that asks every subsystem
-      “you ran — but did you <em>produce</em> anything?”</p>
-      <p class="fine">Roughly 19,700 lines of Python · 609 offline tests · four trader-readable
-      simulation scaffolds</p>
+      <p class="lead">The cheap half runs constantly; the expensive half — the model forming a view
+      — runs roughly every 15 minutes. A stop checked hourly is worthless, so the watching never
+      stops.</p>
+      <p class="fine"><strong style="color:var(--ink)">The ledger is the quiet one.</strong>
+      Forecasts on setups Theo <em>declined</em> are scored too, at zero risk — the only realistic
+      way to build a track record that means anything inside a week.</p>
     </div>
   </div>
 </section>
 
-<!-- ═══ 12 ═══════════════════════════════════════════════════════════ -->
+<!-- ═══ 05 ═══════════════════════════════════════════════════════════ -->
+<section class="slide ledger" data-title="What the model decides, and what the code decides">
+  <div class="inner">
+    <span class="kicker">Where the intelligence sits</span>
+    <h2>The model gets one job. Everything that can be checked is checked by code.</h2>
+    <div class="cols c2">
+      <div class="card"><span class="tag ai">the model's whole job</span>
+        <ul class="clean">
+          <li>Form a <strong>claim that can be proved wrong</strong> — a named level, by a named date</li>
+          <li>Propose at least <strong>two genuinely different trades</strong> that express it</li>
+          <li>State an <strong>honest probability</strong> it will happen</li>
+        </ul>
+        <p class="fine">Ideas come from three independent sources: a daily research pass, discovery
+        where the news nominates the companies, and a “muse” that collides unrelated concepts.</p></div>
+      <div class="card"><span class="tag code">what code decides, every time</span>
+        <ul class="clean">
+          <li><strong>What each trade is worth</strong> — priced under one declared set of
+          assumptions, with the market's own pricing beside it</li>
+          <li><strong>How many contracts</strong> — from the payoff and a track record the agent
+          must earn, never from how confident it feels</li>
+          <li><strong>When to get out</strong> — the agent's own exit rules, checked every minute
+          and executed without asking it</li>
+          <li><strong>The verdict</strong> — view right, trade right, or simply lucky</li>
+        </ul></div>
+    </div>
+    <div class="card" style="border-left:3px solid var(--accent)">
+      <p><strong>The model never executes anything.</strong> It cannot talk the arithmetic round,
+      and “do nothing” is a legitimate, logged answer — Theo declines far more often than it
+      trades. That is what makes the honesty structural rather than a promise.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ 06 ═══════════════════════════════════════════════════════════ -->
 <section class="slide ledger" data-title="Alpaca implementation">
   <div class="inner">
     <span class="kicker">Technology implementation</span>
     <h2>How Alpaca is used — and three things that were harder than they look.</h2>
     <div class="cols c3">
-      <div class="card"><h3>MCP, one session per tick</h3>
-        <p class="muted">Alpaca's MCP server runs as a local stdio subprocess. The adapter's default
-        starts a fresh process <em>per tool call</em> — six calls cost 12.3s. Sharing one session
-        across the tick cut it to 2.75s.</p>
+      <div class="card"><h3>One MCP session per cycle</h3>
+        <p class="muted">Alpaca's MCP server runs as a local subprocess. The default adapter starts
+        a fresh one <em>for every tool call</em> — six calls cost 12.3 seconds. Sharing a single
+        session across the cycle cut that to 2.75.</p>
         <p class="fine">−78% wall clock, measured</p></div>
-      <div class="card"><h3>Real multi-leg options orders</h3>
-        <p class="muted">Verticals, condors and butterflies go as <code>mleg</code> tickets with
-        per-leg <code>position_intent</code>. Calendars and diagonals are <strong>refused</strong>,
-        not approximated — pricing the far leg needs a model we deliberately do not have.</p>
-        <p class="fine">a confident wrong payoff is worse than a refusal</p></div>
-      <div class="card"><h3>Only 19 of 72 tools bound</h3>
-        <p class="muted">Binding all 72 MCP tools cost ~21k tokens of schema <em>per call</em>,
-        71% of it for tools never used once — and a bigger menu measurably worsens tool selection.</p>
-        <p class="fine">$3.46 → $1.32 per decide cycle</p></div>
+      <div class="card"><h3>Real multi-leg option orders</h3>
+        <p class="muted">Spreads, condors and butterflies go to the broker as one ticket with an
+        intent declared per leg, then every leg is checked against what actually filled — risk is
+        counted from the fill, never from what the model claimed.</p>
+        <p class="fine">verified against broker truth</p></div>
+      <div class="card"><h3>19 tools bound, not 72</h3>
+        <p class="muted">Handing the model all 72 tools cost roughly 21,000 tokens of menu on
+        <em>every</em> call, 71% of it for tools never used once — and a longer menu measurably
+        worsens which tool it picks.</p>
+        <p class="fine">$3.46 → $1.32 per decision cycle</p></div>
     </div>
     <div class="card" style="border-left:3px solid var(--caution)">
-      <p><strong>The lesson that generalises.</strong> All three of those had already shipped as
-      code that ran and did nothing: the option-chain compactor failed open against an envelope
-      shape it did not recognise, the session was never actually shared, and the prompt cache was
-      never asked for. Each looked healthy in the logs. That is why
-      <code>trdrbot health</code> exists and asks a different question from the tests —
-      <em>“you ran, but did you produce anything?”</em></p>
+      <p><strong>The lesson that generalises.</strong> All three had already shipped as code that
+      ran and quietly did nothing, while every log line looked healthy. That is why Theo has a
+      health check that asks a question tests cannot: <em>“you ran — but did you actually
+      produce anything?”</em></p>
     </div>
   </div>
 </section>
 
-<!-- ═══ 13 ═══════════════════════════════════════════════════════════ -->
-<section class="slide ledger" data-title="A real trade — the setup">
+<!-- ═══ 07 ═══════════════════════════════════════════════════════════ -->
+<section class="slide ledger" data-title="A real trade — the choice">
   <div class="inner">
-    <span class="kicker">Worked example · 28 August 2026 · 1 of 3</span>
-    <h2>Something happened in the world, and the equity market had not priced it.</h2>
+    <span class="kicker">Worked example · 28 August 2026 · 1 of 2</span>
+    <h2>One market repriced. The stock market had not caught up.</h2>
     <div class="cols side">
-      <div class="inner" style="gap:.9rem">
-        <p class="lead">Fed funds futures flipped intraday to price a September <em>hike</em> as
-        more likely than a hold. Gold, Bitcoin and TLT all sold off. SPY did not — it had printed
-        775.30 before the remarks and sat at 769.07, down 0.3%, after a +5.7% run.</p>
-        <p class="lead"><strong>That asymmetry is the trade.</strong> Not a chart shape — a dated,
+      <div class="inner" style="gap:.85rem">
+        <p class="lead">Interest-rate futures flipped intraday to price a September <em>hike</em>
+        as more likely than a hold. Gold, Bitcoin and long bonds all sold off. The S&amp;P barely
+        moved — it sat 0.3% below its pre-announcement print after a 5.7% run.</p>
+        <p class="lead"><strong>That gap is the trade.</strong> Not a chart pattern: a dated,
         causal claim that one market had repriced and another had not.</p>
-        <div class="card"><span class="tag ai">the thesis, as recorded</span>
-          <p><em>“SPY drifts modestly lower into 2026-09-03 as equities digest fed funds futures
+        <div class="card"><span class="tag ai">the claim, as recorded before any order</span>
+          <p><em>“SPY drifts modestly lower into 2026-09-03 as equities digest the rate
           repricing.”</em></p>
-          <p class="fine">horizon 2026-09-03 · falsifiable · pre-registered before any order</p></div>
+          <p class="fine">nine tool calls end to end: snapshot → bars → clock → news → option chain
+          → simulate → size → order → record</p></div>
       </div>
-      <div class="card">
-        <span class="tag code">Sense → Think, the actual tool calls</span>
-        <div class="scroll"><table><tbody>
-          <tr><td class="n muted">1</td><td><code>get_stock_snapshot</code></td></tr>
-          <tr><td class="n muted">2</td><td><code>get_stock_bars</code></td></tr>
-          <tr><td class="n muted">3</td><td><code>get_clock</code></td></tr>
-          <tr><td class="n muted">4</td><td><code>get_news</code></td></tr>
-          <tr><td class="n muted">5</td><td><code>get_option_chain</code></td></tr>
-          <tr><td class="n muted">6</td><td><code>simulate_experiments</code></td></tr>
-          <tr><td class="n muted">7</td><td><code>size_position</code></td></tr>
-          <tr><td class="n muted">8</td><td><code>place_option_order</code></td></tr>
-          <tr><td class="n muted">9</td><td><code>record_position</code></td></tr>
-        </tbody></table></div>
+      <div class="inner" style="gap:.7rem">
+        <h3>Three ways to trade it. The comfortable one failed the maths.</h3>
+        <div class="scroll"><table>
+          <thead><tr><th>Candidate</th><th class="n">Wins</th><th>Verdict</th></tr></thead>
+          <tbody>
+            <tr><td>call credit spread</td><td class="n">76–92%</td>
+              <td><span class="tag bad">rejected</span> collects $95 to risk $283 — it looks safe
+              <em>because</em> it usually wins</td></tr>
+            <tr><td>butterfly</td><td class="n">low</td>
+              <td><span class="tag bad">rejected</span> needs the fall to stop <em>exactly</em> on
+              one level, and four legs cost $22 to trade</td></tr>
+            <tr style="background:var(--accent-soft)"><td><strong>put debit spread</strong></td>
+              <td class="n">42%</td>
+              <td><span class="tag good">taken</span> pays 2.85 to 1 when it wins — worth taking
+              even on the market's own assumptions</td></tr>
+          </tbody>
+        </table></div>
+        <p class="muted"><strong>Then code, not the agent, set the size:</strong> its honest 42%
+        was cut further by its measured track record, capped three ways at once, and came out at
+        <strong>13 contracts — $2,171 at risk, 2.14% of the account.</strong></p>
       </div>
     </div>
   </div>
 </section>
 
-<!-- ═══ 14 ═══════════════════════════════════════════════════════════ -->
-<section class="slide ledger" data-title="A real trade — priced and sized">
+<!-- ═══ 08 ═══════════════════════════════════════════════════════════ -->
+<section class="slide ledger" data-title="A real trade — what happened next">
   <div class="inner">
-    <span class="kicker">Worked example · 2 of 3</span>
-    <h2>Three ways to trade it. The easy-looking one failed the math.</h2>
-    <div class="scroll">
-      <table>
-        <thead><tr><th>Candidate</th><th class="n">Win rate</th><th class="n">Pays</th><th class="n">Risks</th><th>Verdict</th></tr></thead>
-        <tbody>
-          <tr><td>775/780 call credit spread</td><td class="n">76–92%</td><td class="n">$95</td><td class="n">$283</td>
-            <td><span class="tag bad">rejected</span> looks safe <em>because</em> it usually wins</td></tr>
-          <tr><td>760 butterfly</td><td class="n">low</td><td class="n">—</td><td class="n">$70 debit</td>
-            <td><span class="tag bad">rejected</span> needs the fall to stop <em>exactly</em> at 760; $22 of 4-leg friction</td></tr>
-          <tr style="background:var(--accent-soft)"><td><strong>766/758 put debit spread</strong></td><td class="n">42%</td>
-            <td class="n">2.85 : 1</td><td class="n">$2,171</td>
-            <td><span class="tag good">taken</span> EV-positive even at the market's own drift</td></tr>
-        </tbody>
-      </table>
-    </div>
+    <span class="kicker">Worked example · 2 of 2</span>
+    <h2>Five rules took over. The score still waits for the date the claim named.</h2>
     <div class="cols c2">
-      <div class="quote">
-        <p>“Honest confidence <strong>0.42</strong>. This loses more often than it wins. That is
-        fine — it is the same trade logic as a 38% call spread with 3.8:1 payoff. I resisted
-        rounding up to make it feel better; <strong>the number is scored</strong>.”</p>
-        <cite>Theo's own decision record, 28 August</cite>
-      </div>
-      <div class="card"><span class="tag code">then size_position, not the agent</span>
-        <ul class="clean">
-          <li>Kelly from the <strong>conditional</strong> payoff — E[win|win] / E[loss|loss], not
-          the max/max ratio, which is measurably biased toward buying premium</li>
-          <li>The stated 42% shrunk by measured calibration before it sets size</li>
-          <li>Capped three ways at once: per-position, per-underlying, whole book</li>
-          <li><strong>13 contracts. $2,171 max loss — 2.14% of equity.</strong> The agent did not
-          choose that number.</li>
-        </ul></div>
-    </div>
-  </div>
-</section>
-
-<!-- ═══ 15 ═══════════════════════════════════════════════════════════ -->
-<section class="slide ledger" data-title="A real trade — guarded and scored">
-  <div class="inner">
-    <span class="kicker">Worked example · 3 of 3</span>
-    <h2>Five rules took over. Two questions get answered when the trade closes.</h2>
-    <div class="cols c2">
-      <div class="card"><span class="tag code">the guard, from the moment of the fill</span>
+      <div class="card"><span class="tag code">the guard, from the moment it filled</span>
         <div class="scroll"><table><tbody>
-          <tr><td>profit target</td><td class="n">+140% of debit</td></tr>
-          <tr><td>stop</td><td class="n">−65% of debit</td></tr>
-          <tr><td><strong>underlying stop</strong></td><td class="n">SPY above 776</td></tr>
-          <tr><td>time stop</td><td class="n">expiry day</td></tr>
-          <tr><td>leg divergence</td><td class="n">broker truth vs ours</td></tr>
+          <tr><td>take profit at</td><td class="n">+140%</td></tr>
+          <tr><td>cut the loss at</td><td class="n">−65%</td></tr>
+          <tr><td><strong>abandon the idea if</strong></td><td class="n">SPY above 776</td></tr>
+          <tr><td>close by</td><td class="n">expiry day</td></tr>
+          <tr><td>alert if</td><td class="n">our record ≠ the broker's</td></tr>
         </tbody></table></div>
-        <p class="muted">The agent named the underlying stop as the one it trusts most: <em>if SPY
-        makes new highs, the premise that equities haven't discounted the hike is simply false, and
-        the position should die regardless of what the mark says.</em></p>
-        <p class="fine">None of the five rules fired — the position closed on an external event
-        before expiry, stop or target.</p></div>
+        <p class="muted">The agent named the third rule as the one it trusts most: <em>if the S&amp;P
+        makes new highs, the premise that stocks hadn't absorbed the news is simply false, and the
+        position should die whatever the price says.</em></p>
+        <p class="fine">None of the five fired — it closed on an outside event first.</p></div>
       <div class="inner" style="gap:.9rem">
         <div class="card"><span class="tag good">where it closed</span>
           <p><span class="big" style="color:var(--accent)">+129.1%</span></p>
-          <p class="muted">on net debit. But the P&amp;L is <strong>not</strong> the question that
-          moves anything.</p></div>
-        <div class="card"><span class="tag warn">what gets asked on 3 September — one day out</span>
+          <p class="muted">on the money put at risk. But this is <strong>not</strong> the number
+          that moves anything.</p></div>
+        <div class="card"><span class="tag warn">what gets asked on 3 September</span>
           <ul class="clean">
-            <li>Did SPY close below the level the thesis named? → <strong>was the view right?</strong></li>
-            <li>Given that answer, did this structure express it well? → <strong>was the expression right?</strong></li>
+            <li>Did the S&amp;P close below the level the claim named? → <strong>was the view
+            right?</strong></li>
+            <li>Given that, was this the right way to trade it? → <strong>was the trade
+            right?</strong></li>
           </ul>
-          <p class="fine">the horizon hasn't passed yet — a 129% gain still scores as unattributed,
-          not as proof, until it does</p></div>
+          <p class="fine">Until that date passes, a 129% gain counts as <strong>unscored</strong>
+          — not as proof of anything.</p></div>
       </div>
     </div>
   </div>
 </section>
 
-<!-- ═══ 16 ═══════════════════════════════════════════════════════════ -->
+<!-- ═══ 09 ═══════════════════════════════════════════════════════════ -->
 <section class="slide ledger" data-title="Size is earned">
   <div class="inner">
     <span class="kicker">Risk</span>
-    <h2>Position size is earned, not chosen — and it is the only reward on offer.</h2>
-
+    <h2>Trading bigger is the only reward on offer — and it has to be earned.</h2>
     <div class="ladder">
       <div class="rung" style="--lvl:1">
         <div class="tier">EXPLORE</div>
-        <p class="req">nothing — the starting allocation</p>
+        <p class="req">the starting allowance</p>
         <div class="bar"><i style="width:40%"></i></div>
         <div class="caps">
-          <div><b>10%</b><span>book</span></div>
+          <div><b>10%</b><span>whole book</span></div>
           <div><b>5%</b><span>one position</span></div>
         </div>
       </div>
       <div class="rung" style="--lvl:2">
         <div class="tier">ESTABLISH</div>
-        <p class="req">≥5 resolved theses</p>
+        <p class="req">5 claims scored</p>
         <div class="bar"><i style="width:60%"></i></div>
         <div class="caps">
-          <div><b>15%</b><span>book</span></div>
+          <div><b>15%</b><span>whole book</span></div>
           <div><b>7.5%</b><span>one position</span></div>
         </div>
       </div>
       <div class="rung" style="--lvl:3">
         <div class="tier">SCALE</div>
-        <p class="req">≥15 resolved, ≥60% <em>attributable</em></p>
+        <p class="req">15 scored, and most of them <em>explicable</em></p>
         <div class="bar"><i style="width:80%"></i></div>
         <div class="caps">
-          <div><b>20%</b><span>book</span></div>
+          <div><b>20%</b><span>whole book</span></div>
           <div><b>10%</b><span>one position</span></div>
         </div>
       </div>
       <div class="rung" style="--lvl:4">
         <div class="tier">MATURE</div>
-        <p class="req">≥40 resolved, ≥70% attributable, reliability &lt;0.04</p>
+        <p class="req">40 scored, 70% explicable, and well calibrated</p>
         <div class="bar"><i style="width:100%"></i></div>
         <div class="caps">
-          <div><b>25%</b><span>book</span></div>
+          <div><b>25%</b><span>whole book</span></div>
           <div><b>12.5%</b><span>one position</span></div>
         </div>
       </div>
     </div>
-    <p class="muted">Colour deepens with earned trust — MATURE's tint is the same green this deck
-    uses for a genuinely earned outcome, nowhere else. Climbing costs <strong>evidence</strong>,
-    not confidence: each rung names exactly what must be demonstrated, and none of them can be
-    talked round.</p>
-    <p class="fine">Theo sits on SCALE today, on 76 resolved theses — promotion counts resolved
-    forecasts, not just trades, and it is a different question from whether this week's trades have
-    been attributed yet (next two slides).</p>
-
     <div class="cols c2">
-      <ul class="clean">
-        <li><strong>Monotonic in evidence.</strong> More knowledge can never mean less size. Two
-        separate ladder inversions shipped and were caught by an invariant test that sweeps the
-        whole ladder rather than checking examples.</li>
-        <li><strong>Asymmetric.</strong> Promotion needs a sustained record; a 5% drawdown demotes
-        a whole tier immediately, and 10% goes back to the start.</li>
-      </ul>
-      <div class="inner" style="gap:.6rem">
-        <p class="muted"><strong>Attribution is a promotion criterion, not a metric.</strong> This
-        is the rung that makes “right vs lucky” cost something real.</p>
-        <p class="fine">Kelly refuses any structure with unbounded LOSS outright. Unbounded profit
-        is fine — a long call is not a naked short.</p>
+      <p class="lead">Climbing costs <strong>evidence, not confidence</strong>. The third rung is
+      the one that bites: it is not enough to have been right, most wins must have been
+      <em>explained</em> — which is exactly what a run of lucky trades cannot do.</p>
+      <div class="inner" style="gap:.5rem">
+        <p class="muted"><strong>Falling is faster than climbing.</strong> A 5% drawdown drops a
+        whole rung immediately; 10% goes back to the start.</p>
+        <p class="fine">Theo sits on SCALE today, on 76 scored claims. The sizer also refuses
+        outright any trade whose worst case is unlimited.</p>
       </div>
     </div>
   </div>
 </section>
 
-<!-- ═══ 17 ═══════════════════════════════════════════════════════════ -->
+<!-- ═══ 10 ═══════════════════════════════════════════════════════════ -->
 <section class="slide ledger" data-title="Risk and reward, interactive">
   <div class="inner">
     <span class="kicker">Risk / reward · drag the sliders</span>
-    <h2>How much risk to take depends on how sure you are the edge is real.</h2>
+    <h2>How much to bet depends on how sure you are the edge is real.</h2>
     <div class="cols side">
       <div class="inner" style="gap:.9rem">
         <div class="cols c2">
           <div class="ctl">
-            <div class="row"><label for="wA">Risk appetite</label><span class="v" id="wAV">1.00×</span></div>
+            <div class="row"><label for="wA">How aggressive</label><span class="v" id="wAV">1.00×</span></div>
             <input type="range" id="wA" min="0.25" max="2" step="0.05" value="1">
           </div>
           <div class="ctl">
-            <div class="row"><label for="wB">Belief the edge is real</label><span class="v" id="wBV">50%</span></div>
+            <div class="row"><label for="wB">Chance the edge is real</label><span class="v" id="wBV">50%</span></div>
             <input type="range" id="wB" min="0" max="100" step="1" value="50">
           </div>
         </div>
         <svg class="chart" id="wAsym" viewBox="0 0 460 200" role="img"
-          aria-label="Median gain when the thesis is right against the loss when it is wrong, by appetite"></svg>
-        <p class="fine">SPY's own resampled returns, fair-priced structure, the production sizer.
+          aria-label="Typical gain when the view is right against the loss when it is wrong, at each level of aggression"></svg>
+        <p class="fine">Run on the S&amp;P's own past moves through the production sizer.
         <a href="https://trdrbot.com/resources/risk-appetite-explorer.html">Full explorer →</a></p>
       </div>
       <div class="inner" style="gap:.7rem">
         <div class="card"><span class="tag code">reward : risk</span>
           <span class="big" id="wRR">—</span>
-          <p class="muted">median gain when the view is right, against the loss when it is wrong</p></div>
+          <p class="muted">typical gain when the view is right, against the loss when it is wrong</p></div>
         <div class="card" id="wVerdict"><span class="tag warn">the honest reading</span>
           <p class="muted">—</p></div>
         <p class="fine" id="wNote"></p>
@@ -931,101 +677,69 @@ svg.chart{display:block; width:100%; height:auto; overflow:visible}
   </div>
 </section>
 
-<!-- ═══ 18 ═══════════════════════════════════════════════════════════ -->
-<section class="slide ledger" data-title="Results, reported plainly">
+<!-- ═══ 11 ═══════════════════════════════════════════════════════════ -->
+<section class="slide ledger" data-title="Results, and what the record says">
   <div class="inner">
     <span class="kicker">Results · paper account · as of 2 Sep 2026, 17:26 UTC</span>
-    <h2>The P&amp;L, and why we will not use it as proof.</h2>
+    <h2>The P&amp;L — and the number we would rather not show you.</h2>
     <div class="cols c4">
       <div class="card"><span class="tag code">equity</span><span class="big">$111,415</span>
         <p class="muted">from a $100,000 start</p></div>
       <div class="card"><span class="tag good">return</span>
         <span class="big" style="color:var(--accent)">+11.4%</span>
-        <p class="muted">high water $111,945 · drawdown 0.5% off it</p></div>
+        <p class="muted">0.5% off its high water mark</p></div>
       <div class="card"><span class="tag code">positions</span><span class="big">7</span>
-        <p class="muted">6 closed, from −2.9% to +129.1% on debit; 1 open, currently −12.6%</p></div>
+        <p class="muted">6 closed, from −2.9% to +129.1%; 1 still open</p></div>
       <div class="card"><span class="tag code">decisions</span><span class="big">255</span>
-        <p class="muted">157 theses formed, 98 declined outright</p></div>
+        <p class="muted">157 claims formed, 98 declined outright</p></div>
     </div>
-    <div class="card" style="border-left:3px solid var(--caution)">
-      <p><strong>Seven positions in a week is still not evidence of skill, and the sharper reason
-      is not sample size.</strong> It is that not one of them has been credited as a genuinely
-      explained win yet — the queue that scores view-right-vs-lucky was found stuck this same week
-      (next slide). We report the number because it is real, and we built the machinery precisely
-      so there is something better than this number to judge us on.</p>
-    </div>
-  </div>
-</section>
-
-<!-- ═══ 19 ═══════════════════════════════════════════════════════════ -->
-<section class="slide ledger" data-title="What the record actually says">
-  <div class="inner">
-    <span class="kicker">The uncomfortable slide</span>
-    <h2>The record says something we would rather it did not. Here it is anyway.</h2>
     <div class="cols c2">
-      <div class="inner" style="gap:.8rem">
-        <div class="scroll"><table>
-          <thead><tr><th>Measure</th><th class="n">Value</th><th>Reading</th></tr></thead>
-          <tbody>
-            <tr><td>resolved forecasts</td><td class="n">76</td><td class="muted">9.8 <em>effective</em> — concentrated in a few names</td></tr>
-            <tr><td>Brier score</td><td class="n">0.237</td><td class="muted">0.25 is a coin flip</td></tr>
-            <tr><td>reliability</td><td class="n">n/a</td><td><span class="tag warn">not yet computable</span> too few effective buckets</td></tr>
-            <tr><td><strong>resolution</strong></td><td class="n">0.000</td><td><span class="tag bad">no discrimination</span> forecasts are not separating winners from losers</td></tr>
-          </tbody>
-        </table></div>
+      <div class="card" style="border-left:3px solid var(--danger)">
+        <p><strong>By its own scorecard, Theo has not yet shown skill.</strong> The measure of
+        whether its forecasts separate winners from losers reads <strong>0.000</strong>: a stated
+        70% is not landing more often than a stated 55%. And whether a 40% call really lands 40% of
+        the time cannot be answered yet — 76 scored claims are only <strong>9.8 independent</strong>
+        ones once repeated names are discounted.</p>
       </div>
-      <div class="inner" style="gap:.8rem">
-        <p class="lead">Resolution is still zero — a stated 70% is not yet landing more often than
-        a stated 55%. Reliability, whether a 40% call actually lands 40% of the time, cannot be
-        computed at all right now: 76 nominal forecasts are only 9.8 <em>effective</em> once
-        repeated names are discounted, too thin to bucket by confidence. Two different failures —
-        only a decomposed score tells them apart.</p>
-        <div class="card" style="border-left:3px solid var(--accent)">
-          <p><strong>Attribution went the same way, for a sharper reason.</strong> The queue that
-          scores a closed position view-right, view-wrong, or lucky was silently stuck for days —
-          found and drained this same week (D-114). Its first-ever verdict: <strong>UNSCOREABLE</strong>,
-          for the one trade with no thesis recorded at entry. Six more, including the +129% position
-          on the previous slide, are still waiting on their own horizon dates. All four boxes from
-          slide 3 currently read zero. The system that would let us hide this is the same system
-          that found it.</p>
-        </div>
-        <p class="fine">76 resolved forecasts clears every count threshold the ladder sets.
-        Concentration, not count, is what still limits reliability — 9.8 effective is the real
-        number.</p>
+      <div class="card" style="border-left:3px solid var(--accent)">
+        <p><strong>Worse, and more useful: the scoring queue was stuck.</strong> The step that
+        decides right-versus-lucky sat silently jammed for days. We found it, drained it, and its
+        first verdict was <strong>UNSCOREABLE</strong> — the one trade with no claim recorded at
+        entry. Every box in the two-questions grid still reads zero. <em>The system that would let us hide this
+        is the same system that found it.</em></p>
       </div>
     </div>
+    <p class="fine">We report the P&amp;L because it is real. We built the machinery precisely so
+    there would be something better than it to judge us on.</p>
   </div>
 </section>
 
-<!-- ═══ 20 ═══════════════════════════════════════════════════════════ -->
+<!-- ═══ 12 ═══════════════════════════════════════════════════════════ -->
 <section class="slide ledger" data-title="Known limits">
   <div class="inner">
     <span class="kicker">Honest limitations</span>
     <h2>What Theo does not do — written down before a judge finds it.</h2>
-    <div class="cols c3">
-      <div class="card"><h3>Calendars are refused</h3><p class="muted">Pricing the far leg needs a
-        model we deliberately do not have. A confident wrong payoff is worse than a refusal.</p></div>
-      <div class="card"><h3>One vol, not a smile</h3><p class="muted">Per-leg IVs set the greeks and
-        the vega-weighted vol, with the EV span across legs printed beside it — but a
-        smile-consistent terminal distribution is refused for the same reason.</p></div>
-      <div class="card"><h3>The first position can never be attributed</h3><p class="muted">No thesis
-        was recorded at entry. Fabricating one retroactively would be worse than the gap — its
-        permanent verdict is <strong>UNSCOREABLE</strong>, the book's first attribution row.</p></div>
-      <div class="card"><h3>A decline's structure isn't re-priced</h3><p class="muted">98 declines
-        are each scored as a forecast, at zero capital risk — but the specific spread that got
-        declined is never priced retroactively. "Right about the move" and "right about the trade"
-        stay separate questions for a decline. Logged as an open issue (I-16).</p></div>
-      <div class="card"><h3>No approval gate, by choice</h3><p class="muted">Paper account, and
-        gates block the feedback loop. What replaces it is stricter: the agent cannot execute a
-        mistake the arithmetic refuses to compute.</p></div>
-      <div class="card"><h3>Everything above is in the repo</h3><p class="muted">A living bug ledger
-        records every defect the moment it is found and removes it only in the commit that fixes
-        it. 123 numbered issues so far.</p></div>
+    <div class="cols c4">
+      <div class="card"><h3>Some trades are refused, not approximated</h3>
+        <p class="muted">Structures whose value needs a model we deliberately do not have are
+        turned down outright. A confident wrong number is worse than a refusal.</p></div>
+      <div class="card"><h3>Paper fills are not real fills</h3>
+        <p class="muted">Costs are charged from the real quoted spread on every leg, before the
+        decision. But a paper account still fills more kindly than a live one would — most of all
+        on four-leg structures.</p></div>
+      <div class="card"><h3>No human approval step</h3>
+        <p class="muted">A paper account, and approval gates break the feedback loop. What replaces
+        it is stricter: the agent cannot execute what the arithmetic refuses to compute.</p></div>
+      <div class="card"><h3>Every defect is public</h3>
+        <p class="muted">A living bug ledger records each one the moment it is found and removes it
+        only in the commit that fixes it. 123 numbered issues so far.</p></div>
     </div>
+    <p class="lead tight">None of these is a rough edge we ran out of time to sand. Each is a place
+    where the honest answer was to refuse, and say so.</p>
   </div>
 </section>
 
-<!-- ═══ 21 ═══════════════════════════════════════════════════════════ -->
+<!-- ═══ 13 ═══════════════════════════════════════════════════════════ -->
 <section class="slide brand" data-title="Close">
   <div class="inner">
     <div class="cols side-r">
@@ -1041,8 +755,7 @@ svg.chart{display:block; width:100%; height:auto; overflow:visible}
         <div class="scroll"><table><tbody>
           <tr><td class="muted">Live record</td><td><a href="https://trdrbot.com">trdrbot.com</a> — every trade, decline and forecast, updated continuously</td></tr>
           <tr><td class="muted">Deep dive</td><td><a href="https://trdrbot.com/risk-research.html">the risk research note</a> · <a href="https://trdrbot.com/resources/risk-appetite-explorer.html">the interactive explorer</a></td></tr>
-          <tr><td class="muted">Repo &amp; demo URL</td><td>submitted with this entry's application form</td></tr>
-          <tr><td class="muted">Account</td><td>Alpaca paper · $100,000 start</td></tr>
+          <tr><td class="muted">Account</td><td>Alpaca paper · $100,000 start · repo and demo URL with the application form</td></tr>
         </tbody></table></div>
       </div>
     </div>
@@ -1055,7 +768,7 @@ svg.chart{display:block; width:100%; height:auto; overflow:visible}
   <button id="btnToc" aria-haspopup="dialog">contents</button>
   <button id="btnPrev" aria-label="Previous slide">←</button>
   <button id="btnNext" aria-label="Next slide">→</button>
-  <span class="count" id="count">1 / 21</span>
+  <span class="count" id="count">1 / 13</span>
 </div>
 
 <div class="toc" id="toc" role="dialog" aria-modal="true" aria-label="Contents">

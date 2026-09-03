@@ -27,6 +27,19 @@ every file below before calling the update done**, not just `+page.svelte`.
 never hand-edit them; run `node scripts/sync-static.mjs` (from `web/`) to
 regenerate them after editing the `docs/` originals.
 
+`docs/deck.pdf` is also generated from `docs/deck.html`, and it is what the
+submission form links to — so it goes stale silently. After any deck edit:
+
+```
+cd docs && python3 -m http.server 8899 &        # file:// breaks the webfonts
+"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" --headless \
+  --disable-gpu --no-pdf-header-footer --virtual-time-budget=8000 \
+  --print-to-pdf=deck.pdf http://localhost:8899/deck.html
+```
+
+One slide per 13.333in × 7.5in page, light palette forced, print rules in the
+deck's own `@media print` block. Check the page count matches the slide count.
+
 ## Paraphrases the hero for a different audience (check for contradiction, not exact wording)
 
 - `web/src/routes/submission/+page.svelte` — the "For judges" lead paragraph
@@ -37,10 +50,10 @@ regenerate them after editing the `docs/` originals.
 - `web/src/routes/+page.svelte` — the tiles/cards below the hero:
   - "Two questions, not one." section (the attribution 2×2)
   - "Three ways in." cards — The record / The machine / The scorecard
-- `docs/deck.html` — the "What 'self-improving' actually means" slide and
-  the closing slide ("Any agent can make money for a week…"). Treat these as
-  the *backing evidence* for the hero's claims — if the hero says something
-  these slides don't support, fix the hero, not the slides.
+- `docs/deck.html` — the "What the model decides, and what the code decides"
+  slide and the closing slide ("Any agent can make money for a week…"). Treat
+  these as the *backing evidence* for the hero's claims — if the hero says
+  something these slides don't support, fix the hero, not the slides.
 
 ## Publish checklist for a copy-only change
 
