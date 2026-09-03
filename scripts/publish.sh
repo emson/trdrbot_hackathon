@@ -71,6 +71,21 @@ fi
 echo "[publish] syncing static passthrough documents"
 node "$WEB/scripts/sync-static.mjs"
 
+# The STATIC COPY only (notes/027) - sync-static just regenerated it fresh
+# from docs/deck.html's own baked (possibly stale-by-now) text, and this
+# rewrites its figures from the snapshot that export just wrote. docs/deck.html
+# itself, the tracked SOURCE, is never touched here: this script runs on a
+# loop, and writing to a tracked file every cycle would dirty the working
+# tree constantly for no reviewable reason. Refreshing the deck SOURCE is
+# `scripts/release.sh`'s job, run by hand, reviewed, and committed
+# deliberately.
+echo "[publish] refreshing the deck's live figures (static copy only)"
+if ! node "$WEB/scripts/inject-figures.mjs" "$SNAPSHOT" "$WEB/static/deck.html" --write; then
+	echo "[publish] figure injection refused (see the report above) - not deploying"
+	log_row "refused" "inject-figures could not resolve every tagged figure"
+	exit 1
+fi
+
 echo "[publish] building the site"
 (cd "$WEB" && npm run build)
 
