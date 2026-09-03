@@ -58,6 +58,7 @@ exit_state:
   - false
   - false
 close_reason: null
+closed_at: ''
 decision_ref: jrn_20260902T173203Z_dec9e4618
 sources:
 - id: new_20260902T173200Z_alpaca_news_b39223f9
@@ -65,7 +66,7 @@ sources:
   author: alpaca_news
 generated:
   by: openai:gpt-5.6-sol | anthropic:claude-opus-5 | openai:gpt-5
-  at: '2026-09-03T00:04:29.134022+00:00'
+  at: '2026-09-03T06:19:52.974148+00:00'
 verified:
 - by: trdrbot/reconcile
   at: '2026-09-02T17:38:43.814575+00:00'
