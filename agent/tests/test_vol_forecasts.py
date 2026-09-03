@@ -27,11 +27,21 @@ from trdrbot.ledger import PRICE_BAND, REALIZED_VOL_PCT, Ledger
 
 
 def _series(days: int, daily_vol: float, seed: int = 7,
-            start: str = "2026-06-01") -> tuple[list[str], list[float]]:
+            start: str = "") -> tuple[list[str], list[float]]:
     """A synthetic close series with a KNOWN per-day volatility.
 
     Built with a parameter and then measured, the `test_market_stats_beta`
     pattern - a test that measures its own hardcoded output measures nothing.
+
+    **Ends today unless a `start` is named**, which is conftest's rule for a
+    fixture date (D-105) and matters here specifically: a series saved into the
+    close cache is checked for staleness against its LAST BAR (I-109), so one
+    anchored to a literal is refused the moment the calendar moves far enough
+    past it. This default was `"2026-06-01"`, and the two resolver tests below
+    went red at +90 days on a clean tree - the exact failure the rule exists to
+    prevent, reintroduced by a default. The window tests that assert against
+    named calendar dates pass their own `start`, where it reads beside the
+    dates it produces.
     """
     from conftest import synthetic_dates
 
@@ -66,7 +76,7 @@ def test_the_window_is_the_window_and_nothing_outside_it():
     """A forecast made on the 1st and judged on the 20th is a claim about
     those days. Including the quiet month before it would score a different
     prediction from the one that was made."""
-    dates, closes = _series(120, 0.004)
+    dates, closes = _series(120, 0.004, start="2026-06-01")
     # A violent month bolted onto the end of a calm series.
     loud_dates, loud_closes = _series(30, 0.04, seed=99, start="2026-11-01")
     dates += loud_dates
@@ -81,7 +91,7 @@ def test_the_window_is_the_window_and_nothing_outside_it():
 def test_a_window_too_short_to_measure_returns_nothing_rather_than_a_number():
     """A vol estimate from four returns is noise wearing a number's clothing,
     and a forecast resolved against it enters calibration as evidence."""
-    dates, closes = _series(60, 0.01)
+    dates, closes = _series(60, 0.01, start="2026-06-01")
 
     assert market_stats.realized_vol_between(dates, closes, "2026-06-01", "2026-06-03") is None
     assert market_stats.realized_vol_between([], [], "2026-06-01", "2026-07-01") is None
