@@ -4,6 +4,7 @@
 	import TickIndicator from '$lib/components/TickIndicator.svelte';
 	import Icon from '$lib/components/Icon.svelte';
 	import PageHeader from '$lib/components/PageHeader.svelte';
+	import { siteConfig } from '$lib/site.config.js';
 
 	let { data } = $props();
 	let acct = $derived(data.account);
@@ -35,6 +36,16 @@
 					<a class="btn ghost" href="/submission">For judges</a>
 				</div>
 				<TickIndicator tick={data.tick} generatedAt={data.generatedAt} now={new Date(data.generatedAt).getTime()} />
+				<p class="fine">
+					By {siteConfig.author.name} ·
+					<a href={siteConfig.author.site} target="_blank" rel="noopener noreferrer"
+						>{siteConfig.author.siteLabel}</a
+					>
+					·
+					<a href={siteConfig.author.x} target="_blank" rel="noopener noreferrer"
+						>{siteConfig.author.xLabel}</a
+					>
+				</p>
 			</div>
 			<div class="plate">
 				<img src="/img/logo.jpeg" alt="Theo, trdrbot's mascot — a winking elf inside a speech-bubble frame with an ascending trend line" width="620" height="420" />

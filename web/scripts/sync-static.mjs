@@ -39,6 +39,31 @@ const BANNER = (label, backHref, backLabel) => `
 	<span style="opacity:.6">${label} — a standalone document, hosted as-is</span>
 </div>`;
 
+// The deck's own <img> tags are relative (`src="assets/elf-coding.jpg"`),
+// which resolves against wherever the document is served from - `/deck.html`
+// on trdrbot.com, so the images live at `/assets/*`. Nothing ever copied
+// `docs/assets/` into `static/`, so every deck image has been a 404 in
+// production since the deck was authored. Mirror the whole directory.
+const ASSETS_SRC = path.join(ROOT, 'docs', 'assets');
+const ASSETS_DEST = path.join(STATIC, 'assets');
+let assetCount = 0;
+if (fs.existsSync(ASSETS_SRC)) {
+	fs.mkdirSync(ASSETS_DEST, { recursive: true });
+	// Top-level files only - the deck references e.g. `elf-coding.jpg` flat,
+	// never a subpath, and `docs/assets/` also holds a `crops/` working
+	// directory and other non-deck material that has no business on the site.
+	for (const name of fs.readdirSync(ASSETS_SRC)) {
+		const srcFile = path.join(ASSETS_SRC, name);
+		if (fs.statSync(srcFile).isFile()) {
+			fs.copyFileSync(srcFile, path.join(ASSETS_DEST, name));
+			assetCount++;
+		}
+	}
+	console.log(`[sync-static] copied ${assetCount} file(s) into static/assets/`);
+} else {
+	console.warn(`[sync-static] skip (missing): docs/assets/`);
+}
+
 let count = 0;
 for (const f of FILES) {
 	const srcPath = path.join(ROOT, f.src);
