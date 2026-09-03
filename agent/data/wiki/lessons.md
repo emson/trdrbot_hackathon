@@ -21,8 +21,12 @@ sources:
   resource: positions/pos_20260902_NVDA_bull_call_spread_7251e91e.md
   author: trdrbot/learn
   last_modified: '2026-09-02T15:55:45.630033+00:00'
+- id: src-6
+  resource: positions/pos_20260902_NVDA_bull_call_spread_cf437fa5.md
+  author: trdrbot/learn
+  last_modified: '2026-09-03T17:53:15.576692+00:00'
 generated:
-  at: '2026-09-02T15:55:45.630879+00:00'
+  at: '2026-09-03T17:53:15.577904+00:00'
 ---
 
 # Lessons
@@ -51,4 +55,9 @@ NVDA bull_call_spread, closed `external`, P&L +51.7%. Credit assignment: predict
 NVDA bull_call_spread, closed `external`, P&L +71.5%. Credit assignment: prediction resolved; block credit deferred to attribution at the thesis horizon (D-091 - crediting on P&L here would let a lucky win reinforce a wrong view before the view was ever tested).
 
 > From $224.15, NVDA should hold post-earnings support above $218 and close between $222 and $232 on September 4, with modest upside toward $227 as AI-demand support outweighs macro pressure. A trade below $218 invalidates the premise.
+
+## pos_20260902_NVDA_bull_call_spread_cf437fa5
+NVDA bull_call_spread, closed `external`, P&L +54.2%. Credit assignment: nothing scored - no measured P&L, so both the prediction and the credit would be a guess.
+
+> From $225.35, NVDA should hold post-earnings support above $218 and finish between $218 and $232 on September 4, with modest drift toward $227 as AI-demand support outweighs macro pressure. A trade below $218 invalidates the premise; September 4 payrolls are acknowledged gap risk.
 

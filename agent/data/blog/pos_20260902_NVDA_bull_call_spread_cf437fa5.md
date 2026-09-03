@@ -79,4 +79,8 @@ The 220/215 put spread offered only about +$1 EV with poor payoff, while the but
 
 ## Outcome
 
-_Open - this section fills in when the position resolves._
+**Closed:** external
+
+**Why:** in our records, absent at broker - no P&L observed at close
+
+**Result:** not observed at close.

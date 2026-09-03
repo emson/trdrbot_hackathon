@@ -1,4 +1,5 @@
 ## 2026-09-03
+- lesson recorded for pos_20260902_NVDA_bull_call_spread_cf437fa5 (external)
 - housekeeping: 0 interim score(s), consolidation nothing pending, 0 attribution(s), 0 concept(s) tombstoned
 - housekeeping: 0 interim score(s), consolidation nothing pending, 0 attribution(s), 0 concept(s) tombstoned
 - housekeeping: 0 interim score(s), consolidation nothing pending, 0 attribution(s), 0 concept(s) tombstoned
