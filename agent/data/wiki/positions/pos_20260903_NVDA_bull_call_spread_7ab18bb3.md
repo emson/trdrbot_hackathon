@@ -1,10 +1,10 @@
 ---
 type: Position
 position_id: pos_20260903_NVDA_bull_call_spread_7ab18bb3
-status: opening
+status: open
 interim_band: 0
-max_loss_usd: 5904.0
-last_pnl_pct: null
+max_loss_usd: 5670.0
+last_pnl_pct: 0.009523809523809525
 greeks_at_entry:
   delta_shares: 586.26
   delta_dollars: 134957.96
@@ -38,7 +38,17 @@ exit_rules:
 - type: underlying_stop
   direction: below
   level: 225.0
-exit_state: {}
+exit_state:
+  leg_divergence:above:2:
+  - false
+  position_mark:below:-0.5:
+  - false
+  position_mark:above:0.5:
+  - false
+  days_to_expiry:below:1:
+  - false
+  underlying:below:225:
+  - false
 close_reason: null
 closed_at: ''
 decision_ref: jrn_20260903T175316Z_dec8a78e4
@@ -48,8 +58,10 @@ sources:
   author: alpaca_news
 generated:
   by: openai:gpt-5.6-sol | anthropic:claude-opus-5 | openai:gpt-5
-  at: '2026-09-03T17:54:29.419265+00:00'
-verified: []
+  at: '2026-09-03T17:59:51.243511+00:00'
+verified:
+- by: trdrbot/reconcile
+  at: '2026-09-03T17:59:51.165738+00:00'
 elfmem_blocks:
   self:
     cf4026ebe4e5f325: 0.0
@@ -69,8 +81,9 @@ elfmem_blocks:
     da48c7b3fb414b0d: 0.0
     a37245d6d4cf2b11: 0.0
     f0d0787ab7c007e7: 0.0
-  attention: {}
-mind_decision_block_id: null
+  attention:
+    f487491a936a89ce: 1.0
+mind_decision_block_id: 8455d93b435ce5af
 thesis_claim: From about $230.2, NVDA should close between $232 and $245 on 2026-09-11
   as post-earnings AI-demand support and the Hugging Face acquisition sustain modest
   upside, while a close below $225 would invalidate the continuation thesis.
