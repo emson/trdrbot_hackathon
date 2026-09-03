@@ -218,6 +218,21 @@ class ExtractCache:
         store.write_atomic(self.path, json.dumps(self._items, indent=2, sort_keys=True))
 
 
+def _str_list(raw: Any, limit: int) -> list[str]:
+    """A model's list-of-strings field, or [] when it sent something else.
+
+    **A string is ABSENT here, not iterable** (I-112). `[str(x) for x in raw if
+    isinstance(x, str)]` looks like a filter and is a character shredder when
+    `raw` is a str: "Apple Inc" became `['A','p','p','l','e']`, was persisted by
+    `put_many`, and rendered as "orgs: A, p, p, l, e" in every research,
+    discovery and muse prompt thereafter. `_coerce`'s own docstring promised
+    "fall back to empty".
+    """
+    if not isinstance(raw, list):
+        return []
+    return [str(x) for x in raw if isinstance(x, str)][:limit]
+
+
 def _coerce(raw: Any, item: dict[str, Any], model_name: str) -> Extract:
     """One salvaged record from the model's JSON -> a validated Extract.
 
@@ -231,8 +246,8 @@ def _coerce(raw: Any, item: dict[str, Any], model_name: str) -> Extract:
     sentiment = raw.get("sentiment")
     if not isinstance(sentiment, (int, float)):
         return bare(item)
-    orgs = [str(x) for x in raw.get("organizations", []) if isinstance(x, str)][:5]
-    people = [str(x) for x in raw.get("people", []) if isinstance(x, str)][:3]
+    orgs = _str_list(raw.get("organizations"), 5)
+    people = _str_list(raw.get("people"), 3)
     dense = str(raw.get("dense") or item.get("headline") or "")[:240]
 
     time_horizon = str(raw.get("time_horizon") or "")

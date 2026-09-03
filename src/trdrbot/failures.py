@@ -40,6 +40,16 @@ _CONFIG_MARKERS = (
     "PermissionDeniedError",
     "NotFoundError",
     "UnprocessableEntityError",
+    # Provider 400s (I-103). `BadRequestError` is openai's;
+    # `InvalidRequestError` covers anthropic's and, as a substring,
+    # `AnthropicInvalidRequestError`. Both `llm.py` and the operator config
+    # record these as LIVE failure modes - the gpt-5.6-sol tool-call 400 and the
+    # exhausted-credit 400 - and they are OUR config or billing, never the item.
+    # Classified TRANSIENT, they bumped every pending item's retry count, so
+    # three ticks of a billing problem dead-lettered every blameless
+    # observation in the inbox.
+    "BadRequestError",
+    "InvalidRequestError",
 )
 _TRANSIENT_MARKERS = (
     "RateLimitError",
@@ -65,13 +75,20 @@ _TRANSIENT_MARKERS = (
 #: arriving through the one door CONFIG did not cover. `ConnectionError` and
 #: `TimeoutError` are OSError/RuntimeError subclasses, so the transient check
 #: below must stay ahead of this one.
+#:
+#: `KeyError` joined this list (I-103). It used to map to PERMANENT - "the item
+#: will never parse" - but nothing inside the guarded `agent.ainvoke` parses the
+#: item at all: `inbox.pending()` runs outside the try. So a KeyError there is
+#: OUR bug, and PERMANENT dead-letters a blameless observation immediately, with
+#: no retry. `json.JSONDecodeError` stays PERMANENT: that one really is the
+#: item's own text failing to parse.
 _BUG_TYPES = (TypeError, ValueError, AttributeError, NameError,
-              IndexError, ZeroDivisionError, NotImplementedError)
+              IndexError, KeyError, ZeroDivisionError, NotImplementedError)
 
 
 def classify(exc: BaseException) -> Cause:
     name = type(exc).__name__
-    if isinstance(exc, (json.JSONDecodeError, KeyError)):
+    if isinstance(exc, json.JSONDecodeError):
         return Cause.PERMANENT
     if any(m in name for m in _CONFIG_MARKERS):
         return Cause.CONFIG

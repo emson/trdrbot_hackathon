@@ -20,7 +20,7 @@ from typing import Any
 import pytest
 
 from trdrbot import config as config_mod
-from trdrbot import ids
+from trdrbot import elfmem_adapter, ids
 from trdrbot.elfmem_adapter import ContextResult
 from trdrbot.positions import Position
 
@@ -34,7 +34,7 @@ def paths(tmp_path: Path) -> config_mod.Paths:
 
 
 def days_out(n: int) -> str:
-    """An ISO date `n` days from the code's own today. D-032's rule for tests.
+    """An ISO date `n` days from the MARKET date. D-032's rule for tests.
 
     Eight tests hardcoded "2026-09-02" as a horizon and "2026-09-03" as an
     expiry, which were tomorrow and the day after when written - and became
@@ -42,8 +42,17 @@ def days_out(n: int) -> str:
     horizon branch and the 1-day implicit time stop. The suite failed on a
     clean tree the morning after, on every test that said "nothing should
     close". A fixture date is derived from today or it is a countdown.
+
+    **The MARKET date, not the UTC one.** Every date this helper produces is a
+    horizon, an expiry or a deadline - claims about the trading calendar, read
+    by `market_today()`, `session_closed_on()` and `_days_to()`. From 20:00 ET
+    the UTC date is already tomorrow, so anchoring here to `ids.today()` made
+    `days_out(0)` mean "tomorrow" for four hours every evening and three tests
+    went red at local midnight on a clean tree. Cache staleness is the one
+    thing measured against UTC, and `synthetic_dates` anchors there for exactly
+    that reason.
     """
-    return (ids.today() + timedelta(days=n)).isoformat()
+    return (ids.market_today() + timedelta(days=n)).isoformat()
 
 
 def occ(underlying: str, expiry_iso: str, right: str, strike: float) -> str:
@@ -130,6 +139,8 @@ class FakeMem:
         self.dreamed = 0
         #: Did the thesis block survive consolidation? False reproduces I-115.
         self.thesis_block_active = True
+        #: What `housekeeping_dream` reports. One of elfmem_adapter's DREAM_*.
+        self.dream_result = elfmem_adapter.DREAM_RAN
 
     def _guard(self) -> None:
         if self.fail_with is not None:
@@ -185,9 +196,11 @@ class FakeMem:
             self.credited.append((bid, signal, weight, source))
         return (len(block_ids), len(block_ids))
 
-    async def housekeeping_dream(self) -> bool:
+    async def housekeeping_dream(self) -> str:
+        # A STATE, not a bool (I-120): "nothing was pending" and "consolidated"
+        # were the same `True`, which is what let a dead consolidator report ok.
         self.dreamed += 1
-        return True
+        return self.dream_result
 
 
 @pytest.fixture
@@ -221,14 +234,21 @@ def journal_rows(journal: Any, kind: str) -> list[dict[str, Any]]:
     return [r for r in journal.read() if r.get("kind") == kind]
 
 
-def synthetic_dates(n: int, start: str = "2026-01-01") -> list[str]:
-    """Consecutive dates for a synthetic close series.
+def synthetic_dates(n: int, start: str = "") -> list[str]:
+    """Consecutive dates for a synthetic close series, ENDING TODAY by default.
 
     Beta aligns two series on their SHARED dates (D-091) rather than pairing
     them by array position, so a synthetic series needs dates to be estimable
     at all - the same requirement the real cache now meets.
+
+    Ending today rather than starting from a fixed literal, because staleness
+    is measured from the LAST BAR now (I-109): a series anchored at
+    "2026-01-01" is eight months old on any later run and `load_closes`
+    correctly refuses it. Same rule as `days_out` - a fixture date is derived
+    from the code's own clock or it is a countdown.
     """
     from datetime import date, timedelta
 
-    d0 = date.fromisoformat(start)
+    d0 = (date.fromisoformat(start) if start
+          else ids.today() - timedelta(days=n - 1))
     return [(d0 + timedelta(days=i)).isoformat() for i in range(n)]

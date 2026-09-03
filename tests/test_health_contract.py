@@ -432,6 +432,21 @@ def test_a_healthy_mix_of_sizes_and_refusals_stays_quiet(tmp_path):
     assert found["sizing"][0] == health.OK
 
 
+def _order_call(name: str, intent: str) -> dict:
+    """One `order_calls` entry, shaped the way `tick` actually writes one.
+
+    The fixture used to be `{"symbol": "SPY..."}`, which no producer emits -
+    and the check it exercised counted every entry regardless of what the order
+    did (I-108).
+    """
+    return {"name": name,
+            "args_as_model_supplied": {
+                "qty": 3,
+                "legs": [{"symbol": "SPY260909P00636000", "position_intent": intent,
+                          "ratio_qty": 1}]},
+            "client_order_id_enforced": "trdr-x"}
+
+
 def test_orders_placed_without_consulting_sizing_are_flagged(tmp_path):
     """The Kelly gate and the book caps can be routed around simply by not
     calling the tool - and from every other signal that looks exactly like
@@ -439,7 +454,8 @@ def test_orders_placed_without_consulting_sizing_are_flagged(tmp_path):
     journal = Journal(tmp_path / "journal.jsonl")
     _sized(journal, 1)  # arms the check: sizing has been seen at least once
     for _ in range(health.ORDERS_WITHOUT_SIZING):
-        journal.append("execution", order_calls=[{"symbol": "SPY..."}])
+        journal.append("execution",
+                       order_calls=[_order_call("place_option_order", "buy_to_open")])
 
     found = {name: (lvl, detail) for lvl, name, detail in
              health.check(tmp_path / "journal.jsonl", [])}
@@ -448,13 +464,35 @@ def test_orders_placed_without_consulting_sizing_are_flagged(tmp_path):
     assert "routed around" in found["sizing.bypassed"][1]
 
 
+def test_a_book_winding_down_is_not_a_bypassed_sizing_gate(tmp_path):
+    """The opposite direction (I-108). `sizing.bypassed` summed EVERY
+    `order_calls` entry after the last `sizing` row, so three agent-submitted
+    closes, replaces or cancels read as "the book caps are being routed around"
+    on a book correctly winding down - and the live 2026-09-01 close went
+    through `place_option_order`, so the tool name alone cannot tell them
+    apart. `tick._opens_a_position` already knew; now both seams read one
+    definition."""
+    journal = Journal(tmp_path / "journal.jsonl")
+    _sized(journal, 1)
+    for _ in range(health.ORDERS_WITHOUT_SIZING * 2):
+        journal.append("execution", order_calls=[
+            _order_call("place_option_order", "sell_to_close"),
+            {"name": "cancel_order_by_id", "args_as_model_supplied": {},
+             "client_order_id_enforced": None}])
+
+    names = {name for _lvl, name, _d in health.check(tmp_path / "journal.jsonl", [])}
+
+    assert "sizing.bypassed" not in names
+
+
 def test_the_bypass_check_is_inert_before_sizing_has_ever_been_seen(tmp_path):
     """Self-arming: the journal predates these row kinds by the project's whole
     history, and "this shipped yesterday" is the cheapest false alarm to
     avoid."""
     journal = Journal(tmp_path / "journal.jsonl")
     for _ in range(10):
-        journal.append("execution", order_calls=[{"symbol": "SPY..."}])
+        journal.append("execution",
+                       order_calls=[_order_call("place_option_order", "buy_to_open")])
 
     names = {name for _lvl, name, _detail in health.check(tmp_path / "journal.jsonl", [])}
 

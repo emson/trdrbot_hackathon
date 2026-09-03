@@ -5697,10 +5697,19 @@ def test_the_single_shot_tick_classifies_its_failure_instead_of_crashing(tmp_pat
     is the least useful thing an operator can be handed. The run loop has
     classified-and-continued since it existed."""
     import asyncio
+    import dataclasses
 
     from trdrbot import cli
+    from trdrbot import config as config_mod
 
+    # Its OWN state directory: `_tick` takes the real tick lock, so a live
+    # `trdrbot run` on this machine made the test read "already running" and
+    # return 0 - a pass/fail decided by what else is on the box.
+    cfg = dataclasses.replace(config_mod.load(quiet=True),
+                              paths=config_mod.Paths.build(tmp_path))
+    cfg.paths.ensure()
     with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(cli.config_mod, "load", lambda *a, **k: cfg)
         mp.setattr(cli, "run_tick",
                    lambda *a, **k: (_ for _ in ()).throw(RuntimeError("broker exploded")))
         code = asyncio.run(cli._tick())
@@ -6220,3 +6229,189 @@ def test_discoverys_five_days_reach_the_bootstrap_as_five_sessions():
     assert up(five) > up(three) * 1.5, "the fixture must actually separate the two"
     assert f"P(+5% or more) {up(three):.0%}," not in line
     assert f"{discovery.DISCOVERY_HORIZON_SESSIONS}-session" in line
+
+
+# ================================================== D-121 - operator truth
+#
+# I-103, I-104, I-106, I-108, I-109, I-112, I-113, I-114, I-120, I-121. None of
+# these changes trading behaviour; every one of them changes what a reader is
+# told about it.
+
+def test_a_provider_400_is_our_config_not_the_items_fault():
+    """I-103. `failures.classify` mapped auth/403/404/422 to CONFIG and
+    everything unknown to TRANSIENT, so a provider 400 - `BadRequestError` from
+    openai, `InvalidRequestError` from anthropic - bumped every pending item's
+    retry count. Both are recorded as LIVE failure modes (the gpt-5.6-sol
+    tool-call 400, the exhausted-credit 400) and they are OUR config or billing,
+    never the item: three ticks of a billing problem dead-lettered every
+    blameless observation in the inbox."""
+    from trdrbot.failures import Cause, classify
+
+    class BadRequestError(Exception): ...
+    class AnthropicInvalidRequestError(Exception): ...
+
+    assert classify(BadRequestError("400")) is Cause.CONFIG
+    assert classify(AnthropicInvalidRequestError("400")) is Cause.CONFIG
+
+
+def test_a_key_error_inside_the_agent_loop_is_our_bug_not_a_bad_item():
+    """I-103's other half. `KeyError` mapped to PERMANENT - "the item will never
+    parse" - but nothing inside the guarded `agent.ainvoke` parses the item:
+    `inbox.pending()` runs OUTSIDE the try. So a KeyError there is ours, and
+    PERMANENT dead-lettered a blameless observation immediately with no retry.
+    A genuinely malformed item still fails to parse as JSON, which is what
+    PERMANENT is for."""
+    import json as _json
+
+    from trdrbot.failures import Cause, classify
+
+    assert classify(KeyError("legs")) is Cause.BUG
+    assert classify(_json.JSONDecodeError("bad", "{", 0)) is Cause.PERMANENT
+
+
+def test_every_config_property_is_read_at_startup(tmp_path):
+    """I-104. `risk_appetite`'s docstring promised it raised "at process start,
+    before any trade" and nothing read it there: `config.load()` never touched
+    it and the first read was `tick.py` AFTER the write-ahead decision row. So
+    `risk_appetite: "1.5x"` printed "failed, continuing" every tick, wrote an
+    orphan decision row, never archived the inbox, never decided, and returned 0
+    forever - while the `decide` probe counted those decision rows as output and
+    reported "ran 5x, produced 5"."""
+    import shutil
+
+    from trdrbot import config as config_mod
+
+    root = tmp_path / "proj"
+    root.mkdir()
+    shutil.copy(Path(__file__).resolve().parent.parent / "config.yaml", root / "config.yaml")
+    text = (root / "config.yaml").read_text(encoding="utf-8")
+    (root / "config.yaml").write_text(
+        text.replace("risk_appetite:", "risk_appetite: \"1.5x\"  # was:", 1), encoding="utf-8")
+
+    with pytest.raises(RuntimeError, match="risk_appetite"):
+        config_mod.load(root, quiet=True)
+
+
+def test_validate_covers_a_property_nobody_remembered_to_list():
+    """The mechanism, not just the instance: `validate()` walks the class's own
+    properties, so a knob added later is checked without anyone editing a list -
+    a list that must be kept in step is the exact shape this defect had."""
+    from trdrbot import config as config_mod
+
+    declared = {n for n, a in vars(config_mod.Config).items() if isinstance(a, property)}
+
+    assert {"risk_appetite", "max_retries", "decide_every_n_ticks",
+            "watchdog_seconds", "deadline"} <= declared
+
+
+def test_a_string_where_a_list_was_asked_for_is_absent_not_shredded():
+    """I-112. `[str(x) for x in raw if isinstance(x, str)]` looks like a filter
+    and is a character shredder when `raw` is a str: "Apple Inc" became
+    ['A','p','p','l','e'], was persisted by `put_many`, and rendered as
+    "orgs: A, p, p, l, e" in every research, discovery and muse prompt
+    thereafter. The docstring promised "fall back to empty"."""
+    from trdrbot.news_extract import _str_list
+
+    assert _str_list("Apple Inc", 5) == []
+    assert _str_list(None, 5) == []
+    assert _str_list(["Apple Inc", 7, "Nvidia"], 5) == ["Apple Inc", "Nvidia"]
+
+
+def test_the_muse_reads_the_horizon_constant_rather_than_its_own_literal():
+    """I-113, latent. The muse rejected `days > 10` against a window derived
+    from `competence.MAX_HORIZON_DAYS`. They agree today, which is why it was
+    worth fixing: widen the constant and the muse would advertise the wider
+    window and silently reject everything past 10."""
+    import inspect
+
+    from trdrbot import competence, muse
+
+    src = inspect.getsource(muse)
+
+    assert "competence.MAX_HORIZON_DAYS" in src
+    assert "days > 10" not in src
+    assert competence.MAX_HORIZON_DAYS  # the constant is the one source
+
+
+def test_a_cached_series_goes_stale_from_its_last_bar_not_its_fetch_date(tmp_path):
+    """I-109. `save_closes` stamps `as_of = utc_now().date()` - when we FETCHED,
+    not what we fetched - and `load_closes` accepted age <= 4 without reading
+    the stored dates. A Saturday fetch whose newest bar is Friday's close was
+    served as fresh through Wednesday, and `muse.py` takes `closes[-1]` as the
+    CURRENT price: `_bands_from_pct` then turned "-8%..-2%" into ledger prices
+    anchored to a close the market had not shown for three sessions."""
+    import json as _json
+
+    from trdrbot import ids, market_stats
+
+    closes = [100.0 + i for i in range(80)]
+    stale_dates = synthetic_dates(len(closes),
+                                  start=(ids.today() - timedelta(days=90)).isoformat())
+    market_stats.save_closes(tmp_path, "SPY", closes, dates=stale_dates)
+    on_disk = _json.loads(market_stats.returns_path(tmp_path, "SPY").read_text())
+    assert on_disk["as_of"] == ids.today().isoformat(), "fetched today, bars from months ago"
+
+    assert market_stats.load_closes(tmp_path, "SPY") is None
+    assert market_stats.load_dated_closes(tmp_path, "SPY") is None
+
+    # ...and a genuinely fresh series is still served.
+    market_stats.save_closes(tmp_path, "QQQ", closes, dates=synthetic_dates(len(closes)))
+    assert market_stats.load_closes(tmp_path, "QQQ") == closes
+
+
+def test_a_series_with_no_dates_still_loads_on_its_fetch_date(tmp_path):
+    """The opposite direction: files written before dates were kept are still a
+    valid bootstrap sample, and `as_of` is the only thing they can honestly be
+    judged by."""
+    from trdrbot import market_stats
+
+    closes = [100.0 + i for i in range(80)]
+    market_stats.save_closes(tmp_path, "IWM", closes)
+
+    assert market_stats.load_closes(tmp_path, "IWM") == closes
+
+
+def test_a_stray_heading_does_not_freeze_a_dossier_forever(tmp_path):
+    """I-121. `write_concept` refused any write dropping a heading the page
+    already had, and the research prompt asks for exactly four - so ONE extra
+    heading a model emitted once could never come back and the dossier was
+    frozen: `research.py` archived the prior body, attempted the write, caught
+    the refusal and journalled `wiki_guard` - daily, forever, with a growing
+    pile of identical archives. The regime page is the worst case, because the
+    decide prompt reads it every morning labelled only by date."""
+    from trdrbot.wiki import AugmentationError, Concept, Wiki
+
+    w = Wiki(tmp_path)
+    schema = "# Assessment\na\n\n# Drivers\nb\n\n# Calendar\nc\n\n# Watch\nd\n"
+    w.write_concept(Concept(concept_id="context/regime", frontmatter={},
+                            body=schema + "\n# A Stray Heading\nonce\n"),
+                    type_="MarketContext")
+
+    refreshed = w.read("context/regime")
+    refreshed.body = schema
+    w.write_concept(refreshed, type_="MarketContext")   # must not raise
+
+    assert "A Stray Heading" not in w.read("context/regime").body
+
+    # ...and the SCHEMA is still protected, which is what the guard is for.
+    gutted = w.read("context/regime")
+    gutted.body = "# Assessment\nonly this\n"
+    with pytest.raises(AugmentationError, match="Drivers"):
+        w.write_concept(gutted, type_="MarketContext")
+
+
+def test_a_lesson_page_still_protects_every_heading(tmp_path):
+    """The types whose headings ARE the content declare no schema, so the guard
+    stays total there: a lesson is one heading per resolved position, and losing
+    one is losing the lesson."""
+    from trdrbot.wiki import AugmentationError, Concept, Wiki
+
+    w = Wiki(tmp_path)
+    w.write_concept(Concept(concept_id="lessons", frontmatter={},
+                            body="# Lessons\n\n## pos_a\nx\n\n## pos_b\ny\n"),
+                    type_="Lesson")
+
+    shrunk = w.read("lessons")
+    shrunk.body = "# Lessons\n\n## pos_a\nx\n"
+    with pytest.raises(AugmentationError, match="pos_b"):
+        w.write_concept(shrunk, type_="Lesson")

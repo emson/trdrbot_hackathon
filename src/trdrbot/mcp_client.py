@@ -18,6 +18,38 @@ from langchain_mcp_adapters.tools import load_mcp_tools
 
 from .config import Config
 
+
+def order_legs(args: dict[str, Any]) -> list[dict[str, Any]]:
+    """The legs of an order call's arguments, as the model supplied them."""
+    return [leg for leg in (args.get("legs") or []) if isinstance(leg, dict)]
+
+
+def opens_a_position(name: str, args: dict[str, Any]) -> bool:
+    """Does this order call OPEN exposure, rather than close it?
+
+    THE one definition (I-108). `position_intent` lives on the LEGS in Alpaca's
+    multi-leg payload, not at the top level, so a naive read made the test
+    `"close" not in ""` - permanently True, and every `place_option_order` read
+    as opening including the closes the agent submits through the same tool.
+    D-113 fixed that inside `tick`; `health.sizing.bypassed` then grew its own
+    answer by counting every order call, so three closes after the last
+    `size_position` reported "the Kelly gate and the book caps are being routed
+    around" on a book correctly winding down. Two seams, one question, two
+    answers - so the answer lives here, where the order shape does.
+
+    Nothing stated at all means OPENING, which is the side that warns: a missed
+    warning on an exit is noise, a missed warning on an entry is a position
+    with no stops.
+    """
+    if not str(name or "").startswith("place_"):
+        return False
+    intents = " ".join([*(str(leg.get("position_intent", "")) for leg in order_legs(args)),
+                        str(args.get("position_intent", ""))]).lower()
+    if "to_open" in intents:
+        return True
+    return "close" not in intents
+
+
 # Tool names that move money or change risk. Not used to block anything -
 # D-009 removed guardrails - but the executor needs to know which calls are
 # consequential so it can journal them as executions rather than reads.

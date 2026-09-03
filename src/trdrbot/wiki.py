@@ -62,6 +62,24 @@ class Lifecycle:
     #: for singletons that rewrite themselves (context/regime) - there is no
     #: accumulation to sweep, and deprecating the only copy is just noise.
     sweepable: bool = False
+    #: The headings this type's SCHEMA declares, which the augmentation guard
+    #: protects. `None` protects every heading the page happens to have.
+    #:
+    #: The guard exists to stop an LLM rewrite quietly degrading knowledge
+    #: (D-023), and it had no recovery path (I-121): the research prompt asks
+    #: for exactly four headings, so ONE stray heading a model emitted once was
+    #: protected forever and every later refresh of that page was refused -
+    #: daily, permanently, with `research.py` archiving the prior body BEFORE
+    #: each failed write and growing a pile of identical copies. The regime page
+    #: is the worst case, because the decide prompt reads it every morning
+    #: labelled only by date, so a frozen regime is served as the current one.
+    #:
+    #: Protecting the SCHEMA is the recovery path: the four headings a dossier
+    #: promises cannot be dropped, and a heading nobody declared can come and go
+    #: with the model that wrote it. `None` for the types whose headings ARE the
+    #: content - a lesson is one heading per resolved position, and losing one
+    #: is losing the lesson.
+    schema_headings: tuple[str, ...] | None = None
 
 
 #: The registry. **A type absent from here cannot be written** - that refusal is
@@ -69,8 +87,15 @@ class Lifecycle:
 #: `Position` is deliberately not listed: position pages have their own status
 #: machine and never go through `write_concept` (D-023).
 LIFECYCLE: dict[str, Lifecycle] = {
-    "CompanyDossier": Lifecycle(24, durable_section="What it is", sweepable=True),
-    "MarketContext": Lifecycle(24),
+    "CompanyDossier": Lifecycle(
+        24, durable_section="What it is", sweepable=True,
+        # `research.dossier` writes exactly these, and both writers share it.
+        schema_headings=("# What it is", "# Bull case", "# Bear case",
+                         "# People", "# Environment")),
+    "MarketContext": Lifecycle(
+        24,
+        # The four the research prompt names verbatim.
+        schema_headings=("# Assessment", "# Drivers", "# Calendar", "# Watch")),
     "Technique": Lifecycle(None),
     "Lesson": Lifecycle(None),
 }
@@ -276,10 +301,16 @@ class Wiki:
                         f"{concept.concept_id}: write would shrink `{key}` "
                         f"({len(before)} -> {len(after)}). Union-merge instead of replacing."
                     )
-            missing = [h for h in existing.headings() if h not in concept.headings()]
+            # SCHEMA headings only, where the type declares a schema (I-121).
+            # A heading the model invented once is not knowledge this guard was
+            # built to protect, and protecting it froze the page for good.
+            protected = existing.headings()
+            if policy.schema_headings is not None:
+                protected = [h for h in protected if h in policy.schema_headings]
+            missing = [h for h in protected if h not in concept.headings()]
             if missing:
                 raise AugmentationError(
-                    f"{concept.concept_id}: write drops existing heading(s) {missing}. "
+                    f"{concept.concept_id}: write drops the schema heading(s) {missing}. "
                     f"Extend the document, don't replace sections."
                 )
 
@@ -354,8 +385,14 @@ class Wiki:
             marked.append(c.concept_id)
         return {"deprecated": marked, "protected": skipped}
 
-    def archive_prior(self, concept: Concept) -> bool:
-        """Keep the page's CURRENT body before it is overwritten (D-110).
+    def archive(self, concept_id: str, body: str) -> bool:
+        """Keep a page's PRIOR body under a dated heading (D-110).
+
+        Takes the body rather than the Concept because it is called AFTER the
+        write that replaced it succeeds (I-121). `archive_prior(c)` ran BEFORE
+        the write it protected, so every refusal by the augmentation guard still
+        archived - a page frozen by one stray heading grew a pile of identical
+        copies, one per daily refresh, forever.
 
         A page is never deleted - the sweep tombstones in place - but it IS
         overwritten: research rewrites `context/regime` every morning, handing
@@ -370,13 +407,13 @@ class Wiki:
         excludes it, so the muse cannot sample a history as an idea.
         Returns False when there is nothing to keep (an empty page).
         """
-        if not concept.body.strip():
+        if not body.strip():
             return False
-        path = self.root / f"{concept.concept_id}.history.md"
+        path = self.root / f"{concept_id}.history.md"
         path.parent.mkdir(parents=True, exist_ok=True)
         today = ids.utc_now().strftime("%Y-%m-%d")
         prior = path.read_text(encoding="utf-8") if path.exists() else ""
-        store.write_atomic(path, f"## {today}\n\n{concept.body.rstrip()}\n\n{prior}")
+        store.write_atomic(path, f"## {today}\n\n{body.rstrip()}\n\n{prior}")
         return True
 
     def append_log(self, entry: str, *, dir_: Path | None = None) -> None:

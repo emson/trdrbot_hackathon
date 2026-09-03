@@ -10,7 +10,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from . import attribution, health
+from . import attribution, elfmem_adapter, health
 from .analytics import Snapshot, position_pnl_fraction
 from .config import Config
 from .elfmem_adapter import ElfmemAdapter
@@ -274,18 +274,25 @@ async def run(
     except Exception as exc:  # noqa: BLE001 - the Coach is advisory (INV-8)
         print(f"[housekeeping] coach pulse failed, continuing: {exc!r}")
 
+    # WHAT IT DID, not merely whether it failed (I-120). "nothing was pending"
+    # and "consolidated" were the same `True`, so every half-hourly line said
+    # `consolidation ok` for a dream that had not run since 09-01.
     dreamed = await mem.housekeeping_dream()
+    dream_note = {elfmem_adapter.DREAM_RAN: "consolidated",
+                  elfmem_adapter.DREAM_NOT_DUE: "nothing pending",
+                  elfmem_adapter.DREAM_FAILED: "FAILED (see log)"}.get(dreamed, dreamed)
 
     wiki.append_log(
         f"housekeeping: {interim_scored} interim score(s), "
-        f"consolidation {'ok' if dreamed else 'skipped (see log)'}, "
+        f"consolidation {dream_note}, "
         f"{attributed} attribution(s), "
         f"{len(swept['deprecated'])} concept(s) tombstoned"
     )
     if verbose:
-        print(f"[housekeeping] interim_scored={interim_scored} dream_ok={dreamed}")
+        print(f"[housekeeping] interim_scored={interim_scored} dream={dreamed}")
 
-    return {"interim_scored": interim_scored, "dream_ok": dreamed, "attributed": attributed,
+    return {"interim_scored": interim_scored, "dream": dreamed,
+            "dream_ok": dreamed != elfmem_adapter.DREAM_FAILED, "attributed": attributed,
             "forecasts_resolved": forecasts_resolved,
             "wiki_deprecated": len(swept["deprecated"]),
             "coach_experiments_open": int(coached.get("experiments_open") or 0)}

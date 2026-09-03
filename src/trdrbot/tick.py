@@ -401,31 +401,17 @@ def _usage_went_dark(model_served: list[str], llm_turns: int) -> bool:
 
 
 def _order_legs(call: dict[str, Any]) -> list[dict[str, Any]]:
-    return [leg for leg in ((call.get("args") or {}).get("legs") or [])
-            if isinstance(leg, dict)]
+    return mcp_client.order_legs(call.get("args") or {})
 
 
 def _opens_a_position(call: dict[str, Any]) -> bool:
-    """Does this order OPEN exposure, rather than close it?
+    """Does this order OPEN exposure? `mcp_client` owns the answer (I-108).
 
-    `position_intent` lives on the LEGS in Alpaca's multi-leg payload, and this
-    was reading it off the top level - where it is never present - so the test
-    was `"close" not in ""`, permanently True. Every `place_option_order` read
-    as opening, including the closes the agent submits through the same tool
-    (live: `theo-close-spy-bps-20260901-0957`, three sell_to_close legs), so
-    the "no exit rules were recorded" warning cried wolf on every exit.
+    Kept as a one-line adapter because everything here holds a tool CALL while
+    `health` reads a journalled `order_calls` entry, and the two carry the
+    arguments under different keys - the shapes differ, the question does not.
     """
-    if not str(call.get("name", "")).startswith("place_"):
-        return False
-    args = call.get("args") or {}
-    intents = " ".join([*(str(leg.get("position_intent", "")) for leg in _order_legs(call)),
-                        str(args.get("position_intent", ""))]).lower()
-    if "to_open" in intents:
-        return True
-    # Stated and every leg closes -> a close. Nothing stated at all -> assume
-    # opening, which is the side that WARNS: a missed warning on an exit is
-    # noise, a missed warning on an entry is a position with no stops.
-    return "close" not in intents
+    return mcp_client.opens_a_position(str(call.get("name", "")), call.get("args") or {})
 
 
 def _placed_contracts(call: dict[str, Any]) -> list[int]:

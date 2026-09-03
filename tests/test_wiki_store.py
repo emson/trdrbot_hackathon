@@ -175,19 +175,24 @@ def test_an_overwritten_page_keeps_its_prior_body_in_a_history_the_muse_cannot_s
                 body="# Assessment\nRisk-on.\n")
     w.write_concept(c, type_="MarketContext")
 
-    assert w.archive_prior(w.read("context/regime"))
+    # ARCHIVED AFTER the write that replaced it, and given the prior BODY
+    # (I-121): `archive_prior(concept)` ran before the write it protected, so
+    # every refusal by the augmentation guard archived anyway and a page frozen
+    # by one stray heading grew an identical copy per daily refresh, forever.
+    assert w.archive("context/regime", "# Assessment\nRisk-on.\n")
     hist = (tmp_path / "context" / "regime.history.md").read_text()
     assert hist.startswith("## ") and "Risk-on." in hist
 
     later = w.read("context/regime")
+    prior_body = later.body
     later.body = "# Assessment\nRisk-off.\n"
     w.write_concept(later, type_="MarketContext")
-    assert w.archive_prior(w.read("context/regime"))
+    assert w.archive("context/regime", later.body)
     hist = (tmp_path / "context" / "regime.history.md").read_text()
     assert hist.index("Risk-off.") < hist.index("Risk-on."), "newest first, like log.md"
+    assert "Risk-on." in prior_body
 
-    assert not w.archive_prior(Concept(concept_id="context/empty", body="")), \
-        "an empty page has nothing to keep"
+    assert not w.archive("context/empty", ""), "an empty page has nothing to keep"
     ids_ = {x.concept_id for x in w.all_concepts()}
     assert "context/regime" in ids_
     assert not any("history" in i for i in ids_), "a history is not a concept"

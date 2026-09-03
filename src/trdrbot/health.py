@@ -550,7 +550,20 @@ def check(journal_path: Path, positions: list[Any]) -> list[tuple[str, str, str]
     last_sizing = max((i for i, r in enumerate(rows) if r.get("kind") == "sizing"),
                       default=None)
     if last_sizing is not None:
-        since = sum(len(r.get("order_calls") or []) for r in rows[last_sizing + 1:])
+        # ORDERS THAT OPEN EXPOSURE (I-108). Every `order_calls` entry counted,
+        # so three agent-submitted closes, replaces or cancels after the last
+        # `size_position` read as "the book caps are being routed around" on a
+        # book correctly winding down - the live 2026-09-01 close went through
+        # `place_option_order`. `tick` already knew which orders open exposure
+        # and used it to stop the record_position warning crying wolf; two
+        # seams asking one question had two answers, so the definition moved to
+        # `mcp_client` and both read it.
+        from .mcp_client import opens_a_position
+
+        since = sum(1 for r in rows[last_sizing + 1:]
+                    for oc in (r.get("order_calls") or [])
+                    if opens_a_position(str(oc.get("name", "")),
+                                        oc.get("args_as_model_supplied") or {}))
         if since >= ORDERS_WITHOUT_SIZING:
             findings.append((BAD, "sizing.bypassed",
                              f"{since} order(s) placed since sizing was last consulted - "

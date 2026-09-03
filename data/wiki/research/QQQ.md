@@ -4,7 +4,7 @@ sources:
 - id: src-1
   resource: computed:market_stats
   author: trdrbot/research
-  last_modified: '2026-08-27T06:26:34.056870+00:00'
+  last_modified: '2026-09-03T00:05:59.752796+00:00'
 - id: src-2
   resource: computed:market_stats
   author: trdrbot/research
@@ -14,21 +14,22 @@ sources:
   author: trdrbot/research
   last_modified: '2026-08-27T10:02:36.763766+00:00'
 generated:
-  at: '2026-08-27T10:02:36.766849+00:00'
-status: deprecated
+  at: '2026-09-03T00:05:59.753418+00:00'
+status: stable
+stale_after: '2026-09-04T00:05:59.753420+00:00'
 ---
 
 # What it is
-QQQ is the Invesco ETF tracking the Nasdaq 100, concentrated in megacap technology and the primary listed expression of the AI trade. It closed at 711.28, up 5.3% over 21 days but down 2.5% over 63 days, with realized vol of 21.7% (73rd percentile).
+QQQ is an exchange-traded fund tracking the Nasdaq-100, with substantial exposure to large technology and growth companies. Its valuation is sensitive to both earnings expectations and long-term interest rates. (model knowledge)
 
 # Bull case
-It outperformed SPY over the last 21 days (+5.3% vs +3.4%), and the underlying fundamental news flow is strong: NVDA's double beat, CrowdStrike's best quarter ever, and continued AI infrastructure spending described as being at 'full steam.' A reclaim of the 50-day would frame the 63-day weakness as a completed correction.
+RSI of 48 is neutral rather than deeply bearish, and five-day performance of negative 0.3% indicates recent stabilization. Continued AI spending and strength in major semiconductor companies could produce a rebound.
 
 # Bear case
-QQQ is below both its 20- and 50-day averages, is still negative over 63 days, and gave back 0.7% on the week — the one-month rip has stalled. Long-duration tech is the most sensitive part of the market to the hot PCE print and the collapse in Fed-cut odds, and its realized vol sits at the 73rd percentile, meaning drawdowns arrive faster here than in SPY.
+QQQ is below both moving averages after losing 2.0% over 21 days and 4.7% over 63 days. Rising yields and weakness across software shares show that NVDA's strength has not translated into broad technology leadership.
 
 # People
-Index direction is dominated by a handful of megacap decision-makers referenced in the material — Jensen Huang at NVDA, plus AMZN, GOOGL, META and MSFT leadership tied to the AI capex debate. Cathie Wood's ARK is cited trimming CRWD while adding NET and Cerebras, an indicator of rotation within the complex (model knowledge).
+Elon Musk appears in supplied reports concerning AI, robotics, and SpaceX infrastructure, but these reports do not establish a direct QQQ-level action. Executives at the index's largest technology holdings strongly influence its earnings profile. (model knowledge)
 
 # Environment
-Headlines explicitly link Nasdaq 100 weakness to hot PCE and rate-hike bets, which is the cleanest available description of the current transmission mechanism. Simultaneously, AI capex headlines and semiconductor M&A keep a bid under dips, producing a choppy, two-sided regime rather than a clean trend.
+The environment features concentrated AI enthusiasm but weak index breadth and restrictive bond-market conditions. Its 21-day realized volatility is at only the 17th percentile, leaving potential for volatility expansion if macro or geopolitical stress increases.

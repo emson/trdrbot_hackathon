@@ -226,9 +226,13 @@ def _forecast_tool(tmp_path, book):
 def test_the_tool_records_a_vol_claim_and_says_so_in_percent(tmp_path):
     book = Ledger(tmp_path / "ledger.jsonl")
 
+    # A vol band needs a window long enough to hold returns (I-106): the
+    # resolver measures realized vol from the closes inside it, so a 1-3 day
+    # horizon - which this tool used to RECOMMEND - can never be scored.
     out = _forecast_tool(tmp_path, book)(
         underlying="SPY", claim="realized stays subdued", probability=0.62,
-        horizon=days_out(1), band_low=7.0, band_high=9.5, metric="realized_vol")
+        horizon=days_out(market_stats.MIN_VOL_HORIZON_DAYS + 1),
+        band_low=7.0, band_high=9.5, metric="realized_vol")
 
     assert "realized vol" in out and "[7.0%, 9.5%]" in out
     assert book.all()[0].metric == REALIZED_VOL_PCT
@@ -259,8 +263,33 @@ def test_a_vol_claim_skips_the_price_anchored_vacuity_check(tmp_path):
         underlying="SPY", claim="c", probability=0.97, horizon=days_out(1),
         band_low=1.0, band_high=100000.0)
     vol = _forecast_tool(tmp_path, book)(
-        underlying="SPY", claim="c", probability=0.97, horizon=days_out(1),
+        underlying="SPY", claim="c", probability=0.97,
+        horizon=days_out(market_stats.MIN_VOL_HORIZON_DAYS + 1),
         band_low=7.0, band_high=9.5, metric="realized_vol")
 
     assert priced.startswith("REFUSED"), "the price guard must still bite"
     assert not vol.startswith("REFUSED")
+
+
+def test_a_vol_horizon_too_short_to_resolve_is_refused_at_write_time(tmp_path):
+    """I-106. `record_forecast` told the agent "PREFER 1-3 DAYS OUT" while
+    `housekeeping._resolved_value` needs `MIN_VOL_SAMPLE` returns - six closes
+    inside the inclusive (created, horizon) window. Horizons of 1-6 calendar
+    days hold two to five closes and return None, and the window is FIXED at
+    write time, so "try again tomorrow" never helps: weeks later the 3-day
+    entry still returns None, with no journal row, forever. The README's claim
+    that the vol view "is resolved against the tape at its horizon" was false at
+    every horizon the tool recommended."""
+    book = Ledger(tmp_path / "ledger.jsonl")
+    tool = _forecast_tool(tmp_path, book)
+
+    short = tool(underlying="SPY", claim="c", probability=0.6, horizon=days_out(3),
+                 band_low=7.0, band_high=9.5, metric="realized_vol")
+
+    assert short.startswith("REFUSED") and "could never resolve" in short
+    assert book.all() == [], "an unscoreable entry must not be stored"
+
+    # A PRICE band at the same horizon is untouched: it resolves on one close.
+    priced = tool(underlying="SPY", claim="c", probability=0.6, horizon=days_out(3),
+                  band_low=600.0, band_high=700.0)
+    assert not priced.startswith("REFUSED"), priced

@@ -59,8 +59,11 @@ def test_attribution_uses_the_same_clock_as_the_horizon(paths, make_position):
     from trdrbot.positions import PositionStore
 
     store = PositionStore(paths.wiki)
+    # YESTERDAY's session, which has unambiguously closed. A horizon of TODAY is
+    # due only after 16:00 ET now (I-79), and that boundary is pinned by the
+    # ledger's own maturity test rather than smuggled in here.
     due = make_position(status="closed", last_pnl_pct=0.1,
-                        thesis_horizon=ids.today().isoformat())
+                        thesis_horizon=(ids.market_today() - timedelta(days=1)).isoformat())
     store.save(due)
 
     assert [p.position_id for p in attribution.pending(store)] == [due.position_id]

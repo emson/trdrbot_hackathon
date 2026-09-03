@@ -5,23 +5,27 @@ sources:
   resource: discovery:news+polymarket+yahoo
   author: trdrbot/discovery
   last_modified: '2026-09-02T18:12:37.657668+00:00'
+- id: src-2
+  resource: computed:market_stats
+  author: trdrbot/research
+  last_modified: '2026-09-03T00:05:59.754900+00:00'
 generated:
-  at: '2026-09-02T18:12:37.657680+00:00'
-stale_after: '2026-09-03T18:12:37.657682+00:00'
+  at: '2026-09-03T00:05:59.755289+00:00'
+stale_after: '2026-09-04T00:05:59.755291+00:00'
 status: stable
 ---
 
 # What it is
-Operates a global passenger and cargo airline network through American Airlines.
+American Airlines is a major passenger airline with domestic and international operations. Its earnings are sensitive to travel demand, fares, labor expenses, and fuel costs. (model knowledge)
 
 # Bull case
-White House travel-sector talks lifted the shares, but escalating U.S.-Iran tensions and higher oil prices threaten jet-fuel costs. The collision between a policy catalyst and an immediate cost headwind makes the move vulnerable to either continuation or reversal. Bearish continuation has modest support over the next five sessions. The stock is below SMA20 and SMA50, has fallen 20.6% over 21 days, and faces an immediate jet-fuel cost headwind; the bootstrap is only slightly downside-skewed, with 18% probability of a loss of at least 5% versus 17% probability of a gain of at least 5%.
+The supplied news says the stock rose following White House talks concerning the travel sector. RSI of 35 indicates weakened momentum that could support an oversold rebound if policy discussions produce tangible assistance.
 
 # Bear case
-A reversal in oil prices or additional travel-policy support could trigger an oversold rebound from RSI14 of 35.
+AAL is below both moving averages after falling 5.3% over five days and 20.9% over 21 days. Higher oil prices, geopolitical travel disruption, and the absence of a dated policy outcome leave the primary trend bearish.
 
 # People
-(not researched - discovery pass)
+No American Airlines executive or White House official is named in the supplied material. Robert Isom is the company's chief executive. (model knowledge)
 
 # Environment
-Verdict: opportunity. Evidence: American Airlines stock rose following White House talks on the travel sector.; U.S.-Iran tensions are escalating, leading to higher oil prices and increased focus on energy and defense ETFs.; A separate headline highlighted Strait of Hormuz geopolitical tensions.
+The travel sector may benefit from policy engagement, but escalating U.S.-Iran tensions create fuel-cost and international-demand risks. The combination of a weak chart and uncertain policy follow-through argues against treating the talks as a confirmed reversal catalyst.

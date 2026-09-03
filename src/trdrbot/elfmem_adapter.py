@@ -43,6 +43,12 @@ _DEFAULT_AGENT_NAME = "Theo"
 #: How many learned blocks ATTENTION contributes to a decide cycle.
 ATTENTION_KEEP = 5
 
+#: What `housekeeping_dream` actually did. Three states, because two of them
+#: used to be the same `True` (I-120): "there was nothing pending" is not
+#: "consolidation ok", and a subsystem that has not run since 09-01 must not
+#: read identically to one that runs every half hour.
+DREAM_RAN, DREAM_NOT_DUE, DREAM_FAILED = "consolidated", "nothing_pending", "failed"
+
 
 @dataclass
 class ContextResult:
@@ -398,8 +404,16 @@ class ElfmemAdapter:
 
     # -- housekeeping only (INV-10/23: dream() lives here and nowhere else) --
 
-    async def housekeeping_dream(self) -> bool:
-        """Consolidate the inbox into recallable memory. Returns True on success.
+    async def housekeeping_dream(self) -> str:
+        """Consolidate the inbox into recallable memory. Returns WHAT HAPPENED.
+
+        Three outcomes, three words (I-120). This returned True both when it
+        consolidated and when `should_dream` was False, so "skipped, below
+        threshold" and "ran" were the same value - and with the live inbox
+        holding ONE block since 2026-09-01, every half-hourly housekeeping line
+        in `wiki/log.md` said "consolidation ok" and every heartbeat said
+        `dream_ok=True` while `dream()` had not been called once. That is the
+        D-038 class in the subsystem the constitution and the lessons depend on.
 
         dream() calls the configured embedding provider (elfmem ships only an
         OpenAI adapter for embeddings + a mock - no Anthropic option exists,
@@ -411,10 +425,10 @@ class ElfmemAdapter:
         are all pure-DB and unaffected even when dream() cannot complete.
         """
         if not self.mem.should_dream:
-            return True
+            return DREAM_NOT_DUE
         try:
             await self.mem.dream()
-            return True
+            return DREAM_RAN
         except Exception as exc:  # noqa: BLE001
             print(f"[elfmem] dream() failed, consolidation skipped this cycle: {exc!r}")
-            return False
+            return DREAM_FAILED

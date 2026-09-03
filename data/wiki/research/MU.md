@@ -9,22 +9,27 @@ sources:
   resource: discovery:news+polymarket+yahoo
   author: trdrbot/discovery
   last_modified: '2026-08-28T13:44:59.072981+00:00'
+- id: src-3
+  resource: computed:market_stats
+  author: trdrbot/research
+  last_modified: '2026-09-03T00:05:59.750516+00:00'
 generated:
-  at: '2026-08-28T13:44:59.073487+00:00'
-status: deprecated
+  at: '2026-09-03T00:05:59.751018+00:00'
+status: stable
+stale_after: '2026-09-04T00:05:59.751020+00:00'
 ---
 
 # What it is
-Micron Technology - China's CXMT reported an 874% revenue surge tied to AI-memory demand — a material supply/demand dislocation for DRAM that can re-rate US memory suppliers like Micron; this is amplified by broader bullish AI demand narratives in the news (increased targets / AI M&A), making MU an asymmetry candidate for directional or volatility trades.
+Micron Technology manufactures memory and storage semiconductors, including DRAM and NAND products. Its results are highly exposed to memory pricing, supply cycles, and data-center demand. (model knowledge)
 
 # Bull case
-Short-term: mixed-but-favorable asymmetry. Fundamentals and headlines around AI-memory demand support a bullish tilt; technicals neutral (close 927.00, px above SMA20 but below SMA50, RSI14 50). Realized vol is moderate (21d 58.2%) and options are tradeable. Bootstrap 5d probabilities are roughly balanced (P(+5%) 25%, P(-5%) 27%), so a defined-risk bullish structure is appropriate to express the supply/demand narrative without large naked exposure.
+MU is above both moving averages and has gained 7.1% over 21 days, suggesting a short-term recovery. AI infrastructure spending can increase demand for memory capacity even though the stock remains down over the longer 63-day window.
 
 # Bear case
-News-driven re-rating may be priced already or reversed if demand signals disappoint; downside around macro/semicap weakness remains (1y max DD -39.2%).
+The shares have lost 11.5% over 63 days and carry 49.9% 21-day realized volatility. Taiwan labor-strike risks, tariff uncertainty, and negative memory-patent news could interrupt the technical recovery.
 
 # People
-(not researched - discovery pass)
+No Micron executive is named in the supplied material. David Tepper is mentioned only in connection with exiting SanDisk, so that report provides sector context rather than a direct Micron management signal.
 
 # Environment
-Verdict: opportunity. Evidence: CXMT reported an 870% revenue surge to $22.4 billion due to AI-driven memory chip demand. | AAPL,HPQ,MU,SKHY,SSNLF | benzinga 2026-08-28T13:13; Nvidia price targets have been raised to $400 after strong fiscal 2028 guidance (signals multi-year AI demand beyond supply limits). | NVDA | benzinga 2026-
+Memory stocks face a mix of strong AI-related demand expectations and substantial geopolitical, labor, tariff, and legal uncertainty. High absolute volatility makes defined-risk structures preferable even though its volatility percentile is only 18 relative to its own history.

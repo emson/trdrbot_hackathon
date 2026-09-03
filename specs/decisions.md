@@ -5573,3 +5573,78 @@ rejections across four gates rendered as nine `x1` lines under a heading that sa
 gone and `pulse` set `closed="promoted"` and bumped `promotions_today` regardless - a promotion in
 the heartbeat, zero close rows, the incumbent unchanged. It returns a bool now, and the caller reads
 it.
+
+## D-121 - Operator truth: health, config and reports that say what is true
+
+Ten defects, none of which changes trading behaviour and every one of which changes what a reader is
+told about it. Plan: `docs/plan_defect_remediation.md` W6. Closes I-103, I-104, I-106, I-108, I-109,
+I-112, I-113, I-114, I-120, I-121.
+
+**CONFIG FAILS AT STARTUP, NOT AT TRADE TIME (I-104).** `risk_appetite`'s docstring promised it
+raised "at process start, before any trade" and nothing read it there: `config.load()` never touched
+it, `_run_loop` read only `deadline` and `watchdog_seconds`, and the first read was `tick.py` AFTER
+the write-ahead decision row. So `risk_appetite: "1.5x"` printed "failed, continuing" every tick,
+wrote an orphan decision row, never archived the inbox, never decided, and returned 0 forever -
+while the `decide` probe counted those decision rows as output and reported "ran 5x, produced 5".
+`Config.validate()` walks the class's OWN properties rather than a list, so a knob added later is
+checked without anyone remembering; a list that must be kept in step is the shape this defect had.
+`load()` calls it, and `doctor` says so out loud. The run loop's half of this shipped with D-115: a
+CONFIG- or BUG-classified failure three times in a row stops the loop with rc 2.
+
+**A PROVIDER 400 IS OURS, A KeyError IS OURS (I-103).** `failures.classify` mapped auth/403/404/422
+to CONFIG and everything unknown to TRANSIENT, so `BadRequestError` (openai) and
+`InvalidRequestError` (anthropic, including `AnthropicInvalidRequestError`) bumped every pending
+item's retry count - and `inbox.record_failure` dead-letters at 3, so three ticks of a billing
+problem discarded every blameless observation. Both are recorded as LIVE failure modes. In the other
+direction, `KeyError` mapped to PERMANENT on the grounds that "the item will never parse" - but
+nothing inside the guarded `agent.ainvoke` parses the item at all (`inbox.pending()` runs outside the
+try), so a KeyError there is OUR bug and PERMANENT dead-lettered a good item instantly with no retry.
+`json.JSONDecodeError` stays PERMANENT: that one really is the item's own text.
+
+**UNITS AND FRESHNESS.** A `realized_vol` forecast is refused below `MIN_VOL_HORIZON_DAYS` (I-106):
+the resolver needs `MIN_VOL_SAMPLE` returns from the closes inside a window fixed at write time, so
+a 1-3 day horizon - which the tool RECOMMENDED - can never resolve, however long you wait, and the
+README's claim that the vol view "is resolved against the tape at its horizon" was false at every
+preferred horizon. Cache staleness is measured from the LAST BAR, not the fetch date (I-109): a
+Saturday fetch whose newest bar is Friday's close was served as fresh through Wednesday, and
+`muse.py` takes `closes[-1]` as the CURRENT price, so its bands were anchored to a close the market
+had not shown for three sessions.
+
+**ONE DEFINITION, NOT TWO.** `health.sizing.bypassed` summed EVERY `order_calls` entry after the last
+`sizing` row, so three agent-submitted closes read as "the Kelly gate and the book caps are being
+routed around" on a book correctly winding down - and the live 2026-09-01 close went through
+`place_option_order`, so the tool name alone cannot tell them apart. `tick` already knew, so the
+answer moved to `mcp_client.opens_a_position` and both seams read it (I-108). The muse reads
+`competence.MAX_HORIZON_DAYS` instead of its own literal 10 (I-113), which is latent today and stops
+being latent the moment anyone widens the constant.
+
+**REPORTS THAT SAY WHAT HAPPENED.** `housekeeping_dream` returned True both when it consolidated and
+when nothing was pending, so every half-hourly line said `consolidation ok` for a dream that had not
+run since 09-01 - the D-038 class inside the subsystem the constitution and the lessons depend on. It
+returns a STATE now (I-120). `site_export` stamped `generated_at` into every snapshot, so two exports
+of identical data always differed and `publish.sh`'s no-op branch had never once fired (9 runs, 0
+noop): the previous stamp is kept when the payload is identical, compared as serialised text after
+the redaction scan has added its own keys (I-114). `news_extract._coerce` turned a string where a
+list was asked for into per-character entities and CACHED them - "Apple Inc" rendering as "orgs: A,
+p, p, l, e" in every research, discovery and muse prompt - while its docstring promised "fall back to
+empty" (I-112).
+
+**THE WIKI GUARD GETS A RECOVERY PATH (I-121).** `write_concept` refused any write that dropped a
+heading the page already had, and the research prompt asks for exactly four - so ONE stray heading a
+model emitted once froze the dossier permanently: `research.py` archived the prior body, attempted
+the write, caught the refusal and journalled `wiki_guard`, daily, forever, growing a pile of
+identical archives because `archive_prior` ran BEFORE the write it protected. The regime page is the
+worst case: the decide prompt reads it every morning labelled only by date, so a frozen regime is
+served as the current one. The guard now protects the type's declared `schema_headings` - the four a
+dossier promises cannot be dropped, and a heading nobody declared comes and goes with the model that
+wrote it - and the archive happens AFTER a successful write, on the body that was replaced. Types
+whose headings ARE the content (`Lesson`, `Technique`) declare no schema and keep the total guard.
+
+**Two more test-hygiene fixes fell out, both of the D-117 class.** `conftest.days_out` anchors to the
+MARKET date: every date it produces is a horizon, an expiry or a deadline, read by `market_today()`
+and `session_closed_on()`, and anchoring to the UTC date made `days_out(0)` mean "tomorrow" for four
+hours every evening - three tests went red at local midnight on a clean tree. `synthetic_dates` ends
+TODAY rather than at a fixed literal, because staleness is measured from the last bar now. And two
+tests that reached the real project state (`cli._tick` taking the live lock, `site_export` reading the
+live journal) are hermetic: a pass or fail decided by what else is running on the machine is not a
+test result.

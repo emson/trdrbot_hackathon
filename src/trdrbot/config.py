@@ -134,7 +134,14 @@ class Config:
                 f"trading.risk_appetite is {raw!r}; it is a number in "
                 f"[{0.25}, {2.0}] where 1.0 is neutral, not a flag."
             )
-        return float(raw)
+        try:
+            return float(raw)
+        except (TypeError, ValueError) as exc:
+            raise RuntimeError(
+                f"trading.risk_appetite is {raw!r}, which is not a number. It is a "
+                f"multiplier in [0.25, 2.0] where 1.0 is neutral - write `1.5`, not "
+                f"`\"1.5x\"`. Remove the key to use the neutral default."
+            ) from exc
 
     @property
     def max_retries(self) -> int:
@@ -259,6 +266,29 @@ class Config:
     def decide_every_n_ticks(self) -> int:
         return int(self.raw["tick"].get("decide_every_n_ticks", 1))
 
+    def validate(self) -> None:
+        """Touch every config property once, so a typo stops the process.
+
+        **At startup, which is where a config error belongs** (I-104).
+        `risk_appetite`'s own docstring promised "raises here, at process start,
+        before any trade" and nothing read it there: `config.load()` did not
+        touch it, `_run_loop` read only `deadline` and `watchdog_seconds`, and
+        the first read was `tick.py` AFTER the write-ahead decision row. So
+        `risk_appetite: "1.5x"` printed "failed, continuing" every tick, wrote
+        an orphan decision row, never archived the inbox, never decided, and
+        returned 0 forever - while the `decide` probe counted those decision
+        rows as output and reported "ran 5x, produced 5".
+        `inbox.max_retries` and `tick.decide_every_n_ticks` had the same lazy
+        shape.
+
+        Derived from the class rather than from a list, so a property added
+        later is validated without anyone remembering to add it here - a list
+        that must be kept in step is the shape this whole defect had.
+        """
+        for name, attr in vars(type(self)).items():
+            if isinstance(attr, property):
+                getattr(self, name)
+
     def alpaca_mcp_server(self) -> dict[str, Any]:
         """Config block for MultiServerMCPClient: a local stdio subprocess.
 
@@ -318,4 +348,6 @@ def load(root: Path | None = None, *, quiet: bool = False) -> Config:
         raw = yaml.safe_load(f)
     paths = Paths.build(root)
     paths.ensure()
-    return Config(raw=raw, paths=paths)
+    cfg = Config(raw=raw, paths=paths)
+    cfg.validate()  # a config typo stops the process here, not at trade time (I-104)
+    return cfg

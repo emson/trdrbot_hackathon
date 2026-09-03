@@ -396,8 +396,13 @@ async def _evaluate(
             # resolves after the competition ends, which can never inform anything.
             # And its output clustered at the far end of whatever range it was
             # given: all five live forecasts landed on the last useful day but one.
-            if days <= 0 or days > 10:
-                verdict["fate"] = f"rejected: horizon {cand.get('horizon')} outside 1-10 days"
+            # `competence.MAX_HORIZON_DAYS`, not a literal (I-113). The two
+            # agreed, which is exactly why it was worth fixing: widen the
+            # constant and this gate would have silently rejected every
+            # candidate the widened `forecast_window` invited.
+            if days <= 0 or days > competence.MAX_HORIZON_DAYS:
+                verdict["fate"] = (f"rejected: horizon {cand.get('horizon')} outside "
+                                   f"1-{competence.MAX_HORIZON_DAYS} days")
                 _reject(ledger, entry, verdict["fate"])
                 evaluated.append(verdict)
                 continue

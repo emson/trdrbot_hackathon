@@ -28,7 +28,13 @@ from .tick import run_tick
 
 async def _doctor() -> int:
     print("[doctor] loading config...")
+    # `load()` validates every property already (I-104); this is the same call
+    # said out loud, because "the config is readable" is the first thing an
+    # operator running `doctor` wants confirmed and the first thing that used
+    # to fail silently at trade time instead.
     cfg = config_mod.load()
+    cfg.validate()
+    print("  every config property reads: ok")
     print(f"  model:     {cfg.model}")
     print(f"  watchlist: {cfg.watchlist}")
     print(f"  deadline:  {cfg.deadline or 'none - running indefinitely'}")

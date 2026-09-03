@@ -115,6 +115,16 @@ def _rolling_vol(rets: list[float], window: int = 21) -> list[float]:
 #: A forecast scored against it would be scored against nothing.
 MIN_VOL_SAMPLE = 5
 
+#: Calendar days a `realized_vol` horizon needs before the resolver can score
+#: it at all (I-106). `realized_vol_between` needs `MIN_VOL_SAMPLE` returns,
+#: i.e. six closes inside an INCLUSIVE window - six sessions, which is seven
+#: calendar days at best (Monday to the following Monday) and more across a
+#: holiday. A shorter horizon can NEVER resolve: the window is fixed by
+#: (created, horizon), so "try again tomorrow" never helps and the entry sits
+#: unresolved forever with no journal row. `record_forecast` told the agent to
+#: "PREFER 1-3 DAYS OUT", which is every horizon that cannot be scored.
+MIN_VOL_HORIZON_DAYS = 7
+
 
 def realized_vol_between(dates: list[str], closes: list[float],
                          start: str, end: str) -> float | None:
@@ -493,6 +503,27 @@ def save_closes(state_dir: Path, symbol: str, closes: list[float],
     store.write_atomic(p, json.dumps(body))
 
 
+def _series_age_days(d: dict[str, Any]) -> int | None:
+    """How old this cached series is, measured from its LAST BAR (I-109).
+
+    `save_closes` stamps `as_of = utc_now().date()`, which is when we FETCHED,
+    not what we fetched - so a Saturday fetch whose newest bar is Friday's close
+    was served as fresh through Wednesday. `muse.py` takes `closes[-1]` as the
+    current price and `_bands_from_pct` turns "-8%..-2%" into ledger prices from
+    it, so the bands were anchored to a close the market had not shown for three
+    sessions. Falls back to `as_of` for a series stored before dates were kept -
+    which is what those files can honestly support.
+    """
+    from datetime import date
+
+    dates = d.get("dates")
+    newest = str(dates[-1])[:10] if isinstance(dates, list) and dates else d.get("as_of")
+    try:
+        return (ids.today() - date.fromisoformat(str(newest))).days
+    except (ValueError, TypeError):
+        return None
+
+
 def load_dated_closes(state_dir: Path, symbol: str, *,
                       max_age_days: int = 4) -> tuple[list[str], list[float]] | None:
     """(dates, closes) for a symbol, or None if unusable for ALIGNMENT.
@@ -507,8 +538,8 @@ def load_dated_closes(state_dir: Path, symbol: str, *,
         return None
     try:
         d = json.loads(p.read_text(encoding="utf-8"))
-        from datetime import date
-        if (ids.today() - date.fromisoformat(d["as_of"])).days > max_age_days:
+        age = _series_age_days(d)
+        if age is None or age > max_age_days:
             return None
         dates, closes = d.get("dates"), d.get("closes")
         if not isinstance(dates, list) or not isinstance(closes, list):
@@ -528,9 +559,8 @@ def load_closes(state_dir: Path, symbol: str, *, max_age_days: int = 4) -> list[
         return None
     try:
         d = json.loads(p.read_text(encoding="utf-8"))
-        from datetime import date
-        age = (ids.today() - date.fromisoformat(d["as_of"])).days
-        if age > max_age_days:
+        age = _series_age_days(d)
+        if age is None or age > max_age_days:
             return None
         return [float(c) for c in d["closes"]]
     except (json.JSONDecodeError, KeyError, ValueError):

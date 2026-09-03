@@ -269,11 +269,12 @@ async def run(
         c = wiki.read("context/regime") or Concept(
             concept_id="context/regime", frontmatter={"type": "MarketContext"}, body=""
         )
-        # Keep yesterday's assessment before today's replaces it (D-110) -
-        # only when it actually changed, so a quiet week does not archive the
-        # same paragraph five times.
-        if c.body.strip() and c.body.strip() != regime_md.strip():
-            wiki.archive_prior(c)
+        # Keep yesterday's assessment (D-110) - only when it actually changed,
+        # so a quiet week does not archive the same paragraph five times, and
+        # only AFTER the write that replaced it succeeded (I-121): archiving
+        # first meant every guard refusal still archived, so a frozen page grew
+        # one identical copy per daily refresh, forever.
+        prior_body = c.body
         c.body = regime_md + "\n"
         # `status` and `stale_after` are stamped by wiki.LIFECYCLE now. They
         # were set here by hand, which is exactly how one file ends up with two
@@ -282,6 +283,8 @@ async def run(
         try:
             wiki.write_concept(c, type_="MarketContext")
             wrote.append("context/regime")
+            if prior_body.strip() and prior_body.strip() != regime_md.strip():
+                wiki.archive("context/regime", prior_body)
         except Exception as exc:  # noqa: BLE001 - guard refusal is a data point, not a crash
             journal.append("error", cause="wiki_guard", error=repr(exc), concept="context/regime")
 

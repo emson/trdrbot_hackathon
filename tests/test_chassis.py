@@ -361,3 +361,40 @@ def test_the_closed_cadence_honours_the_same_floor_as_the_open_one():
 
     assert _asyncio.run(cli._run_loop(300, 0, max_ticks=1)) == 2
     assert _asyncio.run(cli._run_loop(0, 1800, max_ticks=1)) == 2
+
+
+def test_an_unchanged_export_leaves_the_snapshot_byte_identical(tmp_path, monkeypatch):
+    """I-114. `site_export` stamped `generated_at = utc_now()` into every
+    snapshot, so two exports of identical data always differed - and
+    `publish.sh`'s "no change - nothing to deploy" branch, which compares the
+    file's hash before and after, had never once fired: `data/publish_log.jsonl`
+    shows 9 runs and 0 noops, so every publish rebuilt and redeployed the site.
+    The stamp is applied only when the payload actually moved."""
+    import dataclasses
+    import json
+
+    from trdrbot import config as config_mod
+    from trdrbot import site_export
+
+    # An EMPTY data tree, not the live one: the running loop appends journal
+    # rows, and a test whose premise is "nothing changed" must own that.
+    live = config_mod.load()
+    cfg = dataclasses.replace(live, paths=config_mod.Paths.build(tmp_path))
+    cfg.paths.ensure()
+    monkeypatch.setattr(site_export.config_mod, "load", lambda *a, **k: cfg)
+
+    out = tmp_path / "snapshot.json"
+    assert site_export.export(out=out) == 0
+    first = out.read_bytes()
+
+    assert site_export.export(out=out) == 0
+    assert out.read_bytes() == first, \
+        "two exports of identical data differ only by their own timestamp"
+
+    # ...and the stamp is still there, still honest, and still moves when the
+    # payload does.
+    assert json.loads(first)["generated_at"]
+    (cfg.paths.journal).write_text('{"kind":"decision","ts":"2026-09-03T00:00:00+00:00"}\n',
+                                   encoding="utf-8")
+    assert site_export.export(out=out) == 0
+    assert out.read_bytes() != first, "a real change must produce a new snapshot"

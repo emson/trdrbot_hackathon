@@ -912,3 +912,66 @@ async def test_an_archived_thesis_block_is_reported_not_swallowed(paths, make_po
             if r.get("subsystem") == "elfmem.remember_thesis"]
     assert rows and rows[0]["position_id"] == pos.position_id
     assert journal_rows(journal, "fill")[0]["thesis_block_active"] is False
+
+
+async def test_a_dream_that_did_not_run_does_not_report_as_consolidated(paths, mem: FakeMem):
+    """I-120. `housekeeping_dream` returned True both when it consolidated and
+    when `should_dream` was False - so "skipped, below threshold" and "ran" were
+    the same value. Live: the inbox held ONE block since 2026-09-01, and every
+    half-hourly line in `wiki/log.md` said "consolidation ok" while the
+    heartbeat said `dream_ok=True` and `dream()` had not been called once. The
+    D-038 class, in the subsystem the constitution and the lessons depend on."""
+    from trdrbot import config as config_mod
+    from trdrbot import elfmem_adapter, housekeeping
+
+    store, journal, wiki, _ = _stores(paths)
+    cfg = config_mod.load()
+    mem.dream_result = elfmem_adapter.DREAM_NOT_DUE
+
+    out = await housekeeping.run(store, Snapshot(), mem, wiki, journal, cfg,
+                                 tools=None, verbose=False)
+
+    assert out["dream"] == elfmem_adapter.DREAM_NOT_DUE
+    assert out["dream_ok"] is True, "not due is not a failure"
+    log = (paths.wiki / "log.md").read_text(encoding="utf-8")
+    assert "consolidation nothing pending" in log
+    assert "consolidation consolidated" not in log
+
+    # ...and a run that DID consolidate says so, distinctly.
+    mem.dream_result = elfmem_adapter.DREAM_RAN
+    await housekeeping.run(store, Snapshot(), mem, wiki, journal, cfg,
+                           tools=None, verbose=False)
+    assert "consolidation consolidated" in (paths.wiki / "log.md").read_text(encoding="utf-8")
+
+
+def test_the_adapter_distinguishes_not_due_from_consolidated():
+    """I-120 at the seam that decides it. `housekeeping_dream` returned True
+    both when `dream()` ran and when `should_dream` was False, so the two were
+    indistinguishable from outside - and `should_dream` is `pending >=
+    inbox_threshold`, which the live inbox has not met since 2026-09-01."""
+    import asyncio
+
+    from trdrbot import elfmem_adapter
+    from trdrbot.elfmem_adapter import ElfmemAdapter
+
+    class FakeElfmem:
+        def __init__(self, due: bool, explode: bool = False) -> None:
+            self.should_dream, self.explode, self.dreams = due, explode, 0
+
+        async def dream(self) -> None:
+            self.dreams += 1
+            if self.explode:
+                raise RuntimeError("embedding provider is down")
+
+    quiet = FakeElfmem(due=False)
+    assert asyncio.run(ElfmemAdapter(quiet).housekeeping_dream()) == \
+        elfmem_adapter.DREAM_NOT_DUE
+    assert quiet.dreams == 0, "nothing was pending; dream() must not have run"
+
+    busy = FakeElfmem(due=True)
+    assert asyncio.run(ElfmemAdapter(busy).housekeeping_dream()) == elfmem_adapter.DREAM_RAN
+    assert busy.dreams == 1
+
+    broken = FakeElfmem(due=True, explode=True)
+    assert asyncio.run(ElfmemAdapter(broken).housekeeping_dream()) == \
+        elfmem_adapter.DREAM_FAILED

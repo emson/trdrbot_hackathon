@@ -755,6 +755,13 @@ def export(out: Path = DEFAULT_OUT, *, strict: bool = True) -> int:
         },
     }
 
+    # THE STAMP MUST NOT BE THE ONLY DIFFERENCE (I-114). `publish.sh` compares
+    # the snapshot's hash before and after the export and skips the build when
+    # nothing changed - a branch that had never once fired, because
+    # `generated_at` made two exports of identical data differ every time
+    # (`data/publish_log.jsonl`: 9 runs, 0 noop). So the stamp is applied only
+    # when the PAYLOAD actually moved; otherwise the previous file is left
+    # exactly as it is, byte for byte, and the no-op branch can see that.
     from .ids import utc_now
     snapshot["generated_at"] = utc_now().isoformat()
 
@@ -767,6 +774,19 @@ def export(out: Path = DEFAULT_OUT, *, strict: bool = True) -> int:
     snapshot["integrity"]["redaction_scan"] = "clean"
     snapshot["integrity"]["patterns_checked"] = len(_SECRET_PATTERNS)
 
+    # THE STAMP MUST NOT BE THE ONLY DIFFERENCE (I-114). `publish.sh` compares
+    # the snapshot's hash before and after the export and skips the build when
+    # nothing changed - a branch that had never once fired, because
+    # `generated_at` made two exports of identical data differ every time
+    # (`data/publish_log.jsonl`: 9 runs, 0 noop). So the previous stamp is kept
+    # when the PAYLOAD is identical, and the file comes out byte for byte the
+    # same. Compared LAST, after the redaction scan has added its own keys, and
+    # as serialised text, because the write applies `default=str` and an
+    # in-memory value is not `==` to its round-tripped form.
+    prior = _prior_snapshot(out)
+    if prior is not None and _payload_text(prior) == _payload_text(snapshot):
+        snapshot["generated_at"] = prior.get("generated_at")
+
     out.parent.mkdir(parents=True, exist_ok=True)
     text = json.dumps(snapshot, indent=None, separators=(",", ":"), default=str)
     out.write_text(text, encoding="utf-8")
@@ -774,6 +794,21 @@ def export(out: Path = DEFAULT_OUT, *, strict: bool = True) -> int:
           f"{counts['positions']} positions, {counts['theses']} theses, "
           f"{counts['journal_rows']} journal rows, {summaries_dropped} summaries dropped")
     return 0
+
+
+def _prior_snapshot(out: Path) -> dict[str, Any] | None:
+    """The snapshot already on disk, or None when there isn't a readable one."""
+    try:
+        loaded = json.loads(out.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    return loaded if isinstance(loaded, dict) else None
+
+
+def _payload_text(snapshot: dict[str, Any]) -> str:
+    """Everything but the timestamp, serialised the way the file is."""
+    return json.dumps({k: v for k, v in snapshot.items() if k != "generated_at"},
+                      sort_keys=True, separators=(",", ":"), default=str)
 
 
 def main(argv: list[str] | None = None) -> int:

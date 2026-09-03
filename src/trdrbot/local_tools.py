@@ -1243,14 +1243,18 @@ def build_record_forecast(ledger: Any, state_dir: Path | None = None) -> Structu
             probability: your honest P(0-1) that the band holds at the horizon.
                 Do not round to 0.5/0.75 - granularity matters, and rounding
                 measurably degrades forecast accuracy.
-            horizon: YYYY-MM-DD when this is judged. PREFER 1-3 DAYS OUT.
-                A forecast only teaches you anything once it RESOLVES, and
-                nothing you record can move your size until it has. Week-long
-                horizons on a short operating window resolve after the point
-                they could have changed a decision - one slow forecast is
-                worth less than three fast ones, even though it feels more
-                serious. Short horizons are also harder, which is the point:
-                they test judgement rather than drift.
+            horizon: YYYY-MM-DD when this is judged. PREFER 1-3 DAYS OUT for a
+                PRICE band, which resolves on a single close. A forecast only
+                teaches you anything once it RESOLVES, and nothing you record
+                can move your size until it has. Week-long horizons on a short
+                operating window resolve after the point they could have
+                changed a decision - one slow forecast is worth less than three
+                fast ones, even though it feels more serious. Short horizons
+                are also harder, which is the point: they test judgement rather
+                than drift. **A `realized_vol` band is the exception and needs
+                at least a week**: it is measured from the closes inside the
+                window, so a shorter one holds too few returns to compute a vol
+                from at all and is refused here rather than left unresolvable.
             band_low: holds only if the metric is >= this at the horizon
             band_high: holds only if the metric is <= this at the horizon.
                 Give at least one, or it cannot be scored and will be refused.
@@ -1271,6 +1275,29 @@ def build_record_forecast(ledger: Any, state_dir: Path | None = None) -> Structu
         if wanted is None:
             return (f"REFUSED: unknown metric {metric!r}. "
                     f"Use one of: {', '.join(sorted(_METRICS))}.")
+
+        # A VOL CLAIM NEEDS ENOUGH TAPE TO BE SCORED (I-106). The resolver
+        # measures realized vol over the inclusive (created, horizon) window and
+        # needs `MIN_VOL_SAMPLE` returns; anything shorter returns None forever,
+        # because the window is fixed at write time and waiting cannot lengthen
+        # it. Refused HERE rather than silently kept, which is the same
+        # discipline as refusing a band-less forecast: an entry that can never
+        # be judged is not evidence of anything.
+        if wanted == REALIZED_VOL_PCT:
+            try:
+                days = (date.fromisoformat(str(horizon)) - ids.market_today()).days
+            except (ValueError, TypeError):
+                days = None
+            if days is not None and days < market_stats.MIN_VOL_HORIZON_DAYS:
+                return (
+                    f"REFUSED: a realized_vol horizon needs at least "
+                    f"{market_stats.MIN_VOL_HORIZON_DAYS} calendar days and {horizon} is "
+                    f"{days}. Realized vol is measured from the closes inside the window, "
+                    f"and under that span there are too few returns to compute one - the "
+                    f"forecast could never resolve, however long you waited. Move the "
+                    f"horizon out, or record a PRICE band instead, which resolves on a "
+                    f"single close."
+                )
 
         # The vacuity anchor is a bootstrap over the PRICE distribution, so it
         # can only judge a price band. A vol analogue is future work; until it
