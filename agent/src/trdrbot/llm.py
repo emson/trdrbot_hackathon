@@ -319,7 +319,12 @@ and COSTS are real - friction is often as large as the edge itself. State your \
 drift AND, whenever the trade is about volatility, `vol_view_pct` - your \
 realized-vol forecast for the horizon. That is the measure your edge is priced \
 under: leave it out and a premium trade is valued at the market's own vol, \
-where by construction you have no vol edge and can never earn size for one.
+where by construction you have no vol edge and can never earn size for one. \
+Opportunities arrive with a PLAYBOOK: structure families placed against the thesis \
+band and priced indicatively, with what each pays if the thesis holds and if it \
+fails. Start from it - two verticals are one shape, a vertical and a condor are two \
+- re-simulate at live quotes, and propose your own when the menu misses the \
+thesis's shape.
 2. `size_position` - it returns a number of contracts derived from your edge \
 and your track record. Use that number. Zero contracts is a real answer.
 3. Place the order, then `record_position`.

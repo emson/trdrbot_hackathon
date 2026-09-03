@@ -1507,3 +1507,34 @@ def test_reconcile_closes_an_experiment_the_log_left_open(tmp_path):
     coach.reconcile(cfg)
     assert len([r for r in coach.events(cfg)
                 if r.get("kind") == "experiment_closed"]) == 1
+
+
+def test_disjoint_lets_playbook_and_muse_run_experiments_concurrently(tmp_path):
+    """Rule 3 by declaration: the playbook is scored by arithmetic no lever
+    names, so its experiment may open while the muse's is running - and the
+    muse's may open while the playbook's is."""
+    cfg = _cfg(tmp_path)
+    journal = _journal(tmp_path)
+    muse_lv, pb_lv = coach.lever("muse.prompt"), coach.lever("playbook.catalogue")
+    assert muse_lv is not None and pb_lv is not None
+    st = coach.load_state(cfg, muse_lv.name, "seed text " * 30)
+    coach._open(cfg, st, coach.Variant("v1", "challenger text " * 20), journal)
+    assert coach._disjoint(cfg, pb_lv) == ""
+    st2 = coach.load_state(cfg, pb_lv.name, "families: [] " * 20)
+    coach._open(cfg, st2, coach.Variant("v1", "families: [x] " * 20), journal)
+    assert coach._disjoint(cfg, muse_lv) == ""
+
+
+def test_playbook_gauges_omit_when_there_is_no_data(tmp_path):
+    cfg = _cfg(tmp_path)
+    g = coach.snapshot_gauges(cfg, [])
+    assert not any(k.startswith("playbook.") for k in g), g
+    rows = [{"kind": "playbook", "shape": "range", "candidates": [
+        {"family": "iron_condor", "fate": "candidate"},
+        {"family": "call_butterfly", "fate": "rejected: pays $-3 when the thesis holds"},
+    ]}, {"kind": "playbook", "voided": "no_chain"}]
+    g = coach.snapshot_gauges(cfg, rows)
+    assert g["playbook.survival_rate"] == 0.5
+    assert g["playbook.candidates_per_opportunity"] == 2.0
+    assert g["playbook.family_entropy"] == 1
+    assert g["playbook.runs_total"] == 2, "voids count as runs, not as candidates"

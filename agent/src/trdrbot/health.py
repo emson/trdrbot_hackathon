@@ -226,6 +226,18 @@ PROBES: tuple[Probe, ...] = (
     #
     # The lesson this points at is the agent's own: when candidates die at one
     # gate en masse, the instrument is the suspect before the candidates are.
+    # The playbook prices a menu for every admitted opportunity (notes/026).
+    # `proposed` counts instances placed on the chain - a run that voids on
+    # every opportunity (no chain, no expiry in the window) proposes nothing
+    # and that is the failure this probe reads: the heartbeat is written either
+    # way, the output is not.
+    Probe(
+        "playbook", ("playbook_run",),
+        lambda rows: sum(int(r.get("proposed") or 0) for r in rows), 5,
+        "the playbook runs and proposes nothing - the chain, the expiry window "
+        "or the anchors are broken (read `voided` and `reason` on the rows)",
+        heartbeat_fields=("opportunities", "proposed", "survived", "voided"),
+    ),
     Probe(
         "sizing", ("sizing",),
         lambda rows: sum(1 for r in rows

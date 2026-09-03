@@ -643,6 +643,126 @@ async def _coach(action: str) -> int:
     return 0
 
 
+async def _playbook(action: str, ticker: str | None, band: str | None, horizon: str | None,
+                    variant: str) -> int:
+    """The operator's surface for the second lever (notes/026)."""
+    from . import coach, market_stats, playbook
+    from .opportunity import Opportunity
+
+    cfg = config_mod.load()
+    st = coach.load_state(cfg, "playbook.catalogue", playbook.SEED_CATALOGUE)
+
+    if action == "show":
+        print(f"=== playbook.catalogue: {st.incumbent.id} {st.incumbent.fingerprint} "
+              f"({st.incumbent.origin}, since {st.incumbent.since[:16] or 'seed'}) ===")
+        if st.incumbent.rationale:
+            print(f"rationale: {st.incumbent.rationale}")
+        print(f"state: {st.blocked or 'running'}")
+        if st.exp_id and not coach.is_closed(cfg, st.exp_id):
+            t = coach.tally(cfg, st.exp_id)
+            if t:
+                print(f"experiment: {t.challenger} vs {t.incumbent}  P(better)={t.posterior:.3f} "
+                      f"over {t.runs} paired run(s)"
+                      + (f", {t.voided} voided" if t.voided else ""))
+        print()
+        print(st.incumbent.text.rstrip())
+        why = playbook.validate_catalogue(st.incumbent.text)
+        print(f"\nvalidator: {'ok' if not why else 'DEFECT - ' + why}")
+        return 0
+
+    if action == "status":
+        rows = list(Journal(cfg.paths.journal).read())
+        priced = [r for r in rows if r.get("kind") == "playbook" and not r.get("voided")]
+        voided = [r for r in rows if r.get("kind") == "playbook" and r.get("voided")]
+        print(f"=== the playbook: {len(priced)} opportunities priced, {len(voided)} voided ===\n")
+        by_shape: dict[str, list[int]] = {}
+        by_family: dict[str, list[int]] = {}
+        for r in priced:
+            for c in r.get("candidates") or []:
+                hit = int(coach.survived(c.get("fate")))
+                by_shape.setdefault(str(r.get("shape")), []).append(hit)
+                by_family.setdefault(str(c.get("family")), []).append(hit)
+        for title, table in (("by shape", by_shape), ("by family", by_family)):
+            print(f"survival {title}:")
+            for k, hits in sorted(table.items(), key=lambda kv: -len(kv[1])):
+                print(f"  {k:<28} {sum(hits):>3}/{len(hits):<3} {sum(hits) / len(hits):>5.0%}")
+            print()
+        if voided:
+            from collections import Counter
+
+            print("voids: " + ", ".join(f"{k} x{v}" for k, v in
+                                        Counter(str(r.get('voided')) for r in voided).most_common()))
+        outcomes = [r for r in rows if r.get("kind") == "playbook_outcome"]
+        if outcomes:
+            won: dict[str, list[int]] = {}
+            for r in outcomes:
+                if r.get("won") is not None:
+                    won.setdefault(str(r.get("family")), []).append(int(bool(r.get("won"))))
+            print("\nresolved at expiry, by family (won / resolved):")
+            for k, w in sorted(won.items(), key=lambda kv: -len(kv[1])):
+                print(f"  {k:<28} {sum(w):>3}/{len(w):<3} {sum(w) / len(w):>5.0%}")
+        if st.exp_id and not coach.is_closed(cfg, st.exp_id):
+            t = coach.tally(cfg, st.exp_id)
+            if t:
+                print(f"\nexperiment {t.challenger} vs {t.incumbent}: P(better)={t.posterior:.3f} "
+                      f"over {t.runs} run(s)")
+        return 0
+
+    # try
+    if not ticker or not band or not horizon:
+        print("usage: trdrbot playbook try TICKER --band LO,HI --horizon YYYY-MM-DD "
+              "[--variant challenger]   (use - for an open side, e.g. --band 220,-)")
+        return 2
+
+    def _side(v: str) -> float | None:
+        v = v.strip()
+        return None if v in ("", "-", "none", "inf") else float(v)
+
+    lo_s, _, hi_s = band.partition(",")
+    lo, hi = _side(lo_s), _side(hi_s)
+    text = st.incumbent.text
+    if variant == "challenger":
+        if not st.challenger:
+            print("no challenger is open on playbook.catalogue")
+            return 1
+        text = st.challenger.text
+    o = Opportunity(underlying=ticker.upper(),
+                    claim=f"{ticker.upper()} between {lo} and {hi} on {horizon}",
+                    horizon=horizon, band_low=lo, band_high=hi)
+    async with mcp_client.session_tools(cfg) as tl:
+        tools = {t.name: t for t in tl}
+        closes = market_stats.load_closes(cfg.paths.state, o.underlying)
+        if closes is None:
+            _dates, closes = await market_stats.fetch_daily_series(tools, o.underlying)
+        snaps = await playbook.fetch_chain(tools, cfg, o.underlying, horizon=horizon,
+                                           spot=closes[-1] if closes else None)
+    chain = playbook.chain_from_snapshots(snaps)
+    spot = closes[-1] if closes else None
+    board = playbook.board_for(o, spot=spot, chain=chain, closes=closes)
+    if isinstance(board, str):
+        print(f"VOID: {board}  (chain quotes: {len(chain.quotes)}, expiries: {chain.expiries()[:6]})")
+        return 1
+    print(f"{o.underlying} spot {board.spot:.2f}  shape {board.shape}  band [{lo}, {hi}] by {horizon}")
+    print(f"expiry {board.expiry} ({board.days}d)  IV {board.iv:.1%} ({board.iv_source})  "
+          f"1-sigma ${board.sigma:.2f}  variant {variant}\n")
+    verdicts = playbook.run_arm(text, board, o)
+    if isinstance(verdicts, str):
+        print(f"catalogue unreadable: {verdicts}")
+        return 1
+    print(f"{'family':<26} {'legs':<34} {'net':>8} {'maxP':>7} {'maxL':>7} "
+          f"{'E[hold]':>8} {'P(hold)':>7} {'P(fail)':>7}  fate")
+    for v in verdicts:
+        legs = " ".join(("+" if l["side"] == "long" else "-") + f"{l['right']}{l['strike']:g}"
+                        + (f"x{l['qty']}" if l.get("qty", 1) > 1 else "") for l in v.get("legs") or [])
+        if "e_hold" in v:
+            nums = (f"{v['net']:>8.0f} {v['max_profit']:>7.0f} {v['max_loss']:>7.0f} "
+                    f"{v['e_hold']:>8.0f} {v['p_hold']:>7.0%} {v['p_fail']:>7.0%}")
+        else:
+            nums = f"{'':>8} {'':>7} {'':>7} {'':>8} {'':>7} {'':>7}"
+        print(f"{v['family']:<26} {legs:<34} {nums}  {v['fate']}")
+    return 0
+
+
 def _risk(proposed: float | None) -> int:
     """What the risk appetite is doing, and what another value would do.
 
@@ -846,6 +966,13 @@ def main() -> None:
     les.add_argument("action", choices=["show", "seed", "verify"], default="show", nargs="?")
     coa = sub.add_parser("coach", help="the self-improvement loop: levers, trials, promotions")
     coa.add_argument("action", choices=["status", "pulse"], default="status", nargs="?")
+    pbk = sub.add_parser("playbook", help="the structure lever: show the catalogue, price it "
+                                          "on a live chain, or read its survival by family")
+    pbk.add_argument("action", choices=["show", "try", "status"], default="show", nargs="?")
+    pbk.add_argument("ticker", nargs="?", default=None)
+    pbk.add_argument("--band", default=None, help="LO,HI - use - for an open side")
+    pbk.add_argument("--horizon", default=None, help="YYYY-MM-DD the claim resolves")
+    pbk.add_argument("--variant", choices=["incumbent", "challenger"], default="incumbent")
     rsk = sub.add_parser("risk", help="the operator's risk appetite, and what another "
                                       "value would do to the live book")
     rsk.add_argument("appetite", type=float, nargs="?", default=None,
@@ -890,6 +1017,8 @@ def main() -> None:
     _H["ledger"] = lambda a: _ledger()
     _H["lessons"] = lambda a: asyncio.run(_lessons(a.action))
     _H["coach"] = lambda a: asyncio.run(_coach(a.action))
+    _H["playbook"] = lambda a: asyncio.run(_playbook(a.action, a.ticker, a.band, a.horizon,
+                                                     a.variant))
     _H["risk"] = lambda a: _risk(a.appetite)
     _H["report"] = lambda a: _report()
     _H["modelcal"] = lambda a: _modelcal(a.action)

@@ -80,6 +80,22 @@ def _active_muse_prompt(config: Any = None) -> str:
         return MUSE_PROMPT
 
 
+def _active_lever_text(config: Any, lever_name: str, module: str, attr: str) -> str:
+    """`_active_muse_prompt`, generalised: the lever's live incumbent, falling
+    back to its in-code seed. Never raises, for the same reason."""
+    import importlib
+
+    seed = str(getattr(importlib.import_module(module), attr, ""))
+    try:
+        from . import coach
+        from . import config as _cm
+
+        cfg = config if config is not None else _cm.load(quiet=True)
+        return coach.load_state(cfg, lever_name, seed).incumbent.text
+    except Exception:  # noqa: BLE001
+        return seed
+
+
 def inventory(tools: list[Any] | None = None, config: Any = None) -> list[PromptRef]:
     """Everything authored that a model reads. Tools passed in when available."""
     from .constitution import PRINCIPLES
@@ -98,6 +114,10 @@ def inventory(tools: list[Any] | None = None, config: Any = None) -> list[Prompt
         # the constant here would fingerprint a prompt nothing is running, and
         # a provenance record that names the wrong artefact is worse than none.
         PromptRef("muse.collide", "free_standing", _active_muse_prompt(config)),
+        # The playbook's catalogue is the second lever, and for the same
+        # reason the artefact in play is the state incumbent, not the seed.
+        PromptRef("playbook.catalogue", "free_standing", _active_lever_text(
+            config, "playbook.catalogue", "trdrbot.playbook", "SEED_CATALOGUE")),
     ]
     # The two artefacts this inventory used to omit while its own docstring
     # claimed eight. Neither is a lever: the mutation prompt is the Coach's own

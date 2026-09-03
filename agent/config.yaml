@@ -314,6 +314,20 @@ coach:
   futility_min_runs: 6
   cap_runs: 40            # no verdict by here: the incumbent keeps its place
 
+  # Per-lever overrides of the floors above (notes/026 section 5). The right
+  # bar depends on the reward's base rate: the muse survives ~89% of its gates,
+  # so an equal challenger has ~11 points of room to look better by luck; the
+  # playbook's band-conditional gates sit near 50%, where the same sequential
+  # peeking promotes an EQUAL catalogue about one time in three at 0.90 and
+  # one in six at 0.95, for a ~20% cost in detection speed on a real 0.50 ->
+  # 0.70 improvement (120 simulated experiments each; the table is in the
+  # note). A false promotion swaps in an equally good catalogue and costs
+  # churn, which the churn sentinel bounds - so this is a preference for
+  # fewer swaps, not a safety bar.
+  levers:
+    playbook.catalogue:
+      promote_at: 0.95
+
   # Sentinels - the autonomic brake. Deterministic, checked every pulse.
   cost_ceiling_usd_per_day: 10.0   # muse + coach_mutate roles, this UTC day
   churn_max_promotions_per_day: 2
@@ -321,3 +335,7 @@ coach:
   # for gate survival could converge on one productive pair and quietly stop
   # being a muse, so the diversity of what it collides is measured and floored.
   entropy_min_type_pairs: 3
+  # The playbook's counterpart: distinct families that survived over the
+  # window. A catalogue optimised purely for survival could converge on one
+  # family per shape, and a menu of one is not a menu.
+  playbook_entropy_min_families: 3

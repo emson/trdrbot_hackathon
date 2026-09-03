@@ -32,7 +32,7 @@ from __future__ import annotations
 import random
 from typing import Any
 
-from . import coach, competence, evidence, ids, market_stats
+from . import coach, competence, evidence, ids, market_stats, playbook
 from .config import Config
 from .discovery import _plausible_band
 from .inbox import Inbox
@@ -636,6 +636,15 @@ async def run(
             journal.append("research_rejected", source="muse",
                            reason=v["fate"], raw=str(c)[:300])
             continue
+        # The chain the gate already fetched, and the closes the band was
+        # computed from - the menu is priced on exactly the data that admitted
+        # the candidate, at no extra network cost.
+        _closes = cache.get(f"closes|{v['underlying']}") or None
+        o = await playbook.attach(
+            tools, config, journal, o, source="muse",
+            spot=_closes[-1] if _closes else None,
+            chain=(cache.get(f"gate|{v['underlying']}") or {}).get("chain"),
+            closes=_closes)
         inbox.write_opportunity(o, source="muse")
         v["fate"] = "EMITTED"
         emitted += 1

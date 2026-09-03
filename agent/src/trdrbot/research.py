@@ -25,7 +25,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from . import competence, evidence, ids, market_stats
+from . import competence, evidence, ids, market_stats, playbook
 from .config import Config
 from .inbox import Inbox
 from .journal import Journal
@@ -321,13 +321,14 @@ async def run(
     # the last possible moment by a `get_option_chain` that returns nothing.
     # Cached per ticker: the same name usually appears in several rows, and
     # this is one MCP round trip each.
-    gates: dict[str, bool] = {}
+    # The whole gate result is kept, not the bool: its `chain` is what the
+    # playbook prices on, so the menu costs no second fetch (notes/026).
+    gates: dict[str, dict[str, Any]] = {}
 
     async def tradeable(ticker: str) -> bool:
         if ticker not in gates:
-            gate = await options_gate(tools, ticker, latest)
-            gates[ticker] = bool(gate.get("tradeable"))
-        return gates[ticker]
+            gates[ticker] = await options_gate(tools, ticker, latest)
+        return bool(gates[ticker].get("tradeable"))
 
     for raw in raw_opps:
         o = Opportunity.from_payload(raw)
@@ -342,6 +343,9 @@ async def run(
             journal.append("research_rejected", source="research",
                            reason=f"unscoreable:{verdict.defect}", raw=str(raw)[:300])
             continue
+        o = await playbook.attach(tools, config, journal, o, source="research",
+                                  spot=last_close.get(o.underlying),
+                                  chain=gates.get(o.underlying, {}).get("chain"))
         inbox.write_opportunity(o, source="research")
         emitted += 1
         if verdict.unchecked:

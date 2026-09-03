@@ -286,6 +286,40 @@ def _seed_entropy(rows: list[dict[str, Any]]) -> int | None:
     return len(pairs)
 
 
+def _playbook_rows(rows: list[dict[str, Any]], n: int = GAUGE_WINDOW) -> list[dict[str, Any]]:
+    """Recent playbook rows that actually PRICED something - voids carry no
+    candidates and would read as a collapse in every rate below."""
+    return [r for r in _kind_rows(rows, "playbook", n * 3) if not r.get("voided")][-n:]
+
+
+def _playbook_survival(rows: list[dict[str, Any]]) -> float | None:
+    pb = _playbook_rows(rows)
+    cands = sum(len(r.get("candidates") or []) for r in pb)
+    if not cands:
+        return None
+    hits = sum(sum(1 for c in (r.get("candidates") or []) if survived(c.get("fate")))
+               for r in pb)
+    return round(hits / cands, 4)
+
+
+def _playbook_candidates_per_opportunity(rows: list[dict[str, Any]]) -> float | None:
+    pb = _playbook_rows(rows)
+    if not pb:
+        return None
+    return round(sum(len(r.get("candidates") or []) for r in pb) / len(pb), 3)
+
+
+def _playbook_family_entropy(rows: list[dict[str, Any]]) -> int | None:
+    """Distinct families that SURVIVED recently. The playbook's version of the
+    muse's seed entropy: a catalogue optimised purely for survival could
+    converge on one family for every shape, and a menu of one is not a menu."""
+    pb = _playbook_rows(rows)
+    if not pb:
+        return None
+    return len({str(c.get("family")) for r in pb for c in (r.get("candidates") or [])
+                if survived(c.get("fate"))})
+
+
 def _cost_today(cfg: Any, roles: tuple[str, ...] = ("muse", "coach_mutate")
                 ) -> tuple[float, int]:
     """(priced spend today, count of UNPRICED calls) for the sentineled roles.
@@ -342,6 +376,11 @@ def snapshot_gauges(cfg: Any, rows: list[dict[str, Any]]) -> dict[str, Any]:
     put("muse.seed_entropy", _seed_entropy(rows))
     put("muse.funnel_overlap_rate", _funnel_overlap_rate(cfg, rows))
     put("muse.runs_total", sum(1 for r in rows if r.get("kind") == "muse") or None)
+    # The second lever's own gauges (notes/026), same omit-never-zero rule.
+    put("playbook.survival_rate", _playbook_survival(rows))
+    put("playbook.candidates_per_opportunity", _playbook_candidates_per_opportunity(rows))
+    put("playbook.family_entropy", _playbook_family_entropy(rows))
+    put("playbook.runs_total", sum(1 for r in rows if r.get("kind") == "playbook") or None)
     # The other two thesis sources and the ladder's own promotion criterion.
     # Each omitted (never zeroed) when there is no data - a gauge reading 0 is
     # indistinguishable from a collapse on a chart.
@@ -381,7 +420,7 @@ def snapshot_gauges(cfg: Any, rows: list[dict[str, Any]]) -> dict[str, Any]:
         regret, baseline = _led.gate_regret(book.all())
         put("gates.admitted_hold_rate", round(baseline, 4) if baseline is not None else None)
         for g in regret.values():
-            if g.measured:
+            if g.measured and g.regret is not None:
                 put(f"gates.{g.gate}.regret", round(g.regret, 4))
                 put(f"gates.{g.gate}.resolved", g.resolved)
 
@@ -507,6 +546,15 @@ def _sentinel_entropy(cfg: Any, rows: list[dict[str, Any]]) -> tuple[bool, Any, 
     return ent < limit, ent, limit
 
 
+def _sentinel_playbook_entropy(cfg: Any, rows: list[dict[str, Any]]) -> tuple[bool, Any, Any]:
+    c = getattr(cfg, "coach", None) or {}
+    limit = int(c.get("playbook_entropy_min_families", 3))
+    ent = _playbook_family_entropy(rows)
+    if ent is None or len(_playbook_rows(rows)) < GAUGE_WINDOW:
+        return False, ent, limit  # not enough priced opportunities to judge
+    return ent < limit, ent, limit
+
+
 SENTINELS: tuple[Sentinel, ...] = (
     Sentinel("cost_ceiling", _sentinel_cost, True,
              "the improvement loop is outspending its allowance"),
@@ -516,6 +564,10 @@ SENTINELS: tuple[Sentinel, ...] = (
              "the muse has stopped colliding diverse concepts - it is being "
              "optimised into a momentum machine",
              levers=("muse.prompt",)),
+    Sentinel("playbook_entropy_floor", _sentinel_playbook_entropy, True,
+             "the playbook has collapsed to one or two families - a menu of one "
+             "is not a menu",
+             levers=("playbook.catalogue",)),
 )
 
 

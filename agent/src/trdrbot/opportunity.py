@@ -51,6 +51,12 @@ class Opportunity:
     band_high: float | None = None
     why: str = ""
     suggested_structures: tuple[str, ...] = ()
+    #: The playbook's priced menu (notes/026): a header naming the board it
+    #: was priced on and the candidates, survivors first. None until
+    #: `playbook.attach` has run, and absent from the payload then, so an
+    #: opportunity without a menu is byte-identical to one written before the
+    #: playbook existed.
+    playbook: dict[str, Any] | None = None
 
     @classmethod
     def from_payload(cls, raw: Any) -> Opportunity | None:
@@ -71,6 +77,7 @@ class Opportunity:
             except (TypeError, ValueError):
                 return None
         structures = raw.get("suggested_structures") or []
+        menu = raw.get("playbook")
         return cls(
             underlying=str(raw.get("underlying") or "").upper(),
             claim=str(raw.get("claim") or ""),
@@ -82,6 +89,7 @@ class Opportunity:
             why=str(raw.get("why") or ""),
             suggested_structures=tuple(str(s) for s in structures
                                        if isinstance(structures, list)),
+            playbook=menu if isinstance(menu, dict) else None,
         )
 
     def to_payload(self) -> dict[str, Any]:
@@ -91,7 +99,7 @@ class Opportunity:
         `ids.opportunity_id` hashes three of them, so renaming one would
         silently change every opportunity's identity and break dedup.
         """
-        return {
+        payload: dict[str, Any] = {
             "underlying": self.underlying,
             "claim": self.claim,
             "direction": self.direction,
@@ -102,6 +110,9 @@ class Opportunity:
             "why": self.why,
             "suggested_structures": list(self.suggested_structures),
         }
+        if self.playbook is not None:
+            payload["playbook"] = self.playbook
+        return payload
 
 
 @dataclass(frozen=True)
@@ -192,6 +203,70 @@ def admit(
     return Admission(unchecked=tuple(unchecked))
 
 
+def _money(x: float) -> str:
+    """+$402 / -$31 - the sign before the currency, the way a desk writes it."""
+    return f"{'+' if x >= 0 else '-'}${abs(x):,.0f}"
+
+
+def _leg_word(leg: dict[str, Any]) -> str:
+    sign = "+" if str(leg.get("side")) == "long" else "-"
+    qty = int(leg.get("qty", 1) or 1)
+    return (f"{sign}{leg.get('right')}{float(leg.get('strike', 0)):g}"
+            + (f"x{qty}" if qty > 1 else ""))
+
+
+def render_for_decide(payload: dict[str, Any], *, source: str = "", trust: str = "") -> str:
+    """One opportunity as the decide prompt shows it. Deterministic.
+
+    Replaces `json.dumps(payload)`: the raw dump rendered a menu as a wall of
+    keys, and the agent has to be able to read the legs straight into
+    `simulate_experiments`. The playbook block names the board it was priced
+    on and says it is indicative - the tick's own quotes decide.
+    """
+    lo, hi = payload.get("band_low"), payload.get("band_high")
+    band = ""
+    if lo is not None or hi is not None:
+        lo_s = f"{float(lo):g}" if lo is not None else "-inf"
+        hi_s = f"{float(hi):g}" if hi is not None else "+inf"
+        band = f"; holds if {lo_s} <= price <= {hi_s} on {payload.get('horizon', '?')}"
+    drift = payload.get("drift_pct") or 0.0
+    drift_s = f", drift {float(drift):+.1f}%" if drift else ""
+    tag = " | ".join(x for x in ("opportunity", source, f"trust={trust}" if trust else "") if x)
+    lines = [f"- [{tag}] {payload.get('underlying', '?')} - \"{payload.get('claim', '')}\" - "
+             f"{payload.get('direction', 'neutral')}{drift_s}{band}."]
+    if payload.get("why"):
+        lines.append(f"  why: {str(payload['why'])[:400]}")
+    if payload.get("suggested_structures"):
+        lines.append("  source suggests: " + ", ".join(str(s) for s in payload["suggested_structures"][:4]))
+    menu = payload.get("playbook")
+    if isinstance(menu, dict) and menu.get("candidates") is not None:
+        lines.append(
+            f"  PLAYBOOK ({menu.get('shape')}; priced {str(menu.get('priced_at', ''))[:16]}Z on "
+            f"the {menu.get('expiry')} chain, spot {menu.get('spot')}, 1-sigma ${menu.get('sigma')}, "
+            f"IV {menu.get('iv_pct')}% ({menu.get('iv_source')}); indicative - re-simulate at "
+            f"live quotes before acting):")
+        rejected = []
+        for c in menu["candidates"]:
+            if c.get("fate") != "candidate":
+                rejected.append(f"{c.get('family')} - {str(c.get('fate', '')).removeprefix('rejected: ')}")
+                continue
+            legs = " ".join(_leg_word(l) for l in (c.get("legs") or []))
+            net = float(c.get("net") or 0.0)
+            side = "debit" if net > 0 else "credit"
+            mp, ml = c.get("max_profit"), c.get("max_loss")
+            mp_s = f"${float(mp):,.0f}" if mp is not None else "unbounded"
+            ml_s = f"${float(ml):,.0f}" if ml is not None else "unbounded"
+            lines.append(
+                f"    {c.get('family')}  {legs}  {side} ${abs(net):,.0f} | maxP {mp_s} / maxL {ml_s}"
+                f" | holds: P(win) {float(c.get('p_hold') or 0):.0%} E[pnl] {_money(float(c.get('e_hold') or 0))}"
+                f" | fails: P(win) {float(c.get('p_fail') or 0):.0%}")
+        if rejected:
+            lines.append("    rejected: " + "; ".join(rejected))
+        if not any(c.get("fate") == "candidate" for c in menu["candidates"]):
+            lines.append("    (no family survived - propose your own, or decline)")
+    return "\n".join(lines)
+
+
 async def options_gate(tools: dict[str, Any], ticker: str, latest: str) -> dict[str, Any]:
     """Does a chain exist with an expiry on/before `latest`?
 
@@ -226,7 +301,12 @@ async def options_gate(tools: dict[str, Any], ticker: str, latest: str) -> dict[
         snaps = r.get("snapshots") if isinstance(r, dict) else None
         if isinstance(snaps, dict):
             n = sum(1 for occ in snaps if optmath.parse_occ(str(occ)))
-            return {"tradeable": n > 0, "contracts_seen": n, "via": "snapshots"}
+            # The chain rides along so the playbook can price on the SAME
+            # fetch the gate answered from - zero extra network calls, and
+            # both are judged on one set of quotes. Additive: every caller
+            # reads `.get("tradeable")` and ignores the rest.
+            return {"tradeable": n > 0, "contracts_seen": n, "via": "snapshots",
+                    "chain": snaps}
         if isinstance(r, dict) and r.get("error"):
             # An error is an answer, and the answer is no. Under the old
             # substring count this was the WORST case: the message itself

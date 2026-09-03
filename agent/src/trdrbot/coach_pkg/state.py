@@ -143,6 +143,34 @@ LEVERS: tuple[Lever, ...] = (
             "Do not change the output schema, the placeholder names, or the "
             "percent-move band convention - those are contracts with code."),
     ),
+    # The playbook's catalogue of structure families (notes/026). A POLICY
+    # lever: the text is YAML data with its own validator, not a template.
+    # Scored by arithmetic no lever can move, so it may run beside the muse's
+    # experiment - `_disjoint` sees no shared reward module.
+    Lever(
+        "playbook.catalogue", "playbook",
+        ("optmath.band_conditional", "experiments.simulate"), "policy",
+        seed_ref=("trdrbot.playbook", "SEED_CATALOGUE"),
+        placeholders=(),
+        must_contain=("families:", "shapes:", "anchor:", "sigma:"),
+        evidence_kind="playbook",
+        reward_description=(
+            "Each family you propose is instantiated on the live option chain for every "
+            "opportunity whose thesis SHAPE it declares (range, bull_target, bear_target, "
+            "bull_floor, bear_ceiling), with strikes placed from your anchors and sigma "
+            "offsets. Each instance then meets fixed gates: every leg quoted, loss bounded, "
+            "pays after entry costs IF the thesis band holds, and wins at least 25 points "
+            "more often when the band holds than when it fails. The reward is the FRACTION "
+            "of instances that survive every gate. A family that fits a shape badly fails "
+            "often; a shape no family covers scores as failures."),
+        contract_note=(
+            "Keep the YAML schema exactly: version, families[].name/shapes/legs[].right/side/"
+            "qty/at.anchor/at.sigma. Anchors are spot, band_low, band_high, band_mid; sigma "
+            "within -2.5..2.5. Between 3 and 12 families; every shape covered; every family "
+            "must have a bounded loss and no naked short. Put the full replacement YAML in "
+            "the `prompt` field."),
+        validator_ref=("trdrbot.playbook", "validate_catalogue"),
+    ),
 )
 
 #: TO REGISTER A NEW LEVER, in full:

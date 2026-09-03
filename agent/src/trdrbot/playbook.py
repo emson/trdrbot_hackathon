@@ -32,12 +32,15 @@ reach them.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+import contextlib
+from dataclasses import dataclass, replace
+from datetime import date
 from typing import Any
 
 import yaml
 
-from . import optmath
+from . import ids, optmath
+from .opportunity import Opportunity
 from .optmath import Leg
 
 # --- shapes and anchors -----------------------------------------------------
@@ -591,9 +594,247 @@ def legs_from_payload(rows: list[dict[str, Any]]) -> list[Leg]:
             for r in rows]
 
 
+# --- the hot path: one board, two arms, one row -----------------------------
+
+#: Survivors shown to the decide agent, at most. Rejections render as one line
+#: each regardless - they are the cheap half of the menu.
+MENU_MAX = 5
+#: Void reasons, as stable strings: the trial log keys on them.
+VOID_NO_CHAIN = "no_chain"
+VOID_NO_EXPIRY = "no_expiry_in_window"
+VOID_NO_SPOT = "no_spot"
+VOID_NO_SIGMA = "no_sigma"
+
+_DIRECTION_OF_SHAPE = {"range": "neutral", "bull_target": "bullish", "bull_floor": "bullish",
+                       "bear_target": "bearish", "bear_ceiling": "bearish"}
+
+
+@dataclass(frozen=True)
+class Board:
+    """The shared inputs both arms are judged on. One memo, so a quote moving
+    between the two arms' evaluations cannot score as a variant difference."""
+
+    shape: str
+    spot: float
+    expiry: str
+    days: int
+    iv: float
+    iv_source: str  # chain | realized
+    sigma: float
+    chain: Chain
+
+
+def board_for(o: Opportunity, *, spot: float | None, chain: Chain,
+              closes: list[float] | None = None) -> Board | str:
+    """Everything an arm needs, or the reason the trial is VOID.
+
+    A void is data absence - no chain, no listed expiry inside the horizon's
+    reach, no spot, no vol to condition on - and says nothing about either
+    catalogue. It differs deliberately from the muse's empty-reply rule, where
+    emptiness is the variant's own doing.
+    """
+    if not chain.quotes:
+        return VOID_NO_CHAIN
+    if spot is None or spot <= 0:
+        return VOID_NO_SPOT
+    shape = shape_of(o.band_low, o.band_high, spot)
+    if shape is None:
+        return "no_band"
+    expiry = next((e for e in chain.expiries() if e >= o.horizon), None)
+    if expiry is None:
+        return VOID_NO_EXPIRY
+    days = (date.fromisoformat(expiry) - ids.market_today()).days
+    if days <= 0:
+        return VOID_NO_EXPIRY
+    iv, source = chain.atm_iv(expiry, spot), "chain"
+    if iv is None and closes and len(closes) >= 60:
+        from . import market_stats
+
+        rv = market_stats.compute_stats(o.underlying, closes).realized_vol
+        if rv:
+            iv, source = rv / 100.0, "realized"
+    if iv is None:
+        return VOID_NO_SIGMA
+    sigma = optmath.expected_move(spot, iv, days)
+    if not sigma:
+        return VOID_NO_SIGMA
+    return Board(shape=shape, spot=spot, expiry=expiry, days=days, iv=iv, iv_source=source,
+                 sigma=sigma, chain=chain)
+
+
+def run_arm(catalogue_text: str, board: Board, o: Opportunity) -> list[dict[str, Any]] | str:
+    """One arm through the gates. A string when the catalogue does not parse.
+
+    ONE copy, run by both arms - the muse's rule (D-088): two arms running
+    subtly different code is this project's most familiar bug.
+    """
+    try:
+        cat = parse_catalogue(catalogue_text)
+    except CatalogueError as exc:
+        return str(exc)
+    out: list[dict[str, Any]] = []
+    for fam in cat.applicable(board.shape):
+        inst = resolve_legs(fam, board.shape, spot=board.spot, sigma=board.sigma,
+                            band_low=o.band_low, band_high=o.band_high, chain=board.chain,
+                            expiry=board.expiry)
+        if isinstance(inst, str):
+            out.append({"family": fam.name, "fate": inst, "legs": [], "occs": []})
+            continue
+        v = evaluate(inst.legs, spot=board.spot, iv=board.iv, days=board.days,
+                     band_low=o.band_low, band_high=o.band_high, friction_rt=inst.friction_rt)
+        out.append({"family": fam.name,
+                    "legs": [leg_payload(l, occ) for l, occ in zip(inst.legs, inst.occs)],
+                    "occs": list(inst.occs), **v})
+    return out
+
+
+def asked_for(catalogue_text: str, shape: str) -> int:
+    try:
+        return len(parse_catalogue(catalogue_text).applicable(shape))
+    except CatalogueError:
+        return 0
+
+
+def menu_of(verdicts: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """What the decide agent sees: survivors first (capped), then every
+    rejection as a one-liner. The journal row keeps the full verdicts."""
+    survivors = [v for v in verdicts if v.get("fate") == "candidate"][:MENU_MAX]
+    rejected = [{"family": v["family"], "fate": v["fate"]} for v in verdicts
+                if v.get("fate") != "candidate"]
+    keep = ("family", "fate", "legs", "net", "max_profit", "max_loss", "e_hold", "p_hold",
+            "p_fail", "edge")
+    return [{k: v[k] for k in keep if k in v} for v in survivors] + rejected
+
+
+async def attach(tools: dict[str, Any], config: Any, journal: Any, o: Opportunity, *,
+                 source: str, spot: float | None = None, chain: Any = None,
+                 closes: list[float] | None = None) -> Opportunity:
+    """The hot-path entry: price the incumbent's menu onto an opportunity, and
+    score the shadow challenger on the same board. Never raises.
+
+    `chain` is the raw snapshots dict when the caller's options gate already
+    fetched it (every source's gate does), so the usual cost is zero network
+    calls. The incumbent's proposals reach the opportunity, the journal and
+    the heartbeat; the challenger's reach `coach.record_trial` and nothing
+    else (D-088's shadow rule).
+    """
+    from . import coach, health
+
+    try:
+        arms = coach.arms(config, "playbook.catalogue", seed_text=SEED_CATALOGUE)
+        if spot is None and closes:
+            spot = closes[-1]
+        if closes is None and spot is None:
+            from . import market_stats
+
+            closes = market_stats.load_closes(config.paths.state, o.underlying)
+            spot = closes[-1] if closes else None
+        snaps = chain
+        if isinstance(snaps, dict) and "snapshots" in snaps:
+            snaps = snaps["snapshots"]
+        board: Board | str = VOID_NO_CHAIN
+        if snaps is not None:
+            board = board_for(o, spot=spot, chain=chain_from_snapshots(snaps), closes=closes)
+        if board in (VOID_NO_CHAIN, VOID_NO_EXPIRY):
+            # The gate's page is the nearest expiry and usually falls short of
+            # the horizon (measured live: one expiry, 100 contracts). One
+            # targeted fetch, shared by both arms, is the usual cost.
+            snaps = await fetch_chain(tools, config, o.underlying, horizon=o.horizon, spot=spot)
+            board = board_for(o, spot=spot, chain=chain_from_snapshots(snaps), closes=closes)
+        nonce = ids.opportunity_id(source, o.to_payload())
+
+        if isinstance(board, str):
+            journal.append("playbook", underlying=o.underlying, source=source,
+                           voided=board, variant=arms.incumbent.id, exp_id=arms.exp_id)
+            if arms.paired:
+                coach.record_trial(config, arms.exp_id or "", run_nonce=nonce,
+                                   incumbent={"candidates": 0, "survived": 0, "failed": 0},
+                                   challenger={"voided": board})
+            health.heartbeat(journal, "playbook_run", opportunities=1, proposed=0,
+                             survived=0, voided=1, reason=board)
+            return o
+
+        inc = run_arm(arms.incumbent.text, board, o)
+        if isinstance(inc, str):
+            # The operator hand-edited the incumbent into something that does
+            # not parse. The opportunity still goes out - without a menu, and
+            # with a row saying why; no trial can be scored against garbage.
+            health.degraded(journal, "playbook", f"incumbent catalogue unreadable: {inc}")
+            health.heartbeat(journal, "playbook_run", opportunities=1, proposed=0,
+                             survived=0, voided=0)
+            return o
+        asked = asked_for(arms.incumbent.text, board.shape)
+        inc_score = score_arm(inc, asked)
+
+        if arms.paired and arms.challenger is not None:
+            ch = run_arm(arms.challenger.text, board, o)
+            if isinstance(ch, str):
+                ch_score: dict[str, Any] = {"candidates": 0, "survived": 0,
+                                            "failed": max(1, asked), "fates": [f"error: {ch}"]}
+            else:
+                ch_score = score_arm(ch, asked_for(arms.challenger.text, board.shape))
+            coach.record_trial(config, arms.exp_id or "", run_nonce=nonce,
+                               incumbent=inc_score, challenger=ch_score)
+
+        header = {
+            "shape": board.shape,
+            "shape_disagrees": (o.direction in _DIRECTION_OF_SHAPE.values()
+                                and _DIRECTION_OF_SHAPE[board.shape] != o.direction),
+            "expiry": board.expiry, "days": board.days, "spot": round(board.spot, 2),
+            "sigma": round(board.sigma, 2), "iv_pct": round(board.iv * 100.0, 1),
+            "iv_source": board.iv_source, "priced_at": ids.utc_now().isoformat(),
+            "variant": arms.incumbent.id, "dist": DIST,
+        }
+        journal.append("playbook", underlying=o.underlying, source=source, horizon=o.horizon,
+                       band_low=o.band_low, band_high=o.band_high, **header,
+                       prompt_fp=arms.incumbent.fingerprint, exp_id=arms.exp_id,
+                       asked=asked, candidates=inc, survived=inc_score["survived"])
+        health.heartbeat(journal, "playbook_run", opportunities=1, proposed=len(inc),
+                         survived=inc_score["survived"], voided=0)
+        return replace(o, playbook={**header, "candidates": menu_of(inc)})
+    except Exception as exc:  # noqa: BLE001 - advisory: never block an emission
+        with contextlib.suppress(Exception):
+            health.degraded(journal, "playbook", f"{type(exc).__name__}: {exc}"[:200])
+        print(f"[playbook] attach failed for {o.underlying}, emitting without a menu: {exc!r}")
+        return o
+
+
+#: Strikes this far either side of spot are requested. Wide enough for a
+#: +/-2.5 sigma anchor on a 40%-vol name over ten days (~17%); a chain page is
+#: the feed's own unit and asking for less is how the gate's page came back as
+#: one expiry, all calls (compact.py's measured case).
+FETCH_STRIKE_WINDOW = 0.20
+FETCH_LIMIT = 600
+
+
+async def fetch_chain(tools: dict[str, Any], config: Any, underlying: str, *,
+                      horizon: str = "", spot: float | None = None) -> Any:
+    """A chain the playbook can actually price on.
+
+    `options_gate` asks for `expiration_date_lte=<window end>` and reads the
+    first page - measured live, that is the NEAREST expiry, 100 contracts,
+    which voids every horizon past it. This asks for expiries from the
+    horizon to the window's end (D-101's bound), both rights, a strike window
+    around spot, and a page big enough to hold it.
+    """
+    from . import competence, mcp_client
+
+    latest = competence.forecast_window(config.deadline)[2]
+    kwargs: dict[str, Any] = {"underlying_symbol": underlying, "expiration_date_lte": latest,
+                              "limit": FETCH_LIMIT}
+    if horizon:
+        kwargs["expiration_date_gte"] = horizon
+    if spot:
+        kwargs["strike_price_gte"] = round(spot * (1 - FETCH_STRIKE_WINDOW), 2)
+        kwargs["strike_price_lte"] = round(spot * (1 + FETCH_STRIKE_WINDOW), 2)
+    r = await mcp_client.call(tools, "get_option_chain", **kwargs)
+    return r.get("snapshots") if isinstance(r, dict) else None
+
+
 __all__ = [
     "ANCHORS", "SHAPES", "SEED_CATALOGUE", "MIN_BAND_EDGE", "ENTRY_CROSSINGS",
-    "Catalogue", "CatalogueError", "Chain", "Family", "Instance", "LegSpec", "Quote",
-    "chain_from_snapshots", "classify", "evaluate", "leg_payload", "legs_from_payload",
-    "parse_catalogue", "resolve_legs", "score_arm", "shape_of", "validate_catalogue",
+    "Board", "Catalogue", "CatalogueError", "Chain", "Family", "Instance", "LegSpec", "Quote",
+    "asked_for", "attach", "board_for", "chain_from_snapshots", "classify", "evaluate", "fetch_chain",
+    "leg_payload", "legs_from_payload", "menu_of", "parse_catalogue", "resolve_legs",
+    "run_arm", "score_arm", "shape_of", "validate_catalogue",
 ]

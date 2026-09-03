@@ -327,3 +327,211 @@ def test_leg_payload_round_trips_through_the_journal_shape():
     assert row["symbol"] == "NVDA260911C00225000" and row["iv_pct"] == 38.0
     back = playbook.legs_from_payload([row])[0]
     assert back == leg
+
+
+# --- the hot path: attach, one board, two arms, one row -------------------
+
+from pathlib import Path  # noqa: E402
+from types import SimpleNamespace  # noqa: E402
+
+from conftest import days_out, journal_rows, tools_for  # noqa: E402
+
+from trdrbot import coach  # noqa: E402
+from trdrbot.journal import Journal  # noqa: E402
+from trdrbot.opportunity import Opportunity, render_for_decide  # noqa: E402
+
+
+def _cfg(tmp_path: Path) -> SimpleNamespace:
+    (tmp_path / "state").mkdir(parents=True, exist_ok=True)
+    return SimpleNamespace(
+        paths=SimpleNamespace(state=tmp_path / "state", data=tmp_path,
+                              journal=tmp_path / "journal.jsonl"),
+        coach={"enabled": True}, pricing={}, deadline=None)
+
+
+def _snapshots(expiry: str, **chain_kw) -> dict:
+    """The synthetic chain as the feed would hand it to `options_gate`."""
+    ymd = expiry[2:4] + expiry[5:7] + expiry[8:10]
+    snaps = {}
+    for q in _chain(**chain_kw).quotes:
+        occ = q.occ.replace("260911", ymd)
+        snaps[occ] = {"latestQuote": {"bp": q.bid, "ap": q.ask}, "impliedVolatility": q.iv}
+    return snaps
+
+
+def _opp(lo: float | None, hi: float | None, horizon: str) -> Opportunity:
+    return Opportunity(underlying="XYZ", claim="XYZ does a thing", horizon=horizon,
+                       direction="neutral", band_low=lo, band_high=hi, why="because")
+
+
+def _pair(cfg: SimpleNamespace, journal: Journal) -> None:
+    """Open a paired experiment on the playbook lever, as the Coach would."""
+    st = coach.load_state(cfg, "playbook.catalogue", playbook.SEED_CATALOGUE)
+    challenger = playbook.SEED_CATALOGUE.replace("sigma: 1.0}}", "sigma: 1.25}}")
+    assert playbook.validate_catalogue(challenger) == ""
+    coach._open(cfg, st, coach.Variant("v1", challenger), journal)
+
+
+@pytest.mark.asyncio
+async def test_attach_shadow_arm_writes_nothing(tmp_path):
+    """D-088's shadow rule, for the second lever: the challenger reaches
+    `record_trial` and nothing else. One `playbook` row, one heartbeat, one
+    trial with both arms - and the opportunity carries only the incumbent's
+    menu."""
+    cfg, journal = _cfg(tmp_path), Journal(tmp_path / "journal.jsonl")
+    _pair(cfg, journal)
+    expiry, horizon = days_out(8), days_out(5)
+    tools = tools_for(get_option_chain=lambda **_: {"snapshots": _snapshots(expiry)})
+
+    out = await playbook.attach(tools, cfg, journal, _opp(98.0, 102.0, horizon), source="muse",
+                                spot=SPOT, chain=_snapshots(expiry))
+
+    assert out.playbook is not None and out.playbook["shape"] == "range"
+    assert out.playbook["variant"] == "v0"
+    survivors = [c for c in out.playbook["candidates"] if c["fate"] == "candidate"]
+    assert survivors and all(c["legs"] for c in survivors)
+    rows = journal_rows(journal, "playbook")
+    assert len(rows) == 1 and rows[0]["variant"] == "v0" and rows[0]["candidates"]
+    beats = journal_rows(journal, "playbook_run")
+    assert len(beats) == 1 and beats[0]["proposed"] == len(rows[0]["candidates"])
+    trials = [r for r in coach.events(cfg) if r.get("kind") == "trial_result"]
+    assert len(trials) == 1
+    assert trials[0]["incumbent"]["candidates"] > 0 and trials[0]["challenger"]["candidates"] > 0
+    assert not tools["get_option_chain"].calls, "the chain was handed in - no fetch"
+    # the payload round-trips and its identity ignores the menu
+    payload = out.to_payload()
+    assert Opportunity.from_payload(payload) == out
+    from trdrbot import ids
+
+    bare = _opp(98.0, 102.0, horizon).to_payload()
+    assert ids.opportunity_id("muse", payload) == ids.opportunity_id("muse", bare)
+
+
+@pytest.mark.asyncio
+async def test_attach_shares_one_chain_fetch_across_both_arms(tmp_path):
+    cfg, journal = _cfg(tmp_path), Journal(tmp_path / "journal.jsonl")
+    _pair(cfg, journal)
+    expiry = days_out(8)
+    tools = tools_for(get_option_chain=lambda **_: {"snapshots": _snapshots(expiry)})
+
+    out = await playbook.attach(tools, cfg, journal, _opp(103.0, 108.0, days_out(5)),
+                                source="research", spot=SPOT)
+
+    assert len(tools["get_option_chain"].calls) == 1
+    assert out.playbook is not None and out.playbook["shape"] == "bull_target"
+    assert len([r for r in coach.events(cfg) if r.get("kind") == "trial_result"]) == 1
+
+
+@pytest.mark.asyncio
+async def test_attach_voids_the_trial_when_no_expiry_lies_inside_the_window(tmp_path):
+    """Data absence is not evidence about either catalogue: the trial is
+    VOID for both arms, the opportunity goes out without a menu, and the
+    heartbeat says so."""
+    cfg, journal = _cfg(tmp_path), Journal(tmp_path / "journal.jsonl")
+    _pair(cfg, journal)
+    expiry, late_horizon = days_out(8), days_out(12)
+    tools = tools_for(get_option_chain=lambda **_: {"snapshots": _snapshots(expiry)})
+
+    out = await playbook.attach(tools, cfg, journal, _opp(98.0, 102.0, late_horizon),
+                                source="muse", spot=SPOT)
+
+    assert out.playbook is None
+    assert journal_rows(journal, "playbook")[0]["voided"] == playbook.VOID_NO_EXPIRY
+    assert journal_rows(journal, "playbook_run")[0]["voided"] == 1
+    trial = [r for r in coach.events(cfg) if r.get("kind") == "trial_result"][0]
+    assert trial["challenger"] == {"voided": playbook.VOID_NO_EXPIRY}
+    assert coach.tally(cfg, trial["exp_id"]).runs == 0, "a void is not a run"
+
+
+@pytest.mark.asyncio
+async def test_attach_never_raises_and_degrades_when_the_incumbent_arm_fails(tmp_path):
+    """An operator can hand-edit the incumbent into something that does not
+    parse. The emission still happens, without a menu, and a `degraded` row
+    says why - a silent pass-through is the failure class D-074 names."""
+    cfg, journal = _cfg(tmp_path), Journal(tmp_path / "journal.jsonl")
+    st = coach.load_state(cfg, "playbook.catalogue", playbook.SEED_CATALOGUE)
+    st.incumbent = coach.Variant("v0", "families: [")
+    coach.save_state(cfg, st)
+    expiry = days_out(8)
+
+    out = await playbook.attach({}, cfg, journal, _opp(98.0, 102.0, days_out(5)), source="muse",
+                                spot=SPOT, chain=_snapshots(expiry))
+
+    assert out.playbook is None
+    degraded = journal_rows(journal, "degraded")
+    assert degraded and degraded[0]["subsystem"] == "playbook"
+    assert journal_rows(journal, "playbook_run")[0]["proposed"] == 0
+
+    # ...and a tool that raises is the same story: no exception escapes
+    def boom(**_):
+        raise RuntimeError("feed down")
+
+    out = await playbook.attach(tools_for(get_option_chain=boom), cfg, journal,
+                                _opp(98.0, 102.0, days_out(5)), source="muse", spot=SPOT)
+    assert out.playbook is None
+
+
+@pytest.mark.asyncio
+async def test_attach_falls_back_to_realized_vol_when_the_chain_carries_no_iv(tmp_path):
+    cfg, journal = _cfg(tmp_path), Journal(tmp_path / "journal.jsonl")
+    expiry = days_out(8)
+    import math
+    import random
+
+    rng = random.Random(1)
+    closes = [100.0]
+    for _ in range(120):
+        closes.append(round(closes[-1] * math.exp(rng.gauss(0, 0.012)), 2))
+
+    out = await playbook.attach({}, cfg, journal, _opp(98.0, 102.0, days_out(5)), source="muse",
+                                chain=_snapshots(expiry, iv=None), closes=closes)
+
+    assert out.playbook is not None and out.playbook["iv_source"] == "realized"
+    assert out.playbook["spot"] == closes[-1]
+
+
+def test_render_for_decide_lists_survivors_then_rejections_and_reads_as_legs():
+    payload = {
+        "underlying": "NVDA", "claim": "NVDA holds 222-232", "direction": "bullish",
+        "drift_pct": 0.0, "band_low": 222.0, "band_high": 232.0, "horizon": "2026-09-04",
+        "why": "MUSE domino chain: a -> b", "suggested_structures": ["bull call spread"],
+        "playbook": {
+            "shape": "bull_target", "priced_at": "2026-09-03T13:02:11+00:00",
+            "expiry": "2026-09-04", "spot": 224.44, "sigma": 5.1, "iv_pct": 38.0,
+            "iv_source": "chain",
+            "candidates": [
+                {"family": "bull_call_debit_on_band", "fate": "candidate",
+                 "legs": [{"right": "C", "strike": 222.0, "side": "long", "qty": 1},
+                          {"right": "C", "strike": 232.0, "side": "short", "qty": 1}],
+                 "net": 410.0, "max_profit": 590.0, "max_loss": -410.0,
+                 "e_hold": 402.0, "p_hold": 0.91, "p_fail": 0.12, "edge": 0.79},
+                {"family": "iron_condor", "fate": "rejected: indifferent to the thesis (edge +0.08)"},
+                {"family": "call_butterfly", "fate": "rejected: pays $-31 when the thesis holds"},
+            ]}}
+    text = render_for_decide(payload, source="muse", trust="primary")
+    lines = text.splitlines()
+    assert lines[0].startswith('- [opportunity | muse | trust=primary] NVDA - "NVDA holds 222-232"')
+    assert "holds if 222 <= price <= 232 on 2026-09-04" in lines[0]
+    assert any(l.strip().startswith("PLAYBOOK (bull_target;") for l in lines)
+    assert "  bull_call_debit_on_band  +C222 -C232  debit $410 | maxP $590 / maxL $-410" in text
+    assert "holds: P(win) 91% E[pnl] +$402 | fails: P(win) 12%" in text
+    assert "rejected: iron_condor - indifferent to the thesis (edge +0.08); call_butterfly - pays" in text
+    assert "re-simulate at live quotes" in text
+    assert len(lines) <= 8
+    # a menu-less opportunity renders the same header and nothing more
+    bare = render_for_decide({k: v for k, v in payload.items() if k != "playbook"}, source="muse")
+    assert "PLAYBOOK" not in bare and bare.startswith("- [opportunity | muse] NVDA")
+
+
+def test_the_playbook_lever_is_a_declaration_the_registry_can_run():
+    lever = coach.lever("playbook.catalogue")
+    assert lever is not None and lever.kind == "policy"
+    assert coach.seeds()["playbook.catalogue"] == playbook.SEED_CATALOGUE
+    validator = coach.validator_of(lever)
+    assert validator is not None and validator(playbook.SEED_CATALOGUE) == ""
+    assert "naked" in validator(playbook.SEED_CATALOGUE.replace(
+        "- {right: P, side: long,  at: {anchor: band_low, sigma: -1.0}}",
+        "- {right: C, side: long,  at: {anchor: band_low, sigma: -1.0}}"))
+    rendered = coach.render_mutate_prompt(lever, playbook.SEED_CATALOGUE, rejections="-",
+                                          graveyard="-")
+    assert "band holds" in rendered and "data, not a template" in rendered

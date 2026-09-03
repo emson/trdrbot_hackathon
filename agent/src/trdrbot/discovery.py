@@ -27,7 +27,7 @@ import json
 from datetime import UTC, datetime
 from typing import Any
 
-from . import competence, evidence, ids, market_stats
+from . import competence, evidence, ids, market_stats, playbook
 from .config import Config
 from .inbox import Inbox
 from .journal import Journal
@@ -221,6 +221,7 @@ async def run(
     # ---- deterministic layer per nominee ----
     blocks: list[str] = []
     last_close: dict[str, float] = {}
+    chains: dict[str, Any] = {}
     for n in nominees:
         t = n["ticker"].upper()
         # NOT `section` (D-102): that is `llm.section`, called below to split
@@ -253,6 +254,9 @@ async def run(
         f = await _fundamentals(t)
         lines.append("Fundamentals (Yahoo): " + json.dumps(f))
         gate = await options_gate(tools, t, _latest)
+        # `chain` is the raw snapshot dict - kept aside for the playbook, and
+        # kept OFF the nominee and out of the gate line, which are journalled.
+        chains[t] = gate.pop("chain", None)
         lines.append(
             f"Options gate (expiries on/before {_latest}): "
             + ("PASS" if gate.get("tradeable") else f"FAIL {gate}")
@@ -327,6 +331,9 @@ async def run(
                            reason=verdict.defect, raw=str(raw)[:300],
                            spot=last_close.get(o.underlying))
             continue
+        o = await playbook.attach(tools, config, journal, o, source="discovery",
+                                  spot=last_close.get(o.underlying),
+                                  chain=chains.get(o.underlying))
         inbox.write_opportunity(o, source="discovery")
         emitted += 1
         if verdict.unchecked:

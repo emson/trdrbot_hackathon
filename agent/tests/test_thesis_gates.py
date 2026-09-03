@@ -171,3 +171,13 @@ async def test_a_malformed_reply_element_is_counted_not_silently_dropped(paths):
     # directly - a KeyError here would take down the whole muse run.
     for v in evaluated:
         assert "underlying" in v and "stated" in v and "fate" in v
+
+
+async def test_the_options_gate_hands_back_the_chain_it_answered_from():
+    """The playbook prices on the SAME fetch the gate answered from (notes/026):
+    zero extra network calls, and one set of quotes for both the gate and the
+    menu. Additive - every caller reads `.get("tradeable")` and ignores the rest."""
+    snaps = {"SPY260904C00760000": {"latestQuote": {"bp": 1.0, "ap": 1.1}}}
+    tools = tools_for(get_option_chain=lambda **_: {"snapshots": snaps})
+    gate = await opportunity.options_gate(tools, "SPY", "2026-09-04")
+    assert gate["tradeable"] and gate["chain"] is snaps

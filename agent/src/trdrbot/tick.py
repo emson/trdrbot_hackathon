@@ -46,6 +46,7 @@ from . import (
     local_tools,
     mcp_client,
     news_extract,
+    opportunity,
     optmath,
     prompts,
     reconcile,
@@ -565,7 +566,15 @@ async def _build_decide_prompt(
             print(f"[tick {n}] news enrichment failed, using raw payloads: {exc!r}")
             obs_lines += [f"- [news | trust={i.trust}] {json.dumps(i.payload)}"
                           for i in news_items]
-    obs_lines += [f"- [{i.type} | trust={i.trust}] {json.dumps(i.payload)}" for i in other_items]
+    # Opportunities render through the seam that owns their wire format, so
+    # the playbook menu reads as legs the agent can simulate rather than as a
+    # JSON dump (notes/026). Everything else keeps the raw payload.
+    for i in other_items:
+        if i.type == "opportunity":
+            obs_lines.append(opportunity.render_for_decide(i.payload, source=i.source,
+                                                           trust=i.trust))
+        else:
+            obs_lines.append(f"- [{i.type} | trust={i.trust}] {json.dumps(i.payload)}")
     prompt_parts.append("## Observations this cycle\n\n" + "\n".join(obs_lines))
     # THE LOOP'S OTHER HALF (D-113). `learn._write_lesson` has appended one
     # entry per resolved position to `lessons.md` since D-022, and nothing has
