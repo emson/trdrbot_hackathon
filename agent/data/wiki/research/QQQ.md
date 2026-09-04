@@ -15,7 +15,7 @@ sources:
   last_modified: '2026-08-27T10:02:36.763766+00:00'
 generated:
   at: '2026-09-03T00:05:59.753418+00:00'
-status: stable
+status: deprecated
 stale_after: '2026-09-04T00:05:59.753420+00:00'
 ---
 

@@ -1,4 +1,44 @@
+## 2026-09-04
+- housekeeping: 0 interim score(s), consolidation nothing pending, 0 attribution(s), 0 concept(s) tombstoned
+- housekeeping: 0 interim score(s), consolidation nothing pending, 0 attribution(s), 0 concept(s) tombstoned
+- housekeeping: 0 interim score(s), consolidation nothing pending, 0 attribution(s), 0 concept(s) tombstoned
+- housekeeping: 0 interim score(s), consolidation nothing pending, 0 attribution(s), 0 concept(s) tombstoned
+- housekeeping: 0 interim score(s), consolidation nothing pending, 0 attribution(s), 0 concept(s) tombstoned
+- housekeeping: 0 interim score(s), consolidation nothing pending, 0 attribution(s), 0 concept(s) tombstoned
+- housekeeping: 0 interim score(s), consolidation nothing pending, 0 attribution(s), 0 concept(s) tombstoned
+- housekeeping: 0 interim score(s), consolidation nothing pending, 0 attribution(s), 0 concept(s) tombstoned
+- housekeeping: 0 interim score(s), consolidation nothing pending, 0 attribution(s), 0 concept(s) tombstoned
+- housekeeping: 0 interim score(s), consolidation nothing pending, 0 attribution(s), 0 concept(s) tombstoned
+- housekeeping: 0 interim score(s), consolidation nothing pending, 0 attribution(s), 0 concept(s) tombstoned
+- housekeeping: 0 interim score(s), consolidation nothing pending, 0 attribution(s), 0 concept(s) tombstoned
+- housekeeping: 0 interim score(s), consolidation nothing pending, 0 attribution(s), 0 concept(s) tombstoned
+- housekeeping: 0 interim score(s), consolidation nothing pending, 0 attribution(s), 0 concept(s) tombstoned
+- housekeeping: 0 interim score(s), consolidation nothing pending, 0 attribution(s), 0 concept(s) tombstoned
+- housekeeping: 0 interim score(s), consolidation nothing pending, 0 attribution(s), 0 concept(s) tombstoned
+- housekeeping: 0 interim score(s), consolidation nothing pending, 0 attribution(s), 0 concept(s) tombstoned
+- housekeeping: 0 interim score(s), consolidation nothing pending, 0 attribution(s), 0 concept(s) tombstoned
+- housekeeping: 0 interim score(s), consolidation nothing pending, 0 attribution(s), 0 concept(s) tombstoned
+- housekeeping: 0 interim score(s), consolidation nothing pending, 0 attribution(s), 0 concept(s) tombstoned
+- housekeeping: 0 interim score(s), consolidation nothing pending, 0 attribution(s), 0 concept(s) tombstoned
+- housekeeping: 0 interim score(s), consolidation nothing pending, 0 attribution(s), 0 concept(s) tombstoned
+- housekeeping: 0 interim score(s), consolidation nothing pending, 0 attribution(s), 0 concept(s) tombstoned
+- housekeeping: 0 interim score(s), consolidation nothing pending, 0 attribution(s), 0 concept(s) tombstoned
+- housekeeping: 0 interim score(s), consolidation nothing pending, 0 attribution(s), 1 concept(s) tombstoned
+
 ## 2026-09-03
+- housekeeping: 0 interim score(s), consolidation nothing pending, 0 attribution(s), 0 concept(s) tombstoned
+- housekeeping: 0 interim score(s), consolidation nothing pending, 0 attribution(s), 0 concept(s) tombstoned
+- housekeeping: 0 interim score(s), consolidation nothing pending, 0 attribution(s), 0 concept(s) tombstoned
+- housekeeping: 0 interim score(s), consolidation nothing pending, 0 attribution(s), 0 concept(s) tombstoned
+- housekeeping: 0 interim score(s), consolidation nothing pending, 0 attribution(s), 0 concept(s) tombstoned
+- housekeeping: 0 interim score(s), consolidation nothing pending, 0 attribution(s), 0 concept(s) tombstoned
+- housekeeping: 0 interim score(s), consolidation nothing pending, 0 attribution(s), 0 concept(s) tombstoned
+- housekeeping: 0 interim score(s), consolidation nothing pending, 0 attribution(s), 0 concept(s) tombstoned
+- housekeeping: 0 interim score(s), consolidation nothing pending, 0 attribution(s), 0 concept(s) tombstoned
+- housekeeping: 0 interim score(s), consolidation nothing pending, 3 attribution(s), 8 concept(s) tombstoned
+- attributed pos_20260902_NVDA_bull_call_spread_c1bca8b8: thesis_wrong_profited_anyway (price 228.54)
+- attributed pos_20260828_SPY_bear_put_spread_79c4ca98: thesis_wrong_profited_anyway (price 773.12)
+- attributed pos_20260827_NVDA_bull_call_spread_01a75fab: thesis_right_expression_right (price 228.54)
 - lesson recorded for pos_20260902_NVDA_bull_call_spread_cf437fa5 (external)
 - housekeeping: 0 interim score(s), consolidation nothing pending, 0 attribution(s), 0 concept(s) tombstoned
 - housekeeping: 0 interim score(s), consolidation nothing pending, 0 attribution(s), 0 concept(s) tombstoned

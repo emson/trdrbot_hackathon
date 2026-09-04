@@ -8,7 +8,7 @@ sources:
 generated:
   at: '2026-09-02T16:07:41.827548+00:00'
 stale_after: '2026-09-03T16:07:41.827550+00:00'
-status: stable
+status: deprecated
 ---
 
 # What it is
@@ -24,4 +24,4 @@ Earnings could validate AI-automation expectations and extend the breakout despi
 (not researched - discovery pass)
 
 # Environment
-Verdict: watch. Evidence: UiPath's upcoming quarterly financials may continue its recent stock rally.; The preview states that UiPath stock was up 36% in one month ahead of earnings.; BlackRock said AI is in Phase 1 after $600 billion of Big Tech spending, indicating future growth potential.; Prediction market: 1% odds of a 
+Verdict: watch. Evidence: UiPath's upcoming quarterly financials may continue its recent stock rally.; The preview states that UiPath stock was up 36% in one month ahead of earnings.; BlackRock said AI is in Phase 1 after $600 billion of Big Tech spending, indicating future growth potential.; Prediction market: 1% odds of a

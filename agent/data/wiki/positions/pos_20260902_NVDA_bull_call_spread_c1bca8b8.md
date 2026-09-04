@@ -60,6 +60,7 @@ exit_state:
   - false
   - false
 close_reason: external
+closed_at: ''
 decision_ref: jrn_20260902T135542Z_deccf1ebf
 sources:
 - id: new_20260902T033512Z_alpaca_news_4348c942
@@ -139,7 +140,7 @@ sources:
   author: polymarket
 generated:
   by: openai:gpt-5.6-sol | anthropic:claude-opus-5 | openai:gpt-5
-  at: '2026-09-02T14:32:58.866251+00:00'
+  at: '2026-09-03T20:03:20.257030+00:00'
 verified:
 - by: trdrbot/reconcile
   at: '2026-09-02T14:02:31.817368+00:00'
@@ -175,7 +176,7 @@ thesis_band_high: 225.0
 thesis_drift: 0.012
 thesis_vol_view: 0.35
 leg_divergence_count: 0
-attribution: ''
+attribution: thesis_wrong_profited_anyway
 provenance: agent
 ---
 

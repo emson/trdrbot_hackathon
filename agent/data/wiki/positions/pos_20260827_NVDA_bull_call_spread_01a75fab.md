@@ -58,6 +58,7 @@ exit_state:
   - false
   - false
 close_reason: external
+closed_at: ''
 decision_ref: jrn_20260827T152254Z_dec775fcc
 sources:
 - id: opp_20260827T152232Z_discovery_36d5c9a3
@@ -68,7 +69,7 @@ sources:
   author: discovery
 generated:
   by: anthropic:claude-opus-5
-  at: '2026-08-27T17:01:05.010319+00:00'
+  at: '2026-09-03T20:03:19.957177+00:00'
 verified:
 - by: trdrbot/reconcile
   at: '2026-08-27T15:27:06.400573+00:00'
@@ -97,7 +98,9 @@ thesis_horizon: '2026-09-03'
 thesis_band_low: 220.0
 thesis_band_high: 245.0
 thesis_drift: 0.015
-attribution: ''
+thesis_vol_view: null
+leg_divergence_count: 0
+attribution: thesis_right_expression_right
 provenance: agent
 ---
 

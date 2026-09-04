@@ -4,7 +4,7 @@ position_id: pos_20260903_PLTR_bear_put_spread_1e5dde36
 status: open
 interim_band: 0
 max_loss_usd: 9940.0
-last_pnl_pct: -0.061971830985915494
+last_pnl_pct: 0.04788732394366197
 greeks_at_entry:
   delta_shares: -939.15
   delta_dollars: -172071.51
@@ -72,7 +72,7 @@ sources:
   author: muse
 generated:
   by: openai:gpt-5.6-sol | anthropic:claude-opus-5 | openai:gpt-5
-  at: '2026-09-03T19:20:33.321449+00:00'
+  at: '2026-09-04T12:29:38.070157+00:00'
 verified:
 - by: trdrbot/reconcile
   at: '2026-09-03T18:15:45.201284+00:00'
