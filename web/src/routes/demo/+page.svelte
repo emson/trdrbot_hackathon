@@ -15,7 +15,6 @@
 	import Icon from '$lib/components/Icon.svelte';
 	import MarkdownBody from '$lib/components/MarkdownBody.svelte';
 	import PayoffChart from '$lib/components/PayoffChart.svelte';
-	import PosteriorTrace from '$lib/components/PosteriorTrace.svelte';
 	import PriceBand from '$lib/components/PriceBand.svelte';
 	import ReliabilityPlot from '$lib/components/ReliabilityPlot.svelte';
 	import StatusPill from '$lib/components/StatusPill.svelte';
@@ -564,7 +563,7 @@
 					<div class="stat-tile"><span class="label">Positions</span><span class="big">{data.counts.positions}</span><span class="provenance">{data.counts.positions_open} open · {data.counts.positions_never_filled} never filled</span></div>
 					<div class="stat-tile"><span class="label">Claims</span><span class="big">{data.counts.theses}</span><span class="provenance">{data.counts.traded} traded · {data.counts.declined} declined</span></div>
 				</div>
-				<EquityCurve series={data.equityCurve} start={data.account.start} {markers} />
+				<EquityCurve series={data.equityCurve} start={data.account.start} {markers} interactive />
 			</div>
 		</div>
 	</div>
@@ -659,35 +658,65 @@
 <section role="tabpanel" id="panel-coach" aria-labelledby="tab-coach" hidden={tab !== 'coach'}>
 	<div class="block ledger">
 		<div class="wrap">
-			<p class="muted" style="max-width:64ch; margin-bottom:1.2rem">
-				Two levers the Coach is allowed to move, each scored by arithmetic it cannot reach. A
-				challenger is promoted only on evidence, and there {data.coach.promotions_total === 1 ? 'has' : 'have'} been
-				{data.coach.promotions_total} promotion{data.coach.promotions_total === 1 ? '' : 's'} so far.
+			<h2 class="tile-h" style="font-size:clamp(1.2rem,2.2vw,1.6rem)">Theo tunes its own dials.</h2>
+			<p class="muted" style="max-width:66ch; margin-bottom:1rem">
+				Everything else on this site improves when a person finds a fault. This part improves
+				while it runs. The Coach keeps a short list of <strong>levers</strong> it is allowed to
+				change, tries a variant of one, scores both against arithmetic it cannot influence, and
+				swaps in the winner without asking anybody.
 			</p>
+
+			<div class="cols c4" style="margin-bottom:1.4rem">
+				<div class="stat-tile">
+					<span class="label">Levers</span><span class="big">{data.coach.levers.length}</span>
+					<span class="provenance">the only things it may change</span>
+				</div>
+				<div class="stat-tile">
+					<span class="label">Trials open</span><span class="big">{data.coach.open_experiments}</span>
+					<span class="provenance">a variant being scored right now</span>
+				</div>
+				<div class="stat-tile">
+					<span class="label">Promotions</span><span class="big">{data.coach.promotions_total}</span>
+					<span class="provenance">variants that beat the incumbent</span>
+				</div>
+				<div class="stat-tile">
+					<span class="label">Scored today</span><span class="big">{data.coach.trials_scored_today}</span>
+					<span class="provenance">paired runs added to the evidence</span>
+				</div>
+			</div>
+
+			<div class="cols c3" style="margin-bottom:1.6rem">
+				<div class="card">
+					<span class="kicker">How a trial runs</span>
+					<p class="fine" style="margin-top:.4rem">
+						The incumbent does the real work. The challenger sees the same inputs, reaches its
+						own verdicts through the same gate code, and writes nothing. Both arms share one
+						copy of the closes and the option chain, so a moving quote can never look like a
+						difference between them.
+					</p>
+				</div>
+				<div class="card">
+					<span class="kicker">How it is scored</span>
+					<p class="fine" style="margin-top:.4rem">
+						By a reward the lever cannot reach: the fraction of what it produces that survives
+						fixed gates elsewhere in the code. A prompt cannot talk its way past its own
+						gauntlet, and a structure catalogue cannot loosen the gates that price it.
+					</p>
+				</div>
+				<div class="card">
+					<span class="kicker">What it may touch</span>
+					<p class="fine" style="margin-top:.4rem">
+						Data, never code. Variants live in state files; there is no path from the Coach to a
+						risk gate, the sizing maths, or a sentinel. Sentinels revert it if cost, churn, or
+						the muse's own diversity floor is breached.
+					</p>
+				</div>
+			</div>
 
 			{#if data.coach.enabled}
 				<div class="cols c2">
 					{#each data.coach.levers as lv}
-						<div class="card pad-lg">
-							<div class="tile-head">
-								<span class="kicker">{lv.name}</span>
-								<span class="fine">{lv.state}</span>
-							</div>
-							{#if lv.experiment?.posterior_series?.length > 1}
-								<!-- The trace only. The run counts and the posterior bar live in
-								     CoachCard below, and printing them twice on one card reads as
-								     two different measurements of the same thing. -->
-								<PosteriorTrace
-									series={lv.experiment.posterior_series}
-									promoteAt={lv.experiment.floors?.promote_at ?? 0.9}
-									futilityAt={lv.experiment.floors?.futility_at ?? 0.05}
-									label={lv.name}
-								/>
-							{:else}
-								<p class="muted">No trial has been scored on this lever yet.</p>
-							{/if}
-							<CoachCard lever={lv} />
-						</div>
+						<CoachCard lever={lv} />
 					{/each}
 				</div>
 			{:else}

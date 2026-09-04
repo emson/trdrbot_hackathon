@@ -201,7 +201,22 @@ test('equityMarkers land on the curve index closest to each open', () => {
 	];
 	const out = equityMarkers(positions, series);
 	assert.deepEqual(out.map((m) => m.index), [1, 2]);
-	assert.equal(out[0].underlying, 'NVDA');
+	assert.equal(out[0].positions[0].underlying, 'NVDA');
+});
+
+test('equityMarkers groups opens that land on the same tick into one marker', () => {
+	const series = [
+		{ ts: '2026-09-01T00:00:00Z', equity: 100 },
+		{ ts: '2026-09-02T00:00:00Z', equity: 110 }
+	];
+	// Two positions opened minutes apart both snap to the 2 Sep tick.
+	const positions = [
+		{ id: 'p1', opened: '2026-09-02T00:05:00Z', underlying: 'NVDA', strategy: 'bull_call_spread' },
+		{ id: 'p2', opened: '2026-09-02T00:11:00Z', underlying: 'PLTR', strategy: 'bear_put_spread' }
+	];
+	const out = equityMarkers(positions, series);
+	assert.equal(out.length, 1, 'one dot, not two stacked on the same pixel');
+	assert.deepEqual(out[0].positions.map((p) => p.underlying), ['NVDA', 'PLTR']);
 });
 
 test('equityMarkers is empty without a curve, and skips positions never opened', () => {

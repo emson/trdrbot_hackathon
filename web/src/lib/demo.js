@@ -195,24 +195,33 @@ export function marketFor(cycle, positions) {
 
 /** Position opens placed on the equity curve by timestamp, for the annotated
  * curve. Each marker is the curve index closest to the open, so a marker can
- * never sit off the drawn line. */
+ * never sit off the drawn line.
+ *
+ * Positions opened minutes apart land on the same tick, so markers are GROUPED
+ * by index and one dot carries however many opens happened there. Drawing them
+ * separately stacks two circles on one pixel, which looks like a rendering
+ * fault and makes the hover target ambiguous about which position it means. */
 export function equityMarkers(positions, series) {
 	if (!series?.length) return [];
 	const times = series.map((p) => Date.parse(p.ts));
-	return (positions || [])
-		.filter((p) => p.opened)
-		.map((p) => {
-			const t = Date.parse(p.opened);
-			if (Number.isNaN(t)) return null;
-			let best = 0, bestGap = Infinity;
-			for (let i = 0; i < times.length; i += 1) {
-				const gap = Math.abs(times[i] - t);
-				if (gap < bestGap) { bestGap = gap; best = i; }
-			}
-			return { index: best, underlying: p.underlying, strategy: p.strategy, id: p.id, status: p.status };
-		})
-		.filter(Boolean)
-		.sort((a, b) => a.index - b.index);
+	const byIndex = new Map();
+	for (const p of positions || []) {
+		if (!p.opened) continue;
+		const t = Date.parse(p.opened);
+		if (Number.isNaN(t)) continue;
+		let best = 0, bestGap = Infinity;
+		for (let i = 0; i < times.length; i += 1) {
+			const gap = Math.abs(times[i] - t);
+			if (gap < bestGap) { bestGap = gap; best = i; }
+		}
+		const group = byIndex.get(best) || { index: best, positions: [] };
+		group.positions.push({
+			id: p.id, underlying: p.underlying, strategy: p.strategy,
+			status: p.status, opened: p.opened
+		});
+		byIndex.set(best, group);
+	}
+	return [...byIndex.values()].sort((a, b) => a.index - b.index);
 }
 
 const ATTR_ROWS = [
