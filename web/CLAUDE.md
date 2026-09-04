@@ -115,13 +115,33 @@ docs/deck.html` (no `--write`) to confirm it resolves cleanly, then
   these as the *backing evidence* for the hero's claims — if the hero says
   something these slides don't support, fix the hero, not the slides.
 
-## The demo page (notes/028)
+## The demo page (notes/028, restructured as "Theo's Floor")
 
 `/demo` replays real decide cycles from `snapshot.cycles[]` (the `cycles`,
 `funnel`, `coach`, and extended `forecasts_resolved` sections `site_export.py`
 builds - see `build_cycles`, `build_funnel`, `build_coach`,
 `extend_forecasts`). The copy in `+page.svelte`'s frames is the source of
 truth for that page's wording; check it, not this file, before rewriting it.
+
+**Three tabs, not one scroll.** The five stages are still all there and still
+in order, but split by the question a reader is asking rather than stacked:
+
+- **The loop** - the cycle reel, then the claim (the tape plus the modelled
+  cone), the edge, what arrived, the competing claims, the structures priced
+  and thrown out, the payoff, what it did, how it scored, what it kept.
+- **The book** - the annotated equity curve, every position, the attribution
+  table as bars, the reliability plot, the forecast dots, and the funnel.
+- **The coach** - one posterior trace per lever, then `CoachCard`.
+
+**The cone and the edge are MODELLED, and only drawn when the record can
+back them.** `marketFor` looks for a chain the cycle actually priced, then
+for a position it opened (`entry_iv`/`entry_spot`), and returns null when
+neither exists - most declined cycles never priced a chain, and those draw a
+band with no cone plus a line saying so. `P(band holds)` prefers the agent's
+OWN recorded `p_band` (the number it gated on) over anything recomputed here.
+The lognormal is drift-zero with no skew, matching what the playbook itself
+scores against; `sigmaT`/`coneBounds`/`pBandHolds` are in `demo.js` and
+node-tested.
 
 Two rules that matter more than the wording:
 

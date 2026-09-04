@@ -1,0 +1,729 @@
+<title>Theo's Floor</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,440;9..144,560;9..144,650&family=Public+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --paper:#F1F4EF; --paper-raised:#FFFFFF; --paper-sunk:#E7ECE6; --paper-line:#D8E0D9;
+    --ink:#17242B; --ink-soft:#4B5D59; --ink-faint:#8393a0;
+    --accent:#1F6F5C; --accent-soft:#E4EFEA; --accent-strong:#164f42;
+    --warm:#A8582C; --warm-soft:#F6EAE1;
+    --danger:#B23A2E; --danger-soft:#F7E6E3;
+    --caution:#8A6A16; --caution-soft:#F3ECD3;
+    --shadow: rgba(23,36,43,.10);
+    --serif:"Fraunces", Georgia, "Times New Roman", serif;
+    --sans:"Public Sans", -apple-system, "Segoe UI", Roboto, sans-serif;
+    --mono:"IBM Plex Mono", ui-monospace, Menlo, monospace;
+    --r:4px; --r-lg:10px;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){
+      --paper:#101816; --paper-raised:#172220; --paper-sunk:#0d1614; --paper-line:#293530;
+      --ink:#E8EEEA; --ink-soft:#9FB0AA; --ink-faint:#657871;
+      --accent:#57C7A7; --accent-soft:#17332B; --accent-strong:#8fe3c9;
+      --warm:#E0A177; --warm-soft:#33231A;
+      --danger:#E5786A; --danger-soft:#3A2321;
+      --caution:#E0BB5C; --caution-soft:#332C16;
+      --shadow: rgba(0,0,0,.45);
+      color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"]{
+    --paper:#101816; --paper-raised:#172220; --paper-sunk:#0d1614; --paper-line:#293530;
+    --ink:#E8EEEA; --ink-soft:#9FB0AA; --ink-faint:#657871;
+    --accent:#57C7A7; --accent-soft:#17332B; --accent-strong:#8fe3c9;
+    --warm:#E0A177; --warm-soft:#33231A;
+    --danger:#E5786A; --danger-soft:#3A2321;
+    --caution:#E0BB5C; --caution-soft:#332C16;
+    --shadow: rgba(0,0,0,.45);
+    color-scheme: dark;
+  }
+  *,*::before,*::after{box-sizing:border-box}
+  html{background:var(--paper)}
+  body{margin:0;background:var(--paper);color:var(--ink);font-family:var(--sans);
+    font-size:15px;line-height:1.55;-webkit-font-smoothing:antialiased}
+  h1,h2,h3,h4{margin:0;font-family:var(--serif);font-weight:650;text-wrap:balance}
+  p{margin:0}
+  button{font:inherit;color:inherit}
+  ::selection{background:var(--accent-soft)}
+  .wrap{max-width:1220px;margin:0 auto;padding:0 20px}
+  .mono{font-family:var(--mono)}
+  .num{font-family:var(--mono);font-variant-numeric:tabular-nums}
+  .kicker{font-family:var(--mono);font-size:.68rem;letter-spacing:.14em;text-transform:uppercase;
+    color:var(--accent);font-weight:600}
+  .fine{font-family:var(--mono);font-size:.72rem;color:var(--ink-faint)}
+  .muted{color:var(--ink-soft)}
+  a{color:var(--accent)}
+  .icon-btn{background:none;border:1px solid var(--paper-line);border-radius:var(--r);width:34px;height:34px;
+    display:grid;place-items:center;cursor:pointer;color:var(--ink-soft);flex:none}
+  .icon-btn:hover{border-color:var(--accent);color:var(--accent)}
+  .icon-btn:focus-visible,button:focus-visible,[role="option"]:focus-visible,[tabindex]:focus-visible{
+    outline:2px solid var(--accent);outline-offset:2px}
+
+  /* ---------- vitals strip (sticky) ---------- */
+  header.vitals{position:sticky;top:0;z-index:30;background:var(--paper);border-bottom:1px solid var(--paper-line)}
+  .vitals-row{display:flex;align-items:center;justify-content:space-between;gap:18px;flex-wrap:wrap;
+    padding:14px 0 10px}
+  .brand{display:flex;align-items:baseline;gap:.6rem}
+  .brand h1{font-size:1.4rem}
+  .brand .sub{font-family:var(--mono);font-size:.7rem;color:var(--ink-faint);letter-spacing:.03em}
+  .vitals-stats{display:flex;gap:26px;flex-wrap:wrap;align-items:flex-end}
+  .vstat{display:flex;flex-direction:column;gap:3px}
+  .vlabel{font-family:var(--mono);font-size:.6rem;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-faint)}
+  .vval{font-family:var(--mono);font-size:1.2rem;font-weight:600;font-variant-numeric:tabular-nums;line-height:1}
+  .vval.up{color:var(--accent)}
+  .vsub{font-family:var(--mono);font-size:.66rem;color:var(--ink-soft)}
+  .xp-bar{display:flex;gap:3px;width:104px;height:8px;margin:3px 0 1px}
+  .xp-seg{flex:1;background:var(--paper-sunk);border-radius:2px;border:1px solid var(--paper-line)}
+  .xp-seg.filled{background:var(--accent);border-color:var(--accent)}
+  .clocks-row{display:flex;gap:22px;flex-wrap:wrap;padding:0 0 10px}
+
+  main{padding:22px 0 60px}
+  .standfirst{font-size:.95rem;color:var(--ink-soft);max-width:70ch;margin-bottom:26px}
+  .standfirst strong{color:var(--ink);font-weight:600}
+  section.block{margin-top:32px}
+  .block-head{display:flex;align-items:baseline;justify-content:space-between;gap:1rem;margin-bottom:12px;
+    flex-wrap:wrap}
+  .block-head h2{font-size:1.1rem}
+  .panel-head{margin-bottom:9px}
+  .panel-head h3{font-size:.98rem}
+
+  /* ---------- reel ---------- */
+  .reel{display:flex;gap:8px;overflow-x:auto;padding-bottom:6px}
+  .reel-chip{flex:0 0 auto;min-width:158px;display:flex;flex-direction:column;gap:4px;align-items:flex-start;
+    background:var(--paper-raised);border:1px solid var(--paper-line);border-radius:var(--r);
+    padding:9px 13px;cursor:pointer;text-align:left}
+  .reel-chip:hover{border-color:var(--accent)}
+  .reel-chip[aria-pressed="true"]{border-color:var(--accent);box-shadow:inset 0 0 0 1px var(--accent);
+    background:var(--accent-soft)}
+  .reel-chip .rc-time{font-family:var(--mono);font-size:.66rem;color:var(--ink-faint)}
+  .reel-chip .rc-what{font-size:.85rem;font-weight:600;font-family:var(--sans)}
+
+  /* ---------- pills ---------- */
+  .pill{font-family:var(--mono);font-size:.62rem;letter-spacing:.06em;text-transform:uppercase;
+    padding:.26em .65em;border-radius:999px;white-space:nowrap}
+  .pill.traded{background:var(--accent-soft);color:var(--accent-strong)}
+  .pill.declined{background:var(--paper-sunk);color:var(--ink-soft)}
+  .pill.error{background:var(--danger-soft);color:var(--danger)}
+  .pill.exit{background:var(--warm-soft);color:var(--warm)}
+  .pill.held{background:var(--accent-soft);color:var(--accent-strong)}
+  .pill.failed{background:var(--danger-soft);color:var(--danger)}
+  .pill.open{background:var(--caution-soft);color:var(--caution)}
+
+  /* ---------- three-panel stage ---------- */
+  .floor-grid{display:grid;grid-template-columns:1fr;gap:18px;align-items:start}
+  @media(min-width:1100px){.floor-grid{grid-template-columns:250px 1fr 270px}}
+  .wire-rail,.gate-rail{display:flex;flex-direction:column;gap:10px}
+  .wire-list{display:flex;flex-direction:column;gap:7px;max-height:560px;overflow-y:auto;padding:2px 2px 2px 0}
+  .wire-item{background:var(--paper-raised);border:1px solid var(--paper-line);border-left:3px solid var(--paper-line);
+    border-radius:var(--r);padding:8px 11px;font-size:.8rem;cursor:pointer;text-align:left;width:100%;
+    display:block;font-family:var(--sans)}
+  .wire-item:hover{border-color:var(--accent)}
+  .wire-item.active{border-left-color:var(--accent);background:var(--accent-soft)}
+  .wire-item .wi-src{font-family:var(--mono);font-size:.6rem;letter-spacing:.09em;text-transform:uppercase;
+    display:flex;justify-content:space-between;gap:8px;margin-bottom:3px}
+  .wire-item .wi-src span:first-child{font-weight:600}
+  .wi-src.research span:first-child{color:var(--ink-soft)}
+  .wi-src.discovery span:first-child{color:var(--warm)}
+  .wi-src.muse span:first-child{color:var(--accent)}
+  .wi-src.position span:first-child{color:var(--ink-faint)}
+  .wi-src.error span:first-child{color:var(--danger)}
+  .wi-src .wi-time{color:var(--ink-faint)}
+  .wire-item .wi-text{line-height:1.4}
+  .wire-empty{font-family:var(--mono);font-size:.76rem;color:var(--ink-faint);padding:2px 2px}
+  .spike-line{margin-top:2px}
+
+  .stage{display:flex;flex-direction:column;gap:16px;min-width:0}
+  .bracket{display:flex;flex-direction:column;gap:12px}
+  .bracket-round-label{font-family:var(--mono);font-size:.62rem;letter-spacing:.1em;text-transform:uppercase;
+    color:var(--ink-faint);display:flex;align-items:center;gap:10px}
+  .bracket-round-label::after{content:"";flex:1;height:1px;background:var(--paper-line)}
+  .bracket-round{display:flex;flex-direction:column;gap:6px}
+  .bracket-row{display:grid;grid-template-columns:1fr auto;gap:2px 14px;align-items:baseline;
+    background:var(--paper-raised);border:1px solid var(--paper-line);border-left:3px solid var(--paper-line);
+    border-radius:var(--r);padding:9px 13px;font-size:.85rem;animation:rise .3s ease-out both}
+  @media (prefers-reduced-motion: reduce){.bracket-row{animation:none}}
+  @keyframes rise{from{opacity:0;transform:translateY(4px)} to{opacity:1;transform:none}}
+  .bracket-row.graduate{border-left-color:var(--accent)}
+  .bracket-row.chosen{border-left-color:var(--accent);background:var(--accent-soft)}
+  .bracket-row.rejected{opacity:.6}
+  .bracket-row .br-name{font-weight:600}
+  .bracket-row .br-badge{font-family:var(--mono);font-size:.6rem;letter-spacing:.06em;text-transform:uppercase;
+    padding:.22em .6em;border-radius:999px;background:var(--paper-sunk);color:var(--ink-soft);white-space:nowrap}
+  .bracket-row.chosen .br-badge,.bracket-row.graduate .br-badge{background:var(--accent);color:#fff}
+  .bracket-row .br-edge{font-family:var(--mono);font-size:.78rem;text-align:right;color:var(--ink-soft)}
+  .bracket-row .br-fate{grid-column:1/-1;font-family:var(--mono);font-size:.72rem;color:var(--caution)}
+  .bracket-row.graduate .br-fate,.bracket-row.chosen .br-fate{color:var(--accent)}
+  .bracket-note{font-family:var(--mono);font-size:.76rem;color:var(--ink-faint);padding:2px 2px}
+
+  .simple-claim{background:var(--paper-raised);border:1px solid var(--paper-line);border-radius:var(--r-lg);
+    padding:14px 16px}
+  .simple-claim .claim-text{font-family:var(--serif);font-size:1.08rem;font-weight:560;line-height:1.4}
+  .simple-claim .fine{margin-top:8px}
+
+  /* ---------- ticket ---------- */
+  .ticket-summary{background:var(--paper-raised);border:1px solid var(--paper-line);border-radius:var(--r-lg);
+    padding:18px 20px;position:relative;overflow:hidden}
+  .ticket-summary .claim-text{font-family:var(--serif);font-size:1.12rem;font-weight:560;line-height:1.4;
+    margin-bottom:10px;padding-right:108px}
+  @media(max-width:520px){.ticket-summary .claim-text{padding-right:0;padding-top:36px}}
+  .ticket-row{display:flex;justify-content:space-between;gap:1rem;padding:6px 0;border-top:1px dashed var(--paper-line);
+    font-size:.85rem}
+  .ticket-row .k{color:var(--ink-faint);font-family:var(--mono);font-size:.7rem;letter-spacing:.04em;
+    text-transform:uppercase}
+  .ticket-row .v{font-family:var(--mono);font-weight:600;text-align:right}
+  .stamp{position:absolute;top:14px;right:18px;font-family:var(--mono);font-weight:700;font-size:.82rem;
+    letter-spacing:.1em;padding:.35em .8em;border:2px solid currentColor;border-radius:3px;
+    transform:rotate(-6deg)}
+  .stamp.traded{color:var(--accent)}
+  .stamp.declined{color:var(--warm)}
+  .stamp.exit{color:var(--warm)}
+  .stamp.error{color:var(--danger)}
+  .mini-payoff-wrap{margin-top:10px;padding-top:10px;border-top:1px dashed var(--paper-line)}
+  svg.mini-payoff{display:block;width:100%;height:70px;overflow:visible}
+  .tag{font-family:var(--mono);font-size:.6rem;letter-spacing:.08em;text-transform:uppercase;font-weight:600;
+    padding:.2em .55em;border-radius:2px;display:inline-flex;align-items:center;gap:.35em}
+  .tag.fact{background:var(--accent-soft);color:var(--accent-strong)}
+
+  /* ---------- gate ladder ---------- */
+  .gates-card{background:var(--paper-raised);border:1px solid var(--paper-line);border-radius:var(--r-lg);
+    padding:14px 16px}
+  .gate-row{display:flex;align-items:baseline;gap:.6rem;padding:6px 0;border-bottom:1px dashed var(--paper-line);
+    font-size:.83rem}
+  .gate-row:last-child{border-bottom:0}
+  .gate-mark{width:1.1em;flex:none;font-weight:700}
+  .gate-row.pass .gate-mark{color:var(--accent)}
+  .gate-row.fail .gate-mark{color:var(--danger)}
+  .gate-name{font-weight:600;flex:none}
+  .gate-detail{color:var(--ink-faint);font-size:.76rem;text-align:right;margin-left:auto}
+  .gate-note{font-family:var(--mono);font-size:.78rem;color:var(--ink-faint)}
+  .learn-card{background:var(--paper-raised);border:1px solid var(--paper-line);border-radius:var(--r-lg);
+    padding:13px 15px;font-size:.83rem;line-height:1.5}
+  .learn-card .lc-kicker{display:block;margin-bottom:4px}
+
+  /* ---------- book ---------- */
+  .book{display:grid;grid-template-columns:1fr;gap:12px}
+  @media(min-width:760px){.book{grid-template-columns:repeat(3,1fr)}}
+  .book-tile{background:var(--paper-raised);border:1px solid var(--paper-line);border-radius:var(--r-lg);
+    padding:15px 17px;display:flex;flex-direction:column;gap:7px;position:relative}
+  .book-tile.callout{border-color:var(--caution)}
+  .bt-head{display:flex;justify-content:space-between;align-items:baseline;gap:8px}
+  .bt-sym{font-family:var(--mono);font-weight:700;font-size:.95rem}
+  .bt-strategy{font-family:var(--mono);font-size:.66rem;color:var(--ink-faint);letter-spacing:.02em}
+  .bt-pnl{font-family:var(--mono);font-weight:600;font-size:.95rem;font-variant-numeric:tabular-nums}
+  .bt-pnl.up{color:var(--accent)}
+  .bt-pnl.down{color:var(--danger)}
+  .bt-claim{font-size:.79rem;color:var(--ink-soft);line-height:1.4}
+  .bt-marks{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+  .bt-marks .fine{font-size:.68rem}
+  .attr-line{font-size:.74rem;color:var(--ink-faint);border-top:1px dashed var(--paper-line);padding-top:7px;
+    margin-top:1px;line-height:1.45}
+  .attr-line strong{color:var(--ink);font-weight:600}
+  .pulse-dot{width:8px;height:8px;border-radius:50%;background:var(--caution);flex:none;
+    animation:pulse 2.4s ease-in-out infinite}
+  @keyframes pulse{0%,100%{opacity:.45;transform:scale(.85)} 50%{opacity:1;transform:scale(1.15)}}
+  @media (prefers-reduced-motion: reduce){.pulse-dot{animation:none;opacity:1}}
+
+  /* ---------- coach log ---------- */
+  .coach-log{display:flex;flex-direction:column;background:var(--paper-raised);border:1px solid var(--paper-line);
+    border-radius:var(--r-lg);overflow:hidden}
+  .coach-line{display:grid;grid-template-columns:118px 1fr;gap:14px;padding:10px 16px;font-size:.83rem;
+    border-bottom:1px solid var(--paper-line)}
+  .coach-line:last-child{border-bottom:0}
+  .cl-time{font-family:var(--mono);font-size:.7rem;color:var(--ink-faint);white-space:nowrap}
+  .cl-text b{color:var(--accent)}
+
+  footer.foot{border-top:1px solid var(--paper-line);margin-top:44px;padding:20px 0 40px}
+  footer.foot p{max-width:80ch}
+  footer.foot p + p{margin-top:8px}
+
+  @media (max-width:640px){
+    .vitals-stats{gap:16px}
+    .ticket-row{font-size:.8rem}
+    .coach-line{grid-template-columns:1fr;gap:2px}
+  }
+</style>
+
+<header class="vitals">
+  <div class="wrap vitals-row">
+    <div class="brand">
+      <h1>Theo's Floor</h1>
+      <span class="sub">watching the loop &middot; nothing here can be clicked into a trade</span>
+    </div>
+    <div class="vitals-stats">
+      <div class="vstat">
+        <span class="vlabel">equity</span>
+        <span class="vval up num">$110,123</span>
+        <span class="vsub">+10.1% since inception</span>
+      </div>
+      <div class="vstat">
+        <span class="vlabel">tier</span>
+        <div class="xp-bar" role="img" aria-label="Competence tier: SCALE, 3 of 4 rungs earned">
+          <span class="xp-seg filled"></span><span class="xp-seg filled"></span>
+          <span class="xp-seg filled"></span><span class="xp-seg"></span>
+        </div>
+        <span class="vsub">SCALE &middot; earned, not chosen</span>
+      </div>
+      <div class="vstat">
+        <span class="vlabel">calibration</span>
+        <span class="vval num">0.237</span>
+        <span class="vsub">brier &middot; 76 of 95 forecasts scored</span>
+      </div>
+    </div>
+    <button class="icon-btn" id="themeBtn" type="button" aria-label="Toggle color theme" title="Toggle theme">
+      <svg id="themeIcon" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+        stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/>
+        <path d="M12 3v2M12 19v2M5 5l1.4 1.4M17.6 17.6L19 19M3 12h2M19 12h2M5 19l1.4-1.4M17.6 6.4L19 5"/></svg>
+    </button>
+  </div>
+  <div class="wrap clocks-row">
+    <span class="fine">last decide cycle &middot; tick 812 &middot; 3 Sep 2026, 17:54 UTC</span>
+    <span class="fine">this snapshot synced &middot; 4 Sep 2026, 08:47 UTC &middot; 14h 53m after that cycle</span>
+  </div>
+</header>
+
+<main class="wrap">
+
+  <p class="standfirst">Nobody can trade from this page - there is no button anywhere that commits capital,
+    cancels an order, or overrides a gate. What you can do is watch: what arrived, which competing readings of
+    it the loop argued with itself about, which one survived to become a trade, and how the recent ones graded
+    themselves. <strong>Every timestamp is the loop's own clock, frozen at a snapshot</strong> - nothing
+    below updates live, the same way the real site only changes when it republishes.</p>
+
+  <!-- ============ the reel ============ -->
+  <section class="block" aria-label="Today's decide cycles">
+    <div class="block-head">
+      <h2>Today, cycle by cycle.</h2>
+      <span class="fine">newest first &middot; pick one to see it staged below</span>
+    </div>
+    <div class="reel" id="reel" role="listbox" aria-label="Decide cycles"></div>
+  </section>
+
+  <!-- ============ the three-panel stage ============ -->
+  <section class="block" aria-label="The selected cycle">
+    <div class="floor-grid">
+
+      <aside class="wire-rail" aria-label="The wire">
+        <div class="panel-head"><span class="kicker">01 &middot; Sense</span><h3>The wire.</h3></div>
+        <div class="wire-list" id="wireList"></div>
+        <p class="fine spike-line" id="spikeLine"></p>
+      </aside>
+
+      <div class="stage">
+        <div class="panel-head"><span class="kicker">02 &middot; Think</span><h3 id="stageTitle">&nbsp;</h3></div>
+        <div id="stageBody"></div>
+        <div class="panel-head" style="margin-top:2px"><span class="kicker">03 &middot; Act</span><h3 id="ticketTitle">&nbsp;</h3></div>
+        <div id="ticketPanel"></div>
+      </div>
+
+      <aside class="gate-rail" aria-label="Gate ladder and outcome">
+        <div class="panel-head"><span class="kicker">Go / no-go</span><h3>The gates it checked.</h3></div>
+        <div class="gates-card" id="gatesCard"></div>
+        <div class="panel-head" style="margin-top:2px"><span class="kicker">04 &middot; Learn</span><h3>Scored.</h3></div>
+        <div class="learn-card" id="learnCard"></div>
+      </aside>
+
+    </div>
+  </section>
+
+  <!-- ============ the book ============ -->
+  <section class="block" aria-label="The book">
+    <div class="block-head">
+      <h2>The book.</h2>
+      <span class="fine">held/failed and attribution are two separate marks - a profit is not always a lesson</span>
+    </div>
+    <div class="book" id="book"></div>
+  </section>
+
+  <!-- ============ the coach ============ -->
+  <section class="block" aria-label="The Coach">
+    <div class="block-head">
+      <h2>Then it grades itself.</h2>
+      <span class="fine">the Coach - alerts, not prices. It touches data, never code</span>
+    </div>
+    <div class="coach-log" id="coachLog"></div>
+  </section>
+
+</main>
+
+<footer class="foot">
+  <div class="wrap">
+    <p class="fine">A design prototype for <a href="https://trdrbot.com" target="_blank" rel="noopener noreferrer">trdrbot</a>'s
+      autonomous decide loop - see <code>docs/research_dashboard_concepts.md</code> for the three ideas this
+      synthesizes and why. The tickers, gate reasons and fate strings are drawn from trdrbot's real vocabulary and
+      one real recorded example (tick 812, NVDA); the surrounding day is an illustrative arrangement, not a live
+      export, and is clearly not the production <code>/demo</code> or <code>/floor</code>.</p>
+    <p class="fine">Zero control surface by design: this page cannot approve, cancel, resize or override anything
+      the agent does, on purpose - see the Coach section of <code>agent/README.md</code>.</p>
+  </div>
+</footer>
+
+<script>
+'use strict';
+/* ============================================================================================
+ * THEO'S FLOOR - a design prototype
+ * An ambient, read-only overview of trdrbot's autonomous decide loop: what arrived (the wire),
+ * which alternative theses competed and how they were narrowed to one (the bracket), what got
+ * traded or declined and why (the ticket + gate ladder), and how recent claims graded themselves
+ * (the book). Cherry-picked synthesis of three brainstormed ideas - see
+ * docs/research_dashboard_concepts.md. Nothing on this page can act on the real (paper) book.
+ * ========================================================================================== */
+
+// ---------------------------------------------------------------- theme (same pattern as Theo's Desk)
+(function themeInit(){
+  try{
+    const saved = localStorage.getItem('theos-floor-theme');
+    if (saved === 'dark' || saved === 'light') document.documentElement.setAttribute('data-theme', saved);
+  }catch(e){}
+})();
+function currentTheme(){
+  const attr = document.documentElement.getAttribute('data-theme');
+  if (attr) return attr;
+  return window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+}
+document.getElementById('themeBtn').addEventListener('click', function(){
+  const next = currentTheme() === 'dark' ? 'light' : 'dark';
+  document.documentElement.setAttribute('data-theme', next);
+  try{ localStorage.setItem('theos-floor-theme', next); }catch(e){}
+});
+
+// ---------------------------------------------------------------- formatting
+const MINUS = '\u2212';
+function pctSigned(v){ return (v<0? MINUS+Math.abs(v).toFixed(1) : '+'+v.toFixed(1)) + '%'; }
+function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+// ---------------------------------------------------------------- the record (illustrative, one day)
+// tick 812's numbers (structure, edge, sizing, payoff points) are the real worked example from
+// specs/notes/028_demo_page.md section 8.1. Everything else this day is a plausible arrangement
+// built from trdrbot's own real gate-reason and fate-string vocabulary, not live data.
+
+const CYCLES = [
+  {
+    id:'812', tick:812, time:'17:54', outcome:'traded', chip:'NVDA',
+    kind:'muse_collision',
+    wire:{src:'muse', text:'Muse collision: 6 concepts argued, 2 graduate.'},
+    bracket:{
+      round1Label:'Round 1 &middot; the collision (6 concepts)',
+      round1:[
+        {name:'NVDA solo \u00b7 momentum', state:'graduate', fate:'graduates - carries to structures below'},
+        {name:'SPY \u00d7 XLE \u00b7 correlated fade', state:'graduate', fate:'graduates - recorded as a thesis, not traded this cycle (scored anyway)'},
+        {name:'AVGO \u00d7 MU \u00b7 semis chain', state:'rejected', fate:'rejected: correlated with an open name'},
+        {name:'PLTR \u00d7 QQQ \u00b7 momentum overlap', state:'rejected', fate:'rejected: indifferent to the thesis (edge +0.18)'},
+        {name:'XLE solo \u00b7 mean-reversion', state:'rejected', fate:'rejected: base probability 9% - a lottery ticket'},
+        {name:'TLT \u00d7 SPY \u00b7 duration hedge', state:'rejected', fate:'rejected: no options chain inside the deadline'}
+      ],
+      round2Label:'Round 2 &middot; structures priced for the NVDA claim',
+      round2:[
+        {name:'NVDA 230/240 bull call spread', family:'bull_call_debit', edge:'+0.62', state:'chosen', fate:'chosen - traded'},
+        {name:'NVDA 230/245 bull call spread on band', family:'bull_call_debit_on_band', edge:'+0.41', state:'candidate', fate:'candidate - not sized this cycle'},
+        {name:'NVDA 220/230/240/250 iron condor', family:'iron_condor', edge:'+0.09', state:'rejected', fate:'rejected: indifferent to the thesis (edge +0.09)'}
+      ]
+    },
+    gates:[
+      {name:'edge', pass:true, detail:'+0.62'},
+      {name:'p_band', pass:true, detail:'0.31 \u00b7 MIN_BAND_EDGE 0.25'},
+      {name:'liquidity', pass:true, detail:'every leg quoted'},
+      {name:'correlation cap', pass:true, detail:'fresh exposure, no open NVDA'}
+    ],
+    ticket:{
+      status:'TRADED', claim:'NVDA holds above 232 through the 4 Sep print and keeps drifting toward 245 by expiry.',
+      rows:[
+        ['structure','NVDA 230/240 bull call spread'],
+        ['contracts','18'],
+        ['fraction of equity','5.06%'],
+        ['sized by','exploration floor'],
+        ['max loss','\u2212$300 \u00b7 per contract, before size'],
+        ['resolves','2026-09-11 \u00b7 in 7 days']
+      ],
+      payoff:{points:[[195.5,-300],[230,-300],[240,700],[276,700]], breakeven:233, lo:195.5, hi:276, loY:-300, hiY:700}
+    },
+    learn:{kicker:'Unresolved', text:'Resolves 2026-09-11. Attribution fires once the horizon has passed - see the NVDA tile in the book below for the interim mark.'}
+  },
+  {
+    id:'811', tick:811, time:'16:20', outcome:'declined', chip:'quiet',
+    kind:'nominal',
+    wire:null,
+    gates:[], gateNote:'Nothing to gate - there was nothing to decide on.',
+    ticket:{status:'DECLINED', claim:null,
+      note:'The decision read no inbox items this cycle (a positions-only review). NOMINAL.'},
+    learn:{kicker:'Nothing to score', text:'A quiet cycle is not a broken one - most of the loop\'s time looks exactly like this.'}
+  },
+  {
+    id:'810', tick:810, time:'15:10', outcome:'exit', chip:'PLTR',
+    kind:'position_review',
+    wire:{src:'position', text:'Reviewing open position PLTR bear put spread.'},
+    gates:[], gateNote:'No new gates - this cycle closed an existing position, it didn\'t price a new one.',
+    ticket:{status:'EXIT', claim:'PLTR fades below 178 as the lockup overhang weighs on the stock.',
+      rows:[
+        ['position','PLTR bear put spread'],
+        ['close reason','time_stop'],
+        ['explanation','closed at the 45% max-loss stop, 3 sessions before horizon'],
+        ['realized','\u2212 12.4% of net entry cost']
+      ]},
+    learn:{kicker:'Held, but lost money', text:'PLTR closed the horizon under 178 - <strong>the view was right.</strong> The stop that forced the early exit is what cost it: the strikes, width or stop were wrong, not the read on the stock. That is a different lesson than a wrong thesis, and the record keeps them apart.'}
+  },
+  {
+    id:'809', tick:809, time:'13:40', outcome:'declined', chip:'AVGO',
+    kind:'single_claim',
+    wire:{src:'research', text:'AVGO holds the 340-370 range into its print.'},
+    claim:{text:'AVGO holds the 340-370 range into its print.',
+      structure:'AVGO 330/320 bull put credit spread', edge:'+0.28'},
+    gates:[
+      {name:'edge', pass:true, detail:'+0.28'},
+      {name:'p_band', pass:true, detail:'0.34'},
+      {name:'liquidity', pass:true, detail:'every leg quoted'},
+      {name:'correlation cap', pass:false, detail:'SPY and NVDA already carry 28% of book on one direction; AVGO adds correlated semis exposure'}
+    ],
+    ticket:{status:'DECLINED', claim:'AVGO holds the 340-370 range into its print.',
+      note:'Priced and ready - blocked by the correlation cap, not by the idea itself. The claim is recorded anyway: it resolves at its horizon against the tape, at zero capital risk, and counts in calibration exactly like a traded one.'},
+    learn:{kicker:'Scored anyway', text:'Declined the trade, kept the claim. Resolves on its own horizon regardless of what the book does next.'}
+  },
+  {
+    id:'808', tick:808, time:'12:20', outcome:'declined', chip:'PLTR nom.',
+    kind:'gate_fail',
+    wire:{src:'discovery', text:'Palantir wins expanded government contract, shares gap up premarket.'},
+    nomination:{headline:'Palantir wins expanded government contract, shares gap up premarket.',
+      evidence:'cites the contract announcement and a 4.2% premarket gap'},
+    gates:[
+      {name:'technicals', pass:true, detail:'trend intact'},
+      {name:'bootstrap forecast', pass:true, detail:'edge present'},
+      {name:'fundamentals', pass:true, detail:'Yahoo screen clean'},
+      {name:'options liquidity', pass:false, detail:'open interest below the discovery floor on the September expiry'}
+    ],
+    ticket:{status:'DECLINED', claim:null,
+      note:'Nominated by discovery, never became a claim - the options-liquidity gate is the last of four checks a nomination has to clear before an LLM call even writes a thesis for it.'},
+    learn:{kicker:'Never became a claim', text:'Nothing to resolve - the gauntlet stopped this before a falsifiable claim existed to score.'}
+  },
+  {
+    id:'807', tick:807, time:'11:05', outcome:'declined', chip:'quiet',
+    kind:'muse_collision',
+    wire:{src:'muse', text:'Muse collision: 4 concepts argued, none graduate.'},
+    bracket:{
+      round1Label:'Round 1 &middot; the collision (4 concepts)',
+      round1:[
+        {name:'SMCI \u00d7 MU \u00b7 AI-supply echo', state:'rejected', fate:'rejected: base probability 6% - a lottery ticket'},
+        {name:'ASTS solo \u00b7 catalyst chase', state:'rejected', fate:'rejected: no options chain inside the deadline'},
+        {name:'OLLI \u00d7 GIII \u00b7 consumer-discretionary pair', state:'rejected', fate:'rejected: indifferent to the thesis (edge +0.11)'},
+        {name:'PATH \u00d7 VRT \u00b7 automation theme', state:'rejected', fate:'rejected: correlated with an open name'}
+      ],
+      closing:'No entrant graduated this round.'
+    },
+    gates:[], gateNote:'Nothing reached the decide gates this cycle - every candidate was cut inside the muse\'s own adversarial evaluation.',
+    ticket:{status:'DECLINED', claim:null, note:'Four ideas collided and lost to their own gauntlet before any reached a claim. NOMINAL.'},
+    learn:{kicker:'Nothing to score', text:'An empty bracket is still a full round - the elimination is the record, whether or not a survivor comes out the other side.'}
+  },
+  {
+    id:'806', tick:806, time:'09:32', outcome:'error', chip:'error',
+    kind:'error',
+    wire:{src:'error', text:'Cycle aborted: AnthropicAuthenticationError.'},
+    gates:[], gateNote:'Cycle aborted before reaching the gates.',
+    ticket:{status:'ERROR', claim:null, note:'The cycle failed before deciding: AnthropicAuthenticationError. The class only, not the full message - and nothing else happened this cycle.'},
+    learn:{kicker:'Nothing to score', text:'A fault, not a decision. The next cycle (11:05) ran normally.'}
+  }
+];
+
+const COACH_LOG = [
+  {time:'4 Sep, 08:15', text:'<b>muse.prompt</b>: new experiment opened - challenger v4 vs incumbent v3'},
+  {time:'3 Sep, 16:02', text:'<b>playbook</b>: challenger v3 crossed P(better) 0.90 vs incumbent v2 &rarr; promoted'},
+  {time:'3 Sep, 09:15', text:'<b>competence</b>: recovered to SCALE after 6 resolved theses cleared the reliability floor'},
+  {time:'2 Sep, 14:15', text:'<b>competence</b>: an 11% drawdown demoted SCALE &rarr; EXPLORE, next size cut 63%'}
+];
+
+const BOOK = [
+  {sym:'NVDA', strategy:'bull call debit spread', open:true, pnl:1.8,
+   claim:'Holds above 232 through the print, drifts toward 245 by 11 Sep.',
+   marks:'<span class="pill open">open</span><span class="fine">resolves 11 Sep &middot; in 7 days</span>',
+   attr:'Attribution pending - fires once the horizon passes, not before.'},
+  {sym:'PLTR', strategy:'bear put spread', open:false, pnl:-12.4,
+   claim:'Fades below 178 as the lockup overhang weighs on the stock.',
+   marks:'<span class="pill held">held</span><span class="fine">closed on a time_stop, 3 sessions early</span>',
+   attr:'<strong>view fine, structure/stop wrong</strong> - the price call was right; the strikes, width or stop were what cost money.'},
+  {sym:'SPY', strategy:'reverse iron condor', open:false, pnl:5.4, callout:true,
+   claim:'Holds 758-772 through Friday\'s data.',
+   marks:'<span class="pill failed">failed</span><span class="fine">closed 774.10, outside the claimed band</span>',
+   attr:'<strong>learn nothing - this was luck.</strong> The claim was wrong: SPY broke the band. The condor\'s short strikes sat wider than the claim, so the breach still fell inside the profit zone. A profitable trade on a wrong thesis moves nothing.'}
+];
+
+// ---------------------------------------------------------------- render: reel
+const reelEl = document.getElementById('reel');
+let selectedId = CYCLES[0].id;
+
+function outcomeLabel(o){
+  return {traded:'TRADED', declined:'DECLINED', error:'ERROR', exit:'CLOSED'}[o] || o.toUpperCase();
+}
+function renderReel(){
+  reelEl.innerHTML = CYCLES.map(function(c){
+    return '<button class="reel-chip" role="option" data-id="'+c.id+'" aria-pressed="'+(c.id===selectedId)+'">' +
+      '<span class="rc-time num">tick '+c.tick+' &middot; '+c.time+'</span>' +
+      '<span class="rc-what">'+esc(c.chip)+'</span>' +
+      '<span class="pill '+c.outcome+'">'+outcomeLabel(c.outcome)+'</span>' +
+      '</button>';
+  }).join('');
+  Array.prototype.forEach.call(reelEl.querySelectorAll('.reel-chip'), function(btn){
+    btn.addEventListener('click', function(){ selectCycle(btn.getAttribute('data-id')); });
+  });
+}
+
+// ---------------------------------------------------------------- render: wire (flattened, newest first)
+const wireListEl = document.getElementById('wireList');
+const spikeLineEl = document.getElementById('spikeLine');
+function renderWire(){
+  const rows = CYCLES.map(function(c){
+    if (!c.wire){
+      return '<p class="wire-empty">'+c.time+' &middot; no inbox items (positions-only review)</p>';
+    }
+    return '<button class="wire-item'+(c.id===selectedId?' active':'')+'" data-id="'+c.id+'">' +
+      '<span class="wi-src '+c.wire.src+'"><span>'+c.wire.src+'</span><span class="wi-time">'+c.time+'</span></span>' +
+      '<span class="wi-text">'+esc(c.wire.text)+'</span>' +
+      '</button>';
+  }).join('');
+  wireListEl.innerHTML = rows;
+  Array.prototype.forEach.call(wireListEl.querySelectorAll('.wire-item'), function(btn){
+    btn.addEventListener('click', function(){ selectCycle(btn.getAttribute('data-id')); });
+  });
+  spikeLineEl.textContent = '11 ideas didn\'t run today - spiked at the muse\'s own gauntlet or decide\'s gates, never reaching a trade.';
+}
+
+// ---------------------------------------------------------------- render: stage (bracket / claim) + ticket
+const stageTitleEl = document.getElementById('stageTitle');
+const stageBodyEl = document.getElementById('stageBody');
+const ticketTitleEl = document.getElementById('ticketTitle');
+const ticketPanelEl = document.getElementById('ticketPanel');
+const gatesCardEl = document.getElementById('gatesCard');
+const learnCardEl = document.getElementById('learnCard');
+
+function bracketRowHtml(row, roundKind){
+  const cls = ['bracket-row'];
+  if (row.state==='graduate') cls.push('graduate');
+  if (row.state==='chosen') cls.push('chosen');
+  if (row.state==='rejected') cls.push('rejected');
+  const badge = row.state==='chosen' ? 'chosen' : row.state==='graduate' ? 'graduates' : row.state==='candidate' ? 'priced' : 'eliminated';
+  return '<div class="'+cls.join(' ')+'">' +
+    '<span class="br-name">'+esc(row.name)+(row.family?' <span class="fine">'+row.family+'</span>':'')+'</span>' +
+    '<span class="br-badge">'+badge+'</span>' +
+    (row.edge ? '<span class="br-edge">edge '+row.edge+'</span><span></span>' : '') +
+    '<span class="br-fate">'+row.fate+'</span>' +
+    '</div>';
+}
+
+function renderStage(c){
+  if (c.kind==='muse_collision' && c.bracket){
+    stageTitleEl.textContent = 'Alternative theses, narrowed to one.';
+    let html = '<div class="bracket">';
+    html += '<div class="bracket-round-label">'+c.bracket.round1Label+'</div>';
+    html += '<div class="bracket-round">'+c.bracket.round1.map(function(r){return bracketRowHtml(r);}).join('')+'</div>';
+    if (c.bracket.round2){
+      html += '<div class="bracket-round-label">'+c.bracket.round2Label+'</div>';
+      html += '<div class="bracket-round">'+c.bracket.round2.map(function(r){return bracketRowHtml(r);}).join('')+'</div>';
+    } else if (c.bracket.closing){
+      html += '<p class="bracket-note">'+c.bracket.closing+'</p>';
+    }
+    html += '</div>';
+    stageBodyEl.innerHTML = html;
+  } else if (c.kind==='single_claim' && c.claim){
+    stageTitleEl.textContent = 'One claim, priced.';
+    stageBodyEl.innerHTML = '<div class="simple-claim"><p class="claim-text">'+esc(c.claim.text)+'</p>' +
+      '<p class="fine">'+esc(c.claim.structure)+' &middot; edge '+c.claim.edge+'</p></div>';
+  } else if (c.kind==='gate_fail' && c.nomination){
+    stageTitleEl.textContent = 'A nomination, not yet a claim.';
+    stageBodyEl.innerHTML = '<div class="simple-claim"><p class="claim-text">'+esc(c.nomination.headline)+'</p>' +
+      '<p class="fine">discovery &middot; '+esc(c.nomination.evidence)+'</p></div>';
+  } else if (c.kind==='position_review'){
+    stageTitleEl.textContent = 'Reviewing an open position, not a new claim.';
+    stageBodyEl.innerHTML = '<div class="simple-claim"><p class="claim-text">'+esc(c.ticket.claim)+'</p>' +
+      '<p class="fine">the claim as it entered the book, still on record</p></div>';
+  } else if (c.kind==='error'){
+    stageTitleEl.textContent = 'Nothing to think through.';
+    stageBodyEl.innerHTML = '<p class="bracket-note">The cycle failed before it reached this stage.</p>';
+  } else {
+    stageTitleEl.textContent = 'No new claim this cycle.';
+    stageBodyEl.innerHTML = '<p class="bracket-note">A positions-only review - nothing new arrived to think about.</p>';
+  }
+}
+
+function payoffSvg(p){
+  const w=560,h=70, padX=6;
+  function sx(x){ return padX + (x-p.lo)/(p.hi-p.lo)*(w-2*padX); }
+  const yMin=Math.min(p.loY,0), yMax=Math.max(p.hiY,0), yspan=(yMax-yMin)||1;
+  function sy(y){ return h-6 - (y-yMin)/yspan*(h-16); }
+  const pts = p.points.map(function(pt){ return sx(pt[0]).toFixed(1)+','+sy(pt[1]).toFixed(1); }).join(' ');
+  const zeroY = sy(0).toFixed(1);
+  const beX = sx(p.breakeven).toFixed(1);
+  return '<svg class="mini-payoff" viewBox="0 0 '+w+' '+h+'" role="img" aria-label="Payoff at expiry, breakeven '+p.breakeven+'">' +
+    '<line x1="0" y1="'+zeroY+'" x2="'+w+'" y2="'+zeroY+'" stroke="var(--paper-line)" stroke-width="1"/>' +
+    '<line x1="'+beX+'" y1="6" x2="'+beX+'" y2="'+(h-6)+'" stroke="var(--ink-faint)" stroke-width="1" stroke-dasharray="2,3"/>' +
+    '<polyline points="'+pts+'" fill="none" stroke="var(--ink)" stroke-width="2" stroke-linejoin="round"/>' +
+    '</svg>';
+}
+
+function renderTicket(c){
+  ticketTitleEl.textContent = {TRADED:'What it did, and how big.', DECLINED:'Why it did nothing.',
+    EXIT:'What it closed, and why.', ERROR:'What went wrong.'}[c.ticket.status] || ' ';
+  const t = c.ticket;
+  let html = '<div class="ticket-summary"><span class="stamp '+t.status.toLowerCase()+'">'+t.status+'</span>';
+  if (t.claim) html += '<p class="claim-text">'+esc(t.claim)+'</p>';
+  if (t.rows){
+    html += t.rows.map(function(r){ return '<div class="ticket-row"><span class="k">'+esc(r[0])+'</span><span class="v">'+esc(r[1])+'</span></div>'; }).join('');
+  }
+  if (t.note){
+    html += '<p class="fine" style="margin-top:'+(t.rows?'0':'2px')+';padding-top:8px;'+(t.rows?'':'')+'">'+t.note+'</p>';
+  }
+  if (t.payoff){
+    html += '<div class="mini-payoff-wrap"><span class="tag fact">Fact &middot; contract arithmetic</span>' + payoffSvg(t.payoff) + '</div>';
+  }
+  html += '</div>';
+  ticketPanelEl.innerHTML = html;
+}
+
+function renderGates(c){
+  if (c.gates && c.gates.length){
+    gatesCardEl.innerHTML = c.gates.map(function(g){
+      return '<div class="gate-row '+(g.pass?'pass':'fail')+'"><span class="gate-mark">'+(g.pass?'\u2713':'\u2717')+'</span>' +
+        '<span class="gate-name">'+esc(g.name)+'</span><span class="gate-detail">'+esc(g.detail)+'</span></div>';
+    }).join('');
+  } else {
+    gatesCardEl.innerHTML = '<p class="gate-note">'+(c.gateNote || 'No gates checked this cycle.')+'</p>';
+  }
+  learnCardEl.innerHTML = '<span class="kicker lc-kicker">'+esc(c.learn.kicker)+'</span>' + c.learn.text;
+}
+
+function selectCycle(id){
+  selectedId = id;
+  const c = CYCLES.find(function(x){ return x.id===id; });
+  if (!c) return;
+  renderReel();
+  renderWire();
+  renderStage(c);
+  renderTicket(c);
+  renderGates(c);
+}
+
+// ---------------------------------------------------------------- render: book
+const bookEl = document.getElementById('book');
+function renderBook(){
+  bookEl.innerHTML = BOOK.map(function(b){
+    return '<div class="book-tile'+(b.callout?' callout':'')+'">' +
+      '<div class="bt-head"><div><span class="bt-sym">'+b.sym+'</span><br><span class="bt-strategy">'+esc(b.strategy)+'</span></div>' +
+      (b.open ? '<span class="pulse-dot" title="open position"></span>' : '') +
+      '<span class="bt-pnl '+(b.pnl>=0?'up':'down')+'">'+pctSigned(b.pnl)+(b.open?' <span class="fine">interim</span>':'')+'</span></div>' +
+      '<p class="bt-claim">'+esc(b.claim)+'</p>' +
+      '<div class="bt-marks">'+b.marks+'</div>' +
+      '<p class="attr-line">'+b.attr+'</p>' +
+      '</div>';
+  }).join('');
+}
+
+// ---------------------------------------------------------------- render: coach log
+const coachLogEl = document.getElementById('coachLog');
+function renderCoachLog(){
+  coachLogEl.innerHTML = COACH_LOG.map(function(l){
+    return '<div class="coach-line"><span class="cl-time num">'+l.time+'</span><span class="cl-text">'+l.text+'</span></div>';
+  }).join('');
+}
+
+// ---------------------------------------------------------------- boot
+renderBook();
+renderCoachLog();
+selectCycle(CYCLES[0].id);
+</script>

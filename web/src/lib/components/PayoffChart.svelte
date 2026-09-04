@@ -5,7 +5,13 @@
 	// (notes/028's demo replay) - {low, high}, either end nullable for a
 	// one-sided claim. A plain position page never passes it, and the shading
 	// is skipped entirely - unchanged from before this prop existed.
-	let { payoff = {}, entrySpot = null, band = null } = $props();
+	// `density`, when given, is {spot, sigmaT} and shades the MODELLED
+	// lognormal distribution of the price at expiry underneath the payoff, on
+	// the same x-axis. Payoff is contract arithmetic and the distribution is a
+	// model: drawing them together is the point (their product is the expected
+	// value), and the caller labels which is which. A position page passes
+	// nothing and the layer is skipped entirely.
+	let { payoff = {}, entrySpot = null, band = null, density = null } = $props();
 	const uid = $props.id();
 
 	const W = 640, H = 280, M = { l: 64, r: 20, t: 20, b: 34 };
@@ -41,6 +47,33 @@
 	// drawing nothing - the claim IS one-sided, that's not missing data.
 	let bandX0 = $derived(band ? xs(Math.max(band.low ?? xmin, xmin)) : null);
 	let bandX1 = $derived(band ? xs(Math.min(band.high ?? xmax, xmax)) : null);
+
+	// The modelled terminal distribution, scaled to the lower 40% of the plot
+	// so it reads as ground under the payoff rather than competing with it.
+	const DENSITY_STEPS = 96, DENSITY_HEIGHT = 0.4;
+	let densityPath = $derived(
+		(() => {
+			if (!density || !(density.spot > 0) || !(density.sigmaT > 0)) return '';
+			const st = density.sigmaT, spot = density.spot;
+			const at = (S) => {
+				if (S <= 0) return 0;
+				const z = (Math.log(S / spot) + 0.5 * st * st) / st;
+				return Math.exp((-z * z) / 2) / (S * st * Math.sqrt(2 * Math.PI));
+			};
+			const samples = [];
+			for (let i = 0; i <= DENSITY_STEPS; i += 1) {
+				const S = xmin + ((xmax - xmin) * i) / DENSITY_STEPS;
+				samples.push([S, at(S)]);
+			}
+			const peak = Math.max(...samples.map((s) => s[1]));
+			if (!(peak > 0)) return '';
+			const base = M.t + innerH;
+			const top = samples.map(
+				([S, d]) => `${xs(S).toFixed(1)},${(base - (d / peak) * innerH * DENSITY_HEIGHT).toFixed(1)}`
+			);
+			return `M${top.join(' L')} L${xs(xmax).toFixed(1)},${base.toFixed(1)} L${xs(xmin).toFixed(1)},${base.toFixed(1)} Z`;
+		})()
+	);
 </script>
 
 {#if payoff.derivable && points.length}
@@ -48,6 +81,10 @@
 		<svg class="chart" viewBox="0 0 {W} {H}" role="img" aria-label="Payoff at expiry chart">
 			<clipPath id="above-{uid}"><rect x={M.l} y={M.t} width={innerW} height={Math.max(0, zeroY - M.t)} /></clipPath>
 			<clipPath id="below-{uid}"><rect x={M.l} y={zeroY} width={innerW} height={Math.max(0, M.t + innerH - zeroY)} /></clipPath>
+
+			{#if densityPath}
+				<path d={densityPath} fill="var(--caution)" opacity="0.14" />
+			{/if}
 
 			{#if band && bandX1 > bandX0}
 				<!-- No inline label - it would collide with a breakeven or axis

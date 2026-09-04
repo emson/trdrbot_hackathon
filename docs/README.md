@@ -36,6 +36,7 @@ it fits together; this directory is the long-form material behind it.
 | | |
 |---|---|
 | [`research_risk_appetite.md`](research_risk_appetite.md) | The measured basis for the risk-appetite lever |
+| [`research_dashboard_concepts.md`](research_dashboard_concepts.md) | Three dashboard concepts for watching the autonomous loop, cherry-picked into one synthesis |
 | [`market_selection.md`](market_selection.md) | Why this watchlist |
 | [`sources/`](sources) | Deep dives: Alpaca API, the MCP server, options strategies, Greeks, OKF, Polymarket |
 

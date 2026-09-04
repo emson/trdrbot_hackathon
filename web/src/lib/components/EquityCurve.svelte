@@ -1,7 +1,12 @@
 <script>
 	import { usd } from '$lib/format.js';
 
-	let { series = [], start = 100000 } = $props();
+	// `markers`, when given, are [{index, underlying, strategy}] placed on the
+	// curve at the tick closest to each position's open (see `equityMarkers`
+	// in demo.js) - so the curve reads as a consequence of decisions rather
+	// than a line that moved on its own. The scoreboard passes none and the
+	// curve is drawn exactly as before.
+	let { series = [], start = 100000, markers = [] } = $props();
 
 	const W = 640, H = 240, M = { l: 66, r: 16, t: 16, b: 26 };
 	const innerW = W - M.l - M.r, innerH = H - M.t - M.b;
@@ -31,6 +36,16 @@
 			<line x1={M.l} x2={M.l + innerW} y1={startY} y2={startY} stroke="var(--paper-line)" stroke-dasharray="3 3" />
 			<text x={M.l + innerW} y={startY - 4} class="axis" text-anchor="end">start {usd(start)}</text>
 			<path d={linePath} fill="none" stroke="var(--accent)" stroke-width="2" stroke-linejoin="round" />
+
+			{#each markers as m}
+				{#if pts[m.index]}
+					<circle cx={xs(m.index)} cy={ys(pts[m.index].equity)} r="4"
+						fill="var(--paper-raised)" stroke="var(--ink)" stroke-width="1.8">
+						<title>opened {m.underlying} {m.strategy} at {usd(pts[m.index].equity)}</title>
+					</circle>
+				{/if}
+			{/each}
+
 			<text x={M.l - 8} y={ys(ymax) + 4} class="axis" text-anchor="end">{usd(ymax)}</text>
 			<text x={M.l - 8} y={ys(ymin) + 4} class="axis" text-anchor="end">{usd(ymin)}</text>
 		</svg>
